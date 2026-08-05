@@ -1,0 +1,125 @@
+import "server-only";
+import { addDays, addMinutes } from "date-fns";
+import { fromZonedTime } from "date-fns-tz";
+import { and, eq, gt, lt, ne } from "drizzle-orm";
+import { db } from "@/db";
+import { appointments } from "@/db/schema";
+import { freeBusy, GoogleNotConnectedError, type BusyInterval } from "@/lib/google";
+import { getSetting, type BookingSettings } from "@/lib/settings";
+
+/** Grid step between two candidate starts. */
+export const SLOT_STEP_MIN = 30;
+/** Minimum lead time before a slot can be booked. */
+export const MIN_LEAD_MIN = 45;
+
+export type AppointmentType = "meet" | "inperson";
+
+export type AvailabilityResult = {
+  /** ISO (UTC) start instants of the free slots, ascending. */
+  slots: string[];
+  /** Slot duration in minutes for the requested type. */
+  duration: number;
+  /** False when the admin has not connected Google Calendar (slots = local data only). */
+  googleConnected: boolean;
+  /** Bookable weekdays (0 = Sunday … 6 = Saturday) from the booking settings. */
+  days: number[];
+  /** IANA timezone the day window is computed in. */
+  timezone: string;
+  /** Default location suggested for in-person appointments. */
+  defaultLocation: string;
+};
+
+export function durationFor(settings: BookingSettings, type: AppointmentType): number {
+  return type === "meet" ? settings.meetDurationMin : settings.inPersonDurationMin;
+}
+
+export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function overlaps(slotStart: Date, slotEnd: Date, busy: BusyInterval[], bufferMin: number): boolean {
+  return busy.some(
+    (b) =>
+      slotStart.getTime() < b.end.getTime() + bufferMin * 60_000 &&
+      slotEnd.getTime() > b.start.getTime() - bufferMin * 60_000,
+  );
+}
+
+/**
+ * Free slots for one calendar day (interpreted in the booking timezone).
+ * Sources subtracted: Google FreeBusy on the admin calendar (+buffer),
+ * locally stored scheduled appointments (+buffer), past/too-soon starts.
+ */
+export async function computeAvailability(
+  date: string,
+  type: AppointmentType,
+  opts?: { excludeAppointmentId?: string },
+): Promise<AvailabilityResult> {
+  const settings = await getSetting("booking");
+  const tz = settings.timezone || "America/Toronto";
+  const duration = durationFor(settings, type);
+
+  const base: Omit<AvailabilityResult, "slots" | "googleConnected"> = {
+    duration,
+    days: settings.days,
+    timezone: tz,
+    defaultLocation: settings.inPersonDefaultLocation,
+  };
+
+  if (!DATE_RE.test(date)) return { ...base, slots: [], googleConnected: true };
+
+  // Weekday of a calendar date is independent of timezone.
+  const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+  if (!settings.days.includes(weekday)) {
+    return { ...base, slots: [], googleConnected: true };
+  }
+
+  const windowStart = fromZonedTime(`${date}T${settings.startHour}:00`, tz);
+  const windowEnd = fromZonedTime(`${date}T${settings.endHour}:00`, tz);
+  const dayStart = fromZonedTime(`${date}T00:00:00`, tz);
+  const dayEnd = addDays(dayStart, 1);
+  if (windowEnd <= windowStart) return { ...base, slots: [], googleConnected: true };
+
+  // 1) Google busy blocks (whole day so the buffer never misses an edge).
+  let googleConnected = true;
+  let busy: BusyInterval[] = [];
+  try {
+    busy = await freeBusy(dayStart, dayEnd);
+  } catch (err) {
+    if (err instanceof GoogleNotConnectedError) {
+      googleConnected = false;
+    } else {
+      // Google unreachable — fail closed rather than double-booking silently.
+      throw err;
+    }
+  }
+
+  // 2) Locally stored scheduled appointments (covers Google propagation lag).
+  const conditions = [
+    eq(appointments.status, "scheduled"),
+    lt(appointments.startsAt, dayEnd),
+    gt(appointments.endsAt, dayStart),
+  ];
+  if (opts?.excludeAppointmentId) {
+    conditions.push(ne(appointments.id, opts.excludeAppointmentId));
+  }
+  const local = await db
+    .select({ startsAt: appointments.startsAt, endsAt: appointments.endsAt })
+    .from(appointments)
+    .where(and(...conditions));
+  busy = busy.concat(local.map((a) => ({ start: a.startsAt, end: a.endsAt })));
+
+  // 3) Walk the 30-min grid.
+  const minStart = addMinutes(new Date(), MIN_LEAD_MIN);
+  const slots: string[] = [];
+  for (
+    let start = windowStart;
+    addMinutes(start, duration) <= windowEnd;
+    start = addMinutes(start, SLOT_STEP_MIN)
+  ) {
+    if (start < minStart) continue;
+    const end = addMinutes(start, duration);
+    if (overlaps(start, end, busy, settings.bufferMin)) continue;
+    slots.push(start.toISOString());
+  }
+
+  return { ...base, slots, googleConnected };
+}

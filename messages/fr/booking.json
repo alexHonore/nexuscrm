@@ -1,1 +1,124 @@
-{}
+{
+  "dialog": {
+    "title": "Réserver un rendez-vous",
+    "stepOf": "Étape {current} sur {total}",
+    "steps": {
+      "qualification": "Qualification",
+      "slot": "Créneau",
+      "confirm": "Confirmation"
+    }
+  },
+  "qualification": {
+    "projectType": "Type de projet",
+    "projectRequired": "Veuillez choisir le type de projet",
+    "project": {
+      "acheter": "Acheter",
+      "vendre": "Vendre",
+      "les_deux": "Les deux"
+    },
+    "timing": "Horizon du projet",
+    "timingOptions": {
+      "0_3": "0-3 mois",
+      "3_6": "3-6 mois",
+      "6_12": "6-12 mois",
+      "12_plus": "12 mois et +"
+    },
+    "budget": "Budget",
+    "budgetOptions": {
+      "lt_250k": "Moins de 250 k$",
+      "250_400k": "250–400 k$",
+      "400_600k": "400–600 k$",
+      "600_800k": "600–800 k$",
+      "800k_1m": "800 k$–1 M$",
+      "gt_1m": "1 M$ et +"
+    },
+    "financing": "Financement préapprouvé",
+    "financingOptions": {
+      "oui": "Oui",
+      "non": "Non",
+      "en_demarche": "En démarche"
+    },
+    "situation": "Situation actuelle",
+    "situationOptions": {
+      "locataire": "Locataire",
+      "proprietaire": "Propriétaire"
+    },
+    "sector": "Secteur / ville",
+    "sectorPlaceholder": "ex. Québec, Lévis, Sainte-Foy…",
+    "email": "Courriel du client",
+    "emailPlaceholder": "courriel@exemple.com",
+    "emailHelp": "Confirmez ou corrigez le courriel — l'invitation au rendez-vous y sera envoyée.",
+    "emailInvalid": "Courriel invalide",
+    "notes": "Notes",
+    "notesPlaceholder": "Détails utiles pour le courtier…"
+  },
+  "slot": {
+    "type": "Type de rendez-vous",
+    "meet": "Visio Google Meet",
+    "inperson": "Visite en personne",
+    "location": "Lieu de la rencontre",
+    "locationPlaceholder": "Adresse de la rencontre",
+    "pickDate": "Choisir une date",
+    "pickTime": "Plages disponibles",
+    "timezoneNote": "Heure de l'Est (Toronto)",
+    "noSlots": "Aucune plage disponible ce jour-là",
+    "loadError": "Impossible de charger les disponibilités",
+    "retry": "Réessayer",
+    "googleWarning": "Google Agenda n'est pas connecté — les disponibilités ne tiennent pas compte de votre agenda Google. Connectez votre compte dans Réglages.",
+    "durationMin": "Durée : {min} min"
+  },
+  "confirm": {
+    "client": "Client",
+    "phone": "Téléphone",
+    "email": "Courriel",
+    "noEmail": "Aucun courriel — pas d'invitation envoyée",
+    "date": "Date",
+    "time": "Heure",
+    "type": "Type",
+    "location": "Lieu",
+    "meetInfo": "Le lien Google Meet sera créé à la confirmation",
+    "confirm": "Confirmer le rendez-vous",
+    "booking": "Réservation…"
+  },
+  "toasts": {
+    "booked": "Rendez-vous confirmé — {date}",
+    "copyMeet": "Copier le lien Meet",
+    "meetCopied": "Lien Meet copié",
+    "googleNotConnected": "Google Agenda non connecté : le rendez-vous est enregistré dans le CRM seulement.",
+    "googleSyncFailed": "Synchronisation Google Agenda échouée : le rendez-vous est enregistré dans le CRM seulement.",
+    "slotTaken": "Cette plage vient d'être prise — veuillez en choisir une autre.",
+    "error": "Impossible de créer le rendez-vous",
+    "cancelled": "Rendez-vous annulé",
+    "cancelError": "Impossible d'annuler le rendez-vous"
+  },
+  "actions": {
+    "next": "Continuer",
+    "back": "Retour"
+  },
+  "page": {
+    "title": "Rendez-vous",
+    "subtitle": "Tous les rendez-vous de l'équipe",
+    "upcoming": "À venir",
+    "past": "Passés",
+    "showPast": "Afficher les rendez-vous passés ({count})",
+    "hidePast": "Masquer les rendez-vous passés",
+    "empty": "Aucun rendez-vous à venir",
+    "emptyHint": "Réservez un rendez-vous depuis la fiche d'un client.",
+    "bookedBy": "Réservé par {name}",
+    "openMeet": "Ouvrir Meet",
+    "copyMeet": "Copier le lien",
+    "cancel": "Annuler",
+    "cancelTitle": "Annuler ce rendez-vous ?",
+    "cancelDescription": "{name} — {date}. L'événement sera retiré du calendrier Google et le client sera avisé.",
+    "cancelConfirm": "Oui, annuler",
+    "cancelKeep": "Non, garder",
+    "today": "Aujourd'hui",
+    "tomorrow": "Demain",
+    "status": {
+      "scheduled": "Prévu",
+      "cancelled": "Annulé",
+      "completed": "Complété",
+      "noshow": "Absent"
+    }
+  }
+}

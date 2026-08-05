@@ -1,0 +1,34 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Groupe Nexus — Passerelle vocale : Caddy
+#
+# Deux rôles :
+#   1. Obtenir et renouveler automatiquement le certificat Let's Encrypt du
+#      domaine (HTTP-01 sur :80 / TLS-ALPN-01 sur :443). Le certificat est
+#      ensuite recopié vers ./certs pour Kamailio par scripts/sync-certs.sh.
+#   2. Exposer en HTTPS le relais API voip.ms pour le CRM sur Vercel :
+#      https://DOMAINE/voipms-api  ->  api-proxy (127.0.0.1:8080)
+#
+# Les variables {$DOMAIN} et {$ACME_EMAIL} viennent de docker-compose (.env).
+# ─────────────────────────────────────────────────────────────────────────────
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	# Relais API voip.ms — « handle_path » retire le préfixe /voipms-api,
+	# le CRM ajoute sa chaîne de requête qui est transmise telle quelle.
+	handle_path /voipms-api* {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# Sonde de vie du relais (répond « ok » sans jeton).
+	handle /healthz {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# Tout le reste : page neutre.
+	handle {
+		respond "Passerelle vocale Groupe Nexus" 200
+	}
+}

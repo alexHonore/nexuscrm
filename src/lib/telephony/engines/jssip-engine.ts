@@ -1,0 +1,349 @@
+"use client";
+
+/**
+ * Moteur voip.ms — JsSIP au-dessus de la passerelle SIP-WSS.
+ *
+ * Priorités : qualité audio (echoCancellation / noiseSuppression / autoGainControl,
+ * un seul élément <audio> persistant) et robustesse (re-connexion WS avec backoff
+ * 2 s → 30 s, exigences voip.ms : session_timers désactivés).
+ */
+
+import JsSIP from "jssip";
+import type {
+  EndEvent,
+  PeerConnectionEvent,
+  RTCSession,
+} from "jssip/lib/RTCSession";
+import type {
+  IncomingRTCSessionEvent,
+  RTCSessionEvent,
+  UnRegisteredEvent,
+} from "jssip/lib/UA";
+import type {
+  ActiveCall,
+  EngineConfig,
+  RegistrationState,
+  TelephonyEngine,
+  TelephonyEvents,
+} from "@/lib/telephony/types";
+
+const PC_CONFIG: RTCConfiguration = {
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  bundlePolicy: "balanced",
+};
+
+/** Contraintes audio « qualité d'abord » — identiques en sortant et en entrant. */
+const MEDIA_CONSTRAINTS: MediaStreamConstraints = {
+  audio: {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  },
+  video: false,
+};
+
+/** Fins d'appel « normales » qui ne méritent pas de toast d'erreur. */
+const NORMAL_END_CAUSES = new Set<string>([
+  JsSIP.C.causes.BYE,
+  JsSIP.C.causes.CANCELED,
+  JsSIP.C.causes.NO_ANSWER,
+  JsSIP.C.causes.EXPIRES,
+]);
+
+const RECONNECT_MIN_MS = 2_000;
+const RECONNECT_MAX_MS = 30_000;
+
+export class JsSipEngine implements TelephonyEngine {
+  readonly provider = "voipms" as const;
+
+  private ua: JsSIP.UA | null = null;
+  private session: RTCSession | null = null;
+  private call: ActiveCall | null = null;
+  private events: TelephonyEvents | null = null;
+  private config: EngineConfig = {};
+  private audio: HTMLAudioElement | null = null;
+  private registration: RegistrationState = "unregistered";
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectDelay = RECONNECT_MIN_MS;
+  private destroyed = false;
+
+  get registrationState(): RegistrationState {
+    return this.registration;
+  }
+
+  async init(config: EngineConfig, events: TelephonyEvents): Promise<void> {
+    this.config = config;
+    this.events = events;
+
+    if (!config.wssUrl || !config.sipUsername || !config.sipPassword) {
+      this.setRegistration("failed", "not_configured");
+      return;
+    }
+
+    // Un seul élément audio persistant pour tout le cycle de vie du moteur.
+    this.audio = document.createElement("audio");
+    this.audio.autoplay = true;
+    this.audio.setAttribute("playsinline", "true");
+    this.audio.style.display = "none";
+    document.body.appendChild(this.audio);
+
+    const domain = config.sipDomain || "sip.voip.ms";
+    const socket = new JsSIP.WebSocketInterface(config.wssUrl);
+
+    this.ua = new JsSIP.UA({
+      sockets: [socket],
+      uri: `sip:${config.sipUsername}@${domain}`,
+      authorization_user: config.sipUsername,
+      password: config.sipPassword,
+      register: true,
+      register_expires: 300,
+      // Exigence voip.ms : pas de session timers (re-INVITE périodiques refusés).
+      session_timers: false,
+      user_agent: "GroupeNexus CRM",
+    });
+
+    this.ua.on("connecting", () => this.setRegistration("registering"));
+    this.ua.on("connected", () => {
+      this.reconnectDelay = RECONNECT_MIN_MS;
+      this.clearReconnectTimer();
+      this.setRegistration("registering");
+    });
+    this.ua.on("registered", () => {
+      this.reconnectDelay = RECONNECT_MIN_MS;
+      this.setRegistration("registered");
+    });
+    this.ua.on("unregistered", (e: UnRegisteredEvent) => {
+      if (!this.destroyed) this.setRegistration("unregistered", e.cause ?? undefined);
+    });
+    this.ua.on("registrationFailed", (e: UnRegisteredEvent) => {
+      this.setRegistration("failed", e.cause ?? undefined);
+      this.scheduleReconnect();
+    });
+    this.ua.on("disconnected", () => {
+      if (this.destroyed) return;
+      this.setRegistration("registering", "socket_disconnected");
+      this.scheduleReconnect();
+    });
+
+    this.ua.on("newRTCSession", (e: RTCSessionEvent) => {
+      if ((e.originator as string) !== "remote") return; // le sortant est géré par dial()
+      this.handleIncoming(e as IncomingRTCSessionEvent);
+    });
+
+    this.ua.start();
+  }
+
+  async dial(number: string): Promise<void> {
+    if (!this.ua || !this.ua.isRegistered()) {
+      this.events?.onError("not_registered");
+      throw new Error("not_registered");
+    }
+    if (this.session) {
+      this.events?.onError("already_in_call");
+      throw new Error("already_in_call");
+    }
+
+    const domain = this.config.sipDomain || "sip.voip.ms";
+    const target = `sip:${number.replace(/[^\d+#*]/g, "")}@${domain}`;
+
+    this.call = { direction: "outbound", remoteNumber: number, startedAt: new Date() };
+
+    const session = this.ua.call(target, {
+      mediaConstraints: MEDIA_CONSTRAINTS,
+      pcConfig: PC_CONFIG,
+      // Forme legacy attendue par la pile WebRTC de JsSIP (1 = true).
+      rtcOfferConstraints: { offerToReceiveAudio: 1 } as unknown as RTCOfferOptions,
+    });
+
+    this.attachSession(session);
+    this.events?.onCallStateChange("connecting", this.call);
+  }
+
+  answer(): void {
+    if (!this.session || this.call?.direction !== "inbound") return;
+    this.session.answer({
+      mediaConstraints: MEDIA_CONSTRAINTS,
+      pcConfig: PC_CONFIG,
+    });
+  }
+
+  hangup(): void {
+    try {
+      this.session?.terminate();
+    } catch {
+      // déjà terminée
+    }
+  }
+
+  reject(): void {
+    try {
+      this.session?.terminate({ status_code: 486, reason_phrase: "Busy Here" });
+    } catch {
+      // déjà terminée
+    }
+  }
+
+  mute(muted: boolean): void {
+    if (!this.session) return;
+    if (muted) this.session.mute({ audio: true });
+    else this.session.unmute({ audio: true });
+  }
+
+  hold(held: boolean): void {
+    if (!this.session) return;
+    if (held) this.session.hold();
+    else this.session.unhold();
+  }
+
+  sendDTMF(digit: string): void {
+    if (!this.session || !/^[\d#*A-D]$/i.test(digit)) return;
+    try {
+      // RFC 2833 (RTP) — attendu par voip.ms.
+      this.session.sendDTMF(digit, { transportType: JsSIP.C.DTMF_TRANSPORT.RFC2833 });
+    } catch {
+      // session pas encore confirmée — on ignore
+    }
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    this.clearReconnectTimer();
+    try {
+      this.session?.terminate();
+    } catch {
+      // rien
+    }
+    this.session = null;
+    this.call = null;
+    try {
+      this.ua?.stop();
+    } catch {
+      // rien
+    }
+    this.ua = null;
+    if (this.audio) {
+      this.audio.srcObject = null;
+      this.audio.remove();
+      this.audio = null;
+    }
+  }
+
+  // ── Interne ────────────────────────────────────────────────────────────────
+
+  private handleIncoming(e: IncomingRTCSessionEvent): void {
+    // Déjà en ligne → 486 Busy pour le second appel.
+    if (this.session) {
+      try {
+        e.session.terminate({ status_code: 486, reason_phrase: "Busy Here" });
+      } catch {
+        // rien
+      }
+      return;
+    }
+
+    const user = e.request.from.uri.user || "";
+    const display = e.request.from.display_name || "";
+    // Brut (10 chiffres, 11 chiffres ou déjà E.164) — normalisé côté contexte.
+    const remoteNumber = user || display;
+
+    this.call = { direction: "inbound", remoteNumber, startedAt: new Date() };
+    this.attachSession(e.session);
+    this.events?.onIncoming(remoteNumber);
+    this.events?.onCallStateChange("ringing", this.call);
+  }
+
+  private attachSession(session: RTCSession): void {
+    this.session = session;
+    this.wireAudio(session);
+
+    session.on("progress", () => {
+      if (this.call?.direction === "outbound") {
+        this.events?.onCallStateChange("ringing", this.call);
+      }
+    });
+
+    const onAnswered = () => {
+      if (!this.call) return;
+      if (!this.call.answeredAt) this.call = { ...this.call, answeredAt: new Date() };
+      this.events?.onCallStateChange("active", this.call);
+    };
+    session.on("accepted", onAnswered);
+    session.on("confirmed", onAnswered);
+
+    session.on("hold", () => this.events?.onCallStateChange("held", this.call));
+    session.on("unhold", () => this.events?.onCallStateChange("active", this.call));
+
+    session.on("getusermediafailed", () => {
+      // Micro refusé — message clair côté UI, l'appel ne peut pas continuer.
+      this.events?.onError("mic_denied");
+    });
+
+    const onEnd = (e: EndEvent) => {
+      const ended = this.call;
+      this.session = null;
+      this.call = null;
+      if (this.audio) this.audio.srcObject = null;
+      if (ended && e.cause && !NORMAL_END_CAUSES.has(e.cause)) {
+        if (e.cause === JsSIP.C.causes.USER_DENIED_MEDIA_ACCESS) {
+          this.events?.onError("mic_denied");
+        } else if (e.cause === JsSIP.C.causes.BUSY) {
+          this.events?.onError("busy");
+        } else {
+          this.events?.onError("call_failed");
+        }
+      }
+      this.events?.onCallStateChange("ended", ended);
+      this.events?.onCallStateChange("idle", null);
+    };
+    session.on("ended", onEnd);
+    session.on("failed", onEnd);
+  }
+
+  /** Route le flux audio distant vers l'unique élément <audio>. */
+  private wireAudio(session: RTCSession): void {
+    const attach = (pc: RTCPeerConnection) => {
+      pc.addEventListener("track", (e: RTCTrackEvent) => {
+        if (e.track.kind !== "audio") return;
+        const stream = e.streams[0] ?? new MediaStream([e.track]);
+        if (this.audio) {
+          this.audio.srcObject = stream;
+          void this.audio.play().catch(() => {
+            // Autoplay bloqué avant premier geste — l'audio démarre au clic suivant.
+          });
+        }
+      });
+    };
+    if (session.connection) attach(session.connection);
+    session.on("peerconnection", (e: PeerConnectionEvent) => attach(e.peerconnection));
+  }
+
+  private setRegistration(state: RegistrationState, error?: string): void {
+    this.registration = state;
+    this.events?.onRegistrationChange(state, error);
+  }
+
+  /** Re-connexion WS : backoff exponentiel 2 s → 30 s. */
+  private scheduleReconnect(): void {
+    if (this.destroyed || this.reconnectTimer) return;
+    const delay = this.reconnectDelay;
+    this.reconnectDelay = Math.min(this.reconnectDelay * 2, RECONNECT_MAX_MS);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.destroyed || !this.ua) return;
+      if (this.ua.isConnected() && this.ua.isRegistered()) return;
+      try {
+        this.ua.stop();
+        this.ua.start();
+      } catch {
+        this.scheduleReconnect();
+      }
+    }, delay);
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+}

@@ -1,1 +1,164 @@
-{}
+{
+  "list": {
+    "title": "Clients",
+    "count": "{count, plural, =0 {Aucun client} one {# client} other {# clients}}",
+    "searchPlaceholder": "Rechercher (nom, téléphone, courriel)…",
+    "addClient": "Ajouter un client",
+    "filters": {
+      "category": "Catégorie",
+      "source": "Source",
+      "assignedTo": "Assigné à",
+      "status": "Suivis",
+      "all": "Tous",
+      "late": "Suivi en retard",
+      "today": "À appeler aujourd'hui",
+      "clear": "Réinitialiser"
+    },
+    "columns": {
+      "name": "Nom",
+      "phone": "Téléphone",
+      "category": "Catégorie",
+      "source": "Source",
+      "nextFollowup": "Prochain suivi",
+      "lastContacted": "Dernier contact",
+      "assignedTo": "Assigné à",
+      "actions": "Actions"
+    },
+    "empty": "Aucun client ne correspond à votre recherche.",
+    "unassigned": "Non assigné",
+    "noCategory": "Sans catégorie",
+    "doNotCall": "Ne pas appeler",
+    "page": "Page {page} sur {pages}",
+    "previous": "Précédent",
+    "next": "Suivant"
+  },
+  "fields": {
+    "fullName": "Nom complet",
+    "phone": "Téléphone",
+    "phoneAlt": "Autre téléphone",
+    "email": "Courriel",
+    "language": "Langue",
+    "city": "Ville",
+    "address": "Adresse",
+    "projectType": "Type de projet",
+    "timing": "Horizon",
+    "budget": "Budget",
+    "category": "Catégorie",
+    "source": "Source",
+    "assignedTo": "Assigné à",
+    "notes": "Notes"
+  },
+  "placeholders": {
+    "timing": "Ex. : 0-3 mois",
+    "budget": "Ex. : 400 000 $",
+    "notes": "Notes internes sur ce client…",
+    "select": "Sélectionner…"
+  },
+  "projectTypes": {
+    "acheter": "Acheter",
+    "vendre": "Vendre",
+    "les_deux": "Acheter et vendre",
+    "autre": "Autre"
+  },
+  "languages": {
+    "fr": "Français",
+    "en": "Anglais"
+  },
+  "create": {
+    "title": "Ajouter un client",
+    "description": "Créer une fiche client manuellement.",
+    "submit": "Créer le client",
+    "cancel": "Annuler",
+    "success": "Client créé",
+    "invalidPhone": "Numéro de téléphone invalide"
+  },
+  "delete": {
+    "label": "Supprimer",
+    "title": "Supprimer ce client ?",
+    "description": "La fiche de {name} et toutes ses données (appels, suivis, commentaires) seront supprimées définitivement.",
+    "confirm": "Supprimer",
+    "cancel": "Annuler",
+    "success": "Client supprimé"
+  },
+  "assign": {
+    "label": "Assigner à",
+    "unassigned": "Non assigné",
+    "success": "Assignation mise à jour"
+  },
+  "detail": {
+    "call": "Appeler",
+    "phoneNotReady": "Téléphone non configuré — contactez l'administrateur.",
+    "doNotCallTooltip": "Ce client ne veut pas être appelé.",
+    "doNotCallBanner": "Ne pas appeler — ce client a demandé de ne plus être contacté.",
+    "changeCategory": "Changer la catégorie",
+    "noCategory": "Sans catégorie",
+    "categoryUpdated": "Catégorie mise à jour",
+    "book": "Prendre rendez-vous",
+    "infoTitle": "Informations",
+    "save": "Enregistrer",
+    "saved": "Modifications enregistrées",
+    "backToList": "Clients",
+    "invalidPhone": "Numéro de téléphone invalide"
+  },
+  "followups": {
+    "title": "Suivis",
+    "add": "Ajouter un suivi",
+    "date": "Date",
+    "time": "Heure",
+    "note": "Note",
+    "notePlaceholder": "Ex. : Rappeler pour confirmer la visite…",
+    "create": "Créer le suivi",
+    "created": "Suivi créé",
+    "complete": "Terminer",
+    "completed": "Suivi terminé",
+    "editDue": "Modifier l'échéance",
+    "updated": "Échéance modifiée",
+    "cancel": "Annuler",
+    "empty": "Aucun suivi planifié.",
+    "openSection": "À faire",
+    "doneSection": "Terminés",
+    "overdue": "En retard",
+    "doneAt": "Terminé le {date}"
+  },
+  "comments": {
+    "title": "Commentaires",
+    "placeholder": "Écrire un commentaire… Tapez @ pour mentionner un collègue.",
+    "submit": "Publier",
+    "posted": "Commentaire publié",
+    "empty": "Aucun commentaire pour l'instant."
+  },
+  "history": {
+    "title": "Historique",
+    "calls": "Appels",
+    "appointments": "Rendez-vous",
+    "noCalls": "Aucun appel enregistré.",
+    "noAppointments": "Aucun rendez-vous.",
+    "inbound": "Appel entrant",
+    "outbound": "Appel sortant",
+    "recording": "Enregistrement",
+    "types": {
+      "meet": "Vidéo (Meet)",
+      "inperson": "En personne"
+    },
+    "statuses": {
+      "scheduled": "Prévu",
+      "cancelled": "Annulé",
+      "completed": "Complété",
+      "noshow": "Absent"
+    }
+  },
+  "dispositions": {
+    "voicemail": "Boîte vocale",
+    "booked": "RDV pris",
+    "callback": "À rappeler",
+    "not_interested": "Pas intéressé",
+    "dncl": "Ne pas appeler",
+    "not_qualified": "Non qualifié",
+    "no_answer": "Sans réponse"
+  },
+  "errors": {
+    "generic": "Une erreur est survenue",
+    "forbidden": "Action non autorisée",
+    "notFound": "Client introuvable"
+  }
+}

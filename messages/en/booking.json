@@ -1,1 +1,124 @@
-{}
+{
+  "dialog": {
+    "title": "Book an appointment",
+    "stepOf": "Step {current} of {total}",
+    "steps": {
+      "qualification": "Qualification",
+      "slot": "Time slot",
+      "confirm": "Confirmation"
+    }
+  },
+  "qualification": {
+    "projectType": "Project type",
+    "projectRequired": "Please choose the project type",
+    "project": {
+      "acheter": "Buying",
+      "vendre": "Selling",
+      "les_deux": "Both"
+    },
+    "timing": "Project timeline",
+    "timingOptions": {
+      "0_3": "0-3 months",
+      "3_6": "3-6 months",
+      "6_12": "6-12 months",
+      "12_plus": "12+ months"
+    },
+    "budget": "Budget",
+    "budgetOptions": {
+      "lt_250k": "Under $250K",
+      "250_400k": "$250–400K",
+      "400_600k": "$400–600K",
+      "600_800k": "$600–800K",
+      "800k_1m": "$800K–1M",
+      "gt_1m": "$1M and up"
+    },
+    "financing": "Pre-approved financing",
+    "financingOptions": {
+      "oui": "Yes",
+      "non": "No",
+      "en_demarche": "In progress"
+    },
+    "situation": "Current situation",
+    "situationOptions": {
+      "locataire": "Renter",
+      "proprietaire": "Owner"
+    },
+    "sector": "Area / city",
+    "sectorPlaceholder": "e.g. Québec City, Lévis, Sainte-Foy…",
+    "email": "Client email",
+    "emailPlaceholder": "email@example.com",
+    "emailHelp": "Confirm or correct the email — the appointment invitation will be sent there.",
+    "emailInvalid": "Invalid email",
+    "notes": "Notes",
+    "notesPlaceholder": "Useful details for the broker…"
+  },
+  "slot": {
+    "type": "Appointment type",
+    "meet": "Google Meet video call",
+    "inperson": "In-person visit",
+    "location": "Meeting location",
+    "locationPlaceholder": "Meeting address",
+    "pickDate": "Pick a date",
+    "pickTime": "Available times",
+    "timezoneNote": "Eastern Time (Toronto)",
+    "noSlots": "No available times on this day",
+    "loadError": "Could not load availability",
+    "retry": "Retry",
+    "googleWarning": "Google Calendar is not connected — availability does not account for your Google calendar. Connect your account in Settings.",
+    "durationMin": "Duration: {min} min"
+  },
+  "confirm": {
+    "client": "Client",
+    "phone": "Phone",
+    "email": "Email",
+    "noEmail": "No email — no invitation will be sent",
+    "date": "Date",
+    "time": "Time",
+    "type": "Type",
+    "location": "Location",
+    "meetInfo": "The Google Meet link will be created upon confirmation",
+    "confirm": "Confirm appointment",
+    "booking": "Booking…"
+  },
+  "toasts": {
+    "booked": "Appointment confirmed — {date}",
+    "copyMeet": "Copy Meet link",
+    "meetCopied": "Meet link copied",
+    "googleNotConnected": "Google Calendar not connected: the appointment was saved in the CRM only.",
+    "googleSyncFailed": "Google Calendar sync failed: the appointment was saved in the CRM only.",
+    "slotTaken": "That time was just taken — please pick another one.",
+    "error": "Could not create the appointment",
+    "cancelled": "Appointment cancelled",
+    "cancelError": "Could not cancel the appointment"
+  },
+  "actions": {
+    "next": "Continue",
+    "back": "Back"
+  },
+  "page": {
+    "title": "Appointments",
+    "subtitle": "All team appointments",
+    "upcoming": "Upcoming",
+    "past": "Past",
+    "showPast": "Show past appointments ({count})",
+    "hidePast": "Hide past appointments",
+    "empty": "No upcoming appointments",
+    "emptyHint": "Book an appointment from a client's page.",
+    "bookedBy": "Booked by {name}",
+    "openMeet": "Open Meet",
+    "copyMeet": "Copy link",
+    "cancel": "Cancel",
+    "cancelTitle": "Cancel this appointment?",
+    "cancelDescription": "{name} — {date}. The event will be removed from Google Calendar and the client will be notified.",
+    "cancelConfirm": "Yes, cancel",
+    "cancelKeep": "No, keep it",
+    "today": "Today",
+    "tomorrow": "Tomorrow",
+    "status": {
+      "scheduled": "Scheduled",
+      "cancelled": "Cancelled",
+      "completed": "Completed",
+      "noshow": "No-show"
+    }
+  }
+}

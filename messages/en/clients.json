@@ -1,1 +1,164 @@
-{}
+{
+  "list": {
+    "title": "Clients",
+    "count": "{count, plural, =0 {No clients} one {# client} other {# clients}}",
+    "searchPlaceholder": "Search (name, phone, email)…",
+    "addClient": "Add a client",
+    "filters": {
+      "category": "Category",
+      "source": "Source",
+      "assignedTo": "Assigned to",
+      "status": "Follow-ups",
+      "all": "All",
+      "late": "Overdue follow-up",
+      "today": "To call today",
+      "clear": "Reset"
+    },
+    "columns": {
+      "name": "Name",
+      "phone": "Phone",
+      "category": "Category",
+      "source": "Source",
+      "nextFollowup": "Next follow-up",
+      "lastContacted": "Last contacted",
+      "assignedTo": "Assigned to",
+      "actions": "Actions"
+    },
+    "empty": "No clients match your search.",
+    "unassigned": "Unassigned",
+    "noCategory": "No category",
+    "doNotCall": "Do not call",
+    "page": "Page {page} of {pages}",
+    "previous": "Previous",
+    "next": "Next"
+  },
+  "fields": {
+    "fullName": "Full name",
+    "phone": "Phone",
+    "phoneAlt": "Other phone",
+    "email": "Email",
+    "language": "Language",
+    "city": "City",
+    "address": "Address",
+    "projectType": "Project type",
+    "timing": "Timeline",
+    "budget": "Budget",
+    "category": "Category",
+    "source": "Source",
+    "assignedTo": "Assigned to",
+    "notes": "Notes"
+  },
+  "placeholders": {
+    "timing": "E.g. 0-3 months",
+    "budget": "E.g. $400,000",
+    "notes": "Internal notes about this client…",
+    "select": "Select…"
+  },
+  "projectTypes": {
+    "acheter": "Buying",
+    "vendre": "Selling",
+    "les_deux": "Buying and selling",
+    "autre": "Other"
+  },
+  "languages": {
+    "fr": "French",
+    "en": "English"
+  },
+  "create": {
+    "title": "Add a client",
+    "description": "Create a client record manually.",
+    "submit": "Create client",
+    "cancel": "Cancel",
+    "success": "Client created",
+    "invalidPhone": "Invalid phone number"
+  },
+  "delete": {
+    "label": "Delete",
+    "title": "Delete this client?",
+    "description": "The record for {name} and all related data (calls, follow-ups, comments) will be permanently deleted.",
+    "confirm": "Delete",
+    "cancel": "Cancel",
+    "success": "Client deleted"
+  },
+  "assign": {
+    "label": "Assign to",
+    "unassigned": "Unassigned",
+    "success": "Assignment updated"
+  },
+  "detail": {
+    "call": "Call",
+    "phoneNotReady": "Phone not configured — contact your administrator.",
+    "doNotCallTooltip": "This client does not want to be called.",
+    "doNotCallBanner": "Do not call — this client asked not to be contacted again.",
+    "changeCategory": "Change category",
+    "noCategory": "No category",
+    "categoryUpdated": "Category updated",
+    "book": "Book an appointment",
+    "infoTitle": "Information",
+    "save": "Save",
+    "saved": "Changes saved",
+    "backToList": "Clients",
+    "invalidPhone": "Invalid phone number"
+  },
+  "followups": {
+    "title": "Follow-ups",
+    "add": "Add a follow-up",
+    "date": "Date",
+    "time": "Time",
+    "note": "Note",
+    "notePlaceholder": "E.g. Call back to confirm the visit…",
+    "create": "Create follow-up",
+    "created": "Follow-up created",
+    "complete": "Complete",
+    "completed": "Follow-up completed",
+    "editDue": "Edit due date",
+    "updated": "Due date updated",
+    "cancel": "Cancel",
+    "empty": "No follow-ups planned.",
+    "openSection": "To do",
+    "doneSection": "Done",
+    "overdue": "Overdue",
+    "doneAt": "Done on {date}"
+  },
+  "comments": {
+    "title": "Comments",
+    "placeholder": "Write a comment… Type @ to mention a teammate.",
+    "submit": "Post",
+    "posted": "Comment posted",
+    "empty": "No comments yet."
+  },
+  "history": {
+    "title": "History",
+    "calls": "Calls",
+    "appointments": "Appointments",
+    "noCalls": "No calls recorded.",
+    "noAppointments": "No appointments.",
+    "inbound": "Inbound call",
+    "outbound": "Outbound call",
+    "recording": "Recording",
+    "types": {
+      "meet": "Video (Meet)",
+      "inperson": "In person"
+    },
+    "statuses": {
+      "scheduled": "Scheduled",
+      "cancelled": "Cancelled",
+      "completed": "Completed",
+      "noshow": "No-show"
+    }
+  },
+  "dispositions": {
+    "voicemail": "Voicemail",
+    "booked": "Booked",
+    "callback": "Callback",
+    "not_interested": "Not interested",
+    "dncl": "Do not call",
+    "not_qualified": "Not qualified",
+    "no_answer": "No answer"
+  },
+  "errors": {
+    "generic": "Something went wrong",
+    "forbidden": "Not allowed",
+    "notFound": "Client not found"
+  }
+}

@@ -1,0 +1,98 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Groupe Nexus — Passerelle vocale (WebRTC <-> voip.ms)
+#
+# Quatre services :
+#   - kamailio  : mandataire SIP (WSS 8443 côté fureteurs, UDP 5060 côté voip.ms)
+#   - rtpengine : relais média (DTLS-SRTP côté fureteurs <-> RTP côté voip.ms)
+#   - caddy     : obtention/renouvellement des certificats Let's Encrypt +
+#                 relais HTTPS /voipms-api -> api-proxy (pour Vercel)
+#   - api-proxy : mini serveur Node qui relaie l'API REST voip.ms depuis une
+#                 IP fixe (voip.ms exige une liste blanche d'IP pour son API)
+#
+# kamailio, rtpengine et caddy sont en réseau « host » : la signalisation SIP
+# et le RTP ont besoin des vrais ports UDP de la machine (pas de NAT Docker).
+# Les variables ${...} proviennent du fichier .env (créé par setup.sh).
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: nexus-voice-gateway
+
+services:
+  kamailio:
+    # Image officielle du projet Kamailio (tous les modules deb installés,
+    # incluant tls, websocket, nathelper, rtpengine). Version épinglée.
+    image: ghcr.io/kamailio/kamailio:6.0.7-bookworm
+    container_name: nexus-kamailio
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      - rtpengine
+    environment:
+      # Mémoire partagée / paquet (Mo) — l'entrypoint de l'image les utilise.
+      SHM_MEMORY: "128"
+      PKG_MEMORY: "16"
+      # IP publique du VPS — injectée dans kamailio.cfg via #!defenv
+      PUBLIC_IP: ${PUBLIC_IP}
+    volumes:
+      # Configuration (kamailio.cfg + tls.cfg) — lecture seule
+      - ./kamailio:/etc/kamailio:ro
+      # Certificats Let's Encrypt copiés par scripts/sync-certs.sh
+      - ./certs:/etc/kamailio/tls:ro
+    healthcheck:
+      test: ["CMD", "kamcmd", "-s", "unix:/tmp/kamailio_ctl", "core.uptime"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  rtpengine:
+    # Image maintenue par le projet jambonz (succède à drachtio/rtpengine qui
+    # n'est plus mis à jour). rtpengine 14.x.
+    image: jambonz/rtpengine:14.1.1.8-jambonz11
+    container_name: nexus-rtpengine
+    network_mode: host
+    restart: unless-stopped
+    # On contourne l'entrypoint « cloud » de l'image (qui modifie sa propre
+    # config) en lançant le binaire directement avec notre fichier de config.
+    # L'interface média est passée ici car le fichier .conf ne peut pas lire
+    # de variables d'environnement.
+    #   RTP_INTERFACE = IP publique (OVH/DigitalOcean : l'IP est directement
+    #   sur la carte réseau). Pour un nuage avec NAT 1:1 (AWS, GCP, Azure),
+    #   utiliser la forme « IP_privée!IP_publique » dans .env.
+    command:
+      - /usr/local/bin/rtpengine
+      - --config-file=/etc/rtpengine/rtpengine.conf
+      - --interface=${RTP_INTERFACE}
+    volumes:
+      - ./rtpengine/rtpengine.conf:/etc/rtpengine/rtpengine.conf:ro
+    # Ports RTP UDP 23000-33000 + ng 22222 : inutile de les publier,
+    # network_mode: host expose déjà tout (ouvrir le pare-feu via setup.sh).
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: nexus-caddy
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # /data contient les certificats obtenus (recopiés vers ./certs pour
+      # Kamailio par scripts/sync-certs.sh)
+      - ./caddy/data:/data
+      - ./caddy/config:/config
+
+  api-proxy:
+    image: node:22-alpine
+    container_name: nexus-api-proxy
+    restart: unless-stopped
+    user: "node"
+    command: ["node", "/app/server.mjs"]
+    environment:
+      PROXY_TOKEN: ${PROXY_TOKEN}
+    volumes:
+      - ./api-proxy:/app:ro
+    ports:
+      # Accessible seulement en local ; Caddy (réseau host) fait le relais
+      # HTTPS public https://DOMAIN/voipms-api -> 127.0.0.1:8080
+      - "127.0.0.1:8080:8080"

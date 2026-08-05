@@ -1,0 +1,4 @@
+# Secrets et données locales de la passerelle
+.env
+certs/
+caddy/

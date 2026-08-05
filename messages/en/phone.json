@@ -1,1 +1,79 @@
-{}
+{
+  "fab": {
+    "open": "Open the phone"
+  },
+  "status": {
+    "registered": "Line ready",
+    "registering": "Connecting to the line…",
+    "unregistered": "Line disconnected",
+    "failed": "Line connection failed",
+    "retry": "Retry"
+  },
+  "dialpad": {
+    "title": "Dial a number",
+    "placeholder": "Phone number",
+    "call": "Call",
+    "backspace": "Delete last digit"
+  },
+  "call": {
+    "connecting": "Connecting…",
+    "ringing": "Ringing…",
+    "active": "On call",
+    "held": "On hold",
+    "mute": "Mute microphone",
+    "unmute": "Unmute microphone",
+    "hold": "Put on hold",
+    "resume": "Resume call",
+    "dtmf": "Keypad (DTMF)",
+    "speakerHint": "Adjust the volume with your device controls",
+    "hangup": "Hang up",
+    "unknownNumber": "Unknown number"
+  },
+  "incoming": {
+    "title": "Incoming call",
+    "answer": "Answer",
+    "decline": "Decline",
+    "unknown": "Unrecognized number — no client record",
+    "viewClient": "Client record"
+  },
+  "disposition": {
+    "title": "Call outcome",
+    "save": "Save outcome",
+    "saving": "Saving…",
+    "saved": "Call outcome saved",
+    "notePlaceholder": "Note (optional)",
+    "callbackWhen": "Call back when?",
+    "pickDate": "Pick a callback date",
+    "followupPlanned": "Follow-up scheduled: {date}",
+    "dismissTitle": "Close without logging an outcome?",
+    "dismissBody": "The call will stay unclassified in the log and the client record will not be updated.",
+    "dismissCancel": "Keep editing",
+    "dismissConfirm": "Close without logging",
+    "chips": {
+      "in1h": "In 1 hr",
+      "tomorrow9": "Tomorrow 9 AM",
+      "in3d": "In 3 days",
+      "custom": "Pick…"
+    },
+    "options": {
+      "booked": "Appointment booked",
+      "callback": "Call back",
+      "voicemail": "Voicemail",
+      "no_answer": "No answer",
+      "not_interested": "Not interested",
+      "not_qualified": "Not qualified",
+      "dncl": "Do not call"
+    }
+  },
+  "errors": {
+    "mic_denied": "Microphone access denied. Allow the microphone in your browser settings and try again.",
+    "not_registered": "The line is not connected. Check the line status and try again.",
+    "already_in_call": "A call is already in progress.",
+    "busy": "The other party's line is busy.",
+    "call_failed": "The call failed. Please try again shortly.",
+    "connect_failed": "Could not connect to the phone service.",
+    "not_configured": "Phone not configured — contact your administrator.",
+    "invalid_number": "Invalid phone number.",
+    "save_failed": "Could not save the outcome. Please try again."
+  }
+}

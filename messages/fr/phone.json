@@ -1,1 +1,79 @@
-{}
+{
+  "fab": {
+    "open": "Ouvrir le téléphone"
+  },
+  "status": {
+    "registered": "Ligne prête",
+    "registering": "Connexion à la ligne…",
+    "unregistered": "Ligne déconnectée",
+    "failed": "Échec de connexion à la ligne",
+    "retry": "Réessayer"
+  },
+  "dialpad": {
+    "title": "Composer un numéro",
+    "placeholder": "Numéro de téléphone",
+    "call": "Appeler",
+    "backspace": "Effacer le dernier chiffre"
+  },
+  "call": {
+    "connecting": "Connexion…",
+    "ringing": "Sonnerie…",
+    "active": "En ligne",
+    "held": "En attente",
+    "mute": "Couper le micro",
+    "unmute": "Réactiver le micro",
+    "hold": "Mettre en attente",
+    "resume": "Reprendre l'appel",
+    "dtmf": "Clavier (DTMF)",
+    "speakerHint": "Réglez le volume avec les contrôles de votre appareil",
+    "hangup": "Raccrocher",
+    "unknownNumber": "Numéro inconnu"
+  },
+  "incoming": {
+    "title": "Appel entrant",
+    "answer": "Répondre",
+    "decline": "Refuser",
+    "unknown": "Numéro non reconnu — aucune fiche client",
+    "viewClient": "Fiche client"
+  },
+  "disposition": {
+    "title": "Résultat de l'appel",
+    "save": "Enregistrer le résultat",
+    "saving": "Enregistrement…",
+    "saved": "Résultat de l'appel enregistré",
+    "notePlaceholder": "Note (optionnel)",
+    "callbackWhen": "Rappeler quand ?",
+    "pickDate": "Choisissez une date de rappel",
+    "followupPlanned": "Relance prévue : {date}",
+    "dismissTitle": "Fermer sans classer l'appel ?",
+    "dismissBody": "L'appel restera sans résultat dans le journal et la fiche client ne sera pas mise à jour.",
+    "dismissCancel": "Continuer la saisie",
+    "dismissConfirm": "Fermer sans classer",
+    "chips": {
+      "in1h": "Dans 1 h",
+      "tomorrow9": "Demain 9 h",
+      "in3d": "Dans 3 jours",
+      "custom": "Choisir…"
+    },
+    "options": {
+      "booked": "Rendez-vous pris",
+      "callback": "À rappeler",
+      "voicemail": "Boîte vocale",
+      "no_answer": "Pas de réponse",
+      "not_interested": "Pas intéressé",
+      "not_qualified": "Non qualifié",
+      "dncl": "Ne plus appeler"
+    }
+  },
+  "errors": {
+    "mic_denied": "Accès au microphone refusé. Autorisez le micro dans les réglages du navigateur puis réessayez.",
+    "not_registered": "La ligne n'est pas connectée. Vérifiez l'état de la ligne puis réessayez.",
+    "already_in_call": "Un appel est déjà en cours.",
+    "busy": "La ligne du correspondant est occupée.",
+    "call_failed": "L'appel a échoué. Réessayez dans un instant.",
+    "connect_failed": "Connexion au service téléphonique impossible.",
+    "not_configured": "Téléphone non configuré — contactez l'administrateur.",
+    "invalid_number": "Numéro de téléphone invalide.",
+    "save_failed": "Impossible d'enregistrer le résultat. Réessayez."
+  }
+}

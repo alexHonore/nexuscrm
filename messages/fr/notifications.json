@@ -1,1 +1,21 @@
-{}
+{
+  "title": "Notifications",
+  "markAllRead": "Tout marquer lu",
+  "allRead": "Toutes les notifications sont lues",
+  "empty": "Aucune notification.",
+  "page": "Page {page} sur {pages}",
+  "previous": "Précédent",
+  "next": "Suivant",
+  "error": "Une erreur est survenue",
+  "types": {
+    "mention": "Mention",
+    "followup_due": "Suivi",
+    "incoming_lead": "Nouveau prospect",
+    "appointment": "Rendez-vous",
+    "system": "Système"
+  },
+  "content": {
+    "mentionTitle": "{name} vous a mentionné",
+    "followupDueTitle": "Suivi à faire : {client}"
+  }
+}

@@ -1,1 +1,32 @@
-{}
+{
+  "greeting": "Bonjour, {name}",
+  "subtitle": "Voici votre journée en un coup d'œil.",
+  "search": {
+    "label": "Recherche rapide",
+    "placeholder": "Rechercher un client (nom ou téléphone)…",
+    "submit": "Rechercher"
+  },
+  "stats": {
+    "calls": "Appels aujourd'hui",
+    "minutes": "Minutes au téléphone",
+    "booked": "Rendez-vous pris"
+  },
+  "followups": {
+    "title": "Suivis",
+    "overdue": "En retard",
+    "dueToday": "À faire aujourd'hui",
+    "empty": "Aucun suivi en attente — beau travail !",
+    "call": "Appeler",
+    "open": "Ouvrir la fiche",
+    "markDone": "Terminer",
+    "done": "Suivi terminé"
+  },
+  "appointments": {
+    "title": "Rendez-vous d'aujourd'hui",
+    "empty": "Aucun rendez-vous aujourd'hui.",
+    "meet": "Vidéo (Meet)",
+    "inperson": "En personne"
+  },
+  "analyticsLink": "Voir l'analytique",
+  "error": "Une erreur est survenue"
+}
