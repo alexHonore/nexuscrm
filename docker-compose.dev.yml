@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: nexus-crm-db
+    environment:
+      POSTGRES_USER: nexus
+      POSTGRES_PASSWORD: nexus
+      POSTGRES_DB: nexus
+    ports:
+      - "5455:5432"
+    volumes:
+      - nexus-db-data:/var/lib/postgresql/data
+
+volumes:
+  nexus-db-data:
