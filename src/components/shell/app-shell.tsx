@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -176,7 +177,10 @@ export function AppShell({
           </div>
         </header>
 
-        <main className="min-w-0 flex-1 pb-24 md:pb-8">{children}</main>
+        {/* pb mobile : dégage la nav basse + le FAB webphone (size-14 au-dessus de la nav). */}
+        <main className="min-w-0 flex-1 pb-[calc(8.5rem+env(safe-area-inset-bottom))] md:pb-8">
+          {children}
+        </main>
 
         {/* ── Nav basse (mobile) ── */}
         <nav className="pb-safe fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t bg-background/95 backdrop-blur md:hidden">
@@ -220,6 +224,7 @@ function UserMenu({
   compact?: boolean;
 }) {
   const t = useTranslations("common");
+  const pathname = usePathname();
   return (
     <DropdownMenu>
       {compact ? (
@@ -250,6 +255,30 @@ function UserMenu({
       <DropdownMenuContent align={align} className="w-52">
         <DropdownMenuLabel className="truncate">{user.name}</DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {compact && user.role === "admin" ? (
+          <>
+            {/* Liens admin — accessibles ici sur mobile, la sidebar étant cachée sous md. */}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>{t("nav.admin")}</DropdownMenuLabel>
+              {ADMIN_NAV.map((item) => {
+                const Icon = item.icon;
+                const active =
+                  pathname === item.href || pathname.startsWith(`${item.href}/`);
+                return (
+                  <DropdownMenuItem
+                    key={item.href}
+                    className={cn("h-11", active && "bg-accent text-accent-foreground")}
+                    render={<Link href={item.href} />}
+                  >
+                    <Icon className="size-4" />
+                    {t(`nav.${item.labelKey}`)}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
         <DropdownMenuItem onClick={() => onSwitchLocale(user.locale === "fr" ? "en" : "fr")}>
           <Globe className="size-4" />
           {user.locale === "fr" ? "English" : "Français"}

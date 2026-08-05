@@ -122,7 +122,11 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
               durationSec: c.durationSec,
               disposition: c.disposition,
               note: c.note,
-              recordingUrl: c.recordingUrl,
+              // Enregistrements : admin seulement, via le proxy audité — jamais l'URL voip.ms brute.
+              recordingUrl:
+                user.role === "admin" && c.recordingUrl
+                  ? `/api/admin/recordings?url=${encodeURIComponent(c.recordingUrl)}`
+                  : null,
               userName: c.user?.name ?? null,
             }))}
             appointments={client.appointments.map((a) => ({

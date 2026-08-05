@@ -162,6 +162,8 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
   /** Id (promis) de la ligne de journal d'appel en cours. */
   const callLogIdRef = useRef<Promise<string | null> | null>(null);
   const incomingRef = useRef<IncomingCallInfo | null>(null);
+  /** Jeton de sonnerie — invalide le lookup en vol dès que le ring est consommé. */
+  const ringTokenRef = useRef(0);
   /** i18n accessible depuis les callbacks du moteur (mis à jour par effet). */
   const i18nRef = useRef<{ t: ReturnType<typeof useTranslations>; locale: string }>({ t, locale });
   useEffect(() => {
@@ -222,7 +224,14 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
         : 0;
 
       void logPromise.then(async (id) => {
-        if (!id) return;
+        if (!id) {
+          // POST /api/calls a échoué — pas de popup de disposition possible :
+          // prévenir l'agent pour qu'il note le résultat sur la fiche client.
+          if (endedCall.answeredAt) {
+            toast.error(i18nRef.current.t("errors.log_failed"));
+          }
+          return;
+        }
         await finalizeCallLog(id, {
           answeredAt: endedCall.answeredAt?.toISOString() ?? null,
           endedAt: endedAt.toISOString(),
@@ -248,10 +257,15 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
       let config: TelephonyConfigResponse;
       try {
         const res = await fetch("/api/telephony/config");
-        if (!res.ok) return;
+        if (!res.ok) {
+          // Config illisible : marquer l'échec pour que « Réessayer » reste visible.
+          if (!cancelled) setRegistration("failed");
+          return;
+        }
         config = (await res.json()) as TelephonyConfigResponse;
         configRef.current = config;
       } catch {
+        if (!cancelled) setRegistration("failed");
         return;
       }
       if (cancelled) return;
@@ -304,11 +318,20 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
         onIncoming: (remoteNumber) => {
           if (cancelled) return;
           const number = normalizePhone(remoteNumber) ?? remoteNumber;
+          const ringToken = ++ringTokenRef.current;
           const info: IncomingCallInfo = { number, client: null };
           incomingRef.current = info;
           setIncomingCall(info);
           void lookupClient(number).then((client) => {
-            if (cancelled || incomingRef.current?.number !== number) return;
+            // N'enrichit le popup que si CE ring sonne encore (ni décroché,
+            // ni refusé, ni terminé) — sinon il rouvrirait par-dessus l'appel.
+            if (
+              cancelled ||
+              ringTokenRef.current !== ringToken ||
+              incomingRef.current?.number !== number
+            ) {
+              return;
+            }
             const enriched = { number, client };
             incomingRef.current = enriched;
             setIncomingCall(enriched);
@@ -378,6 +401,11 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
     const engine = engineRef.current;
     const incoming = incomingRef.current;
     if (!engine || !incoming) return;
+
+    // Ring consommé : un lookupClient() encore en vol ne doit plus rouvrir
+    // le popup entrant (les métadonnées utiles sont déjà copiées ci-dessous).
+    ringTokenRef.current += 1;
+    incomingRef.current = null;
 
     callMetaRef.current = {
       clientId: incoming.client?.id,

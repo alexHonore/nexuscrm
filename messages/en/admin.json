@@ -78,7 +78,8 @@
       "cannot_deactivate_self": "You cannot deactivate your own account.",
       "cannot_demote_self": "You cannot remove your own administrator role.",
       "cannot_delete_self": "You cannot delete your own account.",
-      "invalid_did": "Invalid number (DID)."
+      "invalid_did": "Invalid number (DID).",
+      "has_activity": "This user has history (calls, appointments or follow-ups) that would be destroyed. Deactivate the account instead to keep the data."
     }
   },
 

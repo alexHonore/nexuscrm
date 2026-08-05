@@ -74,6 +74,7 @@
     "connect_failed": "Could not connect to the phone service.",
     "not_configured": "Phone not configured — contact your administrator.",
     "invalid_number": "Invalid phone number.",
-    "save_failed": "Could not save the outcome. Please try again."
+    "save_failed": "Could not save the outcome. Please try again.",
+    "log_failed": "The call could not be logged. Record the outcome on the client page."
   }
 }

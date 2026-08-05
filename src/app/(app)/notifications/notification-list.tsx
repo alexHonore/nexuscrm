@@ -1,6 +1,5 @@
 "use client";
 
-import { formatDistanceToNow } from "date-fns";
 import { enUS, fr } from "date-fns/locale";
 import {
   AtSignIcon,
@@ -14,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useTransition } from "react";
 import { toast } from "sonner";
+import { RelativeTime } from "@/components/relative-time";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { markAllNotificationsReadAction, markNotificationReadAction } from "./actions";
@@ -115,10 +115,7 @@ export function NotificationItem({ notification }: { notification: NotificationD
               {notification.title}
             </span>
             <span className="shrink-0 text-xs text-muted-foreground">
-              {formatDistanceToNow(new Date(notification.createdAt), {
-                addSuffix: true,
-                locale: dfnsLocale,
-              })}
+              <RelativeTime date={notification.createdAt} locale={dfnsLocale} />
             </span>
           </span>
           {notification.body ? (

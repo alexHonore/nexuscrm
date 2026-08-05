@@ -1,4 +1,4 @@
-import { asc } from "drizzle-orm";
+import { asc, desc, gte, lt } from "drizzle-orm";
 import { getTranslations } from "next-intl/server";
 import { db } from "@/db";
 import { appointments } from "@/db/schema";
@@ -13,16 +13,34 @@ export const dynamic = "force-dynamic";
 export default async function AppointmentsPage() {
   const user = await requireUser();
   const t = await getTranslations("booking");
-  const now = new Date().getTime();
+  const nowDate = new Date();
+  const now = nowDate.getTime();
 
-  const rows = await db.query.appointments.findMany({
-    with: {
-      client: { columns: { id: true, fullName: true, phone: true } },
-      user: { columns: { id: true, name: true } },
-    },
-    orderBy: [asc(appointments.startsAt)],
-    limit: 500,
-  });
+  const withRelations = {
+    client: { columns: { id: true, fullName: true, phone: true } },
+    user: { columns: { id: true, name: true } },
+  } as const;
+
+  // Deux requêtes : les RDV à venir d'abord (asc), puis un historique récent
+  // (desc) — sinon, passé 500 lignes, les plus anciens évincent les RDV à venir.
+  const [upcomingRows, pastRows] = await Promise.all([
+    db.query.appointments.findMany({
+      with: withRelations,
+      where: gte(appointments.startsAt, nowDate),
+      orderBy: [asc(appointments.startsAt)],
+      limit: 300,
+    }),
+    db.query.appointments.findMany({
+      with: withRelations,
+      where: lt(appointments.startsAt, nowDate),
+      orderBy: [desc(appointments.startsAt)],
+      limit: 100,
+    }),
+  ]);
+  // Tri asc global : le regroupement par jour côté client dépend de l'ordre.
+  const rows = [...upcomingRows, ...pastRows].sort(
+    (a, b) => a.startsAt.getTime() - b.startsAt.getTime(),
+  );
 
   const items: AppointmentItem[] = rows.map((r) => ({
     id: r.id,

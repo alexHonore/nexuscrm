@@ -682,7 +682,7 @@ function DispositionForm({
                   key={choice}
                   size="sm"
                   variant={callbackChoice === choice ? "default" : "outline"}
-                  className="h-9"
+                  className="h-11 md:h-9"
                   onClick={() => setCallbackChoice(choice)}
                 >
                   {t(`disposition.chips.${choice}`)}
@@ -728,7 +728,7 @@ function DispositionForm({
               <Button
                 variant="outline"
                 size="sm"
-                className="h-10 flex-1"
+                className="h-11 flex-1 md:h-10"
                 onClick={() => setConfirmClose(false)}
               >
                 {t("disposition.dismissCancel")}
@@ -736,7 +736,7 @@ function DispositionForm({
               <Button
                 variant="destructive"
                 size="sm"
-                className="h-10 flex-1"
+                className="h-11 flex-1 md:h-10"
                 onClick={tel.clearPendingDisposition}
               >
                 {t("disposition.dismissConfirm")}

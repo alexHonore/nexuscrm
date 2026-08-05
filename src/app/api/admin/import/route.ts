@@ -100,7 +100,11 @@ export async function POST(req: Request) {
       }
       const set: Partial<typeof clients.$inferInsert> = { updatedAt: new Date() };
       if (row.fullName) set.fullName = row.fullName;
-      if (row.phoneAlt) set.phoneAlt = normalizePhone(row.phoneAlt);
+      if (row.phoneAlt) {
+        // Ne pas écraser un phoneAlt existant avec null si la cellule est invalide.
+        const alt = normalizePhone(row.phoneAlt);
+        if (alt) set.phoneAlt = alt;
+      }
       if (row.email) set.email = row.email;
       if (row.city) set.city = row.city;
       if (row.address) set.address = row.address;

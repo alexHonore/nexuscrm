@@ -77,6 +77,7 @@ function errorMessage(t: Tr, err: unknown): string {
       "cannot_demote_self",
       "cannot_delete_self",
       "invalid_did",
+      "has_activity",
     ];
     if (known.includes(code)) return t(`users.errors.${code}`);
     if (code === "voipms") {

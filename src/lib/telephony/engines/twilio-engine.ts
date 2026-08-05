@@ -34,6 +34,8 @@ export class TwilioEngine implements TelephonyEngine {
   private events: TelephonyEvents | null = null;
   private config: EngineConfig = {};
   private registration: RegistrationState = "unregistered";
+  /** Sourdine voulue par l'utilisateur — restaurée à la reprise d'attente. */
+  private userMuted = false;
   private destroyed = false;
 
   get registrationState(): RegistrationState {
@@ -113,13 +115,15 @@ export class TwilioEngine implements TelephonyEngine {
   }
 
   mute(muted: boolean): void {
+    this.userMuted = muted;
     this.call?.mute(muted);
   }
 
   hold(held: boolean): void {
     // Le SDK Voice JS n'offre pas de vraie mise en attente (il faudrait une
     // conférence TwiML). Repli honnête : couper le micro et signaler l'état.
-    this.call?.mute(held);
+    // La reprise restaure la sourdine voulue par l'utilisateur.
+    this.call?.mute(held || this.userMuted);
     if (this.active) {
       this.events?.onCallStateChange(held ? "held" : "active", this.active);
     }
@@ -179,6 +183,7 @@ export class TwilioEngine implements TelephonyEngine {
       const ended = this.active;
       this.call = null;
       this.active = null;
+      this.userMuted = false;
       this.events?.onCallStateChange("ended", ended);
       this.events?.onCallStateChange("idle", null);
     };

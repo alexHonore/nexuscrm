@@ -74,6 +74,7 @@
     "connect_failed": "Connexion au service téléphonique impossible.",
     "not_configured": "Téléphone non configuré — contactez l'administrateur.",
     "invalid_number": "Numéro de téléphone invalide.",
-    "save_failed": "Impossible d'enregistrer le résultat. Réessayez."
+    "save_failed": "Impossible d'enregistrer le résultat. Réessayez.",
+    "log_failed": "L'appel n'a pas pu être journalisé. Notez le résultat sur la fiche client."
   }
 }

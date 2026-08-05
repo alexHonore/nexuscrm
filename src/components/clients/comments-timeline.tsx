@@ -1,6 +1,5 @@
 "use client";
 
-import { formatDistanceToNow } from "date-fns";
 import { enUS, fr } from "date-fns/locale";
 import { MessageSquareIcon, SendIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -8,6 +7,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { addCommentAction } from "@/app/(app)/clients/actions";
+import { RelativeTime } from "@/components/relative-time";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -168,10 +168,7 @@ export function CommentsTimeline({
                   <p className="text-sm">
                     <span className="font-medium">{c.author.name}</span>{" "}
                     <span className="text-xs text-muted-foreground">
-                      {formatDistanceToNow(new Date(c.createdAt), {
-                        addSuffix: true,
-                        locale: dfnsLocale,
-                      })}
+                      <RelativeTime date={c.createdAt} locale={dfnsLocale} />
                     </span>
                   </p>
                   <p className="text-sm whitespace-pre-wrap break-words">{renderBody(c.body)}</p>

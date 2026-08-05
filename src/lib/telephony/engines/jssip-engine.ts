@@ -283,7 +283,11 @@ export class JsSipEngine implements TelephonyEngine {
       this.session = null;
       this.call = null;
       if (this.audio) this.audio.srcObject = null;
-      if (ended && e.cause && !NORMAL_END_CAUSES.has(e.cause)) {
+      // Refus local d'un entrant (reject() → 486) : fin normale, pas d'erreur.
+      // Un REJECTED distant (ex. 603 sur notre sortant) reste signalé.
+      const locallyRejected =
+        (e.originator as string) === "local" && e.cause === JsSIP.C.causes.REJECTED;
+      if (ended && e.cause && !locallyRejected && !NORMAL_END_CAUSES.has(e.cause)) {
         if (e.cause === JsSIP.C.causes.USER_DENIED_MEDIA_ACCESS) {
           this.events?.onError("mic_denied");
         } else if (e.cause === JsSIP.C.causes.BUSY) {
@@ -331,6 +335,12 @@ export class JsSipEngine implements TelephonyEngine {
       this.reconnectTimer = null;
       if (this.destroyed || !this.ua) return;
       if (this.ua.isConnected() && this.ua.isRegistered()) return;
+      // Appel en cours : UA.stop() terminerait la session active — on
+      // repousse le cycle stop/start après la fin de l'appel (même backoff).
+      if (this.session) {
+        this.scheduleReconnect();
+        return;
+      }
       try {
         this.ua.stop();
         this.ua.start();

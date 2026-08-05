@@ -78,7 +78,8 @@
       "cannot_deactivate_self": "Vous ne pouvez pas désactiver votre propre compte.",
       "cannot_demote_self": "Vous ne pouvez pas retirer votre propre rôle d'administrateur.",
       "cannot_delete_self": "Vous ne pouvez pas supprimer votre propre compte.",
-      "invalid_did": "Numéro (DID) invalide."
+      "invalid_did": "Numéro (DID) invalide.",
+      "has_activity": "Cet utilisateur a un historique (appels, rendez-vous ou relances) qui serait détruit. Désactivez plutôt son compte pour conserver les données."
     }
   },
 

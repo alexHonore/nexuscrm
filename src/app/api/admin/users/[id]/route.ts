@@ -2,7 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
-import { users } from "@/db/schema";
+import { appointments, calls, followups, users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { encryptSecret } from "@/lib/crypto";
@@ -119,6 +119,17 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   }
   const target = await db.query.users.findFirst({ where: eq(users.id, id) });
   if (!target) return NextResponse.json({ error: "not_found" }, { status: 404 });
+
+  // Refus si l'utilisateur a un historique : les FK en cascade détruiraient ses
+  // appels, rendez-vous et relances (KPI, RDV à venir). Désactiver plutôt.
+  const [callCount, appointmentCount, followupCount] = await Promise.all([
+    db.$count(calls, eq(calls.userId, id)),
+    db.$count(appointments, eq(appointments.userId, id)),
+    db.$count(followups, eq(followups.assignedToId, id)),
+  ]);
+  if (callCount + appointmentCount + followupCount > 0) {
+    return NextResponse.json({ error: "has_activity" }, { status: 409 });
+  }
 
   // Les clients assignés sont automatiquement désassignés (FK ON DELETE SET NULL).
   await db.delete(users).where(eq(users.id, id));

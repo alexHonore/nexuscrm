@@ -16,6 +16,9 @@
   },
   "content": {
     "mentionTitle": "{name} vous a mentionné",
-    "followupDueTitle": "Suivi à faire : {client}"
+    "followupDueTitle": "Suivi à faire : {client}",
+    "incomingLeadTitle": "Nouveau lead : {name}",
+    "incomingLeadNewBody": "{phone} — via {source}",
+    "incomingLeadExistingBody": "Client existant recontacté — {phone} — via {source}"
   }
 }

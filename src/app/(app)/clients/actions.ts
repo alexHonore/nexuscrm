@@ -1,13 +1,14 @@
 "use server";
 
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { fromZonedTime } from "date-fns-tz";
 import { z } from "zod";
 import { db } from "@/db";
-import { clients, comments, followups, notifications, users } from "@/db/schema";
+import { appointments, clients, comments, followups, notifications, users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth/guards";
 import { logAudit } from "@/lib/audit";
+import { cancelEvent } from "@/lib/google";
 import { normalizePhone } from "@/lib/phone";
 import {
   commentExcerpt,
@@ -241,6 +242,25 @@ export async function deleteClientAction(clientId: string): Promise<ActionResult
 
   const existing = await db.query.clients.findFirst({ where: eq(clients.id, clientId) });
   if (!existing) return NOT_FOUND;
+
+  // Annulation (au mieux) des événements Google des RDV planifiés — la cascade
+  // supprime les RDV sans prévenir l'agenda de l'admin. Ne bloque jamais la suppression.
+  const scheduled = await db.query.appointments.findMany({
+    where: and(
+      eq(appointments.clientId, clientId),
+      eq(appointments.status, "scheduled"),
+      isNotNull(appointments.googleEventId),
+    ),
+    columns: { googleEventId: true },
+  });
+  for (const appt of scheduled) {
+    if (!appt.googleEventId) continue;
+    try {
+      await cancelEvent(appt.googleEventId);
+    } catch (err) {
+      console.error("google event cancellation failed", err);
+    }
+  }
 
   await db.delete(clients).where(eq(clients.id, clientId));
 

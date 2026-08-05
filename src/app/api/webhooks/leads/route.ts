@@ -1,7 +1,8 @@
-import { and, eq, like, sql } from "drizzle-orm";
+import { and, eq, like, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { categories, clients, notifications, sources, users, webhookKeys } from "@/db/schema";
+import { notificationContent } from "@/components/clients/notification-content";
 import { logAudit } from "@/lib/audit";
 import { sha256Hex } from "@/lib/crypto";
 import { formatPhone, normalizePhone, phoneMatchKey } from "@/lib/phone";
@@ -130,8 +131,35 @@ export async function POST(req: Request) {
 
   const defaults = (key.defaults ?? {}) as KeyDefaults;
 
+  // ── Défauts de la clé : ignorer les ids qui ne référencent plus rien ──
+  // (catégorie/source/utilisateur supprimés → violation de FK et lead perdu).
+  const defaultCategoryId =
+    defaults.categoryId != null &&
+    (await db.query.categories.findFirst({
+      where: eq(categories.id, defaults.categoryId),
+      columns: { id: true },
+    }))
+      ? defaults.categoryId
+      : null;
+  const defaultSourceId =
+    defaults.sourceId != null &&
+    (await db.query.sources.findFirst({
+      where: eq(sources.id, defaults.sourceId),
+      columns: { id: true },
+    }))
+      ? defaults.sourceId
+      : null;
+  const defaultAssignedToId =
+    defaults.assignedToId != null &&
+    (await db.query.users.findFirst({
+      where: eq(users.id, defaults.assignedToId),
+      columns: { id: true },
+    }))
+      ? defaults.assignedToId
+      : null;
+
   // ── Résolution de la source : payload (par nom) sinon défauts de la clé ──
-  let sourceId: number | null = defaults.sourceId ?? null;
+  let sourceId: number | null = defaultSourceId;
   if (fields.source) {
     const match = await db.query.sources.findFirst({
       where: sql`lower(${sources.name}) = ${fields.source.toLowerCase()}`,
@@ -141,10 +169,12 @@ export async function POST(req: Request) {
 
   const newCategory = await db.query.categories.findFirst({ where: eq(categories.key, "new") });
 
-  // ── Dédoublonnage par téléphone (10 derniers chiffres) ──
+  // ── Dédoublonnage par téléphone (10 derniers chiffres) — principal ET secondaire ──
   const matchKey = phoneMatchKey(phone);
   const existing = matchKey
-    ? await db.query.clients.findFirst({ where: like(clients.phone, `%${matchKey}`) })
+    ? await db.query.clients.findFirst({
+        where: or(like(clients.phone, `%${matchKey}`), like(clients.phoneAlt, `%${matchKey}`)),
+      })
     : undefined;
 
   let clientId: string;
@@ -178,7 +208,7 @@ export async function POST(req: Request) {
   } else {
     created = true;
     clientName = fields.name || formatPhone(phone);
-    assignedToId = defaults.assignedToId ?? null;
+    assignedToId = defaultAssignedToId;
     const [inserted] = await db
       .insert(clients)
       .values({
@@ -190,7 +220,7 @@ export async function POST(req: Request) {
         timing: fields.timing ?? null,
         notes: fields.notes ?? null,
         language: "fr",
-        categoryId: defaults.categoryId ?? newCategory?.id ?? null,
+        categoryId: defaultCategoryId ?? newCategory?.id ?? null,
         sourceId,
         assignedToId,
         meta: root,
@@ -199,22 +229,30 @@ export async function POST(req: Request) {
     clientId = inserted.id;
   }
 
-  // ── Notifications : tous les admins actifs + l'assigné ──
+  // ── Notifications : tous les admins actifs + l'assigné (dans LEUR langue) ──
   const admins = await db.query.users.findMany({
     where: and(eq(users.role, "admin"), eq(users.isActive, true)),
-    columns: { id: true },
+    columns: { id: true, locale: true },
   });
-  const recipientIds = new Set(admins.map((a) => a.id));
-  if (assignedToId) recipientIds.add(assignedToId);
-  if (recipientIds.size > 0) {
+  const recipients = new Map(admins.map((a) => [a.id, a.locale]));
+  if (assignedToId && !recipients.has(assignedToId)) {
+    const assignee = await db.query.users.findFirst({
+      where: eq(users.id, assignedToId),
+      columns: { id: true, locale: true },
+    });
+    if (assignee) recipients.set(assignee.id, assignee.locale);
+  }
+  if (recipients.size > 0) {
     await db.insert(notifications).values(
-      Array.from(recipientIds).map((userId) => ({
+      Array.from(recipients, ([userId, locale]) => ({
         userId,
         type: "incoming_lead",
-        title: `Nouveau lead : ${clientName}`,
-        body: created
-          ? `${formatPhone(phone)} — via ${key.name}`
-          : `Client existant recontacté — ${formatPhone(phone)} — via ${key.name}`,
+        title: notificationContent(locale, "incomingLeadTitle", { name: clientName }),
+        body: notificationContent(
+          locale,
+          created ? "incomingLeadNewBody" : "incomingLeadExistingBody",
+          { phone: formatPhone(phone), source: key.name },
+        ),
         link: `/clients/${clientId}`,
       })),
     );

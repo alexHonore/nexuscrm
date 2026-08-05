@@ -66,6 +66,10 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 
     if (!body.disposition) return;
 
+    // Idempotence : si cette disposition est déjà posée sur l'appel (retry client
+    // après réponse perdue), ne pas rejouer les effets (relance dupliquée, catégorie).
+    if (call.disposition === body.disposition) return;
+
     // ── Effets pipeline sur la fiche client ──
     if (call.clientId) {
       const client = await tx.query.clients.findFirst({ where: eq(clients.id, call.clientId) });
