@@ -1,0 +1,67 @@
+{
+  "name": "Groupe Nexus CRM — crons",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 30 }]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "id": "a1000000-0000-0000-0000-000000000001",
+      "name": "Toutes les 30 min"
+    },
+    {
+      "parameters": {
+        "url": "https://groupe-nexus.vercel.app/api/cron/followup-reminders",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer REMPLACER_PAR_CRON_SECRET" }
+          ]
+        },
+        "options": { "timeout": 30000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0],
+      "id": "a1000000-0000-0000-0000-000000000002",
+      "name": "Rappels de suivis"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 1 }]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 200],
+      "id": "a1000000-0000-0000-0000-000000000003",
+      "name": "Toutes les heures"
+    },
+    {
+      "parameters": {
+        "url": "https://groupe-nexus.vercel.app/api/cron/sync-cdr",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer REMPLACER_PAR_CRON_SECRET" }
+          ]
+        },
+        "options": { "timeout": 120000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 200],
+      "id": "a1000000-0000-0000-0000-000000000004",
+      "name": "Sync CDR voip.ms"
+    }
+  ],
+  "connections": {
+    "Toutes les 30 min": { "main": [[{ "node": "Rappels de suivis", "type": "main", "index": 0 }]] },
+    "Toutes les heures": { "main": [[{ "node": "Sync CDR voip.ms", "type": "main", "index": 0 }]] }
+  }
+}

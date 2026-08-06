@@ -1,17 +1,38 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Groupe Nexus — Passerelle vocale (WebRTC <-> voip.ms)
+# Groupe Nexus — Passerelle vocale (WebRTC <-> voip.ms) — MODE TRAEFIK
+#
+# Scénario : KVM (ex. Hostinger) qui héberge DÉJÀ la pile n8n officielle avec
+# Traefik lié aux ports 80/443. On n'installe AUCUN autre serveur web : le
+# Traefik existant termine le TLS et route deux chemins du domaine
+# voice.<domaine> vers la passerelle :
+#
+#   wss://voice.<dom>/ws          -> ws-bridge (socat) -> Kamailio :5066 (ws en clair)
+#   https://voice.<dom>/voipms-api -> api-proxy :8080
 #
 # Quatre services :
-#   - kamailio  : mandataire SIP (WSS 8443 côté fureteurs, UDP 5060 côté voip.ms)
-#   - rtpengine : relais média (DTLS-SRTP côté fureteurs <-> RTP côté voip.ms)
-#   - caddy     : obtention/renouvellement des certificats Let's Encrypt +
-#                 relais HTTPS /voipms-api -> api-proxy (pour Vercel)
+#   - kamailio  : mandataire SIP (réseau hôte : WS en clair 5066 côté Traefik,
+#                 UDP 5060 direct côté voip.ms)
+#   - rtpengine : relais média (réseau hôte, UDP 23000-33000 ; le média ne
+#                 passe JAMAIS par Traefik)
+#   - ws-bridge : pont TCP minuscule (socat) entre le réseau Docker de Traefik
+#                 et le port WS de Kamailio sur l'hôte. Nécessaire parce que
+#                 Traefik (réseau bridge) ne peut pas joindre directement un
+#                 conteneur en réseau hôte : les étiquettes Traefik sont donc
+#                 portées par ce conteneur-relais. « host-gateway » est résolu
+#                 par Docker vers l'IP de l'hôte sur le pont docker0
+#                 (172.17.0.1) — robuste avec Traefik v2 ET v3, contrairement
+#                 à l'étiquette « loadbalancer.server.url » (v3.2+ seulement).
 #   - api-proxy : mini serveur Node qui relaie l'API REST voip.ms depuis une
 #                 IP fixe (voip.ms exige une liste blanche d'IP pour son API)
 #
-# kamailio, rtpengine et caddy sont en réseau « host » : la signalisation SIP
-# et le RTP ont besoin des vrais ports UDP de la machine (pas de NAT Docker).
+# kamailio et rtpengine sont en réseau « host » : la signalisation SIP et le
+# RTP ont besoin des vrais ports UDP de la machine (pas de NAT Docker).
+# ws-bridge et api-proxy rejoignent le réseau EXTERNE de Traefik
+# (TRAEFIK_NETWORK, détecté par setup.sh — typiquement « root_default » pour
+# la pile n8n installée dans /root).
+#
 # Les variables ${...} proviennent du fichier .env (créé par setup.sh).
+# Mode autonome (VPS dédié, Caddy) : voir docker-compose.standalone.yml.
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: nexus-voice-gateway
@@ -19,7 +40,7 @@ name: nexus-voice-gateway
 services:
   kamailio:
     # Image officielle du projet Kamailio (tous les modules deb installés,
-    # incluant tls, websocket, nathelper, rtpengine). Version épinglée.
+    # incluant websocket, nathelper, rtpengine). Version épinglée.
     image: ghcr.io/kamailio/kamailio:6.0.7-bookworm
     container_name: nexus-kamailio
     network_mode: host
@@ -30,13 +51,14 @@ services:
       # Mémoire partagée / paquet (Mo) — l'entrypoint de l'image les utilise.
       SHM_MEMORY: "128"
       PKG_MEMORY: "16"
-      # IP publique du VPS — injectée dans kamailio.cfg via #!defenv
+      # IP publique du KVM — injectée dans kamailio.cfg via #!defenv
       PUBLIC_IP: ${PUBLIC_IP}
+      # Port WebSocket EN CLAIR (Traefik -> ws-bridge -> ici). Pas de TLS :
+      # WITH_STANDALONE_TLS n'est PAS définie dans ce mode.
+      WS_PORT: ${WS_PORT:-5066}
     volumes:
       # Configuration (kamailio.cfg + tls.cfg) — lecture seule
       - ./kamailio:/etc/kamailio:ro
-      # Certificats Let's Encrypt copiés par scripts/sync-certs.sh
-      - ./certs:/etc/kamailio/tls:ro
     healthcheck:
       test: ["CMD", "kamcmd", "-s", "unix:/tmp/kamailio_ctl", "core.uptime"]
       interval: 30s
@@ -55,9 +77,9 @@ services:
     # config) en lançant le binaire directement avec notre fichier de config.
     # L'interface média est passée ici car le fichier .conf ne peut pas lire
     # de variables d'environnement.
-    #   RTP_INTERFACE = IP publique (OVH/DigitalOcean : l'IP est directement
-    #   sur la carte réseau). Pour un nuage avec NAT 1:1 (AWS, GCP, Azure),
-    #   utiliser la forme « IP_privée!IP_publique » dans .env.
+    #   RTP_INTERFACE = IP publique (Hostinger/OVH/DigitalOcean : l'IP est
+    #   directement sur la carte réseau). Pour un nuage avec NAT 1:1
+    #   (AWS, GCP, Azure), utiliser la forme « IP_privée!IP_publique » dans .env.
     command:
       - /usr/local/bin/rtpengine
       - --config-file=/etc/rtpengine/rtpengine.conf
@@ -67,20 +89,33 @@ services:
     # Ports RTP UDP 23000-33000 + ng 22222 : inutile de les publier,
     # network_mode: host expose déjà tout (ouvrir le pare-feu via setup.sh).
 
-  caddy:
-    image: caddy:2-alpine
-    container_name: nexus-caddy
-    network_mode: host
+  ws-bridge:
+    # Pont TCP : Traefik (réseau bridge) -> hôte:WS_PORT (Kamailio, réseau
+    # host). socat relaie les octets tels quels : la mise à niveau WebSocket
+    # (faite nativement par Traefik) traverse sans modification.
+    image: alpine/socat:1.7.4.4
+    container_name: nexus-ws-bridge
     restart: unless-stopped
-    environment:
-      DOMAIN: ${DOMAIN}
-      ACME_EMAIL: ${ACME_EMAIL}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      # /data contient les certificats obtenus (recopiés vers ./certs pour
-      # Kamailio par scripts/sync-certs.sh)
-      - ./caddy/data:/data
-      - ./caddy/config:/config
+    depends_on:
+      - kamailio
+    command:
+      - TCP-LISTEN:5066,fork,reuseaddr
+      - TCP:host.docker.internal:${WS_PORT:-5066}
+    extra_hosts:
+      # « host-gateway » : Docker le remplace par l'IP de l'hôte (172.17.0.1
+      # par défaut). Kamailio écoute sur 0.0.0.0, donc il répond sur cette IP.
+      - "host.docker.internal:host-gateway"
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-root_default}"
+      # Routeur WebSocket SIP : wss://voice.<domaine>/ws
+      # (pas de retrait de préfixe : Kamailio ignore le chemin HTTP).
+      - "traefik.http.routers.nexus-voice-ws.rule=Host(`${DOMAIN}`) && PathPrefix(`/ws`)"
+      - "traefik.http.routers.nexus-voice-ws.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.nexus-voice-ws.tls.certresolver=${TRAEFIK_CERTRESOLVER:-mytlschallenge}"
+      - "traefik.http.services.nexus-voice-ws.loadbalancer.server.port=5066"
 
   api-proxy:
     image: node:22-alpine
@@ -92,7 +127,25 @@ services:
       PROXY_TOKEN: ${PROXY_TOKEN}
     volumes:
       - ./api-proxy:/app:ro
-    ports:
-      # Accessible seulement en local ; Caddy (réseau host) fait le relais
-      # HTTPS public https://DOMAIN/voipms-api -> 127.0.0.1:8080
-      - "127.0.0.1:8080:8080"
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-root_default}"
+      # Relais API voip.ms : https://voice.<domaine>/voipms-api
+      # Le préfixe est retiré avant transmission (le serveur Node reçoit
+      # « /?method=... » et la sonde de vie « /healthz »).
+      - "traefik.http.routers.nexus-voipms-api.rule=Host(`${DOMAIN}`) && PathPrefix(`/voipms-api`)"
+      - "traefik.http.routers.nexus-voipms-api.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.nexus-voipms-api.tls.certresolver=${TRAEFIK_CERTRESOLVER:-mytlschallenge}"
+      - "traefik.http.routers.nexus-voipms-api.middlewares=nexus-voipms-strip"
+      - "traefik.http.middlewares.nexus-voipms-strip.stripprefix.prefixes=/voipms-api"
+      - "traefik.http.services.nexus-voipms-api.loadbalancer.server.port=8080"
+
+networks:
+  # Réseau Docker EXISTANT de la pile n8n/Traefik (créé par son propre
+  # docker-compose). setup.sh le détecte via « docker network ls » et écrit
+  # TRAEFIK_NETWORK dans .env. Valeur typique : root_default.
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-root_default}

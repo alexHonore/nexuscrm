@@ -1,6 +1,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Groupe Nexus — Passerelle vocale : Caddy
 #
+# ⚠ MODE AUTONOME SEULEMENT (docker-compose.standalone.yml, annexe du README).
+# Sur le KVM Hostinger avec n8n, c'est Traefik qui occupe 80/443 : Caddy ne
+# doit PAS être démarré (conflit de ports). Le mode normal n'utilise pas ce
+# fichier.
+#
 # Deux rôles :
 #   1. Obtenir et renouveler automatiquement le certificat Let's Encrypt du
 #      domaine (HTTP-01 sur :80 / TLS-ALPN-01 sur :443). Le certificat est

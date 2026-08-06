@@ -2,13 +2,18 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Groupe Nexus — Passerelle vocale : synchronisation des certificats
 #
+# ⚠ MODE AUTONOME SEULEMENT (docker-compose.standalone.yml, annexe du README).
+# En mode Traefik (par défaut), Kamailio ne termine aucun TLS : les
+# certificats sont entièrement gérés par le Traefik de la pile n8n et ce
+# script est inutile.
+#
 # Copie le certificat Let's Encrypt obtenu par Caddy
 #   (caddy/data/caddy/certificates/<autorité>/<domaine>/<domaine>.{crt,key})
 # vers ./certs/{fullchain.pem,privkey.pem} (montés dans Kamailio), puis
 # demande à Kamailio de recharger ses certificats sans coupure.
 #
-# Exécuté :
-#   - une fois par setup.sh à l'installation ;
+# Exécuté (mode autonome) :
+#   - une fois à l'installation ;
 #   - chaque nuit par cron (/etc/cron.d/nexus-gateway-certs) pour couvrir les
 #     renouvellements (Let's Encrypt renouvelle ~30 jours avant l'expiration).
 #
@@ -17,6 +22,9 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+# Le mode autonome utilise son propre fichier compose.
+COMPOSE=(docker compose -f docker-compose.standalone.yml)
 
 if [[ ! -f .env ]]; then
   echo "ERREUR : fichier .env introuvable (lancer setup.sh d'abord)." >&2
@@ -60,12 +68,12 @@ install -m 600 "$KEY" certs/privkey.pem
 echo "Certificats copiés vers ./certs ($DOMAIN)."
 
 # Recharger Kamailio s'il tourne (sinon il les lira au démarrage).
-if docker compose ps --status running kamailio 2>/dev/null | grep -q kamailio; then
-  if docker compose exec -T kamailio kamcmd -s unix:/tmp/kamailio_ctl tls.reload; then
+if "${COMPOSE[@]}" ps --status running kamailio 2>/dev/null | grep -q kamailio; then
+  if "${COMPOSE[@]}" exec -T kamailio kamcmd -s unix:/tmp/kamailio_ctl tls.reload; then
     echo "Kamailio : certificats rechargés à chaud (tls.reload)."
   else
     echo "tls.reload a échoué — redémarrage du conteneur Kamailio..." >&2
-    docker compose restart kamailio
+    "${COMPOSE[@]}" restart kamailio
   fi
 else
   echo "Kamailio n'est pas démarré — il chargera les certificats au démarrage."

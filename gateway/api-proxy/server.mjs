@@ -14,8 +14,12 @@
 //   Exception : GET /healthz -> 200 « ok » sans jeton (sonde de vie).
 //
 // Aucune dépendance npm : uniquement les modules natifs de Node 22.
-// Écoute sur 0.0.0.0:8080 dans le conteneur, publié en 127.0.0.1:8080 sur
-// l'hôte ; Caddy expose https://DOMAINE/voipms-api par-dessus.
+// Écoute sur 0.0.0.0:8080 dans le conteneur. Exposition publique :
+//   - Mode Traefik (défaut) : le conteneur rejoint le réseau de Traefik ;
+//     https://DOMAINE/voipms-api -> middleware stripprefix -> ici (« / »).
+//     La sonde de vie devient donc https://DOMAINE/voipms-api/healthz.
+//   - Mode autonome : publié en 127.0.0.1:8080, Caddy expose
+//     https://DOMAINE/voipms-api par-dessus (healthz : /healthz à la racine).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { createServer } from "node:http";

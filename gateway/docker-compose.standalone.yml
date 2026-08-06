@@ -1,0 +1,98 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Groupe Nexus — Passerelle vocale — MODE AUTONOME (annexe du README)
+#
+# Ancien mode « VPS dédié » : AUCUN Traefik sur la machine, Caddy occupe
+# 80/443 pour les certificats Let's Encrypt et le relais API, et Kamailio
+# termine lui-même le TLS des fureteurs sur le port 8443 (WSS direct).
+#
+#   NE PAS utiliser ce fichier sur le KVM Hostinger qui héberge n8n :
+#   Caddy entrerait en conflit avec Traefik sur les ports 80/443.
+#   Le mode normal est docker-compose.yml (Traefik). Lancement autonome :
+#     docker compose -f docker-compose.standalone.yml up -d
+#
+# Quatre services :
+#   - kamailio  : mandataire SIP (WSS 8443 côté fureteurs, UDP 5060 côté voip.ms)
+#   - rtpengine : relais média (DTLS-SRTP côté fureteurs <-> RTP côté voip.ms)
+#   - caddy     : obtention/renouvellement des certificats Let's Encrypt +
+#                 relais HTTPS /voipms-api -> api-proxy (pour Vercel)
+#   - api-proxy : relais de l'API REST voip.ms depuis une IP fixe
+#
+# kamailio, rtpengine et caddy sont en réseau « host » : la signalisation SIP
+# et le RTP ont besoin des vrais ports UDP de la machine (pas de NAT Docker).
+# Les variables ${...} proviennent du fichier .env.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: nexus-voice-gateway
+
+services:
+  kamailio:
+    image: ghcr.io/kamailio/kamailio:6.0.7-bookworm
+    container_name: nexus-kamailio
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      - rtpengine
+    environment:
+      SHM_MEMORY: "128"
+      PKG_MEMORY: "16"
+      # IP publique du VPS — injectée dans kamailio.cfg via #!defenv
+      PUBLIC_IP: ${PUBLIC_IP}
+      # Active l'écoute TLS/WSS directe sur 8443 (certificats requis).
+      WITH_STANDALONE_TLS: "yes"
+      # Le port WS en clair (5066) reste actif mais n'est pas ouvert dans le
+      # pare-feu : seul 8443 est exposé aux fureteurs dans ce mode.
+      WS_PORT: ${WS_PORT:-5066}
+    volumes:
+      # Configuration (kamailio.cfg + tls.cfg) — lecture seule
+      - ./kamailio:/etc/kamailio:ro
+      # Certificats Let's Encrypt copiés par scripts/sync-certs.sh
+      - ./certs:/etc/kamailio/tls:ro
+    healthcheck:
+      test: ["CMD", "kamcmd", "-s", "unix:/tmp/kamailio_ctl", "core.uptime"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  rtpengine:
+    image: jambonz/rtpengine:14.1.1.8-jambonz11
+    container_name: nexus-rtpengine
+    network_mode: host
+    restart: unless-stopped
+    # Voir docker-compose.yml pour les explications (identique).
+    command:
+      - /usr/local/bin/rtpengine
+      - --config-file=/etc/rtpengine/rtpengine.conf
+      - --interface=${RTP_INTERFACE}
+    volumes:
+      - ./rtpengine/rtpengine.conf:/etc/rtpengine/rtpengine.conf:ro
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: nexus-caddy
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # /data contient les certificats obtenus (recopiés vers ./certs pour
+      # Kamailio par scripts/sync-certs.sh)
+      - ./caddy/data:/data
+      - ./caddy/config:/config
+
+  api-proxy:
+    image: node:22-alpine
+    container_name: nexus-api-proxy
+    restart: unless-stopped
+    user: "node"
+    command: ["node", "/app/server.mjs"]
+    environment:
+      PROXY_TOKEN: ${PROXY_TOKEN}
+    volumes:
+      - ./api-proxy:/app:ro
+    ports:
+      # Accessible seulement en local ; Caddy (réseau host) fait le relais
+      # HTTPS public https://DOMAIN/voipms-api -> 127.0.0.1:8080
+      - "127.0.0.1:8080:8080"
