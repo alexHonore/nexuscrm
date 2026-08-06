@@ -5,6 +5,7 @@ import { fr as frLocale, enCA } from "date-fns/locale";
 import { formatInTimeZone } from "date-fns-tz";
 import {
   ArrowLeft,
+  ArrowRight,
   Check,
   Copy,
   House,
@@ -20,9 +21,16 @@ import { toast } from "sonner";
 import { createAppointment, type CreateAppointmentInput } from "@/app/(app)/appointments/actions";
 import { CallStrip } from "@/components/telephony/call-strip";
 import { Button } from "@/components/ui/button";
-import { SidePanel } from "@/components/ui/side-panel";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { SidePanel } from "@/components/ui/side-panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { formatPhone } from "@/lib/phone";
@@ -45,6 +53,8 @@ type AvailabilityResponse = {
 
 type Step = 1 | 2 | 3;
 
+// ── Petits blocs UI ──────────────────────────────────────────────────────────
+
 function Chip({
   selected,
   disabled,
@@ -66,7 +76,7 @@ function Chip({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "flex min-h-11 items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition-colors outline-none select-none",
+        "flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-sm font-medium transition-colors outline-none select-none",
         "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
         "disabled:pointer-events-none disabled:opacity-40",
         selected
@@ -80,49 +90,46 @@ function Chip({
   );
 }
 
-function FieldChips({
+/** Menu déroulant compact pour les champs de qualification optionnels. */
+function QualifSelect({
   label,
-  options,
+  placeholder,
   value,
   onChange,
-  columns = 2,
-  error,
+  options,
 }: {
   label: string;
-  options: { value: string; label: string }[];
+  placeholder: string;
   value: string | null;
   onChange: (v: string | null) => void;
-  columns?: 2 | 3;
-  error?: string | null;
+  options: { value: string; label: string }[];
 }) {
   return (
-    <div className="space-y-1.5">
+    <div className="min-w-0 space-y-1.5">
       <Label>{label}</Label>
-      <div
-        role="radiogroup"
-        aria-label={label}
-        className={cn("grid gap-1.5", columns === 3 ? "grid-cols-3" : "grid-cols-2")}
-      >
-        {options.map((o) => (
-          <Chip
-            key={o.value}
-            selected={value === o.value}
-            onClick={() => onChange(value === o.value ? null : o.value)}
-          >
-            {o.label}
-          </Chip>
-        ))}
-      </div>
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      <Select value={value} onValueChange={(v) => onChange(v as string | null)}>
+        <SelectTrigger className="h-11 w-full data-[size=default]:h-11">
+          <SelectValue>{(v: string | null) => (v ? options.find((o) => o.value === v)?.label : placeholder)}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
 
+// ── Panneau ──────────────────────────────────────────────────────────────────
+
 /**
- * Booking flow used by other modules (client page, post-call popup).
- * Rendered as a NON-modal right side panel so the caller can keep talking
- * (and keep the call controls at hand via the CallStrip) while booking.
- * The inner flow is mounted only while open, so state resets on every opening.
+ * Flux de réservation — panneau latéral droit NON modal : la fiche client et
+ * l'appel en cours restent accessibles (CallStrip en tête pendant un appel).
+ * Le flux interne est monté seulement quand ouvert → état remis à zéro à
+ * chaque ouverture.
  */
 export function BookingDialog({
   client,
@@ -141,6 +148,7 @@ export function BookingDialog({
       onClose={() => onOpenChange(false)}
       title={t("dialog.title")}
       subtitle={`${client.fullName} · ${formatPhone(client.phone)}`}
+      className="sm:w-[30rem]"
     >
       {open ? <BookingFlow client={client} onOpenChange={onOpenChange} /> : null}
     </SidePanel>
@@ -163,7 +171,7 @@ function BookingFlow({
 
   const [step, setStep] = useState<Step>(1);
 
-  // Step 1 — qualification
+  // Étape 1 — qualification
   const [projectType, setProjectType] = useState<string | null>(null);
   const [timing, setTiming] = useState<string | null>(null);
   const [budget, setBudget] = useState<string | null>(null);
@@ -175,7 +183,7 @@ function BookingFlow({
   const [projectError, setProjectError] = useState(false);
   const [emailError, setEmailError] = useState(false);
 
-  // Step 2 — type + slot
+  // Étape 2 — type + plage
   const [type, setType] = useState<"meet" | "inperson">("meet");
   const [location, setLocation] = useState("");
   const locationTouchedRef = useRef(false);
@@ -226,11 +234,27 @@ function BookingFlow({
       return {
         dateStr: d.toISOString().slice(0, 10),
         weekday: d.getUTCDay(),
-        labelTop: formatInTimeZone(d, "UTC", "EEE", { locale: dateLocale }),
+        labelTop: formatInTimeZone(d, "UTC", "EEEEE", { locale: dateLocale }),
         labelDay: formatInTimeZone(d, "UTC", "d", { locale: dateLocale }),
       };
     });
   }, [todayStr, dateLocale]);
+
+  /** Plages groupées : matin < 12 h, après-midi 12–17 h, soirée ≥ 17 h (heure locale). */
+  const slotGroups = useMemo(() => {
+    const groups: { key: "morning" | "afternoon" | "evening"; slots: string[] }[] = [
+      { key: "morning", slots: [] },
+      { key: "afternoon", slots: [] },
+      { key: "evening", slots: [] },
+    ];
+    for (const iso of availability?.slots ?? []) {
+      const hour = Number(formatInTimeZone(new Date(iso), tz, "H"));
+      if (hour < 12) groups[0].slots.push(iso);
+      else if (hour < 17) groups[1].slots.push(iso);
+      else groups[2].slots.push(iso);
+    }
+    return groups.filter((g) => g.slots.length > 0);
+  }, [availability, tz]);
 
   function validateStep1(): boolean {
     const badProject = !projectType;
@@ -323,88 +347,131 @@ function BookingFlow({
 
   return (
     <div className="flex min-h-full flex-col">
-      <div className="space-y-3 p-4 pb-3">
+      <div className="flex-1 space-y-5 p-4">
         {/* Contrôles d'appel à portée de main pendant la réservation */}
         <CallStrip />
 
-        {/* Progress header */}
+        {/* Étapes — pastilles numérotées */}
         <ol
-          className="flex items-center gap-1.5"
+          className="flex items-center"
           aria-label={t("dialog.stepOf", { current: step, total: 3 })}
         >
-          {steps.map((s) => (
-            <li key={s.id} className="flex flex-1 flex-col gap-1">
-              <span
-                className={cn("h-1 rounded-full", step >= s.id ? "bg-primary" : "bg-muted")}
-              />
-              <span
+          {steps.map((s, i) => (
+            <li key={s.id} className={cn("flex items-center", i > 0 && "flex-1")}>
+              {i > 0 ? (
+                <span
+                  className={cn("mx-2 h-px flex-1", step > i ? "bg-primary" : "bg-border")}
+                  aria-hidden
+                />
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  // Retour libre vers une étape déjà franchie.
+                  if (s.id < step) setStep(s.id);
+                }}
                 className={cn(
-                  "truncate text-[11px] leading-tight",
-                  step === s.id ? "font-medium text-foreground" : "text-muted-foreground",
+                  "flex items-center gap-1.5",
+                  s.id < step ? "cursor-pointer" : "cursor-default",
                 )}
               >
-                {s.label}
-              </span>
+                <span
+                  className={cn(
+                    "flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
+                    step > s.id
+                      ? "bg-primary text-primary-foreground"
+                      : step === s.id
+                        ? "border-2 border-primary text-primary"
+                        : "border border-border text-muted-foreground",
+                  )}
+                >
+                  {step > s.id ? <Check className="size-3.5" /> : s.id}
+                </span>
+                <span
+                  className={cn(
+                    "text-xs",
+                    step === s.id ? "font-semibold text-foreground" : "text-muted-foreground",
+                  )}
+                >
+                  {s.label}
+                </span>
+              </button>
             </li>
           ))}
         </ol>
-      </div>
 
-      <div className="space-y-4 px-4 pb-4">
-        {/* ── Step 1 — qualification ── */}
+        {/* ── Étape 1 — qualification ── */}
         {step === 1 && (
           <div className="space-y-4">
-            <FieldChips
-              label={t("qualification.projectType")}
-              columns={3}
-              options={[
-                { value: "acheter", label: t("qualification.project.acheter") },
-                { value: "vendre", label: t("qualification.project.vendre") },
-                { value: "les_deux", label: t("qualification.project.les_deux") },
-              ]}
-              value={projectType}
-              onChange={(v) => {
-                setProjectType(v);
-                if (v) setProjectError(false);
-              }}
-              error={projectError ? t("qualification.projectRequired") : null}
-            />
-            <FieldChips
-              label={t("qualification.timing")}
-              options={(["0_3", "3_6", "6_12", "12_plus"] as const).map((v) => ({
-                value: v,
-                label: t(`qualification.timingOptions.${v}`),
-              }))}
-              value={timing}
-              onChange={setTiming}
-            />
-            <FieldChips
-              label={t("qualification.budget")}
-              options={(
-                ["lt_250k", "250_400k", "400_600k", "600_800k", "800k_1m", "gt_1m"] as const
-              ).map((v) => ({ value: v, label: t(`qualification.budgetOptions.${v}`) }))}
-              value={budget}
-              onChange={setBudget}
-            />
-            <FieldChips
-              label={t("qualification.financing")}
-              columns={3}
-              options={(["oui", "non", "en_demarche"] as const).map((v) => ({
-                value: v,
-                label: t(`qualification.financingOptions.${v}`),
-              }))}
-              value={financing}
-              onChange={setFinancing}
-            />
-            <FieldChips
-              label={t("qualification.situation")}
-              options={(["locataire", "proprietaire"] as const).map((v) => ({
-                value: v,
-                label: t(`qualification.situationOptions.${v}`),
-              }))}
-              value={situation}
-              onChange={setSituation}
-            />
+            <div className="space-y-1.5">
+              <Label>
+                {t("qualification.projectType")} <span className="text-destructive">*</span>
+              </Label>
+              <div
+                role="radiogroup"
+                aria-label={t("qualification.projectType")}
+                className="grid grid-cols-3 gap-1.5"
+              >
+                {(["acheter", "vendre", "les_deux"] as const).map((v) => (
+                  <Chip
+                    key={v}
+                    selected={projectType === v}
+                    onClick={() => {
+                      setProjectType(projectType === v ? null : v);
+                      setProjectError(false);
+                    }}
+                  >
+                    {t(`qualification.project.${v}`)}
+                  </Chip>
+                ))}
+              </div>
+              {projectError ? (
+                <p className="text-xs text-destructive">{t("qualification.projectRequired")}</p>
+              ) : null}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <QualifSelect
+                label={t("qualification.timing")}
+                placeholder={t("qualification.selectPlaceholder")}
+                value={timing}
+                onChange={setTiming}
+                options={(["0_3", "3_6", "6_12", "12_plus"] as const).map((v) => ({
+                  value: v,
+                  label: t(`qualification.timingOptions.${v}`),
+                }))}
+              />
+              <QualifSelect
+                label={t("qualification.budget")}
+                placeholder={t("qualification.selectPlaceholder")}
+                value={budget}
+                onChange={setBudget}
+                options={(
+                  ["lt_250k", "250_400k", "400_600k", "600_800k", "800k_1m", "gt_1m"] as const
+                ).map((v) => ({ value: v, label: t(`qualification.budgetOptions.${v}`) }))}
+              />
+              <QualifSelect
+                label={t("qualification.financing")}
+                placeholder={t("qualification.selectPlaceholder")}
+                value={financing}
+                onChange={setFinancing}
+                options={(["oui", "non", "en_demarche"] as const).map((v) => ({
+                  value: v,
+                  label: t(`qualification.financingOptions.${v}`),
+                }))}
+              />
+              <QualifSelect
+                label={t("qualification.situation")}
+                placeholder={t("qualification.selectPlaceholder")}
+                value={situation}
+                onChange={setSituation}
+                options={(["locataire", "proprietaire"] as const).map((v) => ({
+                  value: v,
+                  label: t(`qualification.situationOptions.${v}`),
+                }))}
+              />
+            </div>
+
             <div className="space-y-1.5">
               <Label htmlFor="booking-sector">{t("qualification.sector")}</Label>
               <Input
@@ -415,6 +482,7 @@ function BookingFlow({
                 className="h-11"
               />
             </div>
+
             <div className="space-y-1.5">
               <Label htmlFor="booking-email">{t("qualification.email")}</Label>
               <Input
@@ -426,16 +494,17 @@ function BookingFlow({
                   setEmail(e.target.value);
                   setEmailError(false);
                 }}
-                aria-invalid={emailError || undefined}
                 placeholder={t("qualification.emailPlaceholder")}
+                aria-invalid={emailError}
                 className="h-11"
               />
               {emailError ? (
                 <p className="text-xs text-destructive">{t("qualification.emailInvalid")}</p>
               ) : (
-                <p className="text-xs text-muted-foreground">{t("qualification.emailHelp")}</p>
+                <p className="text-xs text-muted-foreground">{t("qualification.emailHint")}</p>
               )}
             </div>
+
             <div className="space-y-1.5">
               <Label htmlFor="booking-notes">{t("qualification.notes")}</Label>
               <Textarea
@@ -448,43 +517,39 @@ function BookingFlow({
           </div>
         )}
 
-        {/* ── Step 2 — type + slot ── */}
+        {/* ── Étape 2 — type + plage ── */}
         {step === 2 && (
           <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label>{t("slot.type")}</Label>
-              <div
-                role="radiogroup"
-                aria-label={t("slot.type")}
-                className="grid grid-cols-2 gap-1.5"
-              >
+            <div
+              role="radiogroup"
+              aria-label={t("slot.type")}
+              className="grid grid-cols-2 gap-1.5"
+            >
+              {(
+                [
+                  { v: "meet" as const, icon: Video, label: t("slot.meet") },
+                  { v: "inperson" as const, icon: House, label: t("slot.inperson") },
+                ] as const
+              ).map(({ v, icon: Icon, label }) => (
                 <Chip
-                  selected={type === "meet"}
+                  key={v}
+                  selected={type === v}
                   onClick={() => {
-                    setType("meet");
+                    setType(v);
                     setSelectedSlot(null);
                   }}
+                  className="h-16 flex-col gap-1"
                 >
-                  <Video className="size-4" />
-                  {t("slot.meet")}
+                  <Icon className="size-5" />
+                  <span className="text-xs leading-tight">{label}</span>
                 </Chip>
-                <Chip
-                  selected={type === "inperson"}
-                  onClick={() => {
-                    setType("inperson");
-                    setSelectedSlot(null);
-                  }}
-                >
-                  <House className="size-4" />
-                  {t("slot.inperson")}
-                </Chip>
-              </div>
-              {availability ? (
-                <p className="text-xs text-muted-foreground">
-                  {t("slot.durationMin", { min: availability.duration })}
-                </p>
-              ) : null}
+              ))}
             </div>
+            {availability ? (
+              <p className="-mt-2 text-xs text-muted-foreground">
+                {t("slot.durationMin", { min: availability.duration })}
+              </p>
+            ) : null}
 
             {type === "inperson" && (
               <div className="space-y-1.5">
@@ -511,15 +576,15 @@ function BookingFlow({
 
             <div className="space-y-1.5">
               <Label>{t("slot.pickDate")}</Label>
-              {/* 14 jours en grille 7 × 2 — aucun défilement horizontal. */}
+              {/* 14 jours en grille 7 × 2 — fluide, aucun défilement horizontal. */}
               <div
                 className="grid grid-cols-7 gap-1"
                 role="radiogroup"
                 aria-label={t("slot.pickDate")}
               >
                 {days.map((d) => {
-                  const disabled =
-                    availability != null && !availability.days.includes(d.weekday);
+                  const disabled = availability != null && !availability.days.includes(d.weekday);
+                  const isToday = d.dateStr === todayStr;
                   return (
                     <Chip
                       key={d.dateStr}
@@ -529,7 +594,10 @@ function BookingFlow({
                         setSelectedDate(d.dateStr);
                         setSelectedSlot(null);
                       }}
-                      className="min-w-0 flex-col gap-0 px-0.5"
+                      className={cn(
+                        "h-12 flex-col gap-0 px-0",
+                        isToday && selectedDate !== d.dateStr && "border-primary/50",
+                      )}
                     >
                       <span className="text-[10px] uppercase opacity-70">{d.labelTop}</span>
                       <span className="text-sm font-semibold">{d.labelDay}</span>
@@ -539,16 +607,14 @@ function BookingFlow({
               </div>
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <div className="flex items-baseline justify-between gap-2">
                 <Label>{t("slot.pickTime")}</Label>
-                <span className="text-[11px] text-muted-foreground">
-                  {t("slot.timezoneNote")}
-                </span>
+                <span className="text-[11px] text-muted-foreground">{t("slot.timezoneNote")}</span>
               </div>
               {loadingSlots ? (
-                <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
-                  {Array.from({ length: 8 }, (_, i) => (
+                <div className="grid grid-cols-3 gap-1.5">
+                  {Array.from({ length: 9 }, (_, i) => (
                     <Skeleton key={i} className="h-11 rounded-lg" />
                   ))}
                 </div>
@@ -559,24 +625,35 @@ function BookingFlow({
                     {t("slot.retry")}
                   </Button>
                 </div>
-              ) : availability && availability.slots.length === 0 ? (
+              ) : slotGroups.length === 0 ? (
                 <p className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
                   {t("slot.noSlots")}
                 </p>
               ) : (
-                <div
-                  role="radiogroup"
-                  aria-label={t("slot.pickTime")}
-                  className="grid grid-cols-3 gap-1.5 sm:grid-cols-4"
-                >
-                  {availability?.slots.map((iso) => (
-                    <Chip
-                      key={iso}
-                      selected={selectedSlot === iso}
-                      onClick={() => setSelectedSlot(iso)}
-                    >
-                      {formatInTimeZone(new Date(iso), tz, timeFormat, { locale: dateLocale })}
-                    </Chip>
+                <div className="space-y-3">
+                  {slotGroups.map((g) => (
+                    <div key={g.key} className="space-y-1.5">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {t(`slot.groups.${g.key}`)}
+                      </p>
+                      <div
+                        role="radiogroup"
+                        aria-label={t(`slot.groups.${g.key}`)}
+                        className="grid grid-cols-3 gap-1.5"
+                      >
+                        {g.slots.map((iso) => (
+                          <Chip
+                            key={iso}
+                            selected={selectedSlot === iso}
+                            onClick={() => setSelectedSlot(iso)}
+                          >
+                            {formatInTimeZone(new Date(iso), tz, timeFormat, {
+                              locale: dateLocale,
+                            })}
+                          </Chip>
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
@@ -584,7 +661,7 @@ function BookingFlow({
           </div>
         )}
 
-        {/* ── Step 3 — confirmation ── */}
+        {/* ── Étape 3 — confirmation ── */}
         {step === 3 && slotDate && (
           <div className="space-y-4">
             <div className="rounded-xl border bg-muted/30 p-4">
@@ -657,48 +734,52 @@ function BookingFlow({
             )}
           </div>
         )}
+      </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between gap-2 pt-1">
-          {step > 1 ? (
-            <Button
-              type="button"
-              variant="ghost"
-              className="h-11 px-3"
-              disabled={submitting}
-              onClick={() => setStep((s) => (s === 3 ? 2 : 1))}
-            >
-              <ArrowLeft className="size-4" />
-              {t("actions.back")}
-            </Button>
-          ) : (
-            <span />
-          )}
-          {step < 3 ? (
-            <Button
-              type="button"
-              className="h-11 px-5"
-              onClick={goNext}
-              disabled={step === 2 && !selectedSlot}
-            >
-              {t("actions.next")}
-            </Button>
-          ) : (
-            <Button type="button" className="h-11 px-5" onClick={submit} disabled={submitting}>
-              {submitting ? (
-                <>
-                  <LoaderCircle className="size-4 animate-spin" />
-                  {t("confirm.booking")}
-                </>
-              ) : (
-                <>
-                  <Check className="size-4" />
-                  {t("confirm.confirm")}
-                </>
-              )}
-            </Button>
-          )}
-        </div>
+      {/* ── Pied collant : actions toujours visibles ── */}
+      <div className="sticky bottom-0 z-10 flex items-center gap-2 border-t bg-background/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
+        {step > 1 ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="h-12 px-4"
+            disabled={submitting}
+            onClick={() => setStep((s) => (s === 3 ? 2 : 1))}
+          >
+            <ArrowLeft className="size-4" />
+            {t("actions.back")}
+          </Button>
+        ) : null}
+        {step < 3 ? (
+          <Button
+            type="button"
+            className="h-12 flex-1"
+            onClick={goNext}
+            disabled={step === 2 && !selectedSlot}
+          >
+            {t("actions.next")}
+            <ArrowRight className="size-4" />
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            className="h-12 flex-1 bg-emerald-600 text-white hover:bg-emerald-700"
+            onClick={submit}
+            disabled={submitting}
+          >
+            {submitting ? (
+              <>
+                <LoaderCircle className="size-4 animate-spin" />
+                {t("confirm.booking")}
+              </>
+            ) : (
+              <>
+                <Check className="size-4" />
+                {t("confirm.confirm")}
+              </>
+            )}
+          </Button>
+        )}
       </div>
     </div>
   );

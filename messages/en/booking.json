@@ -50,7 +50,8 @@
     "emailHelp": "Confirm or correct the email — the appointment invitation will be sent there.",
     "emailInvalid": "Invalid email",
     "notes": "Notes",
-    "notesPlaceholder": "Useful details for the broker…"
+    "notesPlaceholder": "Useful details for the broker…",
+    "selectPlaceholder": "Select…"
   },
   "slot": {
     "type": "Appointment type",
@@ -65,7 +66,12 @@
     "loadError": "Could not load availability",
     "retry": "Retry",
     "googleWarning": "Google Calendar is not connected — availability does not account for your Google calendar. Connect your account in Settings.",
-    "durationMin": "Duration: {min} min"
+    "durationMin": "Duration: {min} min",
+    "groups": {
+      "morning": "Morning",
+      "afternoon": "Afternoon",
+      "evening": "Evening"
+    }
   },
   "confirm": {
     "client": "Client",

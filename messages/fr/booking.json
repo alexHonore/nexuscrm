@@ -50,7 +50,8 @@
     "emailHelp": "Confirmez ou corrigez le courriel — l'invitation au rendez-vous y sera envoyée.",
     "emailInvalid": "Courriel invalide",
     "notes": "Notes",
-    "notesPlaceholder": "Détails utiles pour le courtier…"
+    "notesPlaceholder": "Détails utiles pour le courtier…",
+    "selectPlaceholder": "Sélectionner…"
   },
   "slot": {
     "type": "Type de rendez-vous",
@@ -65,7 +66,12 @@
     "loadError": "Impossible de charger les disponibilités",
     "retry": "Réessayer",
     "googleWarning": "Google Agenda n'est pas connecté — les disponibilités ne tiennent pas compte de votre agenda Google. Connectez votre compte dans Réglages.",
-    "durationMin": "Durée : {min} min"
+    "durationMin": "Durée : {min} min",
+    "groups": {
+      "morning": "Matin",
+      "afternoon": "Après-midi",
+      "evening": "Soirée"
+    }
   },
   "confirm": {
     "client": "Client",
