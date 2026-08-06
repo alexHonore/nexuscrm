@@ -75,6 +75,7 @@ function revalidateClient(clientId: string): void {
   revalidatePath("/clients");
   revalidatePath(`/clients/${clientId}`);
   revalidatePath("/dashboard");
+  revalidatePath("/pipeline");
 }
 
 // ── Client CRUD ──────────────────────────────────────────────────────────────

@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  ChevronDownIcon,
-  ChevronLeftIcon,
-  MailIcon,
-  MapPinIcon,
-  PhoneIcon,
-  PhoneOffIcon,
-} from "lucide-react";
-import Link from "next/link";
+import { ChevronDownIcon, MailIcon, MapPinIcon, PhoneIcon, PhoneOffIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useTransition } from "react";
@@ -86,14 +78,7 @@ export function ClientHeader({
 
   return (
     <div className="space-y-3">
-      <Link
-        href="/clients"
-        className="inline-flex min-h-11 items-center gap-1 text-sm text-muted-foreground hover:text-foreground md:min-h-0"
-      >
-        <ChevronLeftIcon className="size-4" />
-        {t("detail.backToList")}
-      </Link>
-
+      {/* Le retour à la liste vit dans <ClientSwitcher/> au-dessus de l'entête. */}
       {client.doNotCall ? (
         <div
           role="alert"

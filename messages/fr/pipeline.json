@@ -1,0 +1,31 @@
+{
+  "title": "Pipeline",
+  "subtitle": "{count, plural, =0 {Aucun client} one {# client} other {# clients}}",
+  "board": {
+    "label": "Tableau du pipeline",
+    "noCategory": "Sans catégorie",
+    "empty": "Aucune colonne à afficher pour l'instant."
+  },
+  "column": {
+    "empty": "Aucun client dans cette colonne.",
+    "more": "{count, plural, one {+# autre} other {+# autres}}"
+  },
+  "card": {
+    "menu": "Actions pour {name}",
+    "open": "Ouvrir la fiche",
+    "call": "Appeler",
+    "moveTo": "Déplacer vers",
+    "doNotCall": "Ne pas appeler",
+    "moved": "Fiche déplacée vers {category}",
+    "moveFailed": "Le déplacement a échoué. Réessayez."
+  },
+  "dispositions": {
+    "voicemail": "Boîte vocale",
+    "booked": "RDV pris",
+    "callback": "À rappeler",
+    "not_interested": "Pas intéressé",
+    "dncl": "Ne pas appeler",
+    "not_qualified": "Non qualifié",
+    "no_answer": "Sans réponse"
+  }
+}

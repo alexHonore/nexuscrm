@@ -1,0 +1,500 @@
+"use client";
+
+import {
+  ClockAlertIcon,
+  Loader2Icon,
+  PhoneOffIcon,
+  SearchIcon,
+  SlidersHorizontalIcon,
+  XIcon,
+} from "lucide-react";
+import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AddClientDialog } from "@/components/clients/add-client-dialog";
+import {
+  ClientListNavContext,
+  type ClientListItem,
+  type ClientListNav,
+} from "@/components/clients/client-list-nav";
+import type { FilterOption } from "@/components/clients/clients-filters";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { formatPhone } from "@/lib/phone";
+import { cn } from "@/lib/utils";
+
+export type PanelCategory = { id: number; label: string; color: string; count: number };
+
+type ListResponse = {
+  items: ClientListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+const ALL = "all";
+
+/**
+ * Persistent master-detail workspace for /clients.
+ * Lives in the route layout, so the panel state (search, filters, loaded
+ * pages, scroll) survives navigation between clients — speed is the goal.
+ * Mobile: /clients shows only the panel; /clients/<id> shows only the detail.
+ */
+export function ClientsWorkspace({
+  isAdmin,
+  categories,
+  sources,
+  users,
+  totalClients,
+  children,
+}: {
+  isAdmin: boolean;
+  categories: PanelCategory[];
+  sources: FilterOption[];
+  users: FilterOption[];
+  totalClients: number;
+  children: React.ReactNode;
+}) {
+  const t = useTranslations("clients");
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const isDetail = pathname !== "/clients";
+  const activeId = isDetail ? (pathname.split("/")[2] ?? null) : null;
+
+  // ── Filters ────────────────────────────────────────────────────────────────
+  // Seeded from ?q= so the dashboard quick search keeps working.
+  const [q, setQ] = useState(() => searchParams.get("q") ?? "");
+  const [appliedQ, setAppliedQ] = useState(() => (searchParams.get("q") ?? "").trim());
+  const [categoryId, setCategoryId] = useState<number | null>(() => {
+    // Semée depuis l'URL (liens « +N autres » du tableau pipeline).
+    const raw = searchParams.get("categoryId");
+    const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+    return Number.isFinite(parsed) ? parsed : null;
+  });
+  const [sourceId, setSourceId] = useState(ALL);
+  const [assignedToId, setAssignedToId] = useState(ALL);
+  const [status, setStatus] = useState(ALL);
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onSearchChange = (value: string) => {
+    setQ(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setAppliedQ(value.trim()), 300);
+  };
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    },
+    [],
+  );
+
+  // ── List state ─────────────────────────────────────────────────────────────
+  const [items, setItems] = useState<ClientListItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const filterQuery = useMemo(() => {
+    const p = new URLSearchParams();
+    if (appliedQ) p.set("q", appliedQ);
+    if (categoryId !== null) p.set("categoryId", String(categoryId));
+    if (sourceId !== ALL) p.set("sourceId", sourceId);
+    if (assignedToId !== ALL) p.set("assignedToId", assignedToId);
+    if (status !== ALL) p.set("filter", status);
+    return p.toString();
+  }, [appliedQ, categoryId, sourceId, assignedToId, status]);
+
+  // Latest-value refs so loadMore stays stable for the context consumers.
+  const itemsRef = useRef<ClientListItem[]>([]);
+  const pageRef = useRef(1);
+  const hasMoreRef = useRef(false);
+  const queryRef = useRef(filterQuery);
+  const loadingMoreRef = useRef(false);
+  queryRef.current = filterQuery;
+
+  const listUrl = (query: string, page: number) =>
+    `/api/clients/list?${query ? `${query}&` : ""}page=${page}`;
+
+  const applyPage = useCallback((data: ListResponse, mode: "replace" | "append") => {
+    const merged =
+      mode === "replace"
+        ? data.items
+        : [
+            ...itemsRef.current,
+            ...data.items.filter(
+              (item) => !itemsRef.current.some((prev) => prev.id === item.id),
+            ),
+          ];
+    itemsRef.current = merged;
+    pageRef.current = data.page;
+    hasMoreRef.current = data.page * data.pageSize < data.total;
+    setItems(merged);
+    setTotal(data.total);
+    setHasMore(hasMoreRef.current);
+  }, []);
+
+  // Page 1 (re)load whenever the filters change.
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    setFailed(false);
+    fetch(listUrl(filterQuery, 1), { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json() as Promise<ListResponse>;
+      })
+      .then((data) => {
+        applyPage(data, "replace");
+        setLoading(false);
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setFailed(true);
+        setLoading(false);
+      });
+    return () => controller.abort();
+  }, [filterQuery, refreshKey, applyPage]);
+
+  const loadMore = useCallback(async (): Promise<string[]> => {
+    if (loadingMoreRef.current || !hasMoreRef.current) return [];
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    const startedQuery = queryRef.current;
+    try {
+      const res = await fetch(listUrl(startedQuery, pageRef.current + 1));
+      if (!res.ok) return [];
+      const data = (await res.json()) as ListResponse;
+      // Filters changed while the request was in flight → discard the page.
+      if (queryRef.current !== startedQuery) return [];
+      const known = new Set(itemsRef.current.map((item) => item.id));
+      const fresh = data.items.filter((item) => !known.has(item.id));
+      applyPage({ ...data, items: fresh }, "append");
+      return fresh.map((item) => item.id);
+    } catch {
+      return [];
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [applyPage]);
+
+  // Infinite scroll: auto-trigger the "load more" button as it nears the viewport.
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !hasMore || loading) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void loadMore();
+      },
+      { rootMargin: "240px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, loading, loadMore]);
+
+  // ── Quick-switching context (consumed by <ClientSwitcher/>) ────────────────
+  const ids = useMemo(() => items.map((item) => item.id), [items]);
+  const indexOf = useCallback((id: string) => ids.indexOf(id), [ids]);
+  const nav = useMemo<ClientListNav>(
+    () => ({ ids, total, hasMore, loadingMore, indexOf, loadMore }),
+    [ids, total, hasMore, loadingMore, indexOf, loadMore],
+  );
+
+  // ── Options ────────────────────────────────────────────────────────────────
+  const categoryOptions: FilterOption[] = categories.map((c) => ({
+    value: String(c.id),
+    label: c.label,
+  }));
+  const withAll = (options: FilterOption[]): FilterOption[] => [
+    { value: ALL, label: t("list.filters.all") },
+    ...options,
+  ];
+  const statusOptions: FilterOption[] = [
+    { value: ALL, label: t("list.filters.all") },
+    { value: "overdue", label: t("list.filters.late") },
+    { value: "today", label: t("list.filters.today") },
+  ];
+  const activeFilterCount = [sourceId, assignedToId, status].filter((v) => v !== ALL).length;
+
+  const selectField = (
+    label: string,
+    options: FilterOption[],
+    value: string,
+    onChange: (v: string) => void,
+  ) => (
+    <div className="space-y-1">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <Select items={options} value={value} onValueChange={(v) => onChange(v ?? ALL)}>
+        <SelectTrigger className="min-h-11 w-full md:min-h-9" aria-label={label}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+
+  const chipBase =
+    "inline-flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-xs font-medium transition-colors md:h-7";
+  const now = Date.now();
+
+  return (
+    <ClientListNavContext.Provider value={nav}>
+      <div className="md:flex">
+        {/* ── Left panel: the caller's cockpit ── */}
+        <aside
+          aria-label={t("list.title")}
+          className={cn(
+            "flex w-full flex-col md:sticky md:top-0 md:h-dvh md:w-[340px] md:shrink-0 md:border-r",
+            isDetail && "hidden md:flex",
+          )}
+        >
+          {/* Sticky header — top-[52px] tucks it right under the 53px mobile app bar. */}
+          <div className="sticky top-[52px] z-20 border-b bg-background/95 px-3 pb-2 pt-3 backdrop-blur md:static md:bg-background">
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={q}
+                  onChange={(e) => onSearchChange(e.target.value)}
+                  placeholder={t("list.searchPlaceholder")}
+                  aria-label={t("list.searchPlaceholder")}
+                  className="min-h-11 pl-9 md:min-h-9"
+                  inputMode="search"
+                  enterKeyHint="search"
+                />
+              </div>
+
+              <Popover>
+                <PopoverTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      className="relative size-11 md:size-9"
+                      aria-label={t("panel.filters")}
+                    />
+                  }
+                >
+                  <SlidersHorizontalIcon />
+                  {activeFilterCount > 0 ? (
+                    <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
+                      {activeFilterCount}
+                    </span>
+                  ) : null}
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-64 gap-3 p-3">
+                  {selectField(t("list.filters.source"), withAll(sources), sourceId, setSourceId)}
+                  {selectField(
+                    t("list.filters.assignedTo"),
+                    withAll(users),
+                    assignedToId,
+                    setAssignedToId,
+                  )}
+                  {selectField(t("list.filters.status"), statusOptions, status, setStatus)}
+                  {activeFilterCount > 0 ? (
+                    <Button
+                      variant="ghost"
+                      className="min-h-11 w-full md:min-h-8"
+                      onClick={() => {
+                        setSourceId(ALL);
+                        setAssignedToId(ALL);
+                        setStatus(ALL);
+                      }}
+                    >
+                      <XIcon />
+                      {t("list.filters.clear")}
+                    </Button>
+                  ) : null}
+                </PopoverContent>
+              </Popover>
+
+              {isAdmin ? (
+                <AddClientDialog
+                  compact
+                  categories={categoryOptions}
+                  sources={sources}
+                  users={users}
+                />
+              ) : null}
+            </div>
+
+            {/* Category chips — single-select, colored per categories.color */}
+            <div
+              role="group"
+              aria-label={t("list.filters.category")}
+              className="-mx-3 mt-2 flex gap-1.5 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
+              <button
+                type="button"
+                aria-pressed={categoryId === null}
+                onClick={() => setCategoryId(null)}
+                className={cn(
+                  chipBase,
+                  categoryId === null
+                    ? "border-primary/40 bg-primary/10 text-primary"
+                    : "border-border text-muted-foreground hover:bg-muted",
+                )}
+              >
+                {t("list.filters.all")}
+                <span className="tabular-nums opacity-70">{totalClients}</span>
+              </button>
+              {categories.map((c) => {
+                const active = categoryId === c.id;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setCategoryId(active ? null : c.id)}
+                    className={cn(
+                      chipBase,
+                      !active && "border-border text-muted-foreground hover:bg-muted",
+                    )}
+                    style={
+                      active
+                        ? {
+                            color: c.color,
+                            backgroundColor: `${c.color}1a`,
+                            borderColor: `${c.color}66`,
+                          }
+                        : undefined
+                    }
+                  >
+                    <span
+                      aria-hidden
+                      className="size-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: c.color }}
+                    />
+                    {c.label}
+                    <span className={cn("tabular-nums", !active && "opacity-70")}>{c.count}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="mt-1.5 text-[11px] text-muted-foreground" aria-live="polite">
+              {loading ? t("panel.loading") : t("list.count", { count: total })}
+            </p>
+          </div>
+
+          {/* List — own scroll container on desktop, body scroll on mobile */}
+          <div className="md:min-h-0 md:flex-1 md:overflow-y-auto">
+            {loading ? (
+              <div className="space-y-1.5 p-3">
+                {Array.from({ length: 8 }, (_, i) => (
+                  <Skeleton key={i} className="h-[52px] w-full rounded-lg" />
+                ))}
+              </div>
+            ) : failed ? (
+              <div className="space-y-2 p-6 text-center">
+                <p className="text-sm text-muted-foreground">{t("panel.loadError")}</p>
+                <Button
+                  variant="outline"
+                  className="min-h-11 md:min-h-9"
+                  onClick={() => setRefreshKey((k) => k + 1)}
+                >
+                  {t("panel.retry")}
+                </Button>
+              </div>
+            ) : items.length === 0 ? (
+              <p className="p-6 text-center text-sm text-muted-foreground">{t("list.empty")}</p>
+            ) : (
+              <ul className="divide-y divide-border/60">
+                {items.map((item) => {
+                  const active = item.id === activeId;
+                  const overdue =
+                    item.nextFollowupAt !== null && Date.parse(item.nextFollowupAt) < now;
+                  return (
+                    <li key={item.id}>
+                      <Link
+                        href={`/clients/${item.id}`}
+                        aria-current={active ? "page" : undefined}
+                        className={cn(
+                          "flex min-h-[52px] items-center gap-2.5 border-l-2 px-3 py-1.5 transition-colors",
+                          active
+                            ? "border-l-primary bg-accent text-accent-foreground"
+                            : "border-l-transparent hover:bg-muted/60 active:bg-muted",
+                        )}
+                      >
+                        <span
+                          aria-hidden
+                          className={cn(
+                            "size-2.5 shrink-0 rounded-full",
+                            !item.categoryColor && "bg-muted-foreground/25",
+                          )}
+                          style={
+                            item.categoryColor
+                              ? { backgroundColor: item.categoryColor }
+                              : undefined
+                          }
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-1.5">
+                            <span className="truncate text-sm font-semibold">{item.fullName}</span>
+                            {overdue ? (
+                              <ClockAlertIcon
+                                className="size-3.5 shrink-0 text-destructive"
+                                aria-label={t("list.filters.late")}
+                              />
+                            ) : null}
+                            {item.doNotCall ? (
+                              <PhoneOffIcon
+                                className="size-3.5 shrink-0 text-destructive"
+                                aria-label={t("list.doNotCall")}
+                              />
+                            ) : null}
+                          </span>
+                          <span className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+                            <span className="tabular-nums">{formatPhone(item.phone)}</span>
+                            {item.city ? <span className="truncate">{item.city}</span> : null}
+                          </span>
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            {hasMore && !loading && !failed ? (
+              <div ref={sentinelRef} className="p-3">
+                <Button
+                  variant="outline"
+                  className="min-h-11 w-full md:min-h-9"
+                  disabled={loadingMore}
+                  onClick={() => void loadMore()}
+                >
+                  {loadingMore ? <Loader2Icon className="animate-spin" /> : null}
+                  {t("panel.loadMore")}
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        </aside>
+
+        {/* ── Right side: detail (or desktop empty state) ── */}
+        <div className={cn("min-w-0 flex-1", !isDetail && "hidden md:block")}>{children}</div>
+      </div>
+    </ClientListNavContext.Provider>
+  );
+}

@@ -14,6 +14,7 @@ const NAMESPACES = [
   "auth",
   "dashboard",
   "clients",
+  "pipeline",
   "phone",
   "booking",
   "admin",

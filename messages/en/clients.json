@@ -14,23 +14,30 @@
       "today": "To call today",
       "clear": "Reset"
     },
-    "columns": {
-      "name": "Name",
-      "phone": "Phone",
-      "category": "Category",
-      "source": "Source",
-      "nextFollowup": "Next follow-up",
-      "lastContacted": "Last contacted",
-      "assignedTo": "Assigned to",
-      "actions": "Actions"
-    },
     "empty": "No clients match your search.",
     "unassigned": "Unassigned",
     "noCategory": "No category",
-    "doNotCall": "Do not call",
-    "page": "Page {page} of {pages}",
+    "doNotCall": "Do not call"
+  },
+  "panel": {
+    "filters": "Filters",
+    "loading": "Loading…",
+    "loadMore": "Load more",
+    "loadError": "The list could not be loaded.",
+    "retry": "Retry"
+  },
+  "switcher": {
     "previous": "Previous",
-    "next": "Next"
+    "next": "Next",
+    "backToList": "Back to the list",
+    "position": "{position} / {total}"
+  },
+  "empty": {
+    "title": "Select a client",
+    "hint": "Pick a client from the list on the left to open their record and start calling.",
+    "statTotal": "Total clients",
+    "statOverdue": "Overdue follow-ups",
+    "statToday": "To call today"
   },
   "fields": {
     "fullName": "Full name",
@@ -97,7 +104,6 @@
     "infoTitle": "Information",
     "save": "Save",
     "saved": "Changes saved",
-    "backToList": "Clients",
     "invalidPhone": "Invalid phone number"
   },
   "followups": {

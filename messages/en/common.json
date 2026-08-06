@@ -15,7 +15,9 @@
     "settings": "Settings",
     "audit": "Audit log",
     "logout": "Log out",
-    "profile": "Profile"
+    "profile": "Profile",
+    "pipelineSettings": "Categories",
+    "callsShort": "Calls"
   },
   "actions": {
     "save": "Save",

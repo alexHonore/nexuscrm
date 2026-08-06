@@ -76,5 +76,49 @@
     "invalid_number": "Numéro de téléphone invalide.",
     "save_failed": "Impossible d'enregistrer le résultat. Réessayez.",
     "log_failed": "L'appel n'a pas pu être journalisé. Notez le résultat sur la fiche client."
+  },
+  "callsPage": {
+    "title": "Mes appels",
+    "subtitle": "Votre activité d'appels — aujourd'hui et les derniers jours",
+    "stats": {
+      "calls": "Appels aujourd'hui",
+      "minutes": "Minutes au téléphone",
+      "booked": "Rendez-vous pris"
+    },
+    "filters": {
+      "period": "Période",
+      "today": "Aujourd'hui",
+      "last7": "7 jours",
+      "last30": "30 jours",
+      "direction": "Direction",
+      "allDirections": "Tous",
+      "outbound": "Sortants",
+      "inbound": "Entrants",
+      "disposition": "Résultat d'appel",
+      "reset": "Réinitialiser"
+    },
+    "days": {
+      "today": "Aujourd'hui",
+      "yesterday": "Hier"
+    },
+    "resultsCount": "{count, plural, =0 {Aucun appel} one {# appel} other {# appels}}",
+    "list": {
+      "outbound": "Appel sortant",
+      "inbound": "Appel entrant",
+      "unknownNumber": "Numéro inconnu",
+      "noDisposition": "Sans résultat",
+      "redial": "Rappeler",
+      "notReady": "Téléphone non prêt"
+    },
+    "pagination": {
+      "label": "Pagination",
+      "previous": "Précédent",
+      "next": "Suivant",
+      "page": "Page {page} sur {total}"
+    },
+    "empty": {
+      "title": "Aucun appel pour cette période",
+      "hint": "Composez avec le bouton téléphone en bas de l'écran — vos appels apparaîtront ici."
+    }
   }
 }

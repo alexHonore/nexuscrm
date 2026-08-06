@@ -1,0 +1,31 @@
+{
+  "title": "Pipeline",
+  "subtitle": "{count, plural, =0 {No clients} one {# client} other {# clients}}",
+  "board": {
+    "label": "Pipeline board",
+    "noCategory": "No category",
+    "empty": "No columns to display yet."
+  },
+  "column": {
+    "empty": "No clients in this column.",
+    "more": "{count, plural, one {+# more} other {+# more}}"
+  },
+  "card": {
+    "menu": "Actions for {name}",
+    "open": "Open profile",
+    "call": "Call",
+    "moveTo": "Move to",
+    "doNotCall": "Do not call",
+    "moved": "Client moved to {category}",
+    "moveFailed": "The move failed. Please try again."
+  },
+  "dispositions": {
+    "voicemail": "Voicemail",
+    "booked": "Booked",
+    "callback": "Callback",
+    "not_interested": "Not interested",
+    "dncl": "Do not call",
+    "not_qualified": "Not qualified",
+    "no_answer": "No answer"
+  }
+}

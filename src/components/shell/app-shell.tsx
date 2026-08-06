@@ -4,6 +4,7 @@ import {
   BarChart3,
   Bell,
   CalendarDays,
+  Columns3,
   FileText,
   Globe,
   KeyRound,
@@ -52,13 +53,18 @@ type NavItem = {
 const MAIN_NAV: NavItem[] = [
   { href: "/dashboard", labelKey: "dashboard", icon: LayoutDashboard },
   { href: "/clients", labelKey: "clients", icon: UsersRound },
+  { href: "/pipeline", labelKey: "pipeline", icon: Columns3 },
+  { href: "/calls", labelKey: "callsShort", icon: PhoneCall },
   { href: "/appointments", labelKey: "appointments", icon: CalendarDays },
   { href: "/notifications", labelKey: "notifications", icon: Bell },
 ];
 
+/** Nav basse mobile : 5 onglets — les notifications restent sur la cloche du haut. */
+const MOBILE_NAV = MAIN_NAV.filter((i) => i.labelKey !== "notifications");
+
 const ADMIN_NAV: NavItem[] = [
   { href: "/admin/users", labelKey: "users", icon: Users },
-  { href: "/admin/pipeline", labelKey: "pipeline", icon: FileText },
+  { href: "/admin/pipeline", labelKey: "pipelineSettings", icon: FileText },
   { href: "/admin/analytics", labelKey: "analytics", icon: BarChart3 },
   { href: "/admin/calls", labelKey: "calls", icon: PhoneCall },
   { href: "/admin/import-export", labelKey: "importExport", icon: Upload },
@@ -183,8 +189,8 @@ export function AppShell({
         </main>
 
         {/* ── Nav basse (mobile) ── */}
-        <nav className="pb-safe fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t bg-background/95 backdrop-blur md:hidden">
-          {MAIN_NAV.map((item) => {
+        <nav className="pb-safe fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t bg-background/95 backdrop-blur md:hidden">
+          {MOBILE_NAV.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
             return (

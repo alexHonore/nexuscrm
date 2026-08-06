@@ -15,7 +15,9 @@
     "settings": "Réglages",
     "audit": "Journal d'audit",
     "logout": "Se déconnecter",
-    "profile": "Profil"
+    "profile": "Profil",
+    "pipelineSettings": "Catégories",
+    "callsShort": "Appels"
   },
   "actions": {
     "save": "Enregistrer",

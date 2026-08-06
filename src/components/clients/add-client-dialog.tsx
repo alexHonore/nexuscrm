@@ -35,10 +35,13 @@ export function AddClientDialog({
   categories,
   sources,
   users,
+  compact = false,
 }: {
   categories: FilterOption[];
   sources: FilterOption[];
   users: FilterOption[];
+  /** Icon-only trigger — used in the tight /clients panel header. */
+  compact?: boolean;
 }) {
   const t = useTranslations("clients");
   const router = useRouter();
@@ -96,9 +99,16 @@ export function AddClientDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button className="min-h-11 md:min-h-8" />}>
+      <DialogTrigger
+        render={
+          <Button
+            className={compact ? "size-11 md:size-9" : "min-h-11 md:min-h-8"}
+            aria-label={t("list.addClient")}
+          />
+        }
+      >
         <PlusIcon />
-        {t("list.addClient")}
+        {compact ? null : t("list.addClient")}
       </DialogTrigger>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>

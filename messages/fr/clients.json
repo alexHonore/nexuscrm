@@ -14,23 +14,30 @@
       "today": "À appeler aujourd'hui",
       "clear": "Réinitialiser"
     },
-    "columns": {
-      "name": "Nom",
-      "phone": "Téléphone",
-      "category": "Catégorie",
-      "source": "Source",
-      "nextFollowup": "Prochain suivi",
-      "lastContacted": "Dernier contact",
-      "assignedTo": "Assigné à",
-      "actions": "Actions"
-    },
     "empty": "Aucun client ne correspond à votre recherche.",
     "unassigned": "Non assigné",
     "noCategory": "Sans catégorie",
-    "doNotCall": "Ne pas appeler",
-    "page": "Page {page} sur {pages}",
+    "doNotCall": "Ne pas appeler"
+  },
+  "panel": {
+    "filters": "Filtres",
+    "loading": "Chargement…",
+    "loadMore": "Charger plus",
+    "loadError": "Impossible de charger la liste.",
+    "retry": "Réessayer"
+  },
+  "switcher": {
     "previous": "Précédent",
-    "next": "Suivant"
+    "next": "Suivant",
+    "backToList": "Retour à la liste",
+    "position": "{position} / {total}"
+  },
+  "empty": {
+    "title": "Sélectionnez un client",
+    "hint": "Choisissez un client dans la liste de gauche pour ouvrir sa fiche et commencer vos appels.",
+    "statTotal": "Clients au total",
+    "statOverdue": "Suivis en retard",
+    "statToday": "À appeler aujourd'hui"
   },
   "fields": {
     "fullName": "Nom complet",
@@ -97,7 +104,6 @@
     "infoTitle": "Informations",
     "save": "Enregistrer",
     "saved": "Modifications enregistrées",
-    "backToList": "Clients",
     "invalidPhone": "Numéro de téléphone invalide"
   },
   "followups": {
