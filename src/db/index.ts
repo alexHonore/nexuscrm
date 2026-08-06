@@ -12,7 +12,12 @@ const conn =
   postgres(url, {
     // Compatible pgbouncer/Supavisor (Supabase "Transaction pooler") et Postgres local.
     prepare: false,
-    max: 5,
+    max: 10,
+    // Supavisor coupe les connexions inactives : on les recycle nous-mêmes,
+    // sinon une socket à moitié morte bloque la file d'attente du pool.
+    idle_timeout: 20,
+    max_lifetime: 60 * 5,
+    connect_timeout: 10,
     // Supabase/Neon exigent TLS ; les URI n'incluent pas toujours sslmode=require.
     ...(isLocal ? {} : { ssl: "require" as const }),
   });
