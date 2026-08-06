@@ -129,6 +129,24 @@ if [[ -f .env ]]; then
   echo "Fichier .env existant — valeurs conservées."
   # shellcheck disable=SC1091
   set -a; source ./.env; set +a
+  # Migration depuis l'ancien mode autonome : compléter les variables Traefik
+  # manquantes avec les valeurs détectées (sans toucher au reste).
+  if ! grep -q '^TRAEFIK_NETWORK=' .env; then
+    {
+      echo "# Ajouté par setup.sh (mode Traefik) le $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      echo "TRAEFIK_NETWORK=${DETECTED_NETWORK}"
+      echo "TRAEFIK_ENTRYPOINT=${DETECTED_ENTRYPOINT}"
+      echo "TRAEFIK_CERTRESOLVER=${DETECTED_RESOLVER}"
+    } >> .env
+    TRAEFIK_NETWORK="$DETECTED_NETWORK"
+    TRAEFIK_ENTRYPOINT="$DETECTED_ENTRYPOINT"
+    TRAEFIK_CERTRESOLVER="$DETECTED_RESOLVER"
+    echo "Variables TRAEFIK_* ajoutées au .env existant."
+  fi
+  if ! grep -q '^WS_PORT=' .env; then
+    echo "WS_PORT=5066" >> .env
+    WS_PORT=5066
+  fi
 else
   DETECTED_IP="$(detect_public_ip || true)"
   echo "IP publique détectée : ${DETECTED_IP:-inconnue}"
