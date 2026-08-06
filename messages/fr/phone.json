@@ -120,5 +120,9 @@
       "title": "Aucun appel pour cette période",
       "hint": "Composez avec le bouton téléphone en bas de l'écran — vos appels apparaîtront ici."
     }
+  },
+  "panel": {
+    "title": "Téléphone",
+    "showCall": "Afficher l'appel"
   }
 }

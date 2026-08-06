@@ -120,5 +120,9 @@
       "title": "No calls for this period",
       "hint": "Dial with the phone button at the bottom of the screen — your calls will show up here."
     }
+  },
+  "panel": {
+    "title": "Phone",
+    "showCall": "Show call"
   }
 }

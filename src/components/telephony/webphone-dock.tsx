@@ -31,7 +31,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { SidePanel, type SidePanelEventDetail } from "@/components/ui/side-panel";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
@@ -75,16 +76,171 @@ function formatTimer(totalSec: number): string {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+function isDesktopViewport(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches;
+}
+
 export function WebphoneDock() {
   const tel = useTelephony();
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [otherPanelOpen, setOtherPanelOpen] = useState(false);
+
+  const inCall =
+    tel.activeCall !== null &&
+    (tel.callState === "connecting" ||
+      tel.callState === "ringing" ||
+      tel.callState === "active" ||
+      tel.callState === "held");
+
+  // Coordination : si un autre panneau (réservation) s'ouvre, le nôtre se ferme
+  // via SidePanel ; on retient son état pour masquer la pastille flottante.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const d = (e as CustomEvent<SidePanelEventDetail>).detail;
+      if (d.id !== "phone") setOtherPanelOpen(d.open);
+    };
+    window.addEventListener("nexus:sidepanel", handler);
+    return () => window.removeEventListener("nexus:sidepanel", handler);
+  }, []);
+
+  // Desktop : ouverture auto du panneau au début d'un appel, fermeture à la fin.
+  const prevInCallRef = useRef(false);
+  useEffect(() => {
+    const was = prevInCallRef.current;
+    prevInCallRef.current = inCall;
+    if (inCall && !was && isDesktopViewport() && !otherPanelOpen) setPanelOpen(true);
+    else if (!inCall && was) setPanelOpen(false);
+  }, [inCall, otherPanelOpen]);
+
   if (!tel.provider) return null;
+
   return (
     <TooltipProvider>
-      {tel.ready ? <DialFab /> : null}
+      {tel.ready && !panelOpen ? <DialFab onOpenPanel={() => setPanelOpen(true)} /> : null}
       <CallBar />
+      <PhonePanel open={panelOpen} onClose={() => setPanelOpen(false)} inCall={inCall} />
+      {inCall && !panelOpen && !otherPanelOpen ? (
+        <DesktopCallPill onOpen={() => setPanelOpen(true)} />
+      ) : null}
       <IncomingCallDialog />
       <DispositionDialog />
     </TooltipProvider>
+  );
+}
+
+// ── 0. Panneau téléphone (desktop) ──────────────────────────────────────────
+
+function PhonePanel({
+  open,
+  onClose,
+  inCall,
+}: {
+  open: boolean;
+  onClose: () => void;
+  inCall: boolean;
+}) {
+  const t = useTranslations("phone");
+  const tel = useTelephony();
+
+  return (
+    <SidePanel id="phone" open={open} onClose={onClose} title={t("panel.title")}>
+      <div className="space-y-4 p-4">
+        {inCall && tel.activeCall ? (
+          <ActiveCallPanelCard tel={tel} call={tel.activeCall} />
+        ) : (
+          <DialpadContent />
+        )}
+      </div>
+    </SidePanel>
+  );
+}
+
+function ActiveCallPanelCard({
+  tel,
+  call,
+}: {
+  tel: TelephonyContextValue;
+  call: NonNullable<TelephonyContextValue["activeCall"]>;
+}) {
+  const t = useTranslations("phone");
+  const elapsed = useElapsedSeconds(call.answeredAt?.getTime() ?? null);
+
+  const stateLabel =
+    tel.callState === "active"
+      ? t("call.active")
+      : tel.callState === "held"
+        ? t("call.held")
+        : tel.callState === "ringing"
+          ? t("call.ringing")
+          : t("call.connecting");
+
+  const title = call.clientName || formatPhone(call.remoteNumber) || t("call.unknownNumber");
+
+  return (
+    <div className="flex flex-col items-center gap-4 pt-4 text-center">
+      <span
+        className={cn(
+          "flex size-16 items-center justify-center rounded-full",
+          tel.callState === "active"
+            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
+            : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
+        )}
+      >
+        <Phone className={cn("size-7", tel.callState !== "active" && "animate-pulse")} />
+      </span>
+      <div className="min-w-0 space-y-0.5">
+        {call.clientId ? (
+          <Link
+            href={`/clients/${call.clientId}`}
+            className="block truncate text-lg font-semibold hover:underline"
+          >
+            {title}
+          </Link>
+        ) : (
+          <p className="truncate text-lg font-semibold">{title}</p>
+        )}
+        <p className="text-sm text-muted-foreground">
+          {stateLabel}
+          {call.clientName ? ` · ${formatPhone(call.remoteNumber)}` : ""}
+        </p>
+        <p className="font-mono text-2xl tabular-nums">
+          {elapsed !== null ? formatTimer(elapsed) : "—"}
+        </p>
+      </div>
+      <div className="w-full">
+        <CallControlsSection tel={tel} />
+      </div>
+    </div>
+  );
+}
+
+// ── 0b. Pastille flottante (desktop, panneau fermé pendant un appel) ────────
+
+function DesktopCallPill({ onOpen }: { onOpen: () => void }) {
+  const t = useTranslations("phone");
+  const tel = useTelephony();
+  const call = tel.activeCall;
+  const elapsed = useElapsedSeconds(call?.answeredAt?.getTime() ?? null);
+  if (!call) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label={t("panel.showCall")}
+      className="fixed right-6 bottom-6 z-40 hidden h-12 items-center gap-2.5 rounded-full bg-emerald-600 px-4 text-white shadow-xl transition-colors hover:bg-emerald-700 md:flex"
+    >
+      <span className="relative flex size-2.5">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/70" />
+        <span className="relative inline-flex size-2.5 rounded-full bg-white" />
+      </span>
+      <span className="max-w-40 truncate text-sm font-medium">
+        {call.clientName || formatPhone(call.remoteNumber)}
+      </span>
+      <span className="font-mono text-sm tabular-nums">
+        {elapsed !== null ? formatTimer(elapsed) : ""}
+      </span>
+    </button>
   );
 }
 
@@ -97,26 +253,14 @@ const REG_DOT: Record<string, string> = {
   failed: "bg-red-500",
 };
 
-function DialFab() {
+function DialFab({ onOpenPanel }: { onOpenPanel: () => void }) {
   const t = useTranslations("phone");
   const tel = useTelephony();
   const [open, setOpen] = useState(false);
-  const [number, setNumber] = useState("");
 
   if (tel.callState !== "idle" || tel.incomingCall) return null;
 
   const statusLabel = t(`status.${tel.registration}`);
-
-  const placeCall = () => {
-    const normalized = normalizePhone(number);
-    if (!normalized) {
-      toast.error(t("errors.invalid_number"));
-      return;
-    }
-    tel.dial({ number: normalized });
-    setNumber("");
-    setOpen(false);
-  };
 
   return (
     <>
@@ -124,7 +268,7 @@ function DialFab() {
         <TooltipTrigger
           render={
             <Button
-              onClick={() => setOpen(true)}
+              onClick={() => (isDesktopViewport() ? onOpenPanel() : setOpen(true))}
               aria-label={t("fab.open")}
               className={cn(
                 "fixed right-4 z-40 size-14 rounded-full shadow-lg md:right-6 md:bottom-6",
@@ -145,82 +289,101 @@ function DialFab() {
         <TooltipContent side="left">{statusLabel}</TooltipContent>
       </Tooltip>
 
+      {/* Mobile : clavier en feuille basse (pouces d'abord) */}
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent side="bottom" className="rounded-t-2xl pb-[env(safe-area-inset-bottom)]">
           <div className="mx-auto w-full max-w-sm">
             <SheetHeader className="pb-0">
               <SheetTitle>{t("dialpad.title")}</SheetTitle>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span
-                  className={cn("size-2 rounded-full", REG_DOT[tel.registration])}
-                  aria-hidden
-                />
-                {statusLabel}
-                {tel.registration === "failed" ? (
-                  <Button
-                    variant="outline"
-                    size="xs"
-                    onClick={tel.retryRegistration}
-                    className="ml-1"
-                  >
-                    <RotateCw data-icon="inline-start" />
-                    {t("status.retry")}
-                  </Button>
-                ) : null}
-              </div>
             </SheetHeader>
-
-            <div className="space-y-3 p-4">
-              <div className="flex items-center gap-2">
-                <Input
-                  type="tel"
-                  inputMode="tel"
-                  autoComplete="off"
-                  value={number}
-                  onChange={(e) => setNumber(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") placeCall();
-                  }}
-                  placeholder={t("dialpad.placeholder")}
-                  aria-label={t("dialpad.placeholder")}
-                  className="h-12 text-center text-lg font-medium tracking-wide"
-                />
-                <Button
-                  variant="ghost"
-                  className="size-12 shrink-0"
-                  onClick={() => setNumber((n) => n.slice(0, -1))}
-                  aria-label={t("dialpad.backspace")}
-                >
-                  <Delete className="size-5" />
-                </Button>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                {DIAL_KEYS.map((key) => (
-                  <Button
-                    key={key}
-                    variant="secondary"
-                    className="h-14 text-xl font-semibold"
-                    onClick={() => setNumber((n) => n + key)}
-                  >
-                    {key}
-                  </Button>
-                ))}
-              </div>
-
-              <Button
-                onClick={placeCall}
-                disabled={tel.registration !== "registered" || !number.trim()}
-                className="h-14 w-full bg-emerald-600 text-base text-white hover:bg-emerald-700"
-              >
-                <Phone data-icon="inline-start" className="size-5" />
-                {t("dialpad.call")}
-              </Button>
+            <div className="p-4">
+              <DialpadContent onCalled={() => setOpen(false)} />
             </div>
           </div>
         </SheetContent>
       </Sheet>
     </>
+  );
+}
+
+/** Clavier de composition — réutilisé par la feuille mobile et le panneau desktop. */
+function DialpadContent({ onCalled }: { onCalled?: () => void }) {
+  const t = useTranslations("phone");
+  const tel = useTelephony();
+  const [number, setNumber] = useState("");
+
+  const statusLabel = t(`status.${tel.registration}`);
+
+  const placeCall = () => {
+    const normalized = normalizePhone(number);
+    if (!normalized) {
+      toast.error(t("errors.invalid_number"));
+      return;
+    }
+    tel.dial({ number: normalized });
+    setNumber("");
+    onCalled?.();
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span className={cn("size-2 rounded-full", REG_DOT[tel.registration])} aria-hidden />
+        {statusLabel}
+        {tel.registration === "failed" ? (
+          <Button variant="outline" size="xs" onClick={tel.retryRegistration} className="ml-1">
+            <RotateCw data-icon="inline-start" />
+            {t("status.retry")}
+          </Button>
+        ) : null}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Input
+          type="tel"
+          inputMode="tel"
+          autoComplete="off"
+          value={number}
+          onChange={(e) => setNumber(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") placeCall();
+          }}
+          placeholder={t("dialpad.placeholder")}
+          aria-label={t("dialpad.placeholder")}
+          className="h-12 text-center text-lg font-medium tracking-wide"
+        />
+        <Button
+          variant="ghost"
+          className="size-12 shrink-0"
+          onClick={() => setNumber((n) => n.slice(0, -1))}
+          aria-label={t("dialpad.backspace")}
+        >
+          <Delete className="size-5" />
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        {DIAL_KEYS.map((key) => (
+          <Button
+            key={key}
+            variant="secondary"
+            className="h-14 text-xl font-semibold"
+            onClick={() => setNumber((n) => n + key)}
+          >
+            {key}
+          </Button>
+        ))}
+      </div>
+
+      <Button
+        onClick={placeCall}
+        disabled={tel.registration !== "registered" || !number.trim()}
+        className="h-14 w-full bg-emerald-600 text-base text-white hover:bg-emerald-700"
+      >
+        <Phone data-icon="inline-start" className="size-5" />
+        {t("dialpad.call")}
+      </Button>
+    </div>
   );
 }
 
@@ -264,8 +427,6 @@ function ActiveCallBar({
   call: NonNullable<TelephonyContextValue["activeCall"]>;
 }) {
   const t = useTranslations("phone");
-  const [dtmfOpen, setDtmfOpen] = useState(false);
-  const [dtmfHistory, setDtmfHistory] = useState("");
   const elapsed = useElapsedSeconds(call.answeredAt?.getTime() ?? null);
 
   const stateLabel =
@@ -283,8 +444,8 @@ function ActiveCallBar({
     <div
       role="status"
       className={cn(
-        "fixed inset-x-2 z-40 rounded-2xl border bg-background/95 p-3 shadow-xl backdrop-blur",
-        "md:inset-x-auto md:bottom-6 md:left-1/2 md:w-[28rem] md:-translate-x-1/2",
+        // Mobile seulement — sur desktop, l'appel vit dans le panneau de droite.
+        "fixed inset-x-2 z-40 rounded-2xl border bg-background/95 p-3 shadow-xl backdrop-blur md:hidden",
         ABOVE_NAV,
       )}
     >
@@ -324,7 +485,22 @@ function ActiveCallBar({
         </span>
       </div>
 
-      <div className="mt-3 flex items-center justify-between gap-2">
+      <div className="mt-3">
+        <CallControlsSection tel={tel} />
+      </div>
+    </div>
+  );
+}
+
+/** Rangée de contrôles + clavier DTMF — partagée entre la barre mobile et le panneau desktop. */
+function CallControlsSection({ tel }: { tel: TelephonyContextValue }) {
+  const t = useTranslations("phone");
+  const [dtmfOpen, setDtmfOpen] = useState(false);
+  const [dtmfHistory, setDtmfHistory] = useState("");
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2">
         <Button
           variant={tel.muted ? "default" : "secondary"}
           className="size-11"

@@ -18,14 +18,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { createAppointment, type CreateAppointmentInput } from "@/app/(app)/appointments/actions";
+import { CallStrip } from "@/components/telephony/call-strip";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { SidePanel } from "@/components/ui/side-panel";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -125,6 +120,8 @@ function FieldChips({
 
 /**
  * Booking flow used by other modules (client page, post-call popup).
+ * Rendered as a NON-modal right side panel so the caller can keep talking
+ * (and keep the call controls at hand via the CallStrip) while booking.
  * The inner flow is mounted only while open, so state resets on every opening.
  */
 export function BookingDialog({
@@ -136,10 +133,17 @@ export function BookingDialog({
   open: boolean;
   onOpenChange: (o: boolean) => void;
 }) {
+  const t = useTranslations("booking");
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <SidePanel
+      id="booking"
+      open={open}
+      onClose={() => onOpenChange(false)}
+      title={t("dialog.title")}
+      subtitle={`${client.fullName} · ${formatPhone(client.phone)}`}
+    >
       {open ? <BookingFlow client={client} onOpenChange={onOpenChange} /> : null}
-    </Dialog>
+    </SidePanel>
   );
 }
 
@@ -318,14 +322,10 @@ function BookingFlow({
   const slotEnd = slotDate && availability ? addMinutes(slotDate, availability.duration) : null;
 
   return (
-    <DialogContent className="max-h-[92dvh] gap-0 overflow-y-auto p-0 sm:max-w-lg">
+    <div className="flex min-h-full flex-col">
       <div className="space-y-3 p-4 pb-3">
-        <DialogHeader>
-          <DialogTitle>{t("dialog.title")}</DialogTitle>
-          <DialogDescription>
-            {client.fullName} · {formatPhone(client.phone)}
-          </DialogDescription>
-        </DialogHeader>
+        {/* Contrôles d'appel à portée de main pendant la réservation */}
+        <CallStrip />
 
         {/* Progress header */}
         <ol
@@ -511,32 +511,31 @@ function BookingFlow({
 
             <div className="space-y-1.5">
               <Label>{t("slot.pickDate")}</Label>
-              <div className="-mx-4 overflow-x-auto px-4">
-                <div
-                  className="flex w-max gap-1.5 pb-1"
-                  role="radiogroup"
-                  aria-label={t("slot.pickDate")}
-                >
-                  {days.map((d) => {
-                    const disabled =
-                      availability != null && !availability.days.includes(d.weekday);
-                    return (
-                      <Chip
-                        key={d.dateStr}
-                        selected={selectedDate === d.dateStr}
-                        disabled={disabled}
-                        onClick={() => {
-                          setSelectedDate(d.dateStr);
-                          setSelectedSlot(null);
-                        }}
-                        className="min-w-14 flex-col gap-0 px-2"
-                      >
-                        <span className="text-[11px] uppercase opacity-70">{d.labelTop}</span>
-                        <span className="text-sm font-semibold">{d.labelDay}</span>
-                      </Chip>
-                    );
-                  })}
-                </div>
+              {/* 14 jours en grille 7 × 2 — aucun défilement horizontal. */}
+              <div
+                className="grid grid-cols-7 gap-1"
+                role="radiogroup"
+                aria-label={t("slot.pickDate")}
+              >
+                {days.map((d) => {
+                  const disabled =
+                    availability != null && !availability.days.includes(d.weekday);
+                  return (
+                    <Chip
+                      key={d.dateStr}
+                      selected={selectedDate === d.dateStr}
+                      disabled={disabled}
+                      onClick={() => {
+                        setSelectedDate(d.dateStr);
+                        setSelectedSlot(null);
+                      }}
+                      className="min-w-0 flex-col gap-0 px-0.5"
+                    >
+                      <span className="text-[10px] uppercase opacity-70">{d.labelTop}</span>
+                      <span className="text-sm font-semibold">{d.labelDay}</span>
+                    </Chip>
+                  );
+                })}
               </div>
             </div>
 
@@ -701,6 +700,6 @@ function BookingFlow({
           )}
         </div>
       </div>
-    </DialogContent>
+    </div>
   );
 }
