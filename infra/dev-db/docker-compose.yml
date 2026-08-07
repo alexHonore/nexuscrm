@@ -1,0 +1,45 @@
+# Base de données de DÉVELOPPEMENT / TESTS — hébergée sur le KVM Hostinger
+# (remplace Docker Desktop en local).
+#
+# ⚠️  SÉCURITÉ — NE JAMAIS publier ce port sur 0.0.0.0.
+# Le KVM a une IP publique ; un Postgres exposé avec des identifiants faibles
+# est compromis en quelques heures. L'écoute est donc volontairement liée à
+# 127.0.0.1 : on y accède depuis le Mac par un tunnel SSH (scripts/db-tunnel.sh),
+# ce qui reproduit exactement `localhost:5455` en local — aucun changement de
+# configuration applicative n'est nécessaire.
+#
+#   Mac  localhost:5455  ──tunnel SSH──►  KVM 127.0.0.1:5455  ──►  conteneur :5432
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: nexus-devdb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nexus
+      POSTGRES_PASSWORD: nexus
+      POSTGRES_DB: nexus
+      # Accélère les tests : ces bases sont jetables, la durabilité disque
+      # n'a aucune valeur ici (une perte = `pnpm db:push && pnpm db:seed`).
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    command: >
+      postgres
+      -c fsync=off
+      -c synchronous_commit=off
+      -c full_page_writes=off
+      -c max_connections=100
+    ports:
+      # Liaison LOOPBACK uniquement — voir l'avertissement ci-dessus.
+      - "127.0.0.1:5455:5432"
+    volumes:
+      - nexus-devdb-data:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexus -d nexus"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  nexus-devdb-data:
