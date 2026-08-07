@@ -49,7 +49,7 @@ export async function GET() {
     {
       provider: "voipms" as const,
       wssUrl,
-      sipDomain: process.env.VOIPMS_SIP_DOMAIN || "montreal.voip.ms",
+      sipDomain: process.env.VOIPMS_SIP_DOMAIN || "montreal1.voip.ms",
       sipUsername: auth.sipUsername ?? null,
       sipPassword,
       callerId: auth.didNumber ?? null,
