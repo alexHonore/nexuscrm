@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
@@ -36,7 +37,15 @@ export function LoginForm() {
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="password">{t("password")}</Label>
+        <div className="flex items-baseline justify-between gap-2">
+          <Label htmlFor="password">{t("password")}</Label>
+          <Link
+            href="/forgot-password"
+            className="text-xs font-medium text-primary hover:underline"
+          >
+            {t("forgot.link")}
+          </Link>
+        </div>
         <Input id="password" name="password" type="password" autoComplete="current-password" required />
       </div>
       <div className="flex items-center gap-2">

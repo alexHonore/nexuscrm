@@ -287,6 +287,23 @@ export const loginThrottle = pgTable("login_throttle", {
   resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
 });
 
+/** Jetons de réinitialisation de mot de passe (« mot de passe oublié »). */
+export const passwordResets = pgTable(
+  "password_resets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** SHA-256 du jeton — le jeton en clair n'existe que dans le courriel. */
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("password_resets_user_idx").on(t.userId)],
+);
+
 // ── Relations ────────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({

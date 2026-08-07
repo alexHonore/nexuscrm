@@ -10,6 +10,8 @@ export default function proxy(request: NextRequest) {
 
   const isPublic =
     pathname === "/login" ||
+    pathname === "/forgot-password" ||
+    pathname === "/reset-password" ||
     pathname.startsWith("/api/") ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico" ||
