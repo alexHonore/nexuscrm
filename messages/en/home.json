@@ -1,0 +1,41 @@
+{
+  "eyebrow": "Internal software — Groupe Nexus",
+  "tagline": "the real estate broker's calling CRM",
+  "purpose": "Groupe Nexus is the internal application used by Alex-Honoré Nshimiyimana, a real estate broker in Québec, and their calling team. It is used to follow up with people who expressed interest in a real estate service, call them directly from the browser, record every follow-up, and book appointments on the broker's calendar.",
+  "audience": "Access is restricted to authorized team members: accounts are created and removed by the administrator. The application is not offered to the public and accepts no open sign-ups.",
+  "signIn": "Sign in",
+  "readPrivacy": "Privacy policy",
+  "featuresTitle": "What the application does",
+  "features": [
+    {
+      "title": "Calling from the browser",
+      "body": "Callers place and receive calls inside the application, with the caller identified against their record and every call labelled with its outcome."
+    },
+    {
+      "title": "Appointments and calendar",
+      "body": "Offered time slots come from the broker's real availability; the confirmed appointment is created on their Google Calendar, with a video meeting link when needed."
+    },
+    {
+      "title": "Records and follow-ups",
+      "body": "Every person has a record: contact details, project, notes, call history and scheduled reminders so nothing is missed."
+    },
+    {
+      "title": "Automatic intake",
+      "body": "Advertising forms filled in by interested people create their record automatically, with no re-typing."
+    },
+    {
+      "title": "Activity tracking",
+      "body": "The broker sees call volume, minutes, appointments booked, and the team's detailed call log."
+    },
+    {
+      "title": "Controlled access",
+      "body": "Callers have no deletion, export or bulk actions; sensitive actions are logged."
+    }
+  ],
+  "googleTitle": "How Google Calendar is used",
+  "googleBody": "The broker can connect their own Google account. The application then only reads their busy periods so that just genuinely free slots are offered, and creates or cancels the appointment events created from the application, with the matching Google Meet link. Calendar content is never bulk-copied or retained, and authorization can be revoked at any time.",
+  "googleLimited": "Groupe Nexus's use and transfer of information received from Google APIs will adhere to the Google API Services User Data Policy, including the Limited Use requirements.",
+  "contact": "info@alexhonore.com",
+  "privacy": "Privacy",
+  "terms": "Terms of Service"
+}

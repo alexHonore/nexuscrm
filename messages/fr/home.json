@@ -1,0 +1,41 @@
+{
+  "eyebrow": "Logiciel interne — Groupe Nexus",
+  "tagline": "le CRM d'appels du courtier immobilier",
+  "purpose": "Groupe Nexus est l'application interne utilisée par Alex-Honoré Nshimiyimana, courtier immobilier au Québec, et son équipe de téléphonistes. Elle sert à suivre les personnes qui ont manifesté un intérêt pour un service immobilier, à les appeler directement depuis le navigateur, à consigner chaque suivi et à fixer les rendez-vous dans l'agenda du courtier.",
+  "audience": "L'accès est réservé aux membres autorisés de l'équipe : les comptes sont créés et retirés par l'administrateur. L'application n'est pas offerte au public et n'accepte aucune inscription libre.",
+  "signIn": "Se connecter",
+  "readPrivacy": "Politique de confidentialité",
+  "featuresTitle": "Ce que fait l'application",
+  "features": [
+    {
+      "title": "Appels depuis le navigateur",
+      "body": "Les téléphonistes appellent et reçoivent les appels directement dans l'application, avec identification de la personne qui appelle et classement de l'appel."
+    },
+    {
+      "title": "Rendez-vous et agenda",
+      "body": "Les plages horaires proposées proviennent des disponibilités réelles du courtier ; le rendez-vous confirmé est créé dans son agenda Google, avec lien de visioconférence au besoin."
+    },
+    {
+      "title": "Fiches et suivis",
+      "body": "Chaque personne a une fiche : coordonnées, projet, notes, historique d'appels et rappels planifiés pour ne rien échapper."
+    },
+    {
+      "title": "Réception automatique des demandes",
+      "body": "Les formulaires publicitaires remplis par les personnes intéressées créent automatiquement leur fiche, sans ressaisie."
+    },
+    {
+      "title": "Suivi de l'activité",
+      "body": "Le courtier voit le volume d'appels, les minutes, les rendez-vous obtenus et le journal détaillé de l'équipe."
+    },
+    {
+      "title": "Accès encadré",
+      "body": "Les téléphonistes n'ont ni suppression, ni exportation, ni action en lot ; les actions sensibles sont journalisées."
+    }
+  ],
+  "googleTitle": "Utilisation de l'agenda Google",
+  "googleBody": "Le courtier peut connecter son propre compte Google. L'application consulte alors uniquement ses périodes occupées afin de ne proposer que des plages réellement libres, et crée ou annule les événements de rendez-vous créés depuis l'application, avec le lien Google Meet correspondant. Le contenu de l'agenda n'est jamais copié en bloc ni conservé, et l'autorisation peut être révoquée en tout temps.",
+  "googleLimited": "L'utilisation et le transfert par Groupe Nexus des renseignements reçus des API Google respecteront la Politique relative aux données utilisateur des services API Google, y compris les exigences d'utilisation limitée.",
+  "contact": "info@alexhonore.com",
+  "privacy": "Confidentialité",
+  "terms": "Conditions d'utilisation"
+}

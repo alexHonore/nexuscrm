@@ -13,6 +13,7 @@ const NAMESPACES = [
   "common",
   "auth",
   "legal",
+  "home",
   "dashboard",
   "clients",
   "pipeline",
