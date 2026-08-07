@@ -6,7 +6,12 @@ import { users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { encryptSecret } from "@/lib/crypto";
-import { createSubAccount, getSubAccounts } from "@/lib/voipms";
+import {
+  createSubAccount,
+  getSubAccounts,
+  setSubAccountPassword,
+  VoipMsError,
+} from "@/lib/voipms";
 import { generateSipPassword, readJson, voipmsErrorResponse } from "../../_helpers";
 import { indexBySipAccount, loadAssignments } from "../_assignments";
 
@@ -75,16 +80,30 @@ export async function POST(req: Request) {
   if (!target) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   const password = generateSipPassword();
+  const callerId = target.didNumber ? target.didNumber.replace(/\D/g, "").slice(-10) : undefined;
   try {
-    const res = (await createSubAccount({
-      username: body.username,
-      password,
-      description: target.name,
-      calleridNumber: target.didNumber ? target.didNumber.replace(/\D/g, "").slice(-10) : undefined,
-    })) as { account?: string };
+    let account: string | null = null;
+    try {
+      const res = (await createSubAccount({
+        username: body.username,
+        password,
+        description: target.name,
+        calleridNumber: callerId,
+      })) as { account?: string };
+      account = res.account ?? null;
+    } catch (err) {
+      // L'API voip.ms est lente (5–10 s) : une réponse perdue peut laisser le
+      // sous-compte créé chez voip.ms sans que le CRM l'ait enregistré. Dans ce
+      // cas on le RÉCUPÈRE et on lui applique le nouveau mot de passe, au lieu
+      // d'échouer et de laisser l'utilisateur sans ligne.
+      if (!(err instanceof VoipMsError && err.status === "used_username")) throw err;
+      const existing = (await getSubAccounts()).find((a) => a.username === body.username);
+      if (!existing) throw err;
+      await setSubAccountPassword(existing.id, password, callerId);
+      account = existing.account;
+    }
 
     // Nom de compte complet ("compte_sousnom") — renvoyé par l'API ou retrouvé via la liste.
-    let account = res.account ?? null;
     if (!account) {
       const accounts = await getSubAccounts().catch(() => []);
       account = accounts.find((a) => a.username === body.username)?.account ?? body.username;
