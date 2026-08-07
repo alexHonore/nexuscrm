@@ -6,7 +6,7 @@ import { users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { normalizePhone } from "@/lib/phone";
-import { routeDidToSubAccount, updateSubAccountCallerId } from "@/lib/voipms";
+import { didDigits, routeDidToSubAccount, updateSubAccountCallerId } from "@/lib/voipms";
 import { readJson, voipmsErrorResponse } from "../../_helpers";
 import { releaseDidFromOthers } from "../_assignments";
 
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
   // Meilleur effort : l'échec n'annule pas l'attribution, mais il est signalé.
   let calleridUpdated = true;
   try {
-    await updateSubAccountCallerId(body.account, didE164.replace(/\D/g, "").slice(-10));
+    await updateSubAccountCallerId(body.account, didDigits(didE164));
   } catch {
     calleridUpdated = false;
   }

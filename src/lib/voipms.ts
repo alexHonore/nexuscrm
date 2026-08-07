@@ -138,18 +138,32 @@ export async function setSubAccountPassword(id: string, password: string, caller
 }
 
 /**
- * Met à jour le caller ID d'un sous-compte SANS changer son mot de passe
- * (réutilise le mot de passe en clair que voip.ms renvoie dans la liste).
- * À appeler quand on attribue un DID après la création du sous-compte —
- * sinon les appels sortants partent sans numéro présenté valide.
+ * Réapplique le profil commun à un sous-compte EXISTANT sans toucher au mot de
+ * passe (on réutilise celui que voip.ms renvoie en clair dans la liste).
+ *
+ * C'est ainsi que `record_calls` finit par être activé sur les lignes créées
+ * avant l'ajout du paramètre : un sous-compte adopté n'était jamais réécrit,
+ * donc l'enregistrement des appels restait désactivé en silence.
+ * Sert aussi à faire suivre le caller ID quand on attribue un DID.
  */
-export async function updateSubAccountCallerId(account: string, calleridNumber: string) {
-  const accounts = await getSubAccounts();
-  const acc = accounts.find((a) => a.id === account || a.account === account);
-  if (!acc) throw new VoipMsError("subaccount_not_found");
+export async function applySubAccountProfile(
+  acc: VoipMsSubAccount,
+  calleridNumber?: string,
+) {
   if (!acc.password) throw new VoipMsError("password_unavailable");
   return rewriteSubAccount(acc, { password: acc.password, calleridNumber });
 }
+
+/** Variante qui retrouve d'abord le sous-compte par son nom. */
+export async function enforceSubAccountProfile(account: string, calleridNumber?: string) {
+  const accounts = await getSubAccounts();
+  const acc = accounts.find((a) => a.id === account || a.account === account);
+  if (!acc) throw new VoipMsError("subaccount_not_found");
+  return applySubAccountProfile(acc, calleridNumber);
+}
+
+/** @deprecated Utiliser enforceSubAccountProfile — conservé pour la lisibilité des appels. */
+export const updateSubAccountCallerId = enforceSubAccountProfile;
 
 export type VoipMsDid = {
   did: string;
@@ -164,9 +178,20 @@ export async function getDids(): Promise<VoipMsDid[]> {
   return r.dids ?? [];
 }
 
+/**
+ * voip.ms veut le DID en 10 chiffres, SANS indicatif de pays : passer la forme
+ * E.164 stockée en base (« +15149561693 ») fait échouer l'API avec
+ * « invalid_did ». Constaté en production le 2026-08-07 : le routage entrant
+ * pointait encore sur le compte principal parce que l'appel échouait.
+ */
+export function didDigits(did: string): string {
+  const digits = did.replace(/\D/g, "");
+  return digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+}
+
 /** Route un DID vers un sous-compte ("account:username"). */
 export async function routeDidToSubAccount(did: string, subAccount: string) {
-  return voipms("setDIDRouting", { did: did.replace(/\D/g, ""), routing: `account:${subAccount}` });
+  return voipms("setDIDRouting", { did: didDigits(did), routing: `account:${subAccount}` });
 }
 
 export type VoipMsCdr = {
@@ -221,13 +246,38 @@ export type VoipMsRecording = {
   [k: string]: unknown;
 };
 
-/** Enregistrements d'appels (la fonctionnalité "Call Recording" doit être activée sur le compte). */
-export async function getCallRecordings(dateFrom: string, dateTo: string): Promise<VoipMsRecording[]> {
-  const r = await voipms<{ call_recordings?: VoipMsRecording[]; recordings?: VoipMsRecording[] }>(
-    "getCallRecordings",
-    { date_from: dateFrom, date_to: dateTo },
-  );
-  return r.call_recordings ?? r.recordings ?? [];
+/** voip.ms signale « pas d'enregistrement » par un statut, pas par une liste vide. */
+const EMPTY_RECORDING_STATUSES = new Set([
+  "no_recordings",
+  "no_call_recordings",
+  "no_recording",
+  "missing_recordings",
+]);
+
+/**
+ * Enregistrements d'appels d'UN sous-compte.
+ *
+ * `account` est OBLIGATOIRE : sans lui l'API répond « missing_account » et la
+ * synchronisation n'attachait jamais rien (constaté en production le
+ * 2026-08-07). La fonctionnalité « Call Recording » doit par ailleurs être
+ * active sur le compte voip.ms, sinon l'API renvoie une erreur explicite que
+ * l'on laisse remonter telle quelle.
+ */
+export async function getCallRecordings(
+  account: string,
+  dateFrom: string,
+  dateTo: string,
+): Promise<VoipMsRecording[]> {
+  try {
+    const r = await voipms<{ call_recordings?: VoipMsRecording[]; recordings?: VoipMsRecording[] }>(
+      "getCallRecordings",
+      { account, date_from: dateFrom, date_to: dateTo },
+    );
+    return r.call_recordings ?? r.recordings ?? [];
+  } catch (err) {
+    if (err instanceof VoipMsError && EMPTY_RECORDING_STATUSES.has(err.status)) return [];
+    throw err;
+  }
 }
 
 /**
@@ -240,4 +290,77 @@ export function extractRecordingUrl(rec: VoipMsRecording): string | undefined {
     if (typeof value === "string" && /^https?:\/\//i.test(value)) return value;
   }
   return undefined;
+}
+
+/** Préfixe des références internes « enregistrement voip.ms à retélécharger ». */
+export const VOIPMS_RECORDING_SCHEME = "voipms:";
+
+/**
+ * Référence stockée dans `calls.recording_url` quand voip.ms ne donne PAS
+ * d'URL directe (cas réel : la liste ne contient qu'un identifiant
+ * `callrecording`). Format : `voipms:<compte>:<id>` — l'audio est retéléchargé
+ * à la lecture par /api/admin/recordings.
+ */
+export function recordingRef(account: string, callrecording: string): string {
+  return `${VOIPMS_RECORDING_SCHEME}${account}:${callrecording}`;
+}
+
+export function parseRecordingRef(
+  ref: string,
+): { account: string; callrecording: string } | null {
+  if (!ref.startsWith(VOIPMS_RECORDING_SCHEME)) return null;
+  const rest = ref.slice(VOIPMS_RECORDING_SCHEME.length);
+  const sep = rest.lastIndexOf(":");
+  if (sep <= 0 || sep === rest.length - 1) return null;
+  return { account: rest.slice(0, sep), callrecording: rest.slice(sep + 1) };
+}
+
+/**
+ * Type MIME déduit des octets d'en-tête. voip.ms renvoie du MP3 (en-tête
+ * `FF E3` mesuré en production), pas du WAV : annoncer « audio/wav » ferait
+ * refuser le flux par les lecteurs stricts et donnerait une mauvaise extension
+ * au téléchargement.
+ */
+export function sniffAudioType(buf: Buffer): string {
+  if (
+    buf.length >= 12 &&
+    buf.toString("ascii", 0, 4) === "RIFF" &&
+    buf.toString("ascii", 8, 12) === "WAVE"
+  ) {
+    return "audio/wav";
+  }
+  if (buf.length >= 3 && buf.toString("ascii", 0, 3) === "ID3") return "audio/mpeg";
+  // Synchronisation de trame MPEG : 11 bits à 1.
+  if (buf.length >= 2 && buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0) return "audio/mpeg";
+  if (buf.length >= 4 && buf.toString("ascii", 0, 4) === "OggS") return "audio/ogg";
+  return "application/octet-stream";
+}
+
+export type VoipMsRecordingFile = Record<string, unknown>;
+
+/** Contenu d'un enregistrement (URL signée ou données base64 selon le compte). */
+export async function getCallRecordingFile(
+  account: string,
+  callrecording: string,
+): Promise<VoipMsRecordingFile> {
+  return voipms<VoipMsRecordingFile>("getCallRecording", { account, callrecording });
+}
+
+/**
+ * Extrait l'audio d'une réponse `getCallRecording`, que voip.ms renvoie une
+ * URL ou des données base64 (le nom du champ varie selon les comptes).
+ * Renvoie aussi les noms de champs vus, pour diagnostiquer sans exposer de
+ * données si le format change encore.
+ */
+export function extractRecordingAudio(
+  payload: VoipMsRecordingFile,
+): { url: string } | { base64: string } | { fields: string[] } {
+  const direct = extractRecordingUrl(payload as VoipMsRecording);
+  if (direct) return { url: direct };
+  for (const [key, value] of Object.entries(payload)) {
+    if (key === "status" || typeof value !== "string" || value.length < 256) continue;
+    // Un WAV/MP3 encodé en base64 : long et strictement dans l'alphabet base64.
+    if (/^[A-Za-z0-9+/\r\n]+={0,2}$/.test(value)) return { base64: value };
+  }
+  return { fields: Object.keys(payload) };
 }

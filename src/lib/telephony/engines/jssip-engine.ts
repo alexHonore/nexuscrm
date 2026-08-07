@@ -74,6 +74,92 @@ const NORMAL_END_CAUSES = new Set<string>([
 const RECONNECT_MIN_MS = 2_000;
 const RECONNECT_MAX_MS = 30_000;
 
+/**
+ * Numéro à composer dans l'URI SIP. On stocke l'E.164 (« +14189065924 »)
+ * partout dans le CRM, mais le plan de numérotation de voip.ms compare des
+ * SUITES DE CHIFFRES : un « + » en tête ne correspond à aucun motif, si bien
+ * que voip.ms accuse réception (100 Trying) puis abandonne l'appel en
+ * silence — ni sonnerie, ni erreur. Diagnostiqué en production le 2026-08-07 :
+ * `INVITE sip:+14189065924@montreal1.voip.ms` -> 100 Trying, puis plus rien.
+ * On ne garde donc que les chiffres (et # / * pour les serveurs vocaux).
+ */
+export function toDialString(number: string): string {
+  return number.replace(/[^\d#*]/g, "");
+}
+
+/**
+ * Codecs réellement utilisables sur la ligne voip.ms (le sous-compte n'autorise
+ * que « ulaw;g722;g729 ») + la télé-signalisation DTMF en 8 kHz.
+ */
+const PSTN_CODECS = new Set(["pcmu", "pcma", "g722", "g729", "telephone-event"]);
+
+/**
+ * Allège l'offre SDP avant l'envoi de l'INVITE.
+ *
+ * Chrome propose 8 codecs (opus, red, CN, telephone-event/48000…) plus des
+ * en-têtes `a=extmap`, ce qui donne un INVITE d'environ 1 750 octets. Relayé
+ * vers voip.ms en UDP, ce datagramme dépasse le MTU, part en fragments et se
+ * perd : la passerelle répond « 100 Trying » puis PLUS RIEN, et l'appel
+ * n'aboutit jamais. Mesuré le 2026-08-07 — 774 o : voip.ms répond ;
+ * 1 755 o : silence total ; le même message en TCP : réponse immédiate.
+ *
+ * Aucun de ces codecs supplémentaires ne sert : la ligne est en 8 kHz de bout
+ * en bout. On les retire donc, ce qui évite aussi un transcodage inutile.
+ * En cas de doute (aucun codec reconnu), on renvoie le SDP intact.
+ */
+export function trimSdpForPstn(sdp: string): string {
+  const lines = sdp.split(/\r\n|\n/);
+
+  // 1. Payload types à conserver, d'après les a=rtpmap.
+  const keep = new Set<string>();
+  const drop = new Set<string>();
+  for (const line of lines) {
+    const m = /^a=rtpmap:(\d+)\s+([^/]+)\/(\d+)/.exec(line);
+    if (!m) continue;
+    const [, pt, name, clock] = m;
+    const usable =
+      PSTN_CODECS.has(name.toLowerCase()) &&
+      // telephone-event n'est utile qu'en 8 kHz côté RTC public.
+      (name.toLowerCase() !== "telephone-event" || clock === "8000");
+    (usable ? keep : drop).add(pt);
+  }
+  if (keep.size === 0) return sdp; // rien de reconnu : ne pas casser l'appel
+
+  const out: string[] = [];
+  for (const line of lines) {
+    // 2. Liste des payloads de la ligne m=audio.
+    const mAudio = /^m=audio (\d+) (\S+) (.+)$/.exec(line);
+    if (mAudio) {
+      const [, port, proto, pts] = mAudio;
+      const kept = pts.split(/\s+/).filter((pt) => !drop.has(pt));
+      out.push(`m=audio ${port} ${proto} ${(kept.length ? kept : pts.split(/\s+/)).join(" ")}`);
+      continue;
+    }
+    // 3. Attributs rattachés à un payload supprimé.
+    const attr = /^a=(?:rtpmap|fmtp|rtcp-fb):(\d+)\b/.exec(line);
+    if (attr && drop.has(attr[1])) continue;
+    // 4. Comptabilité propre à WebRTC, sans objet pour un appel téléphonique
+    //    à un seul flux audio — et c'est là que partent les octets de trop
+    //    (a=ssrc ×4, a=msid, a=msid-semantic… ≈ 400 o). rtpengine retire
+    //    déjà ICE et DTLS en direction de voip.ms ; ce sont ces lignes-ci qui
+    //    faisaient encore dépasser le MTU.
+    if (
+      line.startsWith("a=extmap:") ||
+      line.startsWith("a=extmap-allow-mixed") ||
+      line.startsWith("a=msid:") ||
+      line.startsWith("a=msid-semantic") ||
+      line.startsWith("a=ssrc:") ||
+      line.startsWith("a=ssrc-group:") ||
+      line.startsWith("a=group:BUNDLE") ||
+      line.startsWith("a=rtcp-rsize")
+    ) {
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join("\r\n");
+}
+
 /** Collecte ICE : envoi de l'INVITE 500 ms après le dernier candidat, 3 s max. */
 const ICE_SETTLE_MS = 500;
 const ICE_MAX_MS = 3_000;
@@ -104,6 +190,14 @@ export class JsSipEngine implements TelephonyEngine {
   private dialWatchdog: ReturnType<typeof setTimeout> | null = null;
   private iceSettleTimer: ReturnType<typeof setTimeout> | null = null;
   private iceMaxTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Un candidat ICE a-t-il été vu pour l'appel en cours ? C'est la seule prise
+   * que JsSIP nous donne pour débloquer l'INVITE (`ready()` n'existe QUE dans
+   * l'événement). Si aucun candidat n'arrive, l'INVITE n'est jamais émis — un
+   * échec très différent d'« INVITE envoyé, personne ne répond », et le chien
+   * de garde doit le dire.
+   */
+  private sawIceCandidate = false;
   private ringback: { ctx: AudioContext; timer: ReturnType<typeof setInterval> } | null = null;
 
   get registrationState(): RegistrationState {
@@ -191,7 +285,7 @@ export class JsSipEngine implements TelephonyEngine {
     }
 
     const domain = this.config.sipDomain || "sip.voip.ms";
-    const target = `sip:${number.replace(/[^\d+#*]/g, "")}@${domain}`;
+    const target = `sip:${toDialString(number)}@${domain}`;
 
     this.dialAborted = false;
     this.call = { direction: "outbound", remoteNumber: number, startedAt: new Date() };
@@ -407,8 +501,17 @@ export class JsSipEngine implements TelephonyEngine {
     this.session = session;
     this.wireAudio(session);
 
+    // Allège l'offre SDP avant l'envoi (voir trimSdpForPstn). JsSIP réutilise
+    // la valeur de `e.sdp` après l'événement : la muter suffit.
+    session.on("sdp", (e: { originator: string; type: string; sdp: string }) => {
+      if (e.originator === "local" && e.type === "offer") {
+        e.sdp = trimSdpForPstn(e.sdp);
+      }
+    });
+
     // Ne pas attendre la collecte ICE complète (voir l'en-tête du fichier).
     session.on("icecandidate", (e: IceCandidateEvent) => {
+      this.sawIceCandidate = true;
       const line = e.candidate?.candidate ?? "";
       if (e.candidate?.type === "srflx" || line.includes(" typ srflx")) {
         e.ready();
@@ -553,16 +656,23 @@ export class JsSipEngine implements TelephonyEngine {
    */
   private armDialWatchdog(): void {
     this.clearDialWatchdog();
+    this.sawIceCandidate = false;
     this.dialWatchdog = setTimeout(() => {
       this.dialWatchdog = null;
       if (!this.session || this.call?.direction !== "outbound" || this.call.answeredAt) return;
-      this.events?.onError("dial_timeout");
+      // Aucun candidat ICE => l'INVITE n'a jamais pu partir (le fureteur n'a
+      // produit aucune adresse). Distinguer les deux cas évite de faire
+      // chercher une panne réseau là où il n'y en a pas.
+      this.events?.onError(this.sawIceCandidate ? "dial_timeout" : "ice_failed");
       try {
         this.session.terminate();
       } catch {
         // déjà terminée
       }
-      this.restartUA();
+      // NE PAS recycler l'UA ici : ua.stop() désenregistre la ligne et ferme
+      // le WebSocket, si bien que la tentative suivante échoue en
+      // « ligne non enregistrée ». L'enregistrement n'est pas en cause —
+      // l'INVITE partait sur une connexion vivante.
     }, DIAL_WATCHDOG_MS);
   }
 

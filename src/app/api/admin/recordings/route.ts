@@ -1,17 +1,52 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { apiAdmin } from "@/lib/auth/guards";
 import { logAudit } from "@/lib/audit";
+import {
+  extractRecordingAudio,
+  getCallRecordingFile,
+  parseRecordingRef,
+  sniffAudioType,
+} from "@/lib/voipms";
 
 export const dynamic = "force-dynamic";
+// Le téléchargement passe par l'API voip.ms, qui peut être lente.
+export const maxDuration = 120;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Renvoie un extrait d'octets quand le lecteur demande une plage (seek). */
+function rangeResponse(buf: Buffer, range: string | null, contentType: string) {
+  const headers = new Headers({
+    "content-type": contentType,
+    "accept-ranges": "bytes",
+    "cache-control": "private, max-age=3600",
+  });
+  const m = range ? /^bytes=(\d*)-(\d*)$/.exec(range.trim()) : null;
+  if (!m) {
+    headers.set("content-length", String(buf.length));
+    return new NextResponse(new Uint8Array(buf), { status: 200, headers });
+  }
+  const start = m[1] ? Number(m[1]) : 0;
+  const end = m[2] ? Math.min(Number(m[2]), buf.length - 1) : buf.length - 1;
+  if (Number.isNaN(start) || Number.isNaN(end) || start > end || start >= buf.length) {
+    headers.set("content-range", `bytes */${buf.length}`);
+    return new NextResponse(null, { status: 416, headers });
+  }
+  const slice = buf.subarray(start, end + 1);
+  headers.set("content-range", `bytes ${start}-${end}/${buf.length}`);
+  headers.set("content-length", String(slice.length));
+  return new NextResponse(new Uint8Array(slice), { status: 206, headers });
+}
+
 /**
- * GET /api/admin/recordings?url=<url voip.ms>&callId=<uuid>
- * Proxy de lecture des enregistrements d'appels : l'admin écoute via l'app
- * sans exposer l'URL voip.ms au navigateur d'un tiers. Hôte strictement
- * limité à voip.ms ; chaque écoute est auditée (rattachée à l'appel via
- * callId quand il est fourni).
+ * GET /api/admin/recordings?url=<référence>&callId=<uuid>
+ *
+ * Écoute d'un enregistrement d'appel, réservée à l'admin et auditée à chaque
+ * lecture. Deux formes de référence :
+ *   - `https://…voip.ms/…`  : URL directe (relayée en continu, avec Range) ;
+ *   - `voipms:<compte>:<id>` : voip.ms ne donne pas d'URL — l'audio est
+ *     retéléchargé via l'API puis servi ici. C'est le cas réel en production.
+ * L'URL voip.ms n'est jamais exposée au navigateur.
  */
 export async function GET(req: NextRequest) {
   const auth = await apiAdmin();
@@ -23,7 +58,62 @@ export async function GET(req: NextRequest) {
   }
   const rawCallId = req.nextUrl.searchParams.get("callId");
   const callId = rawCallId && UUID_RE.test(rawCallId) ? rawCallId : undefined;
+  const range = req.headers.get("range");
 
+  // Chaque écoute est tracée, quelle que soit la forme de la référence.
+  const audit = (detail: Record<string, unknown>) =>
+    logAudit({
+      userId: auth.id,
+      action: "recording.play",
+      entity: "call",
+      entityId: callId,
+      detail,
+    });
+
+  // ── Référence interne : retéléchargement par l'API voip.ms ──
+  const ref = parseRecordingRef(rawUrl);
+  if (ref) {
+    await audit({ account: ref.account, recording: ref.callrecording });
+    let payload;
+    try {
+      payload = await getCallRecordingFile(ref.account, ref.callrecording);
+    } catch (err) {
+      return NextResponse.json(
+        { error: "upstream_error", detail: err instanceof Error ? err.message : String(err) },
+        { status: 502 },
+      );
+    }
+
+    const audio = extractRecordingAudio(payload);
+    if ("base64" in audio) {
+      const buf = Buffer.from(audio.base64, "base64");
+      return rangeResponse(buf, range, sniffAudioType(buf));
+    }
+    if ("url" in audio) {
+      const upstream = await fetch(audio.url, {
+        headers: range ? { range } : {},
+        cache: "no-store",
+      }).catch(() => null);
+      if (!upstream?.ok || !upstream.body) {
+        return NextResponse.json({ error: "upstream_error" }, { status: 502 });
+      }
+      const headers = new Headers({ "cache-control": "private, max-age=3600" });
+      const ct = upstream.headers.get("content-type");
+      headers.set("content-type", ct?.startsWith("audio/") ? ct : "audio/mpeg");
+      for (const h of ["content-length", "content-range", "accept-ranges"]) {
+        const v = upstream.headers.get(h);
+        if (v) headers.set(h, v);
+      }
+      return new NextResponse(upstream.body, { status: upstream.status, headers });
+    }
+    // Format inattendu : on renvoie les NOMS de champs, jamais les valeurs.
+    return NextResponse.json(
+      { error: "unsupported_payload", fields: audio.fields },
+      { status: 502 },
+    );
+  }
+
+  // ── URL voip.ms directe (forme historique) ──
   let target: URL;
   try {
     target = new URL(rawUrl);
@@ -38,25 +128,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "forbidden_host" }, { status: 400 });
   }
 
-  await logAudit({
-    userId: auth.id,
-    action: "recording.play",
-    entity: "call",
-    entityId: callId,
-    detail: { url: target.toString() },
-  });
+  await audit({ url: target.toString() });
 
-  // Transfert de l'en-tête Range pour permettre l'avance rapide dans <audio>.
   const upstreamHeaders: Record<string, string> = {};
-  const range = req.headers.get("range");
   if (range) upstreamHeaders.range = range;
 
   let upstream: Response;
   try {
-    upstream = await fetch(target.toString(), {
-      headers: upstreamHeaders,
-      cache: "no-store",
-    });
+    upstream = await fetch(target.toString(), { headers: upstreamHeaders, cache: "no-store" });
   } catch {
     return NextResponse.json({ error: "upstream_unreachable" }, { status: 502 });
   }

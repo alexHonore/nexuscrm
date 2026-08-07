@@ -700,15 +700,15 @@ async function seedCdrFixture(): Promise<CdrFixture> {
   });
 
   const e1 = await makeCall({
-    userId: alice.id, startedAt: "2026-08-19T15:00:00.000Z", answered: false, durationSec: 0,
+    userId: alice.id, startedAt: "2026-08-19T14:00:00.000Z", answered: false, durationSec: 0,
     providerCallId: "uid-1", fromNumber: "+14180001111", toNumber: "+15145550000",
   });
   const e2 = await makeCall({
-    userId: alice.id, startedAt: "2026-08-19T16:01:00.000Z", answered: false, durationSec: 0,
+    userId: alice.id, startedAt: "2026-08-19T15:01:00.000Z", answered: false, durationSec: 0,
     fromNumber: "+14180001111", toNumber: "+14185551234",
   });
   const e3 = await makeCall({
-    userId: bob.id, startedAt: "2026-08-19T20:00:00.000Z", answered: false, durationSec: 7,
+    userId: bob.id, startedAt: "2026-08-19T19:00:00.000Z", answered: false, durationSec: 7,
     fromNumber: "+14180002222", toNumber: "+15819990000",
   });
 
@@ -747,7 +747,7 @@ describe("GET /api/cron/sync-cdr", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("demande les CDR d'hier et d'aujourd'hui (dates Toronto, fuseau −5)", async () => {
+  it("demande les CDR d'hier et d'aujourd'hui au fuseau RÉEL de Toronto (EDT −4 en août)", async () => {
     await seedCdrFixture();
     const out = await runSync();
     expect(out.range).toEqual({ from: "2026-08-19", to: "2026-08-20" });
@@ -755,7 +755,17 @@ describe("GET /api/cron/sync-cdr", () => {
     const cdrReq = voip.requests.find((u) => u.searchParams.get("method") === "getCDR")!;
     expect(cdrReq.searchParams.get("date_from")).toBe("2026-08-19");
     expect(cdrReq.searchParams.get("date_to")).toBe("2026-08-20");
-    expect(cdrReq.searchParams.get("timezone")).toBe("-5");
+    // Un −5 figé décalait d'une heure TOUS les horodatages d'été et faisait
+    // échouer le rapprochement à ±3 min : le fuseau suit l'heure avancée.
+    expect(cdrReq.searchParams.get("timezone")).toBe("-4");
+  });
+
+  it("suit l'heure normale (EST −5) hors période d'heure avancée", async () => {
+    const { torontoUtcOffsetHours, utcOffsetSuffix } = await import("@/lib/voipms");
+    expect(torontoUtcOffsetHours("2026-01-15")).toBe(-5); // hiver
+    expect(torontoUtcOffsetHours("2026-08-19")).toBe(-4); // été
+    expect(utcOffsetSuffix(-5)).toBe("-05:00");
+    expect(utcOffsetSuffix(-4)).toBe("-04:00");
   });
 
   it("rattache un CDR à l'appel existant par uniqueid", async () => {
@@ -765,7 +775,7 @@ describe("GET /api/cron/sync-cdr", () => {
 
     const [call] = await testDb.select().from(calls).where(eq(calls.id, f.e1));
     expect(call.durationSec).toBe(95);
-    expect(call.answeredAt?.toISOString()).toBe("2026-08-19T15:00:00.000Z");
+    expect(call.answeredAt?.toISOString()).toBe("2026-08-19T14:00:00.000Z");
     expect(call.providerCallId).toBe("uid-1");
   });
 
@@ -777,7 +787,7 @@ describe("GET /api/cron/sync-cdr", () => {
     const [call] = await testDb.select().from(calls).where(eq(calls.id, f.e2));
     expect(call.providerCallId).toBe("uid-2");
     expect(call.durationSec).toBe(42);
-    expect(call.answeredAt?.toISOString()).toBe("2026-08-19T16:00:00.000Z");
+    expect(call.answeredAt?.toISOString()).toBe("2026-08-19T15:00:00.000Z");
 
     // L'appel sans CDR correspondant reste intact.
     const [untouched] = await testDb.select().from(calls).where(eq(calls.id, f.e3));
@@ -802,7 +812,7 @@ describe("GET /api/cron/sync-cdr", () => {
     expect(outbound.fromNumber).toBe("+14180002222");
     expect(outbound.toNumber).toBe("+14189998888");
     expect(outbound.clientId).toBe(f.client);
-    expect(outbound.startedAt.toISOString()).toBe("2026-08-19T17:00:00.000Z");
+    expect(outbound.startedAt.toISOString()).toBe("2026-08-19T16:00:00.000Z");
     expect(outbound.answeredAt).toBeNull();
     expect(outbound.durationSec).toBe(0);
     expect(outbound.provider).toBe("voipms");
@@ -811,9 +821,9 @@ describe("GET /api/cron/sync-cdr", () => {
     const inbound = byUid.get("uid-4")!;
     expect(inbound.direction).toBe("inbound");
     expect(inbound.fromNumber).toBe("+14181234567");
-    expect(inbound.answeredAt?.toISOString()).toBe("2026-08-19T18:00:00.000Z");
+    expect(inbound.answeredAt?.toISOString()).toBe("2026-08-19T17:00:00.000Z");
     expect(inbound.durationSec).toBe(180);
-    expect(inbound.endedAt?.toISOString()).toBe("2026-08-19T18:03:00.000Z");
+    expect(inbound.endedAt?.toISOString()).toBe("2026-08-19T17:03:00.000Z");
     expect(inbound.clientId).toBeNull();
 
     // Compte SIP inconnu : aucune ligne.
@@ -890,7 +900,10 @@ describe("GET /api/cron/sync-cdr", () => {
 
     const out = await runSync();
     expect(out.ok).toBe(false);
-    expect(out.errors.some((e) => e.startsWith("getCallRecordings:"))).toBe(true);
+    // Les enregistrements se demandent par sous-compte : l'erreur nomme la
+    // ligne fautive, ce qui permet de savoir QUI n'est pas enregistré.
+    expect(out.errors.some((e) => e.startsWith("getCallRecordings("))).toBe(true);
+    expect(out.errors.some((e) => e.includes("nexus_alice"))).toBe(true);
     expect(out.matchedByProviderId).toBe(1);
     expect(out.inserted).toBe(3);
 

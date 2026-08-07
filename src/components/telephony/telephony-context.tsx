@@ -98,6 +98,7 @@ const KNOWN_ERRORS = new Set([
   "mic_unavailable",
   "mic_timeout",
   "dial_timeout",
+  "ice_failed",
   "not_registered",
   "already_in_call",
   "busy",

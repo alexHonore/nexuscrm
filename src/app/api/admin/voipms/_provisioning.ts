@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { encryptSecret } from "@/lib/crypto";
 import {
+  applySubAccountProfile,
   createSubAccount,
   getSubAccounts,
   setSubAccountPassword,
@@ -144,13 +145,32 @@ export type ProvisionResult = {
   derived: boolean;
 };
 
-/** Reprend un sous-compte existant : son mot de passe si voip.ms le donne, sinon on en pose un. */
+/**
+ * Reprend un sous-compte existant : son mot de passe si voip.ms le donne,
+ * sinon on en pose un.
+ *
+ * Dans les deux cas le PROFIL commun est réappliqué (codecs, NAT et surtout
+ * `record_calls`) : sans cela, une ligne adoptée gardait les réglages qu'elle
+ * avait au moment de sa création — c'est ainsi que l'enregistrement des appels
+ * restait désactivé sans que rien ne le signale.
+ */
 async function adoptSubAccount(
   existing: VoipMsSubAccount,
   fallbackPassword: string,
   calleridNumber?: string,
 ): Promise<string> {
-  if (existing.password) return existing.password;
+  if (existing.password) {
+    // Réécriture à mot de passe INCHANGÉ (le softphone déjà enregistré
+    // continue de fonctionner), et au MEILLEUR EFFORT : récupérer une ligne
+    // utilisable prime sur l'application du profil. Un échec ici laisserait
+    // seulement `record_calls` inactif — ce que « Vérifier la ligne » signale.
+    try {
+      await applySubAccountProfile(existing, calleridNumber);
+    } catch {
+      // profil non réappliqué — la ligne reste fonctionnelle
+    }
+    return existing.password;
+  }
   await setSubAccountPassword(existing.id, fallbackPassword, calleridNumber);
   return fallbackPassword;
 }

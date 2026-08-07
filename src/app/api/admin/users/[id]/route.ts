@@ -80,7 +80,15 @@ export async function PATCH(req: Request, ctx: Ctx) {
   }
   if (body.sipUsername !== undefined) {
     set.sipUsername = body.sipUsername || null;
-    if ((body.sipUsername || null) !== target.sipUsername) changed.push("sipUsername");
+    if ((body.sipUsername || null) !== target.sipUsername) {
+      changed.push("sipUsername");
+      // Le mot de passe stocké appartenait à l'ANCIEN sous-compte : le garder
+      // produirait une ligne qui paraît configurée mais ne peut pas
+      // s'enregistrer. On l'efface (sauf si l'admin en fournit un nouveau
+      // ci-dessous) pour que « Vérifier la ligne » signale password_missing
+      // et propose « Resynchroniser ».
+      set.sipPasswordEnc = null;
+    }
   }
   if (body.sipPassword !== undefined && body.sipPassword !== "") {
     set.sipPasswordEnc = encryptSecret(body.sipPassword);

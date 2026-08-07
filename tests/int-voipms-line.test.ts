@@ -265,8 +265,57 @@ describe("ligne SIP voip.ms", () => {
 
       const [row] = await testDb.select().from(users).where(eq(users.id, target.id));
       expect(decryptSecret(row.sipPasswordEnc!)).toBe("MotDePasseReel9");
-      // Le mot de passe distant n'a PAS été écrasé : la ligne reste utilisable.
-      expect(stub.methods()).not.toContain("setSubAccount");
+      // Le profil est réappliqué (pour activer `record_calls` sur une ligne
+      // créée avant ce réglage), mais SANS toucher au mot de passe distant :
+      // c'est ce qui garde la ligne utilisable.
+      const setCall = stub.calls.find((c) => c.method === "setSubAccount");
+      expect(setCall).toBeDefined();
+      expect(setCall!.params.get("password")).toBe("MotDePasseReel9");
+      expect(setCall!.params.get("record_calls")).toBe("1");
+    });
+
+    it("active l'enregistrement des appels à la création d'une ligne", async () => {
+      const admin = await makeUser({ role: "admin" });
+      const target = await makeUser({ name: "Alex", email: "alex@nexus.ca" });
+      await loginAs(admin);
+
+      const stub = stubVoipms({
+        getSubAccounts: () => ({ status: "success", accounts: [] }),
+        createSubAccount: () => ({ status: "success", account: "551013_alex" }),
+      });
+
+      await subaccountsRoute.POST(
+        jsonRequest("http://localhost/api/admin/voipms/subaccounts", "POST", { userId: target.id }),
+      );
+
+      const created = stub.calls.find((c) => c.method === "createSubAccount");
+      expect(created).toBeDefined();
+      expect(created!.params.get("record_calls")).toBe("1");
+    });
+
+    it("la reprise d'une ligne survit à l'échec de la réécriture du profil", async () => {
+      const admin = await makeUser({ role: "admin" });
+      const target = await makeUser({
+        name: "Alex",
+        email: "alex@nexus.ca",
+        sipUsername: "551013_alex",
+      });
+      await loginAs(admin);
+
+      // voip.ms refuse le setSubAccount : récupérer une ligne UTILISABLE prime
+      // sur l'activation de l'enregistrement.
+      stubVoipms({
+        getSubAccounts: () => ({ status: "success", accounts: [sub({ password: "MotDePasseReel9" })] }),
+        setSubAccount: () => ({ status: "invalid_account" }),
+      });
+
+      const res = await subaccountsRoute.POST(
+        jsonRequest("http://localhost/api/admin/voipms/subaccounts", "POST", { userId: target.id }),
+      );
+      expect(res.status).toBe(200);
+
+      const [row] = await testDb.select().from(users).where(eq(users.id, target.id));
+      expect(decryptSecret(row.sipPasswordEnc!)).toBe("MotDePasseReel9");
     });
 
     it("REJEU : provisionner deux fois ne crée pas de doublon", async () => {

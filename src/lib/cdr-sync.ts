@@ -8,6 +8,7 @@ import {
   extractRecordingUrl,
   getCallRecordings,
   getCdr,
+  recordingRef,
   torontoUtcOffsetHours,
   utcOffsetSuffix,
   type VoipMsRecording,
@@ -66,6 +67,12 @@ export type CdrSyncResult = {
     recordingsAttached: number;
     recordingsWithoutUrl: number;
   };
+  /**
+   * Noms des champs renvoyés par voip.ms pour un enregistrement SANS URL
+   * directe — la seule façon de savoir quelle clé porte l'identifiant à
+   * redemander. Diagnostic : aucune valeur, seulement les noms de champs.
+   */
+  recordingFields: string[];
   errors: string[];
 };
 
@@ -82,6 +89,7 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
     recordingsWithoutUrl: 0,
   };
   const errors: string[] = [];
+  const recordingFields = new Set<string>();
   const pushError = (msg: string) => {
     if (errors.length < MAX_ERRORS) errors.push(msg);
   };
@@ -103,14 +111,27 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
   }
   counts.cdrRows = cdrRows.length;
 
-  let recordings: VoipMsRecording[] = [];
-  try {
-    recordings = await getCallRecordings(dateFrom, dateTo);
-    counts.recordingsFound = recordings.length;
-  } catch (err) {
-    // Fonctionnalité possiblement désactivée côté voip.ms.
-    pushError(`getCallRecordings: ${err instanceof Error ? err.message : String(err)}`);
+  // Les enregistrements se demandent PAR SOUS-COMPTE (paramètre `account`
+  // obligatoire). On lit donc la liste des lignes avant d'interroger voip.ms.
+  const sipAccounts = (
+    await db.select({ sipUsername: users.sipUsername }).from(users)
+  )
+    .map((u) => u.sipUsername)
+    .filter((a): a is string => Boolean(a));
+
+  const recordings: VoipMsRecording[] = [];
+  for (const account of sipAccounts) {
+    try {
+      recordings.push(...(await getCallRecordings(account, dateFrom, dateTo)));
+    } catch (err) {
+      // Une ligne en erreur ne doit pas priver les autres de leurs
+      // enregistrements — l'erreur est remontée telle quelle à l'admin.
+      pushError(
+        `getCallRecordings(${account}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
+  counts.recordingsFound = recordings.length;
 
   // ── Phase base de données, sous verrou consultatif ──
   const ranToCompletion = await db.transaction(async (tx) => {
@@ -293,21 +314,66 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
     // ── 5. Rattachement des enregistrements ──
     for (const rec of recordings) {
       try {
-        const url = extractRecordingUrl(rec);
+        const asRec = rec as Record<string, unknown>;
+        // voip.ms ne fournit pas d'URL : la liste ne porte qu'un identifiant
+        // `callrecording`. On mémorise une RÉFÉRENCE et l'audio est
+        // retéléchargé au moment de l'écoute (voir /api/admin/recordings).
+        const account = typeof asRec.account === "string" ? asRec.account : undefined;
+        const recId =
+          typeof asRec.callrecording === "string" ? asRec.callrecording : undefined;
+        const url =
+          extractRecordingUrl(rec) ??
+          (account && recId ? recordingRef(account, recId) : undefined);
         if (!url) {
-          // Payload sans URL directe (id seul ?) — compté pour que l'admin le
-          // voie au lieu d'un « 0 attaché » silencieux.
+          // Ni URL ni identifiant : compté ET tracé (noms de champs seulement)
+          // plutôt qu'un « 0 attaché » silencieux.
           counts.recordingsWithoutUrl += 1;
+          for (const k of Object.keys(rec)) recordingFields.add(k);
           continue;
         }
 
+        // `call_id` porte l'uniqueid du CDR ; `uniqueid` reste accepté au cas
+        // où voip.ms harmoniserait ses noms de champs.
         const recUid =
-          typeof (rec as Record<string, unknown>).uniqueid === "string"
-            ? ((rec as Record<string, unknown>).uniqueid as string)
-            : undefined;
+          typeof asRec.call_id === "string"
+            ? asRec.call_id
+            : typeof asRec.uniqueid === "string"
+              ? asRec.uniqueid
+              : undefined;
         let call = recUid ? byProviderId.get(recUid) : undefined;
+
+        // Repli principal : l'identifiant d'enregistrement n'est PAS toujours
+        // l'uniqueid du CDR. On rapproche alors comme pour les CDR — même
+        // ligne SIP, même horaire à ±3 min, mêmes 10 derniers chiffres.
+        if (!call && account) {
+          const owner = userByAccount.get(account);
+          const when =
+            typeof asRec.datetime === "string" ? parseCdrDate(asRec.datetime) : null;
+          if (owner && when) {
+            const callerKey = phoneMatchKey(
+              typeof asRec.caller === "string" ? asRec.caller : null,
+            );
+            const destKey = phoneMatchKey(
+              typeof asRec.destination === "string" ? asRec.destination : null,
+            );
+            const candidates = (byUser.get(owner.id) ?? []).filter((c) => {
+              if (Math.abs(c.startedAt.getTime() - when.getTime()) > MATCH_WINDOW_MS) return false;
+              const keys = [phoneMatchKey(c.fromNumber), phoneMatchKey(c.toNumber)].filter(
+                Boolean,
+              );
+              return keys.some((k) => k === callerKey || k === destKey);
+            });
+            candidates.sort(
+              (a, b) =>
+                Math.abs(a.startedAt.getTime() - when.getTime()) -
+                Math.abs(b.startedAt.getTime() - when.getTime()),
+            );
+            call = candidates[0];
+          }
+        }
+
         if (!call) {
-          // Repli : chercher un uniqueid connu dans les champs texte de l'enregistrement.
+          // Dernier repli : un uniqueid connu apparaît-il dans les champs texte ?
           const haystack = Object.values(rec)
             .filter((v): v is string => typeof v === "string")
             .join(" ");
@@ -335,5 +401,5 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
     pushError("sync_already_running");
   }
 
-  return { counts, errors };
+  return { counts, recordingFields: [...recordingFields], errors };
 }

@@ -52,7 +52,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "range_too_wide", maxDays: MAX_RANGE_DAYS }, { status: 422 });
   }
 
-  const { counts, errors } = await syncCdrRange(from, to);
+  const { counts, recordingFields, errors } = await syncCdrRange(from, to);
 
   await logAudit({
     userId: admin.id,
@@ -65,6 +65,7 @@ export async function POST(req: Request) {
     ok: errors.length === 0,
     range: { from, to },
     ...counts,
+    recordingFields,
     errors,
   });
 }

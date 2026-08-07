@@ -227,6 +227,152 @@ function states(events: Events): string[] {
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
+describe("numéro composé dans l'URI SIP", () => {
+  it("retire le « + » de l'E.164 — voip.ms n'apparie que des chiffres", async () => {
+    const { toDialString } = await import("@/lib/telephony/engines/jssip-engine");
+    expect(toDialString("+14189065924")).toBe("14189065924");
+    expect(toDialString("+1 (418) 906-5924")).toBe("14189065924");
+    expect(toDialString("4189065924")).toBe("4189065924");
+    // Serveurs vocaux : # et * doivent survivre.
+    expect(toDialString("*97")).toBe("*97");
+    expect(toDialString("1234#")).toBe("1234#");
+  });
+
+  it("compose une URI SIP sans « + » (régression : 100 Trying puis silence)", async () => {
+    const { engine } = await bootEngine();
+    await dialWithMic(engine);
+    const target = h.state.ua?.call.mock.calls[0]?.[0] as string;
+    expect(target).toBe("sip:15145550142@montreal1.voip.ms");
+    expect(target).not.toContain("+");
+  });
+});
+
+describe("allègement du SDP (INVITE sous le MTU)", () => {
+  // Offre Chrome représentative : 8 codecs + extensions d'en-tête.
+  const chromeOffer = [
+    "v=0", "o=- 461173 2 IN IP4 127.0.0.1", "s=-", "t=0 0",
+    "a=group:BUNDLE 0", "a=msid-semantic: WMS s0",
+    "m=audio 9 UDP/TLS/RTP/SAVPF 111 63 9 0 8 13 110 126",
+    "c=IN IP4 0.0.0.0", "a=rtcp:9 IN IP4 0.0.0.0",
+    "a=ice-ufrag:abcd", "a=ice-pwd:0123456789012345678901",
+    "a=fingerprint:sha-256 8F:1A:2B:3C:4D:5E:6F:70:81:92:A3:B4:C5:D6:E7:F8:09:1A:2B:3C:4D:5E:6F:70:81:92:A3:B4:C5:D6:E7:F8",
+    "a=extmap:1 urn:ietf:params:rtp-hdrext:ssrc-audio-level",
+    "a=extmap:2 http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time",
+    "a=setup:actpass", "a=mid:0", "a=sendrecv", "a=rtcp-mux",
+    "a=rtpmap:111 opus/48000/2", "a=rtcp-fb:111 transport-cc",
+    "a=fmtp:111 minptime=10;useinbandfec=1",
+    "a=rtpmap:63 red/48000/2", "a=fmtp:63 111/111",
+    "a=rtpmap:9 G722/8000", "a=rtpmap:0 PCMU/8000", "a=rtpmap:8 PCMA/8000",
+    "a=rtpmap:13 CN/8000",
+    "a=rtpmap:110 telephone-event/48000", "a=rtpmap:126 telephone-event/8000",
+  ].join("\r\n");
+
+  it("ne garde que les codecs utilisables par voip.ms", async () => {
+    const { trimSdpForPstn } = await import("@/lib/telephony/engines/jssip-engine");
+    const out = trimSdpForPstn(chromeOffer);
+
+    expect(out).toContain("a=rtpmap:0 PCMU/8000");
+    expect(out).toContain("a=rtpmap:8 PCMA/8000");
+    expect(out).toContain("a=rtpmap:9 G722/8000");
+    expect(out).toContain("a=rtpmap:126 telephone-event/8000"); // DTMF conservé
+    expect(out).not.toContain("opus");
+    expect(out).not.toContain("red/48000");
+    expect(out).not.toContain("CN/8000");
+    expect(out).not.toContain("telephone-event/48000");
+  });
+
+  it("retire les payloads supprimés de la ligne m=audio", async () => {
+    const { trimSdpForPstn } = await import("@/lib/telephony/engines/jssip-engine");
+    const m = trimSdpForPstn(chromeOffer).split("\r\n").find((l) => l.startsWith("m=audio"));
+    expect(m).toBe("m=audio 9 UDP/TLS/RTP/SAVPF 9 0 8 126");
+  });
+
+  it("supprime aussi les fmtp/rtcp-fb orphelins et les extmap", async () => {
+    const { trimSdpForPstn } = await import("@/lib/telephony/engines/jssip-engine");
+    const out = trimSdpForPstn(chromeOffer);
+    expect(out).not.toContain("a=fmtp:111");
+    expect(out).not.toContain("a=rtcp-fb:111");
+    expect(out).not.toContain("a=fmtp:63");
+    expect(out).not.toContain("a=extmap:");
+  });
+
+  it("retire la comptabilité WebRTC inutile (a=ssrc, a=msid, BUNDLE…)", async () => {
+    const { trimSdpForPstn } = await import("@/lib/telephony/engines/jssip-engine");
+    const withWebrtcCruft = [
+      chromeOffer,
+      "a=msid:s0 a0",
+      "a=rtcp-rsize",
+      "a=ssrc:1234567890 cname:abcdefghijklmnop",
+      "a=ssrc:1234567890 msid:s0 a0",
+      "a=ssrc-group:FID 1234567890",
+    ].join("\r\n");
+    const out = trimSdpForPstn(withWebrtcCruft);
+    for (const gone of ["a=ssrc:", "a=ssrc-group:", "a=msid:", "a=msid-semantic", "a=group:BUNDLE", "a=rtcp-rsize", "a=extmap-allow-mixed"]) {
+      expect(out).not.toContain(gone);
+    }
+    // La négociation média elle-même reste intacte.
+    expect(out).toContain("a=fingerprint:");
+    expect(out).toContain("a=ice-ufrag:abcd");
+    expect(out).toContain("a=rtcp-mux");
+  });
+
+  it("ramène une offre Chrome réaliste bien sous le MTU", async () => {
+    const { trimSdpForPstn } = await import("@/lib/telephony/engines/jssip-engine");
+    // Offre proche du réel mesuré en production (1419 o, 4 candidats ICE).
+    const realistic = [
+      chromeOffer,
+      "a=msid:stream0 audio0",
+      "a=rtcp-rsize",
+      "a=ssrc:1111111111 cname:aaaaaaaaaaaaaaaa",
+      "a=ssrc:1111111111 msid:stream0 audio0",
+      "a=ssrc:1111111111 mslabel:stream0",
+      "a=ssrc:1111111111 label:audio0",
+    ].join("\r\n");
+    // rtpengine retire ICE/DTLS vers voip.ms : on mesure ce qui SUBSISTE.
+    const relayed = trimSdpForPstn(realistic)
+      .split("\r\n")
+      .filter((l) => !/^a=(candidate|ice-|fingerprint|setup)/.test(l))
+      .join("\r\n");
+    expect(relayed.length).toBeLessThan(700);
+  });
+
+  it("préserve ICE, DTLS et le reste de la négociation", async () => {
+    const { trimSdpForPstn } = await import("@/lib/telephony/engines/jssip-engine");
+    const out = trimSdpForPstn(chromeOffer);
+    for (const keep of ["a=ice-ufrag:abcd", "a=ice-pwd:", "a=setup:actpass", "a=mid:0", "a=rtcp-mux", "a=sendrecv"]) {
+      expect(out).toContain(keep);
+    }
+  });
+
+  it("raccourcit nettement l'offre — c'est tout l'objet du correctif", async () => {
+    const { trimSdpForPstn } = await import("@/lib/telephony/engines/jssip-engine");
+    expect(trimSdpForPstn(chromeOffer).length).toBeLessThan(chromeOffer.length * 0.8);
+  });
+
+  it("renvoie le SDP intact si aucun codec connu (sécurité)", async () => {
+    const { trimSdpForPstn } = await import("@/lib/telephony/engines/jssip-engine");
+    const exotic = "v=0\r\nm=audio 9 RTP/AVP 97\r\na=rtpmap:97 SPEEX/16000";
+    expect(trimSdpForPstn(exotic)).toBe(exotic);
+  });
+
+  it("applique l'allègement à l'offre sortante réelle", async () => {
+    const { engine } = await bootEngine();
+    await dialWithMic(engine);
+    const e = { originator: "local", type: "offer", sdp: chromeOffer };
+    h.state.session?.emit("sdp", e);
+    expect(e.sdp).not.toContain("opus");           // muté sur place
+    expect(e.sdp.length).toBeLessThan(chromeOffer.length);
+  });
+
+  it("ne touche pas au SDP distant", async () => {
+    const { engine } = await bootEngine();
+    await dialWithMic(engine);
+    const e = { originator: "remote", type: "answer", sdp: chromeOffer };
+    h.state.session?.emit("sdp", e);
+    expect(e.sdp).toBe(chromeOffer);
+  });
+});
+
 describe("collecte ICE — court-circuit (cause racine du blocage)", () => {
   it("émet l'INVITE dès le premier candidat srflx, sans attendre la fin de la collecte", async () => {
     const { engine } = await bootEngine();
@@ -389,9 +535,17 @@ describe("appel entrant pendant le préflight micro", () => {
 });
 
 describe("chien de garde de composition", () => {
+  /** Simule une collecte ICE normale : l'INVITE a donc bien pu partir. */
+  const emitCandidate = () =>
+    h.state.session?.emit("icecandidate", {
+      candidate: { type: "srflx", candidate: "candidate:2 1 UDP 1686 1.2.3.4 5 typ srflx" },
+      ready: vi.fn(),
+    });
+
   it("échoue l'appel après 20 s sans aucune réponse SIP", async () => {
     const { engine, events } = await bootEngine();
     await dialWithMic(engine);
+    emitCandidate();
     const session = h.state.session;
 
     await vi.advanceTimersByTimeAsync(19_000);
@@ -400,9 +554,28 @@ describe("chien de garde de composition", () => {
     await vi.advanceTimersByTimeAsync(1_500);
     expect(events.onError).toHaveBeenCalledWith("dial_timeout");
     expect(session?.terminate).toHaveBeenCalled();
-    // La connexion est recyclée : un socket à moitié mort ne reste pas en place.
-    expect(h.state.ua?.stop).toHaveBeenCalled();
-    expect(h.state.ua?.start.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("ne désenregistre PAS la ligne en expirant (sinon l'essai suivant échoue)", async () => {
+    const { engine } = await bootEngine();
+    const startsAfterBoot = h.state.ua!.start.mock.calls.length;
+    await dialWithMic(engine);
+    emitCandidate();
+
+    await vi.advanceTimersByTimeAsync(21_000);
+
+    expect(h.state.ua?.stop).not.toHaveBeenCalled();
+    expect(h.state.ua?.start.mock.calls.length).toBe(startsAfterBoot);
+  });
+
+  it("distingue « aucun candidat ICE » d'un silence du réseau", async () => {
+    const { engine, events } = await bootEngine();
+    await dialWithMic(engine);
+    // Aucun événement icecandidate : l'INVITE n'a jamais pu être émis.
+    await vi.advanceTimersByTimeAsync(21_000);
+
+    expect(events.onError).toHaveBeenCalledWith("ice_failed");
+    expect(events.onError).not.toHaveBeenCalledWith("dial_timeout");
   });
 
   it("est désarmé dès qu'une réponse provisoire arrive", async () => {
