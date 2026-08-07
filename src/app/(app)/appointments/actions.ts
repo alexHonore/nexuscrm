@@ -7,7 +7,7 @@ import { and, eq, gt, lt, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
-import { appointments, categories, clients, notifications, users } from "@/db/schema";
+import { appointments, categories, clients, comments, notifications, users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth/guards";
 import {
@@ -18,8 +18,9 @@ import {
 import { formatPhone } from "@/lib/phone";
 import { getSetting } from "@/lib/settings";
 import { computeAvailability, durationFor } from "@/app/api/availability/slots";
+import frBooking from "../../../../messages/fr/booking.json";
 
-// ── Qualification vocabulary (stored snapshot + calendar description) ────────
+// ── Qualification vocabulary (stored snapshot + CRM comment log) ─────────────
 
 export type Qualification = {
   projectType: "acheter" | "vendre" | "les_deux";
@@ -31,6 +32,11 @@ export type Qualification = {
   notes?: string;
 };
 
+/**
+ * Libellés recopiés dans les colonnes dénormalisées `clients.timing` /
+ * `clients.budget` (texte libre affiché tel quel dans la fiche et l'export).
+ * Historique : NE PAS modifier sans migrer les lignes existantes.
+ */
 const TIMING_LABELS: Record<string, string> = {
   "0_3": "0-3 mois",
   "3_6": "3-6 mois",
@@ -45,32 +51,82 @@ const BUDGET_LABELS: Record<string, string> = {
   "800k_1m": "800 k$ – 1 M$",
   gt_1m: "1 M$ et plus",
 };
-const PROJECT_LABELS: Record<string, string> = {
-  acheter: "Acheter",
-  vendre: "Vendre",
-  les_deux: "Acheter et vendre",
-};
-const FINANCING_LABELS: Record<string, string> = {
-  oui: "Préapprouvé",
-  non: "Non préapprouvé",
-  en_demarche: "En démarche",
-};
-const SITUATION_LABELS: Record<string, string> = {
-  locataire: "Locataire",
-  proprietaire: "Propriétaire",
-};
 
-function qualificationSummary(q: Qualification): string {
+/**
+ * Libellés EXACTS affichés par le formulaire de réservation. Ils sont lus dans
+ * `messages/fr/booking.json` — la même source que
+ * `src/components/booking/booking-dialog.tsx` — pour que le commentaire déposé
+ * dans la fiche client se lise comme le formulaire rempli par le téléphoniste,
+ * sans jamais laisser filtrer un code brut du genre « 12_plus ».
+ *
+ * Toujours en FR : c'est du contenu persisté et partagé par toute l'équipe, à
+ * la manière de `src/components/clients/notification-content.ts` qui importe
+ * lui aussi les messages directement (hors contexte de requête).
+ */
+const FORM_LABELS = {
+  project: frBooking.qualification.project,
+  timing: frBooking.qualification.timingOptions,
+  budget: frBooking.qualification.budgetOptions,
+  financing: frBooking.qualification.financingOptions,
+  situation: frBooking.qualification.situationOptions,
+  type: { meet: frBooking.slot.meet, inperson: frBooking.slot.inperson },
+} as const;
+
+/** Lookup tolérant : un code inconnu (donnée héritée) est rendu tel quel. */
+function label<K extends string>(map: Record<K, string>, code: string): string {
+  return (map as Record<string, string | undefined>)[code] ?? code;
+}
+
+/** « jeudi 13 août 2026 à 14 h 00 » (fuseau d'affichage de l'équipe). */
+function frenchWhen(date: Date, tz: string): string {
+  return formatInTimeZone(date, tz, "EEEE d MMMM yyyy 'à' HH 'h' mm", { locale: frLocale });
+}
+
+/**
+ * Journal déposé dans le fil de commentaires de la fiche client à la
+ * réservation. Rédigé en FRANÇAIS : contrairement aux notifications (qui sont
+ * écrites par destinataire via `notificationContent`), un commentaire est une
+ * ligne unique, partagée par toute l'équipe — le français est la langue de
+ * travail. Seules les valeurs renseignées apparaissent.
+ */
+function bookingCommentBody(args: {
+  type: "meet" | "inperson";
+  startsAt: Date;
+  durationMin: number;
+  location: string | null;
+  clientEmail: string | null;
+  qualification: Qualification;
+  timezone: string;
+}): string {
+  const q = args.qualification;
   const lines = [
-    `Projet : ${PROJECT_LABELS[q.projectType] ?? q.projectType}`,
-    q.timing ? `Horizon : ${TIMING_LABELS[q.timing] ?? q.timing}` : null,
-    q.budget ? `Budget : ${BUDGET_LABELS[q.budget] ?? q.budget}` : null,
-    q.financing ? `Financement : ${FINANCING_LABELS[q.financing] ?? q.financing}` : null,
-    q.currentSituation ? `Situation : ${SITUATION_LABELS[q.currentSituation] ?? q.currentSituation}` : null,
+    `Rendez-vous fixé — ${FORM_LABELS.type[args.type]}, ${frenchWhen(args.startsAt, args.timezone)} (${args.durationMin} min)`,
+    args.type === "inperson" && args.location ? `Lieu : ${args.location}` : null,
+    "",
+    `Projet : ${label(FORM_LABELS.project, q.projectType)}`,
+    q.timing ? `Horizon : ${label(FORM_LABELS.timing, q.timing)}` : null,
+    q.budget ? `Budget : ${label(FORM_LABELS.budget, q.budget)}` : null,
+    q.financing ? `Financement préapprouvé : ${label(FORM_LABELS.financing, q.financing)}` : null,
+    q.currentSituation ? `Situation : ${label(FORM_LABELS.situation, q.currentSituation)}` : null,
     q.sector ? `Secteur : ${q.sector}` : null,
+    args.clientEmail ? `Courriel : ${args.clientEmail}` : null,
     q.notes ? `Notes : ${q.notes}` : null,
   ];
   return lines.filter((l): l is string => l !== null).join("\n");
+}
+
+/**
+ * Insertion « meilleur effort » d'un commentaire de journal sur la fiche
+ * client. Écrit directement en base (et non via `addCommentAction`) : c'est un
+ * journal, il ne doit déclencher AUCUNE notification de mention. Une erreur
+ * est journalisée mais n'interrompt jamais la réservation/l'annulation.
+ */
+async function logClientComment(clientId: string, userId: string, body: string): Promise<void> {
+  try {
+    await db.insert(comments).values({ clientId, userId, body });
+  } catch (err) {
+    console.error("booking comment insert failed", err);
+  }
 }
 
 // ── createAppointment ────────────────────────────────────────────────────────
@@ -228,10 +284,7 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
       startsAt,
       endsAt,
       clientName: client.fullName,
-      clientPhone: client.phone,
       clientEmail,
-      callerName: user.name,
-      qualificationSummary: qualificationSummary(qualification),
       location,
       timezone: tz,
     });
@@ -261,6 +314,21 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
       updatedAt: new Date(),
     })
     .where(eq(clients.id, client.id));
+
+  // ── Journal dans le fil de commentaires (le courtier le relit plus tard). ──
+  await logClientComment(
+    client.id,
+    user.id,
+    bookingCommentBody({
+      type: data.type,
+      startsAt,
+      durationMin: duration,
+      location,
+      clientEmail,
+      qualification,
+      timezone: tz,
+    }),
+  );
 
   await logAudit({
     userId: user.id,
@@ -382,6 +450,14 @@ export async function cancelAppointment(appointmentId: string): Promise<CancelAp
   const tz = settings.timezone || "America/Toronto";
   const whenFr = formatInTimeZone(appt.startsAt, tz, "d MMM yyyy 'à' HH 'h' mm", { locale: frLocale });
   const whenEn = formatInTimeZone(appt.startsAt, tz, "MMM d, yyyy 'at' h:mm a", { locale: enCA });
+
+  // ── Journal dans le fil de commentaires (même règle « meilleur effort »). ──
+  await logClientComment(
+    appt.clientId,
+    user.id,
+    `Rendez-vous annulé — ${FORM_LABELS.type[appt.type]}, ${frenchWhen(appt.startsAt, tz)}`,
+  );
+
   await notifyAdmins({
     actorId: user.id,
     type: "appointment",

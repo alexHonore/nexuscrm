@@ -62,6 +62,8 @@ export type VoipMsSubAccount = {
   username: string;
   description: string;
   callerid_number?: string;
+  /** voip.ms renvoie le mot de passe SIP en clair dans la liste des sous-comptes. */
+  password?: string;
 };
 
 export async function getSubAccounts(): Promise<VoipMsSubAccount[]> {

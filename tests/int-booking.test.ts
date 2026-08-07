@@ -77,7 +77,7 @@ import {
   type CreateAppointmentInput,
 } from "@/app/(app)/appointments/actions";
 import { GET as availabilityGET } from "@/app/api/availability/route";
-import { appointments, auditLogs, clients, notifications } from "@/db/schema";
+import { appointments, auditLogs, clients, comments, notifications } from "@/db/schema";
 import { setSetting } from "@/lib/settings";
 import {
   closeDb,
@@ -234,24 +234,23 @@ describe("createAppointment", () => {
     expect(appt.qualification).toEqual({ ...QUALIFICATION });
   });
 
-  it("transmet à Google le courriel confirmé, le fuseau et le résumé de qualification", async () => {
+  it("transmet à Google le courriel confirmé et le fuseau, SANS données de qualification", async () => {
     await createAppointment(input());
     expect(googleMock.createBookingEvent).toHaveBeenCalledTimes(1);
     const arg = googleMock.createBookingEvent.mock.calls[0][0];
     expect(arg).toMatchObject({
       type: "meet",
       clientName: "Marie Tremblay",
-      clientPhone: "+14184761542",
       clientEmail: "nouveau@exemple.ca",
-      callerName: "Téléphoniste Un",
       timezone: "America/Toronto",
     });
     expect(arg.startsAt.toISOString()).toBe(SLOT);
     expect(arg.endsAt.toISOString()).toBe("2026-08-10T15:30:00.000Z");
-    expect(arg.qualificationSummary).toContain("Projet : Acheter");
-    expect(arg.qualificationSummary).toContain("Horizon : 0-3 mois");
-    expect(arg.qualificationSummary).toContain("Budget : 400 k$ – 600 k$");
-    expect(arg.qualificationSummary).toContain("Secteur : Québec");
+    // L'évènement Google ne porte plus aucune description : la qualification
+    // (et le téléphone du client) restent dans le CRM.
+    expect(arg.qualificationSummary).toBeUndefined();
+    expect(arg.callerName).toBeUndefined();
+    expect(arg.clientPhone).toBeUndefined();
   });
 
   it("bascule le client en catégorie « booked » et recopie la qualification", async () => {
@@ -345,6 +344,99 @@ describe("createAppointment", () => {
     expect(appt.startsAt.toISOString()).toBe("2026-08-11T02:30:00.000Z");
     // Le créneau disparaît bien de la journée Toronto du 10, pas du 11.
     expect((await availability("2026-08-10")).slots).not.toContain("2026-08-11T02:30:00.000Z");
+  });
+});
+
+// ── Journal de réservation dans le fil de commentaires ───────────────────────
+
+describe("createAppointment — commentaire de journal", () => {
+  it("dépose un commentaire français lisible, signé par le téléphoniste qui a réservé", async () => {
+    await createAppointment(input());
+
+    const rows = await testDb.select().from(comments);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].clientId).toBe(ids.client);
+    expect(rows[0].userId).toBe(ids.caller);
+    // 15:00Z = 11 h 00 à Toronto, lundi 10 août 2026.
+    expect(rows[0].body).toBe(
+      [
+        "Rendez-vous fixé — Visio Google Meet, lundi 10 août 2026 à 11 h 00 (30 min)",
+        "",
+        "Projet : Acheter",
+        "Horizon : 0-3 mois",
+        "Budget : 400–600 k$",
+        "Financement préapprouvé : En démarche",
+        "Situation : Locataire",
+        "Secteur : Québec",
+        "Courriel : nouveau@exemple.ca",
+        "Notes : Cherche un condo au centre-ville",
+      ].join("\n"),
+    );
+  });
+
+  it("traduit les codes stockés en libellés du formulaire (jamais de code brut ni de JSON)", async () => {
+    await createAppointment(
+      input({
+        qualification: {
+          projectType: "les_deux",
+          timing: "12_plus",
+          budget: "gt_1m",
+          financing: "oui",
+          currentSituation: "proprietaire",
+          sector: "",
+          notes: "",
+        },
+      }),
+    );
+
+    const [row] = await testDb.select().from(comments);
+    expect(row.body).toContain("Projet : Les deux");
+    expect(row.body).toContain("Horizon : 12 mois et +");
+    expect(row.body).toContain("Budget : 1 M$ et +");
+    expect(row.body).toContain("Financement préapprouvé : Oui");
+    expect(row.body).toContain("Situation : Propriétaire");
+    expect(row.body).not.toMatch(/les_deux|12_plus|gt_1m|proprietaire|[{}]/);
+  });
+
+  it("n'écrit que les lignes renseignées", async () => {
+    await createAppointment(
+      input({ qualification: { projectType: "vendre", sector: "", notes: "" } }),
+    );
+
+    const [row] = await testDb.select().from(comments);
+    expect(row.body).toBe(
+      [
+        "Rendez-vous fixé — Visio Google Meet, lundi 10 août 2026 à 11 h 00 (30 min)",
+        "",
+        "Projet : Vendre",
+        "Courriel : nouveau@exemple.ca",
+      ].join("\n"),
+    );
+  });
+
+  it("mentionne le lieu et la durée d'une visite en personne", async () => {
+    await createAppointment(input({ type: "inperson", location: "7 chemin du Lac" }));
+
+    const [row] = await testDb.select().from(comments);
+    expect(row.body).toContain(
+      "Rendez-vous fixé — Visite en personne, lundi 10 août 2026 à 11 h 00 (60 min)",
+    );
+    expect(row.body).toContain("Lieu : 7 chemin du Lac");
+  });
+
+  it("est un simple journal : aucune notification de mention", async () => {
+    await createAppointment(input());
+    const mentions = await testDb
+      .select()
+      .from(notifications)
+      .where(eq(notifications.type, "mention"));
+    expect(mentions).toHaveLength(0);
+  });
+
+  it("Google indisponible : le commentaire est déposé quand même", async () => {
+    googleMock.createBookingEvent.mockRejectedValue(new googleMock.GoogleNotConnectedError());
+    expect((await createAppointment(input())).ok).toBe(true);
+    expect(await testDb.select().from(comments)).toHaveLength(1);
   });
 });
 
@@ -571,6 +663,64 @@ describe("cancelAppointment", () => {
       .where(and(eq(notifications.type, "appointment"), eq(notifications.userId, ids.admin)));
     // 1 création + 1 annulation (la seconde annulation ne renotifie pas).
     expect(cancelNotifs).toHaveLength(2);
+  });
+});
+
+// ── Journal d'annulation ─────────────────────────────────────────────────────
+
+describe("cancelAppointment — commentaire de journal", () => {
+  it("ajoute un commentaire d'annulation signé par celui qui annule", async () => {
+    const id = await book();
+    await login(ids.admin, "admin");
+    expect(await cancelAppointment(id)).toEqual({ ok: true });
+
+    const cancelRows = (await testDb.select().from(comments)).filter((r) =>
+      r.body.startsWith("Rendez-vous annulé"),
+    );
+    expect(cancelRows).toHaveLength(1);
+    expect(cancelRows[0].clientId).toBe(ids.client);
+    expect(cancelRows[0].userId).toBe(ids.admin);
+    expect(cancelRows[0].body).toBe(
+      "Rendez-vous annulé — Visio Google Meet, lundi 10 août 2026 à 11 h 00",
+    );
+  });
+
+  it("une annulation répétée ne rejournalise pas", async () => {
+    const id = await book();
+    await cancelAppointment(id);
+    await cancelAppointment(id);
+
+    const rows = await testDb.select().from(comments);
+    expect(rows.filter((r) => r.body.startsWith("Rendez-vous annulé"))).toHaveLength(1);
+    // 1 journal de réservation + 1 journal d'annulation.
+    expect(rows).toHaveLength(2);
+  });
+});
+
+// ── Évènement Google : titre et couleur ──────────────────────────────────────
+
+/** Le module est simulé pour le reste du fichier — ici on charge le vrai code. */
+async function realGoogle(): Promise<typeof import("@/lib/google")> {
+  return vi.importActual<typeof import("@/lib/google")>("@/lib/google");
+}
+
+describe("évènement Google — titre et couleur", () => {
+  it("mappe le type de rencontre sur la couleur documentée", async () => {
+    const { EVENT_COLOR_ID_BY_TYPE } = await realGoogle();
+    // Palette d'évènements Google : 5 = Banana (jaune), 6 = Tangerine (orange).
+    expect(EVENT_COLOR_ID_BY_TYPE).toEqual({ meet: "5", inperson: "6" });
+  });
+
+  it("compose « 1re Rencontre avec <Prénom> - Alex-Honoré »", async () => {
+    const { bookingEventTitle } = await realGoogle();
+    expect(bookingEventTitle("Marie Tremblay")).toBe("1re Rencontre avec Marie - Alex-Honoré");
+    expect(bookingEventTitle("  Jean-Pierre   Roy  ")).toBe(
+      "1re Rencontre avec Jean-Pierre - Alex-Honoré",
+    );
+    // Nom d'un seul mot : on garde ce qui existe.
+    expect(bookingEventTitle("Cher")).toBe("1re Rencontre avec Cher - Alex-Honoré");
+    // Nom vide : ni « undefined », ni tiret orphelin.
+    expect(bookingEventTitle("   ")).toBe("1re Rencontre - Alex-Honoré");
   });
 });
 

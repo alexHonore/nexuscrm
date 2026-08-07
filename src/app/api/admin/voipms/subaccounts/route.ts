@@ -6,12 +6,7 @@ import { users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { encryptSecret } from "@/lib/crypto";
-import {
-  createSubAccount,
-  getSubAccounts,
-  setSubAccountPassword,
-  VoipMsError,
-} from "@/lib/voipms";
+import { createSubAccount, getSubAccounts, setSubAccountPassword } from "@/lib/voipms";
 import { generateSipPassword, readJson, voipmsErrorResponse } from "../../_helpers";
 import { indexBySipAccount, loadAssignments } from "../_assignments";
 
@@ -79,7 +74,7 @@ export async function POST(req: Request) {
   const target = await db.query.users.findFirst({ where: eq(users.id, body.userId) });
   if (!target) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  const password = generateSipPassword();
+  let password = generateSipPassword();
   const callerId = target.didNumber ? target.didNumber.replace(/\D/g, "").slice(-10) : undefined;
   try {
     let account: string | null = null;
@@ -92,14 +87,21 @@ export async function POST(req: Request) {
       })) as { account?: string };
       account = res.account ?? null;
     } catch (err) {
-      // L'API voip.ms est lente (5–10 s) : une réponse perdue peut laisser le
-      // sous-compte créé chez voip.ms sans que le CRM l'ait enregistré. Dans ce
-      // cas on le RÉCUPÈRE et on lui applique le nouveau mot de passe, au lieu
-      // d'échouer et de laisser l'utilisateur sans ligne.
-      if (!(err instanceof VoipMsError && err.status === "used_username")) throw err;
-      const existing = (await getSubAccounts()).find((a) => a.username === body.username);
+      // L'API voip.ms est lente et irrégulière (8 s… parfois > 90 s) : la
+      // création peut RÉUSSIR chez voip.ms alors que la réponse se perd, ou le
+      // sous-compte peut déjà exister. Plutôt que d'échouer et de laisser le
+      // téléphoniste sans ligne, on relit la liste : si le sous-compte est là,
+      // on reprend son mot de passe (voip.ms le renvoie en clair) et on
+      // l'enregistre chiffré. L'opération devient donc idempotente.
+      const existing = (await getSubAccounts().catch(() => [])).find(
+        (a) => a.username === body.username,
+      );
       if (!existing) throw err;
-      await setSubAccountPassword(existing.id, password, callerId);
+      if (existing.password) {
+        password = existing.password;
+      } else {
+        await setSubAccountPassword(existing.id, password, callerId);
+      }
       account = existing.account;
     }
 

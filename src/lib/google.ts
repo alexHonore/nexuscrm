@@ -2,8 +2,46 @@ import "server-only";
 import { randomUUID } from "crypto";
 import { google, type calendar_v3 } from "googleapis";
 import { decryptSecret } from "@/lib/crypto";
-import { formatPhone } from "@/lib/phone";
 import { getSetting } from "@/lib/settings";
+
+/**
+ * Google Calendar event colour palette (`event.colorId`, values "1".."11").
+ * 1 Lavender · 2 Sage · 3 Grape · 4 Flamingo · 5 Banana · 6 Tangerine ·
+ * 7 Peacock · 8 Graphite · 9 Blueberry · 10 Basil · 11 Tomato
+ * Ref. https://developers.google.com/workspace/calendar/api/v3/reference/colors
+ *
+ * Le courtier veut repérer le type de rencontre d'un coup d'œil :
+ *   visio Google Meet  → jaune  (Banana)
+ *   visite en personne → orange (Tangerine)
+ */
+export const EVENT_COLOR_ID_BY_TYPE = {
+  meet: "5", // Banana — jaune
+  inperson: "6", // Tangerine — orange
+} as const;
+
+/**
+ * Signature du courtier, ajoutée à la fin de chaque titre d'évènement.
+ * TODO: à terme, lire le nom depuis les réglages (`getSetting("booking")`)
+ * plutôt que de le coder en dur ici.
+ */
+export const BROKER_DISPLAY_NAME = "Alex-Honoré";
+
+/** Prénom = premier mot du nom complet ("" si le nom est vide). */
+function firstNameOf(fullName: string): string {
+  return fullName.trim().split(/\s+/)[0] ?? "";
+}
+
+/**
+ * Titre de l'évènement : « 1re Rencontre avec <Prénom> - Alex-Honoré ».
+ * Sans prénom exploitable, on retombe sur « 1re Rencontre - Alex-Honoré »
+ * (jamais de « undefined » ni de tiret orphelin).
+ */
+export function bookingEventTitle(clientFullName: string): string {
+  const first = firstNameOf(clientFullName);
+  return first
+    ? `1re Rencontre avec ${first} - ${BROKER_DISPLAY_NAME}`
+    : `1re Rencontre - ${BROKER_DISPLAY_NAME}`;
+}
 
 /** Thrown when the admin has not connected his Google account yet. */
 export class GoogleNotConnectedError extends Error {
@@ -105,14 +143,12 @@ export async function freeBusy(timeMin: Date, timeMax: Date): Promise<BusyInterv
 }
 
 export type BookingEventInput = {
-  type: "meet" | "inperson";
+  type: keyof typeof EVENT_COLOR_ID_BY_TYPE;
   startsAt: Date;
   endsAt: Date;
+  /** Nom complet du client — seul le prénom apparaît dans le titre. */
   clientName: string;
-  clientPhone: string;
   clientEmail?: string | null;
-  callerName: string;
-  qualificationSummary?: string | null;
   location?: string | null;
   /** IANA timezone used for the event start/end (booking settings). */
   timezone?: string;
@@ -128,25 +164,19 @@ export type BookingEventResult = {
  * Insert the appointment on the admin's calendar.
  * meet → Google Meet conference is created (conferenceDataVersion: 1);
  * inperson → plain event with a location. Invitations are e-mailed (sendUpdates: all).
+ *
+ * Volontairement SANS description : le courtier consulte la fiche client dans
+ * le CRM (un commentaire y consigne la qualification). On omet complètement le
+ * champ `description` — l'API le laisse alors vide, ce qui est plus propre
+ * qu'une chaîne vide.
  */
 export async function createBookingEvent(input: BookingEventInput): Promise<BookingEventResult> {
   const { calendar, calendarId } = await getAuthedCalendar();
   const tz = input.timezone ?? "America/Toronto";
 
-  const descriptionLines = [
-    `Client : ${input.clientName}`,
-    `Téléphone : ${formatPhone(input.clientPhone)}`,
-    input.clientEmail ? `Courriel : ${input.clientEmail}` : null,
-    input.type === "inperson" && input.location ? `Lieu : ${input.location}` : null,
-    "",
-    input.qualificationSummary ? `— Qualification —\n${input.qualificationSummary}` : null,
-    "",
-    `Réservé par ${input.callerName} via Groupe Nexus CRM`,
-  ].filter((l): l is string => l !== null);
-
   const requestBody: calendar_v3.Schema$Event = {
-    summary: `RDV — ${input.clientName} (Groupe Nexus)`,
-    description: descriptionLines.join("\n"),
+    summary: bookingEventTitle(input.clientName),
+    colorId: EVENT_COLOR_ID_BY_TYPE[input.type],
     start: { dateTime: input.startsAt.toISOString(), timeZone: tz },
     end: { dateTime: input.endsAt.toISOString(), timeZone: tz },
     reminders: { useDefault: true },
