@@ -89,6 +89,9 @@ const server = createServer((req, res) => {
       path: UPSTREAM_PATH + qs,
       method: "GET",
       timeout: 30_000,
+      // IPv4 obligatoire : voip.ms n'autorise que l'IPv4 du VPS dans sa liste
+      // blanche d'API, alors que ce KVM sort en IPv6 par défaut.
+      family: 4,
       headers: { accept: "application/json" },
     },
     (up) => {
