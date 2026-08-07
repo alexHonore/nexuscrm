@@ -12,6 +12,9 @@ export default function proxy(request: NextRequest) {
     pathname === "/login" ||
     pathname === "/forgot-password" ||
     pathname === "/reset-password" ||
+    // Pages publiques exigées par la vérification Google OAuth.
+    pathname === "/privacy" ||
+    pathname === "/terms" ||
     pathname.startsWith("/api/") ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico" ||

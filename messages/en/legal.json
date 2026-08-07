@@ -1,0 +1,149 @@
+{
+  "updated": "Last updated:",
+  "updatedDate": "August 7, 2026",
+  "backToApp": "Back to the app",
+  "privacy": {
+    "short": "Privacy",
+    "title": "Privacy Policy",
+    "intro": "Groupe Nexus is an internal customer relationship management (CRM) tool used by Alex-Honoré Nshimiyimana, real estate broker, and their calling team. This policy explains what information the application collects, why, and how it is protected.",
+    "controller": {
+      "h": "1. Who is responsible",
+      "p": "The data controller is Alex-Honoré Nshimiyimana, real estate broker (Groupe Nexus), Québec, Canada. For any privacy question: info@alexhonore.com."
+    },
+    "collected": {
+      "h": "2. Information we collect",
+      "p": "The application processes two categories of information:",
+      "items": [
+        "Application users (broker and callers): name, email address, hashed password, interface language, role, phone line credentials, last sign-in date, and a log of sensitive actions.",
+        "People contacted (clients and prospects): name, phone numbers, email address, city or address, language, real estate project (buying, selling, timeline, budget), notes and comments written by the team, call and appointment history, and the information submitted through advertising forms the person filled in themselves.",
+        "Technical data: IP address and timestamps of sign-ins and sensitive actions, for security purposes."
+      ]
+    },
+    "purpose": {
+      "h": "3. How we use it",
+      "items": [
+        "Contact people who expressed interest in a real estate service and follow up on those conversations.",
+        "Schedule and confirm appointments (video meeting or property showing).",
+        "Support team quality and training through call logs.",
+        "Keep the application secure and prevent unauthorized access."
+      ],
+      "noAds": "Information is never used for targeted advertising or to train artificial intelligence models."
+    },
+    "google": {
+      "h": "4. Google Calendar access",
+      "p": "When the broker connects their Google account, the application requests calendar access (scope \"https://www.googleapis.com/auth/calendar\") solely to:",
+      "items": [
+        "read busy periods from the calendar so only genuinely free time slots are offered (Free/Busy);",
+        "create, update or cancel the appointment events created from the application, including the matching Google Meet link."
+      ],
+      "limitedUse": "Groupe Nexus's use and transfer of information received from Google APIs to any other app will adhere to the Google API Services User Data Policy, including the Limited Use requirements.",
+      "revoke": "Calendar content is never bulk-copied or retained: only references to events created by the application (event id and meeting link) are stored. The Google token is stored encrypted and can be revoked at any time from the application (Administration → Settings → Disconnect Google) or from the Google account security page."
+    },
+    "recording": {
+      "h": "5. Calls and recordings",
+      "p": "Calls are carried by the telephony provider voip.ms. The application stores the date, duration, direction, outcome label and any notes written. When call recording is enabled at the provider, recordings remain hosted there and are accessible only to the administrator, with every playback logged. Anyone called may ask not to be contacted again: their record is then flagged \"Do not call\"."
+    },
+    "sharing": {
+      "h": "6. Sharing with third parties",
+      "p": "Information is hosted and processed by the following providers, solely for the purposes described above:",
+      "items": [
+        "Vercel — application hosting.",
+        "Supabase — database.",
+        "voip.ms — telephone service and call logs.",
+        "Google — calendar and video meetings, when the feature is enabled.",
+        "Resend — transactional email delivery (password reset)."
+      ],
+      "noSale": "No information is sold, rented or traded."
+    },
+    "security": {
+      "h": "7. Security measures",
+      "items": [
+        "Encrypted transport (HTTPS) and encrypted sensitive secrets at rest (AES-256-GCM).",
+        "Passwords stored only as hashes (bcrypt).",
+        "Role-based access: callers can neither delete, export nor import data.",
+        "Audit log of sensitive actions and sign-in rate limiting.",
+        "Immediate session revocation on password change or account deactivation."
+      ]
+    },
+    "retention": {
+      "h": "8. Retention",
+      "p": "Client records are kept as long as they remain relevant to the business relationship, then deleted on request. Audit logs are retained for security purposes. A person registered as \"Do not call\" keeps a minimal record so they are not contacted again."
+    },
+    "rights": {
+      "h": "9. Your rights",
+      "p": "Under Québec's Law 25 and applicable Canadian legislation, any person may:",
+      "items": [
+        "request access to the information held about them;",
+        "request correction of inaccurate information;",
+        "request deletion of their information;",
+        "withdraw consent and ask not to be contacted again."
+      ],
+      "how": "These requests are handled free of charge within 30 days at info@alexhonore.com."
+    },
+    "dncl": {
+      "h": "10. Do not call",
+      "p": "Simply tell one of our representatives during a call, or write to info@alexhonore.com. The record is immediately flagged \"Do not call\" and outbound calls to that number are blocked in the application."
+    },
+    "contact": {
+      "h": "11. Contact us",
+      "p": "Questions, access requests or complaints: info@alexhonore.com. Any material change to this policy will be published on this page with a new update date."
+    }
+  },
+  "terms": {
+    "short": "Terms",
+    "title": "Terms of Service",
+    "intro": "These terms govern the use of the Groupe Nexus application, an internal tool reserved for the broker and authorized members of their team.",
+    "service": {
+      "h": "1. What the service is",
+      "p": "Groupe Nexus is a customer relationship management tool used to track real estate prospects, place and receive calls from the browser, record follow-ups, and schedule appointments on the broker's calendar. It is not offered to the public: access is created and removed by the administrator."
+    },
+    "access": {
+      "h": "2. Accounts and access",
+      "items": [
+        "Each account is personal; sharing credentials is prohibited.",
+        "Users are responsible for keeping their password confidential and must report suspicious activity without delay.",
+        "The administrator may create, modify, deactivate or delete an account at any time.",
+        "Callers have restricted access: viewing and editing one record at a time, with no deletion, import, export or bulk actions."
+      ]
+    },
+    "acceptable": {
+      "h": "3. Acceptable use",
+      "p": "By using the application, the user agrees to:",
+      "items": [
+        "use client information solely for their work on behalf of Groupe Nexus;",
+        "never copy, extract or transmit any data outside the application;",
+        "honour opt-out requests and the \"Do not call\" flag;",
+        "comply with applicable telemarketing rules, including Canada's National Do Not Call List (DNCL) and permitted calling hours;",
+        "inform the other party when a call is being recorded, where that feature is active."
+      ]
+    },
+    "google": {
+      "h": "4. Google integration",
+      "p": "Connecting the Google Calendar is optional and performed by the administrator. It is used solely to check availability and create appointments. Use of Google data is described in the privacy policy and complies with the Google API Services User Data Policy, including the Limited Use requirements. Authorization can be revoked at any time."
+    },
+    "telephony": {
+      "h": "5. Telephony",
+      "p": "Calls are carried by the provider voip.ms through a voice gateway hosted by Groupe Nexus. Call quality depends on the user's Internet connection and the provider's network. The application is not a replacement for emergency telephone service and must never be used to reach 911."
+    },
+    "availability": {
+      "h": "6. Availability",
+      "p": "The application is provided \"as is\". Interruptions may occur for maintenance or because of a third-party provider. No contractual uptime commitment is offered."
+    },
+    "liability": {
+      "h": "7. Responsibility",
+      "p": "The application is an internal working tool. The broker remains responsible for the content entered by their team, the accuracy of the information recorded, and compliance with the professional and legal obligations applicable to their practice."
+    },
+    "termination": {
+      "h": "8. End of access",
+      "p": "A user's access ends as soon as their account is deactivated, in particular at the end of their engagement. Data entered remains the property of Groupe Nexus."
+    },
+    "law": {
+      "h": "9. Governing law",
+      "p": "These terms are governed by the laws of the Province of Québec and the laws of Canada applicable therein."
+    },
+    "contact": {
+      "h": "10. Contact us",
+      "p": "Any question regarding these terms may be sent to info@alexhonore.com."
+    }
+  }
+}

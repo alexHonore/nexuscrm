@@ -1,0 +1,149 @@
+{
+  "updated": "Dernière mise à jour :",
+  "updatedDate": "7 août 2026",
+  "backToApp": "Retour à l'application",
+  "privacy": {
+    "short": "Confidentialité",
+    "title": "Politique de confidentialité",
+    "intro": "Groupe Nexus est un logiciel interne de gestion de la relation client (CRM) utilisé par Alex-Honoré Nshimiyimana, courtier immobilier, et son équipe de téléphonistes. La présente politique explique quels renseignements l'application recueille, pourquoi, et comment ils sont protégés.",
+    "controller": {
+      "h": "1. Responsable des renseignements",
+      "p": "Le responsable du traitement est Alex-Honoré Nshimiyimana, courtier immobilier (Groupe Nexus), Québec, Canada. Pour toute question relative à la vie privée : info@alexhonore.com."
+    },
+    "collected": {
+      "h": "2. Renseignements recueillis",
+      "p": "L'application traite deux catégories de renseignements :",
+      "items": [
+        "Utilisateurs de l'application (courtier et téléphonistes) : nom, adresse courriel, mot de passe chiffré (haché), langue d'interface, rôle, identifiants de ligne téléphonique, date de dernière connexion et journal des actions sensibles.",
+        "Personnes contactées (clients et prospects) : nom, numéros de téléphone, adresse courriel, ville ou adresse, langue, projet immobilier (achat, vente, échéance, budget), notes et commentaires saisis par l'équipe, historique des appels et des rendez-vous, ainsi que les renseignements transmis par les formulaires publicitaires auxquels la personne a elle-même répondu.",
+        "Données techniques : adresse IP et horodatage des connexions et des actions sensibles, à des fins de sécurité."
+      ]
+    },
+    "purpose": {
+      "h": "3. Finalités",
+      "items": [
+        "Communiquer avec les personnes ayant manifesté un intérêt pour un service immobilier et effectuer le suivi de ces communications.",
+        "Planifier et confirmer des rendez-vous (visioconférence ou visite de propriété).",
+        "Assurer la qualité et la formation de l'équipe au moyen des journaux d'appels.",
+        "Assurer la sécurité de l'application et prévenir les accès non autorisés."
+      ],
+      "noAds": "Les renseignements ne servent jamais à de la publicité ciblée, ni à l'entraînement de modèles d'intelligence artificielle."
+    },
+    "google": {
+      "h": "4. Accès au calendrier Google",
+      "p": "Lorsque le courtier connecte son compte Google, l'application demande l'autorisation d'accéder à son agenda (portée « https://www.googleapis.com/auth/calendar ») uniquement pour :",
+      "items": [
+        "lire les périodes occupées de l'agenda afin de proposer des plages horaires réellement libres (fonction « Disponible/Occupé ») ;",
+        "créer, modifier ou annuler les événements de rendez-vous créés depuis l'application, y compris le lien Google Meet correspondant."
+      ],
+      "limitedUse": "L'utilisation et le transfert par Groupe Nexus des renseignements reçus des API Google vers toute autre application respecteront la Politique relative aux données utilisateur des services API Google, y compris les exigences d'utilisation limitée (Limited Use).",
+      "revoke": "Le contenu de l'agenda n'est ni copié en bloc, ni conservé : seules les références des événements créés par l'application (identifiant d'événement et lien de visioconférence) sont enregistrées. Le jeton d'accès Google est conservé chiffré et peut être révoqué en tout temps depuis l'application (Administration → Réglages → Déconnecter Google) ou depuis la page de sécurité du compte Google."
+    },
+    "recording": {
+      "h": "5. Appels et enregistrements",
+      "p": "Les appels sont acheminés par le fournisseur de téléphonie voip.ms. L'application conserve la date, la durée, le sens de l'appel, le classement de l'appel et les notes rédigées. Lorsque l'enregistrement d'appel est activé chez le fournisseur, les enregistrements demeurent hébergés chez celui-ci et sont accessibles uniquement à l'administrateur, chaque écoute étant journalisée. Toute personne appelée peut demander à ne plus être contactée : sa fiche est alors marquée « Ne plus appeler »."
+    },
+    "sharing": {
+      "h": "6. Communication à des tiers",
+      "p": "Les renseignements sont hébergés et traités par les fournisseurs suivants, uniquement aux fins décrites ci-dessus :",
+      "items": [
+        "Vercel — hébergement de l'application.",
+        "Supabase — base de données.",
+        "voip.ms — service téléphonique et journaux d'appels.",
+        "Google — agenda et visioconférence, lorsque la fonction est activée.",
+        "Resend — envoi des courriels transactionnels (réinitialisation de mot de passe)."
+      ],
+      "noSale": "Aucun renseignement n'est vendu, loué ni échangé."
+    },
+    "security": {
+      "h": "7. Mesures de sécurité",
+      "items": [
+        "Chiffrement des communications (HTTPS) et des secrets sensibles en base (AES-256-GCM).",
+        "Mots de passe conservés uniquement sous forme de empreintes (bcrypt).",
+        "Accès par rôle : les téléphonistes ne peuvent ni supprimer, ni exporter, ni importer de données.",
+        "Journal d'audit des actions sensibles et limitation des tentatives de connexion.",
+        "Révocation immédiate des sessions lors d'un changement de mot de passe ou d'une désactivation de compte."
+      ]
+    },
+    "retention": {
+      "h": "8. Conservation",
+      "p": "Les fiches clients sont conservées tant qu'elles demeurent utiles à la relation d'affaires, puis supprimées sur demande. Les journaux d'audit sont conservés à des fins de sécurité. Une personne inscrite comme « Ne plus appeler » conserve une mention minimale afin d'éviter tout nouveau contact."
+    },
+    "rights": {
+      "h": "9. Vos droits",
+      "p": "Conformément à la Loi 25 (Québec) et aux lois canadiennes applicables, toute personne peut :",
+      "items": [
+        "demander l'accès aux renseignements la concernant ;",
+        "demander la rectification de renseignements inexacts ;",
+        "demander la suppression de ses renseignements ;",
+        "retirer son consentement et demander à ne plus être contactée."
+      ],
+      "how": "Ces demandes sont traitées sans frais dans un délai de 30 jours à l'adresse info@alexhonore.com."
+    },
+    "dncl": {
+      "h": "10. Ne plus appeler",
+      "p": "Il suffit d'en faire la demande à l'un de nos représentants pendant un appel ou d'écrire à info@alexhonore.com. La fiche est immédiatement marquée « Ne plus appeler » et les appels sortants vers ce numéro sont bloqués dans l'application."
+    },
+    "contact": {
+      "h": "11. Nous joindre",
+      "p": "Questions, demandes d'accès ou plaintes : info@alexhonore.com. Toute modification importante de la présente politique sera publiée sur cette page avec une nouvelle date de mise à jour."
+    }
+  },
+  "terms": {
+    "short": "Conditions",
+    "title": "Conditions d'utilisation",
+    "intro": "Les présentes conditions encadrent l'utilisation de l'application Groupe Nexus, un outil interne réservé au courtier et aux membres autorisés de son équipe.",
+    "service": {
+      "h": "1. Nature du service",
+      "p": "Groupe Nexus est un logiciel de gestion de la relation client permettant de suivre des prospects immobiliers, de passer et recevoir des appels depuis le navigateur, de consigner les suivis et de planifier des rendez-vous dans l'agenda du courtier. L'application n'est pas offerte au public : l'accès est créé et retiré par l'administrateur."
+    },
+    "access": {
+      "h": "2. Comptes et accès",
+      "items": [
+        "Chaque compte est nominatif ; le partage d'identifiants est interdit.",
+        "L'utilisateur est responsable de la confidentialité de son mot de passe et doit signaler sans délai toute utilisation suspecte.",
+        "L'administrateur peut créer, modifier, désactiver ou supprimer un compte en tout temps.",
+        "Les téléphonistes disposent d'un accès restreint : consultation et modification d'une fiche à la fois, sans suppression, importation, exportation ni action en lot."
+      ]
+    },
+    "acceptable": {
+      "h": "3. Utilisation acceptable",
+      "p": "En utilisant l'application, l'utilisateur s'engage à :",
+      "items": [
+        "n'utiliser les renseignements des clients que dans le cadre de son travail pour Groupe Nexus ;",
+        "ne copier, extraire ou transmettre aucune donnée à l'extérieur de l'application ;",
+        "respecter les demandes de retrait et la mention « Ne plus appeler » ;",
+        "respecter les règles applicables au télémarketing, notamment la Liste nationale de numéros de télécommunication exclus (LNNTE) et les heures d'appel permises ;",
+        "informer l'interlocuteur lorsque l'appel est enregistré, si cette fonction est active."
+      ]
+    },
+    "google": {
+      "h": "4. Intégration Google",
+      "p": "La connexion de l'agenda Google est facultative et effectuée par l'administrateur. Elle sert uniquement à consulter les disponibilités et à créer les rendez-vous. L'utilisation des données Google est décrite dans la politique de confidentialité et respecte la Politique relative aux données utilisateur des services API Google, y compris les exigences d'utilisation limitée. L'autorisation peut être révoquée à tout moment."
+    },
+    "telephony": {
+      "h": "5. Téléphonie",
+      "p": "Les appels transitent par le fournisseur voip.ms et par une passerelle vocale hébergée par Groupe Nexus. La qualité des appels dépend de la connexion Internet de l'utilisateur et du réseau du fournisseur. L'application ne remplace pas un service téléphonique d'urgence : elle ne doit jamais être utilisée pour joindre le 911."
+    },
+    "availability": {
+      "h": "6. Disponibilité",
+      "p": "L'application est fournie « telle quelle ». Des interruptions peuvent survenir pour de la maintenance ou en raison d'un fournisseur tiers. Aucun engagement de disponibilité contractuel n'est offert."
+    },
+    "liability": {
+      "h": "7. Responsabilité",
+      "p": "L'application est un outil de travail interne. Le courtier demeure responsable du contenu saisi par son équipe, de l'exactitude des renseignements consignés et du respect des obligations professionnelles et légales applicables à sa pratique."
+    },
+    "termination": {
+      "h": "8. Fin d'accès",
+      "p": "L'accès d'un utilisateur prend fin dès la désactivation de son compte, notamment à la fin de son mandat. Les données saisies demeurent la propriété de Groupe Nexus."
+    },
+    "law": {
+      "h": "9. Droit applicable",
+      "p": "Les présentes conditions sont régies par les lois de la province de Québec et les lois du Canada qui y sont applicables."
+    },
+    "contact": {
+      "h": "10. Nous joindre",
+      "p": "Toute question relative aux présentes conditions peut être adressée à info@alexhonore.com."
+    }
+  }
+}

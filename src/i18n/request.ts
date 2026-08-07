@@ -12,6 +12,7 @@ export const DEFAULT_LOCALE: AppLocale = "fr";
 const NAMESPACES = [
   "common",
   "auth",
+  "legal",
   "dashboard",
   "clients",
   "pipeline",
