@@ -46,8 +46,14 @@ type CallRowLite = {
 
 const MATCH_WINDOW_MS = 3 * 60 * 1000;
 const MAX_ERRORS = 25;
-/** Clé (arbitraire, stable) du verrou consultatif Postgres de la synchro. */
-const SYNC_LOCK_KEY = "nexus-cdr-sync";
+/**
+ * Clé du verrou consultatif Postgres de la synchro CDR. Entier littéral —
+ * même convention que le verrou de réservation (874511, voir
+ * src/app/(app)/appointments/actions.ts) : pas de dépendance à hashtext(),
+ * fonction interne non documentée. Les deux clés doivent rester DISTINCTES,
+ * sinon une synchro bloquerait les prises de rendez-vous.
+ */
+const SYNC_LOCK_KEY = 874512;
 
 export type CdrSyncResult = {
   counts: {
@@ -109,7 +115,7 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
   // ── Phase base de données, sous verrou consultatif ──
   const ranToCompletion = await db.transaction(async (tx) => {
     const lockRows = (await tx.execute(
-      sql`select pg_try_advisory_xact_lock(hashtext(${SYNC_LOCK_KEY})) as locked`,
+      sql`select pg_try_advisory_xact_lock(${SYNC_LOCK_KEY}) as locked`,
     )) as unknown as Array<{ locked: boolean }>;
     if (!lockRows[0]?.locked) return false;
 
