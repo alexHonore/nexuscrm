@@ -51,7 +51,8 @@
     "emailInvalid": "Courriel invalide",
     "notes": "Notes",
     "notesPlaceholder": "Détails utiles pour le courtier…",
-    "selectPlaceholder": "Sélectionner…"
+    "selectPlaceholder": "Sélectionner…",
+    "emailHint": "Le lien Google Meet et la confirmation y seront envoyés."
   },
   "slot": {
     "type": "Type de rendez-vous",

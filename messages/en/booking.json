@@ -51,7 +51,8 @@
     "emailInvalid": "Invalid email",
     "notes": "Notes",
     "notesPlaceholder": "Useful details for the broker…",
-    "selectPlaceholder": "Select…"
+    "selectPlaceholder": "Select…",
+    "emailHint": "The Google Meet link and confirmation will be sent there."
   },
   "slot": {
     "type": "Appointment type",
