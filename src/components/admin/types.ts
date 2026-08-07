@@ -1,5 +1,22 @@
 /** DTO sérialisables passés des pages serveur aux îlots clients (jamais de secrets). */
 
+/**
+ * Diagnostic « ce poste peut-il appeler ? » — calculé côté serveur
+ * (`computePhoneStatus`), transmis en booléens seulement.
+ *
+ * - `ready` : SIP complet + numéro (DID) + passerelle configurée
+ * - `no_did` : peut appeler, ne peut pas recevoir
+ * - `not_configured` : aucun identifiant SIP
+ * - `no_gateway` : passerelle SIP-WSS absente — affecte TOUT le monde
+ */
+export type PhoneStatusDto = {
+  code: "ready" | "no_did" | "not_configured" | "no_gateway";
+  hasSipUsername: boolean;
+  hasSipPassword: boolean;
+  hasDid: boolean;
+  hasGateway: boolean;
+};
+
 export type AdminUserDto = {
   id: string;
   name: string;
@@ -10,6 +27,8 @@ export type AdminUserDto = {
   sipUsername: string | null;
   hasSipPassword: boolean;
   didNumber: string | null;
+  /** État du téléphone (badge + info-bulle dans /admin/users). */
+  phone: PhoneStatusDto;
   lastLoginAt: string | null;
   createdAt: string;
 };

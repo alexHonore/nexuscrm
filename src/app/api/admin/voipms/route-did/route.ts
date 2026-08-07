@@ -6,7 +6,7 @@ import { users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { normalizePhone } from "@/lib/phone";
-import { routeDidToSubAccount } from "@/lib/voipms";
+import { routeDidToSubAccount, updateSubAccountCallerId } from "@/lib/voipms";
 import { readJson, voipmsErrorResponse } from "../../_helpers";
 import { releaseDidFromOthers } from "../_assignments";
 
@@ -35,6 +35,16 @@ export async function POST(req: Request) {
     return voipmsErrorResponse(err);
   }
 
+  // Le caller ID du sous-compte doit suivre le DID, sinon les appels sortants
+  // partent sans numéro présenté valide (rejets possibles côté opérateur).
+  // Meilleur effort : l'échec n'annule pas l'attribution, mais il est signalé.
+  let calleridUpdated = true;
+  try {
+    await updateSubAccountCallerId(body.account, didE164.replace(/\D/g, "").slice(-10));
+  } catch {
+    calleridUpdated = false;
+  }
+
   // Un DID n'appartient qu'à une personne : on le retire de son détenteur
   // précédent dans la MÊME transaction que l'assignation.
   let released: { id: string; name: string; email: string }[] = [];
@@ -58,9 +68,10 @@ export async function POST(req: Request) {
     detail: {
       did: didE164,
       account: body.account,
+      calleridUpdated,
       ...(released.length > 0 ? { releasedFrom: released } : {}),
     },
   });
 
-  return NextResponse.json({ ok: true, did: didE164, released });
+  return NextResponse.json({ ok: true, did: didE164, released, calleridUpdated });
 }

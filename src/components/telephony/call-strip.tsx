@@ -72,7 +72,9 @@ export function CallStrip({ className }: { className?: string }) {
           <p className="truncate text-sm font-medium">{title}</p>
         )}
         <p className="font-mono text-xs tabular-nums text-muted-foreground">
-          {answeredAtMs !== null ? formatTimer(elapsed) : t("call.connecting")}
+          {answeredAtMs !== null
+            ? formatTimer(elapsed)
+            : t(tel.callState === "ringing" ? "call.ringing" : "call.connecting")}
         </p>
       </div>
       <Button

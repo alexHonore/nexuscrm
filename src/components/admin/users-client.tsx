@@ -4,14 +4,20 @@ import { formatInTimeZone } from "date-fns-tz";
 import { enCA, fr } from "date-fns/locale";
 import {
   Check,
+  CircleCheck,
+  CircleDashed,
   KeyRound,
   Loader2,
   Phone,
+  PhoneOff,
   Plus,
   RefreshCw,
+  ShieldCheck,
   Trash2,
   TriangleAlert,
   UserRound,
+  X,
+  Zap,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
@@ -63,11 +69,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { formatPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 import { api, ApiError } from "./api";
 import { LoginCredentials, OneTimeSecret } from "./copy-button";
-import type { AdminUserDto } from "./types";
+import type { AdminUserDto, PhoneStatusDto } from "./types";
 
 const TZ = "America/Toronto";
 
@@ -166,6 +178,10 @@ function useDateFmt() {
 type Tr = ReturnType<typeof useTranslations>;
 
 function errorMessage(t: Tr, err: unknown): string {
+  // Abandon côté navigateur : voip.ms dépasse parfois le temps qu'on lui laisse.
+  if (err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError")) {
+    return t("users.verify.unreachable");
+  }
   if (err instanceof ApiError) {
     const code = err.code;
     const known = [
@@ -284,6 +300,87 @@ function AssignmentLegend({ available, assigned }: { available: number; assigned
   );
 }
 
+// ── État du téléphone ────────────────────────────────────────────────────────
+
+/**
+ * L'incident d'origine : personne ne voyait qu'un téléphoniste avait des champs
+ * SIP vides — donc aucun appel possible. La pastille répond d'un coup d'œil, et
+ * l'info-bulle dit exactement ce qui manque.
+ */
+const PHONE_BADGE: Record<PhoneStatusDto["code"], { className: string; Icon: typeof Check }> = {
+  ready: {
+    className: "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400",
+    Icon: CircleCheck,
+  },
+  no_did: {
+    className: "bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400",
+    Icon: PhoneOff,
+  },
+  not_configured: { className: "bg-muted text-muted-foreground", Icon: CircleDashed },
+  no_gateway: { className: "bg-destructive/10 text-destructive", Icon: TriangleAlert },
+};
+
+/**
+ * Reflète immédiatement l'ajout ou le retrait d'un numéro sur la pastille,
+ * sans attendre un rechargement. Le serveur reste la référence : toute réponse
+ * d'API rapporte l'état recalculé.
+ */
+function phoneWithDid(phone: PhoneStatusDto, hasDid: boolean): PhoneStatusDto {
+  if (phone.hasDid === hasDid) return phone;
+  const blocked = phone.code === "no_gateway" || phone.code === "not_configured";
+  return { ...phone, hasDid, code: blocked ? phone.code : hasDid ? "ready" : "no_did" };
+}
+
+/** Éléments manquants, du plus bloquant au moins bloquant. */
+function missingPhoneParts(t: Tr, phone: PhoneStatusDto): string[] {
+  return [
+    !phone.hasGateway ? t("users.phone.missingGateway") : null,
+    !phone.hasSipUsername ? t("users.phone.missingSipUsername") : null,
+    !phone.hasSipPassword ? t("users.phone.missingSipPassword") : null,
+    !phone.hasDid ? t("users.phone.missingDid") : null,
+  ].filter((v): v is string => v !== null);
+}
+
+function PhoneBadge({ phone, className }: { phone: PhoneStatusDto; className?: string }) {
+  const t = useTranslations("admin");
+  const { className: tone, Icon } = PHONE_BADGE[phone.code];
+  return (
+    <Badge variant="secondary" className={cn("gap-1", tone, className)}>
+      <Icon className="size-3" />
+      {t(`users.phone.${phone.code}`)}
+    </Badge>
+  );
+}
+
+/** Pastille + info-bulle explicative (desktop ; au tactile, la carte suffit). */
+function PhoneStatusCell({ phone }: { phone: PhoneStatusDto }) {
+  const t = useTranslations("admin");
+  const missing = missingPhoneParts(t, phone);
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger render={<span className="inline-flex" />}>
+          <PhoneBadge phone={phone} />
+        </TooltipTrigger>
+        <TooltipContent className="flex-col items-start gap-1 text-left">
+          <span className="font-medium">{t(`users.phone.${phone.code}`)}</span>
+          <span>{t(`users.phone.${phone.code}Hint`)}</span>
+          {missing.length > 0 ? (
+            <>
+              <span className="pt-0.5 font-medium">{t("users.phone.missingTitle")}</span>
+              <ul className="list-inside list-disc">
+                {missing.map((m) => (
+                  <li key={m}>{m}</li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function UsersClient({
@@ -332,7 +429,7 @@ export function UsersClient({
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">{t("users.subtitle")}</p>
-        <CreateUserDialog onCreated={upsert} />
+        <CreateUserDialog onCreated={upsert} onConfigure={setEditingId} />
       </div>
 
       {/* ── Tableau (desktop) ── */}
@@ -343,6 +440,7 @@ export function UsersClient({
               <TableHead>{t("users.name")}</TableHead>
               <TableHead>{t("users.role")}</TableHead>
               <TableHead>{t("users.active")}</TableHead>
+              <TableHead>{t("users.phone.column")}</TableHead>
               <TableHead>{t("users.did")}</TableHead>
               <TableHead>{t("users.sipUser")}</TableHead>
               <TableHead>{t("users.lastLogin")}</TableHead>
@@ -372,6 +470,9 @@ export function UsersClient({
                     onCheckedChange={(checked) => void toggleActive(u, checked)}
                     aria-label={t("users.active")}
                   />
+                </TableCell>
+                <TableCell>
+                  <PhoneStatusCell phone={u.phone} />
                 </TableCell>
                 <TableCell className="text-sm">{u.didNumber ? formatPhone(u.didNumber) : "—"}</TableCell>
                 <TableCell className="max-w-40 truncate font-mono text-xs">{u.sipUsername ?? "—"}</TableCell>
@@ -414,6 +515,16 @@ export function UsersClient({
                 {!u.isActive ? <Badge variant="destructive">{t("users.inactive")}</Badge> : null}
               </div>
             </div>
+            {/* L'état du téléphone doit rester visible sur mobile : c'est là que
+                le courtier constate qu'une ligne n'a jamais été configurée. */}
+            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <PhoneBadge phone={u.phone} />
+              {u.phone.code !== "ready" ? (
+                <span className="text-xs text-muted-foreground">
+                  {missingPhoneParts(t, u.phone).join(" · ")}
+                </span>
+              ) : null}
+            </div>
             <div className="mt-2 grid grid-cols-2 gap-1 text-xs text-muted-foreground">
               <span className="flex items-center gap-1">
                 <Phone className="size-3" />
@@ -436,7 +547,11 @@ export function UsersClient({
         onUpdated={upsert}
         onDidReleased={(ids) =>
           setUsers((prev) =>
-            prev.map((p) => (ids.includes(p.id) ? { ...p, didNumber: null } : p)),
+            prev.map((p) =>
+              ids.includes(p.id)
+                ? { ...p, didNumber: null, phone: phoneWithDid(p.phone, false) }
+                : p,
+            ),
           )
         }
         onDeleted={(id) => {
@@ -448,19 +563,139 @@ export function UsersClient({
   );
 }
 
+// ── Provisionnement de la ligne SIP ──────────────────────────────────────────
+
+/** voip.ms répond parfois après plus d'une minute : on laisse largement le temps. */
+const PROVISION_TIMEOUT_MS = 90_000;
+
+type ProvisionResponse = {
+  account: string;
+  password: string;
+  created: boolean;
+  derived: boolean;
+  user: AdminUserDto;
+};
+
+type ProvisionState =
+  | { state: "idle" }
+  | { state: "running" }
+  | { state: "done"; account: string; reused: boolean }
+  | { state: "error"; message: string };
+
+/**
+ * Configure (ou reprend) la ligne SIP d'un utilisateur. Sans `username`, le
+ * serveur dérive un nom sûr du nom/courriel. L'opération est idempotente :
+ * rejouer après un échec ne crée jamais de doublon.
+ */
+async function provisionLine(userId: string, username?: string): Promise<ProvisionResponse> {
+  return api<ProvisionResponse>("/api/admin/voipms/subaccounts", {
+    method: "POST",
+    body: JSON.stringify({ userId, ...(username ? { username } : {}) }),
+    signal: AbortSignal.timeout(PROVISION_TIMEOUT_MS),
+  });
+}
+
+/** Avancement « Configuration de la ligne… » → succès / échec + Réessayer. */
+function ProvisionStatus({
+  status,
+  onRetry,
+  onAssignDid,
+}: {
+  status: ProvisionState;
+  onRetry: () => void;
+  onAssignDid?: () => void;
+}) {
+  const t = useTranslations("admin");
+  if (status.state === "idle") return null;
+
+  return (
+    <div className="space-y-2 rounded-lg bg-muted/50 p-3">
+      <p className="text-sm font-medium">{t("users.provision.title")}</p>
+
+      {status.state === "running" ? (
+        <>
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            {t("users.provision.running")}
+          </p>
+          <p className="text-xs text-muted-foreground">{t("users.provision.slow")}</p>
+        </>
+      ) : null}
+
+      {status.state === "done" ? (
+        <>
+          <p className="flex items-start gap-2 text-sm text-emerald-700 dark:text-emerald-400">
+            <CircleCheck className="mt-0.5 size-4 shrink-0" />
+            <span className="font-mono">
+              {t(status.reused ? "users.provision.reused" : "users.provision.done", {
+                account: status.account,
+              })}
+            </span>
+          </p>
+          {/* Un DID libre n'est JAMAIS attribué d'office — l'admin choisit. */}
+          <p className="text-xs text-muted-foreground">{t("users.provision.noDid")}</p>
+          {onAssignDid ? (
+            <Button variant="secondary" size="sm" className="min-h-11 md:min-h-8" onClick={onAssignDid}>
+              <Phone className="size-4" />
+              {t("users.provision.assignDid")}
+            </Button>
+          ) : null}
+        </>
+      ) : null}
+
+      {status.state === "error" ? (
+        <>
+          <p className="flex items-start gap-2 text-sm text-destructive">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+            {t("users.provision.failed")}
+          </p>
+          <p className="text-xs text-muted-foreground">{status.message}</p>
+          <Button variant="secondary" size="sm" className="min-h-11 md:min-h-8" onClick={onRetry}>
+            <RefreshCw className="size-4" />
+            {t("users.provision.retry")}
+          </Button>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 // ── Création ─────────────────────────────────────────────────────────────────
 
-function CreateUserDialog({ onCreated }: { onCreated: (u: AdminUserDto) => void }) {
+function CreateUserDialog({
+  onCreated,
+  onConfigure,
+}: {
+  onCreated: (u: AdminUserDto) => void;
+  onConfigure: (userId: string) => void;
+}) {
   const t = useTranslations("admin");
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", role: "caller", locale: "fr" });
   /** Identifiants complets (courriel + mot de passe) montrés une seule fois. */
-  const [created, setCreated] = useState<{ email: string; password: string } | null>(null);
+  const [created, setCreated] = useState<{ id: string; email: string; password: string } | null>(null);
+  const [provision, setProvision] = useState<ProvisionState>({ state: "idle" });
 
   const reset = () => {
     setForm({ name: "", email: "", role: "caller", locale: "fr" });
     setCreated(null);
+    setProvision({ state: "idle" });
+  };
+
+  /**
+   * Configure la ligne APRÈS coup : le compte est déjà créé et son mot de passe
+   * déjà affiché. Un échec voip.ms ne peut donc rien annuler ni masquer.
+   */
+  const runProvision = async (userId: string) => {
+    setProvision({ state: "running" });
+    try {
+      const res = await provisionLine(userId);
+      onCreated(res.user);
+      setProvision({ state: "done", account: res.account, reused: !res.created });
+    } catch (err) {
+      setProvision({ state: "error", message: errorMessage(t, err) });
+    }
   };
 
   const submit = async () => {
@@ -472,7 +707,10 @@ function CreateUserDialog({ onCreated }: { onCreated: (u: AdminUserDto) => void 
       });
       onCreated(res.user);
       // Le courriel affiché est celui RÉELLEMENT enregistré (normalisé serveur).
-      setCreated({ email: res.user.email, password: res.tempPassword });
+      setCreated({ id: res.user.id, email: res.user.email, password: res.tempPassword });
+      // La ligne se configure toute seule dans la foulée : l'incident venait de
+      // ce deuxième pas manuel que personne ne faisait.
+      void runProvision(res.user.id);
     } catch (err) {
       toast.error(errorMessage(t, err));
     } finally {
@@ -503,6 +741,14 @@ function CreateUserDialog({ onCreated }: { onCreated: (u: AdminUserDto) => void 
         {created ? (
           <>
             <LoginCredentials email={created.email} password={created.password} />
+            <ProvisionStatus
+              status={provision}
+              onRetry={() => void runProvision(created.id)}
+              onAssignDid={() => {
+                setOpen(false);
+                onConfigure(created.id);
+              }}
+            />
             <DialogFooter>
               <Button onClick={() => setOpen(false)} className="min-h-11 md:min-h-8">
                 {t("close")}
@@ -616,6 +862,88 @@ type VoipDid = {
 /** Utilisateur dépossédé de son DID par une réassignation. */
 type ReleasedUser = { id: string; name: string; email: string };
 
+// ── Vérification de la ligne chez voip.ms ────────────────────────────────────
+
+type VerifyCheck = {
+  key: "gateway" | "subaccount" | "password" | "did" | "routing";
+  status: "ok" | "fail" | "warn" | "unknown";
+  reason: string;
+  value?: string;
+};
+
+type VerifyResponse = {
+  ok: boolean;
+  canCall: boolean;
+  checks: VerifyCheck[];
+  canResync: boolean;
+  user: AdminUserDto;
+};
+
+const CHECK_ICON = {
+  ok: { Icon: Check, className: "text-emerald-600 dark:text-emerald-400" },
+  fail: { Icon: X, className: "text-destructive" },
+  warn: { Icon: TriangleAlert, className: "text-amber-600 dark:text-amber-400" },
+  unknown: { Icon: CircleDashed, className: "text-muted-foreground" },
+} as const;
+
+/**
+ * Résultat de « Vérifier la ligne » : un ✓/✗ par point de contrôle, avec la
+ * correction à faire en clair. C'est la réponse à « son téléphone marche-t-il
+ * vraiment ? » — les champs remplis dans le CRM ne le garantissent pas.
+ */
+function VerifyChecklist({
+  result,
+  onResync,
+  resyncing,
+}: {
+  result: VerifyResponse;
+  onResync: () => void;
+  resyncing: boolean;
+}) {
+  const t = useTranslations("admin");
+  const headline = result.ok
+    ? { text: t("users.verify.ok"), className: "text-emerald-700 dark:text-emerald-400" }
+    : result.canCall
+      ? { text: t("users.verify.partial"), className: "text-amber-700 dark:text-amber-400" }
+      : { text: t("users.verify.failed"), className: "text-destructive" };
+
+  return (
+    <div className="space-y-2 rounded-lg border p-2.5">
+      <p className={cn("text-sm font-medium", headline.className)}>{headline.text}</p>
+      <ul className="space-y-1.5">
+        {result.checks.map((c) => {
+          const { Icon, className } = CHECK_ICON[c.status];
+          const value = c.key === "did" && c.value ? formatPhone(c.value) : (c.value ?? "—");
+          return (
+            <li key={c.key} className="flex items-start gap-2 text-xs">
+              <Icon className={cn("mt-0.5 size-3.5 shrink-0", className)} />
+              <span className="min-w-0">
+                <span className="font-medium">{t(`users.verify.labels.${c.key}`)}</span>
+                <span className="block text-muted-foreground">
+                  {t(`users.verify.reasons.${c.reason}`, { value })}
+                </span>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {result.canResync ? (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="min-h-11 md:min-h-8"
+          onClick={onResync}
+          disabled={resyncing}
+        >
+          {resyncing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+          {t("users.verify.resync")}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 function UserEditSheet({
   user,
   currentUserId,
@@ -658,6 +986,8 @@ function UserEditSheet({
   const [voipLoading, setVoipLoading] = useState<string | null>(null);
   const [subUsername, setSubUsername] = useState("");
   const [createSubOpen, setCreateSubOpen] = useState(false);
+  const [provision, setProvision] = useState<ProvisionState>({ state: "idle" });
+  const [verifyResult, setVerifyResult] = useState<VerifyResponse | null>(null);
 
   if (!user) return null;
   const isSelf = user.id === currentUserId;
@@ -763,12 +1093,9 @@ function UserEditSheet({
   const createSubaccount = async () => {
     setVoipLoading("create");
     try {
-      const res = await api<{ account: string; password: string }>("/api/admin/voipms/subaccounts", {
-        method: "POST",
-        body: JSON.stringify({ userId: user.id, username: subUsername }),
-      });
+      const res = await provisionLine(user.id, subUsername);
       setForm((f) => ({ ...f, sipUsername: res.account }));
-      onUpdated({ ...user, sipUsername: res.account, hasSipPassword: true });
+      onUpdated(res.user);
       setSubaccounts(null); // le cache d'affectations n'est plus à jour
       setSubsOpen(false);
       setCreateSubOpen(false);
@@ -777,6 +1104,69 @@ function UserEditSheet({
         value: res.password,
         hint: t("users.voip.sipPasswordSavedHint"),
       });
+    } catch (err) {
+      toast.error(errorMessage(t, err), { description: t("users.voip.ipHint") });
+    } finally {
+      setVoipLoading(null);
+    }
+  };
+
+  /**
+   * Configuration automatique : nom de sous-compte dérivé côté serveur, mot de
+   * passe généré et chiffré. Idempotent — rejouable sans risque de doublon.
+   */
+  const autoProvision = async () => {
+    setVoipLoading("provision");
+    setProvision({ state: "running" });
+    try {
+      const res = await provisionLine(user.id);
+      setForm((f) => ({ ...f, sipUsername: res.account }));
+      onUpdated(res.user);
+      setSubaccounts(null);
+      setSubsOpen(false);
+      setProvision({ state: "done", account: res.account, reused: !res.created });
+      setSecret({
+        title: t("users.voip.sipPasswordCreated"),
+        value: res.password,
+        hint: t("users.voip.sipPasswordSavedHint"),
+      });
+    } catch (err) {
+      setProvision({ state: "error", message: errorMessage(t, err) });
+    } finally {
+      setVoipLoading(null);
+    }
+  };
+
+  /** Confronte les champs enregistrés à ce que voip.ms rapporte réellement. */
+  const runVerify = async () => {
+    setVoipLoading("verify");
+    setVerifyResult(null);
+    try {
+      const res = await api<VerifyResponse>(`/api/admin/voipms/verify?userId=${user.id}`, {
+        signal: AbortSignal.timeout(PROVISION_TIMEOUT_MS),
+      });
+      setVerifyResult(res);
+      onUpdated(res.user);
+    } catch (err) {
+      toast.error(errorMessage(t, err), { description: t("users.voip.ipHint") });
+    } finally {
+      setVoipLoading(null);
+    }
+  };
+
+  /** Adopte le mot de passe que voip.ms utilise vraiment, puis revérifie. */
+  const resyncPassword = async () => {
+    setVoipLoading("resync");
+    try {
+      const res = await api<{ account: string; user: AdminUserDto }>("/api/admin/voipms/verify", {
+        method: "POST",
+        body: JSON.stringify({ userId: user.id }),
+        signal: AbortSignal.timeout(PROVISION_TIMEOUT_MS),
+      });
+      onUpdated(res.user);
+      toast.success(t("users.verify.resyncDone"));
+      setVoipLoading(null);
+      await runVerify();
     } catch (err) {
       toast.error(errorMessage(t, err), { description: t("users.voip.ipHint") });
     } finally {
@@ -795,7 +1185,7 @@ function UserEditSheet({
         },
       );
       setForm((f) => ({ ...f, didNumber: res.did }));
-      onUpdated({ ...user, didNumber: res.did });
+      onUpdated({ ...user, didNumber: res.did, phone: phoneWithDid(user.phone, true) });
       announceReleased(res.released);
       toast.success(t("users.voip.routed"));
     } catch (err) {
@@ -805,13 +1195,19 @@ function UserEditSheet({
     }
   };
 
+  /**
+   * M\u00eame forme que la d\u00e9rivation serveur : pr\u00e9nom pli\u00e9 en ASCII, sans le
+   * pr\u00e9fixe du compte principal (voip.ms l'ajoute lui-m\u00eame). \u00ab Alex-Honor\u00e9 \u00bb \u2192
+   * \u00ab alexhonore \u00bb. L'admin reste libre de le remplacer.
+   */
   const suggestedUsername = () => {
-    const first = (user.name.split(/\s+/)[0] ?? "agent")
+    const first = (user.name.split(/\s+/)[0] ?? "")
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9]/g, "");
-    return `551013_${first || "agent"}`;
+      .replace(/[^a-z0-9_]/g, "")
+      .slice(0, 12);
+    return first.length >= 2 ? first : "agent";
   };
 
   // ── Conflits d'affectation (dérivés des listes voip.ms chargées) ──
@@ -910,8 +1306,63 @@ function UserEditSheet({
 
           {/* ── VoIP ── */}
           <section className="space-y-3">
-            <h3 className="text-sm font-semibold">{t("users.voip.title")}</h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">{t("users.voip.title")}</h3>
+              <PhoneBadge phone={user.phone} />
+            </div>
             <p className="text-xs text-muted-foreground">{t("users.voip.desc")}</p>
+
+            {/* Deux gestes suffisent : tout configurer, ou savoir ce qui cloche. */}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="min-h-11 md:min-h-8"
+                onClick={() => void autoProvision()}
+                disabled={voipLoading !== null}
+              >
+                {voipLoading === "provision" ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Zap className="size-4" />
+                )}
+                {t("users.provision.auto")}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="min-h-11 md:min-h-8"
+                onClick={() => void runVerify()}
+                disabled={voipLoading !== null}
+              >
+                {voipLoading === "verify" ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <ShieldCheck className="size-4" />
+                )}
+                {t("users.verify.action")}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">{t("users.provision.autoHint")}</p>
+
+            {provision.state !== "idle" ? (
+              <ProvisionStatus status={provision} onRetry={() => void autoProvision()} />
+            ) : null}
+            {voipLoading === "verify" ? (
+              <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" />
+                {t("users.verify.running")}
+              </p>
+            ) : null}
+            {verifyResult ? (
+              <VerifyChecklist
+                result={verifyResult}
+                onResync={() => void resyncPassword()}
+                resyncing={voipLoading === "resync"}
+              />
+            ) : null}
 
             <div className="space-y-1.5">
               <Label htmlFor="edit-sip-user">{t("users.voip.sipUsername")}</Label>

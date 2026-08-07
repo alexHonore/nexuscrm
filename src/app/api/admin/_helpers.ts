@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import type { z } from "zod";
 import { users } from "@/db/schema";
 import { VoipMsError } from "@/lib/voipms";
+import { computePhoneStatus, sipGatewayConfigured } from "./users/_phone-status";
 
 // ── Générateurs de mots de passe ─────────────────────────────────────────────
 
@@ -80,7 +81,7 @@ export function voipmsErrorResponse(err: unknown): NextResponse {
 
 // ── Sérialisation utilisateur (jamais de secrets) ────────────────────────────
 
-export function toAdminUser(u: typeof users.$inferSelect) {
+export function toAdminUser(u: typeof users.$inferSelect, gateway = sipGatewayConfigured()) {
   return {
     id: u.id,
     name: u.name,
@@ -91,6 +92,8 @@ export function toAdminUser(u: typeof users.$inferSelect) {
     sipUsername: u.sipUsername,
     hasSipPassword: Boolean(u.sipPasswordEnc),
     didNumber: u.didNumber,
+    // Diagnostic téléphonie — booléens seulement, jamais le secret ni l'URL.
+    phone: computePhoneStatus(u, gateway),
     lastLoginAt: u.lastLoginAt ? u.lastLoginAt.toISOString() : null,
     createdAt: u.createdAt.toISOString(),
   };

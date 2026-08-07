@@ -5,10 +5,10 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
-import { encryptSecret } from "@/lib/crypto";
-import { createSubAccount, getSubAccounts, setSubAccountPassword } from "@/lib/voipms";
-import { generateSipPassword, readJson, voipmsErrorResponse } from "../../_helpers";
+import { getSubAccounts } from "@/lib/voipms";
+import { readJson, toAdminUser, voipmsErrorResponse } from "../../_helpers";
 import { indexBySipAccount, loadAssignments } from "../_assignments";
+import { provisionSipLine, SIP_USERNAME_RE } from "../_provisioning";
 
 /**
  * Liste les sous-comptes voip.ms annotés avec l'utilisateur qui les emploie
@@ -54,15 +54,27 @@ export async function GET() {
 
 const createSchema = z.object({
   userId: z.uuid(),
-  username: z
-    .string()
-    .trim()
-    .regex(/^[A-Za-z0-9_]{2,32}$/),
+  /**
+   * Absent ⇒ le nom est DÉRIVÉ du nom/courriel de la personne (configuration
+   * automatique déclenchée juste après la création du compte).
+   */
+  username: z.string().trim().regex(SIP_USERNAME_RE).optional(),
 });
 
 /**
- * Crée un sous-compte SIP voip.ms pour un utilisateur : mot de passe SIP fort
- * généré, montré UNE fois et sauvegardé chiffré sur l'utilisateur.
+ * voip.ms est lent : on prend tout le budget d'exécution disponible. Si la
+ * plateforme coupe quand même, le compte utilisateur reste créé et « Réessayer »
+ * récupère la ligne (le provisionnement est idempotent).
+ */
+export const maxDuration = 60;
+
+/**
+ * Provisionne la ligne SIP d'un utilisateur : sous-compte voip.ms créé (ou
+ * repris s'il existe déjà), mot de passe fort montré UNE fois et sauvegardé
+ * chiffré sur l'utilisateur.
+ *
+ * Idempotent et auto-réparateur — voir `../_provisioning.ts`. Rejouer l'appel
+ * (bouton « Réessayer ») est donc toujours sûr.
  */
 export async function POST(req: Request) {
   const admin = await apiAdmin();
@@ -74,57 +86,29 @@ export async function POST(req: Request) {
   const target = await db.query.users.findFirst({ where: eq(users.id, body.userId) });
   if (!target) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  let password = generateSipPassword();
-  const callerId = target.didNumber ? target.didNumber.replace(/\D/g, "").slice(-10) : undefined;
   try {
-    let account: string | null = null;
-    try {
-      const res = (await createSubAccount({
-        username: body.username,
-        password,
-        description: target.name,
-        calleridNumber: callerId,
-      })) as { account?: string };
-      account = res.account ?? null;
-    } catch (err) {
-      // L'API voip.ms est lente et irrégulière (8 s… parfois > 90 s) : la
-      // création peut RÉUSSIR chez voip.ms alors que la réponse se perd, ou le
-      // sous-compte peut déjà exister. Plutôt que d'échouer et de laisser le
-      // téléphoniste sans ligne, on relit la liste : si le sous-compte est là,
-      // on reprend son mot de passe (voip.ms le renvoie en clair) et on
-      // l'enregistre chiffré. L'opération devient donc idempotente.
-      const existing = (await getSubAccounts().catch(() => [])).find(
-        (a) => a.username === body.username,
-      );
-      if (!existing) throw err;
-      if (existing.password) {
-        password = existing.password;
-      } else {
-        await setSubAccountPassword(existing.id, password, callerId);
-      }
-      account = existing.account;
-    }
-
-    // Nom de compte complet ("compte_sousnom") — renvoyé par l'API ou retrouvé via la liste.
-    if (!account) {
-      const accounts = await getSubAccounts().catch(() => []);
-      account = accounts.find((a) => a.username === body.username)?.account ?? body.username;
-    }
-
-    await db
-      .update(users)
-      .set({ sipUsername: account, sipPasswordEnc: encryptSecret(password), updatedAt: new Date() })
-      .where(eq(users.id, target.id));
+    const result = await provisionSipLine(target, body.username);
 
     await logAudit({
       userId: admin.id,
       action: "voipms.subaccount_create",
       entity: "user",
       entityId: target.id,
-      detail: { account },
+      detail: {
+        account: result.account,
+        created: result.created,
+        derived: result.derived,
+      },
     });
 
-    return NextResponse.json({ account, password });
+    const [updated] = await db.select().from(users).where(eq(users.id, target.id));
+    return NextResponse.json({
+      account: result.account,
+      password: result.password,
+      created: result.created,
+      derived: result.derived,
+      user: toAdminUser(updated),
+    });
   } catch (err) {
     return voipmsErrorResponse(err);
   }

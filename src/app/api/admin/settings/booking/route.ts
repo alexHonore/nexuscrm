@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { logAudit } from "@/lib/audit";
+import { diffFields, logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { bookingSettingsSchema, getSetting, setSetting } from "@/lib/settings";
 import { readJson } from "../../_helpers";
 
 const patchSchema = bookingSettingsSchema.partial();
+const BOOKING_FIELDS = Object.keys(bookingSettingsSchema.shape);
 
 export async function POST(req: Request) {
   const admin = await apiAdmin();
@@ -17,7 +18,13 @@ export async function POST(req: Request) {
   const next = bookingSettingsSchema.parse({ ...current, ...body });
   await setSetting("booking", next);
 
-  await logAudit({ userId: admin.id, action: "settings.booking", entity: "settings", detail: body });
+  const changes = diffFields(current, next, BOOKING_FIELDS);
+  await logAudit({
+    userId: admin.id,
+    action: "settings.booking",
+    entity: "settings",
+    detail: { ...body, ...(changes ? { changes } : {}) },
+  });
 
   return NextResponse.json({ booking: next });
 }

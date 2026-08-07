@@ -36,8 +36,8 @@ function mmss(totalSec: number): string {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 }
 
-function proxyUrl(recordingUrl: string): string {
-  return `/api/admin/recordings?url=${encodeURIComponent(recordingUrl)}`;
+function proxyUrl(recordingUrl: string, callId: string): string {
+  return `/api/admin/recordings?url=${encodeURIComponent(recordingUrl)}&callId=${encodeURIComponent(callId)}`;
 }
 
 function DirectionIcon({ direction }: { direction: "outbound" | "inbound" }) {
@@ -122,7 +122,7 @@ function RecordingCell({
         controls
         autoPlay
         preload="none"
-        src={proxyUrl(row.recordingUrl)}
+        src={proxyUrl(row.recordingUrl, row.id)}
         className={compact ? "h-11 min-w-0 flex-1" : "h-8 w-60"}
       />
       <Button

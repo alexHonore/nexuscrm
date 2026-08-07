@@ -4,11 +4,14 @@ import { logAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
- * GET /api/admin/recordings?url=<url voip.ms>
+ * GET /api/admin/recordings?url=<url voip.ms>&callId=<uuid>
  * Proxy de lecture des enregistrements d'appels : l'admin écoute via l'app
  * sans exposer l'URL voip.ms au navigateur d'un tiers. Hôte strictement
- * limité à voip.ms ; chaque écoute est auditée.
+ * limité à voip.ms ; chaque écoute est auditée (rattachée à l'appel via
+ * callId quand il est fourni).
  */
 export async function GET(req: NextRequest) {
   const auth = await apiAdmin();
@@ -18,6 +21,8 @@ export async function GET(req: NextRequest) {
   if (!rawUrl) {
     return NextResponse.json({ error: "missing_url" }, { status: 400 });
   }
+  const rawCallId = req.nextUrl.searchParams.get("callId");
+  const callId = rawCallId && UUID_RE.test(rawCallId) ? rawCallId : undefined;
 
   let target: URL;
   try {
@@ -36,7 +41,8 @@ export async function GET(req: NextRequest) {
   await logAudit({
     userId: auth.id,
     action: "recording.play",
-    entity: "recording",
+    entity: "call",
+    entityId: callId,
     detail: { url: target.toString() },
   });
 

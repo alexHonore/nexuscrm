@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { categories } from "@/db/schema";
-import { logAudit } from "@/lib/audit";
+import { diffFields, logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { readJson } from "../_helpers";
 
@@ -27,12 +27,13 @@ export async function POST(req: Request) {
     .values({ ...body, isSystem: false, sortOrder: (last?.sortOrder ?? -1) + 1 })
     .returning();
 
+  const changes = diffFields(null, created, ["nameFr", "nameEn", "color", "sortOrder"]);
   await logAudit({
     userId: admin.id,
     action: "category.create",
     entity: "category",
     entityId: String(created.id),
-    detail: { nameFr: created.nameFr },
+    detail: { nameFr: created.nameFr, ...(changes ? { changes } : {}) },
   });
 
   return NextResponse.json({ category: created });

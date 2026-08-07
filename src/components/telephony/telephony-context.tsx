@@ -95,6 +95,9 @@ type TelephonyConfigResponse = {
 
 const KNOWN_ERRORS = new Set([
   "mic_denied",
+  "mic_unavailable",
+  "mic_timeout",
+  "dial_timeout",
   "not_registered",
   "already_in_call",
   "busy",
@@ -178,6 +181,11 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
 
     const showError = (code: string) => {
       const { t: tt } = i18nRef.current;
+      if (code === "mic_prompt") {
+        // Pas une erreur : l'invite micro du navigateur attend une réponse.
+        toast.info(tt("errors.mic_prompt"));
+        return;
+      }
       toast.error(KNOWN_ERRORS.has(code) ? tt(`errors.${code}`) : tt("errors.call_failed"));
     };
 

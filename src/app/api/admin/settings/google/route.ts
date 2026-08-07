@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { logAudit } from "@/lib/audit";
+import { diffFields, logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { getSetting, setSetting } from "@/lib/settings";
 import { readJson } from "../../_helpers";
@@ -18,11 +18,12 @@ export async function POST(req: Request) {
   const current = await getSetting("google");
   await setSetting("google", { ...current, calendarId: body.calendarId });
 
+  const changes = diffFields(current, body, ["calendarId"]);
   await logAudit({
     userId: admin.id,
     action: "settings.google",
     entity: "settings",
-    detail: { calendarId: body.calendarId },
+    detail: { calendarId: body.calendarId, ...(changes ? { changes } : {}) },
   });
 
   return NextResponse.json({ ok: true });

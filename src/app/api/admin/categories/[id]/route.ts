@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { categories, clients } from "@/db/schema";
-import { logAudit } from "@/lib/audit";
+import { diffFields, logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { readJson } from "../../_helpers";
 
@@ -29,15 +29,18 @@ export async function PATCH(req: Request, ctx: Ctx) {
   const body = await readJson(req, patchSchema);
   if (body instanceof NextResponse) return body;
 
+  // Lu AVANT l'écriture : le journal doit pouvoir montrer l'ancienne valeur.
+  const before = await db.query.categories.findFirst({ where: eq(categories.id, id) });
   const [updated] = await db.update(categories).set(body).where(eq(categories.id, id)).returning();
   if (!updated) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
+  const changes = diffFields(before, updated, ["nameFr", "nameEn", "color"]);
   await logAudit({
     userId: admin.id,
     action: "category.update",
     entity: "category",
     entityId: String(id),
-    detail: body,
+    detail: { ...body, ...(changes ? { changes } : {}) },
   });
 
   return NextResponse.json({ category: updated });
@@ -71,12 +74,13 @@ export async function DELETE(req: Request, ctx: Ctx) {
     await tx.delete(categories).where(eq(categories.id, id));
   });
 
+  const changes = diffFields(target, null, ["nameFr", "nameEn", "color"]);
   await logAudit({
     userId: admin.id,
     action: "category.delete",
     entity: "category",
     entityId: String(id),
-    detail: { nameFr: target.nameFr, reassignTo },
+    detail: { nameFr: target.nameFr, reassignTo, ...(changes ? { changes } : {}) },
   });
 
   return NextResponse.json({ ok: true });

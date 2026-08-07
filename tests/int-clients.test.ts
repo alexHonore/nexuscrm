@@ -191,6 +191,13 @@ describe("intégrité des données clients", () => {
       const logs = await testDb.select().from(auditLogs).where(eq(auditLogs.action, "client.update"));
       expect(logs).toHaveLength(1);
       expect(logs[0].entityId).toBe(client.id);
+      // Le journal doit dire CE QUI a changé : ancienne valeur → nouvelle.
+      expect(logs[0].detail).toMatchObject({
+        changes: {
+          phone: { from: "+15145550188", to: "+14184761542" },
+          phoneAlt: { from: null, to: "+14389990000" },
+        },
+      });
     });
 
     it("rejette un téléphone invalide et laisse la fiche intacte", async () => {

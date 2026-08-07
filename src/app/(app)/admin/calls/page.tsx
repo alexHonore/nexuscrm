@@ -7,6 +7,7 @@ import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { CallsFilters } from "@/components/analytics/calls-filters";
 import { CallsList, type CallRow } from "@/components/analytics/calls-list";
+import { SyncCallsButton } from "@/components/analytics/sync-calls-button";
 import { APP_TZ, dayStartUtc, shiftDateStr } from "@/components/analytics/period";
 import { VizTheme } from "@/components/analytics/viz-theme";
 import { Button } from "@/components/ui/button";
@@ -163,9 +164,12 @@ export default async function CallsPage({
     <div className="nx-viz space-y-4 p-4 md:p-6">
       <VizTheme />
 
-      <header>
-        <h1 className="text-xl font-semibold tracking-tight">{t("callsPage.title")}</h1>
-        <p className="text-sm text-muted-foreground">{t("callsPage.subtitle")}</p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">{t("callsPage.title")}</h1>
+          <p className="text-sm text-muted-foreground">{t("callsPage.subtitle")}</p>
+        </div>
+        <SyncCallsButton />
       </header>
 
       <CallsFilters

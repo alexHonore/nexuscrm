@@ -186,6 +186,11 @@ describe("opérations d'administration", () => {
 
       const log = (await testDb.select().from(auditLogs)).find((l) => l.action === "user.update");
       expect(log?.detail).toMatchObject({ previousEmail: "ancien@nexus.ca" });
+      // Avant → après lisible dans le journal, sans jamais toucher aux secrets.
+      expect(log?.detail).toMatchObject({
+        changes: { email: { from: "ancien@nexus.ca", to: "nouveau@nexus.ca" } },
+      });
+      expect(JSON.stringify(log?.detail)).not.toMatch(/password|hash/i);
     });
 
     it("RÉGRESSION (corrigé) : un courriel déjà utilisé par un autre compte doit renvoyer 409 (le handler lève → 500)", async () => {

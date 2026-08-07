@@ -67,6 +67,10 @@
   },
   "errors": {
     "mic_denied": "Accès au microphone refusé. Autorisez le micro dans les réglages du navigateur puis réessayez.",
+    "mic_prompt": "Autorisez l'accès au microphone dans la fenêtre du navigateur pour lancer l'appel.",
+    "mic_timeout": "Impossible d'accéder au microphone (aucune réponse). Vérifiez l'autorisation du micro puis réessayez.",
+    "mic_unavailable": "Aucun microphone utilisable. Branchez ou autorisez un micro, puis réessayez.",
+    "dial_timeout": "Le service téléphonique ne répond pas. Reconnexion en cours — réessayez dans quelques secondes.",
     "not_registered": "La ligne n'est pas connectée. Vérifiez l'état de la ligne puis réessayez.",
     "already_in_call": "Un appel est déjà en cours.",
     "busy": "La ligne du correspondant est occupée.",

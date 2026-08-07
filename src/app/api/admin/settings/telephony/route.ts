@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { logAudit } from "@/lib/audit";
+import { diffFields, logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
-import { setSetting } from "@/lib/settings";
+import { getSetting, setSetting } from "@/lib/settings";
 import { readJson } from "../../_helpers";
 
 const schema = z.object({ provider: z.enum(["voipms", "twilio"]) });
@@ -15,13 +15,15 @@ export async function POST(req: Request) {
   const body = await readJson(req, schema);
   if (body instanceof NextResponse) return body;
 
+  const current = await getSetting("telephony");
   await setSetting("telephony", { provider: body.provider });
 
+  const changes = diffFields(current, body, ["provider"]);
   await logAudit({
     userId: admin.id,
     action: "settings.telephony",
     entity: "settings",
-    detail: { provider: body.provider },
+    detail: { provider: body.provider, ...(changes ? { changes } : {}) },
   });
 
   return NextResponse.json({ telephony: { provider: body.provider } });

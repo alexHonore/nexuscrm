@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { clients, sources } from "@/db/schema";
-import { logAudit } from "@/lib/audit";
+import { diffFields, logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { readJson } from "../../_helpers";
 
@@ -29,15 +29,18 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (body instanceof NextResponse) return body;
 
   try {
+    // Lu AVANT l'écriture : le journal doit pouvoir montrer l'ancienne valeur.
+    const before = await db.query.sources.findFirst({ where: eq(sources.id, id) });
     const [updated] = await db.update(sources).set(body).where(eq(sources.id, id)).returning();
     if (!updated) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
+    const changes = diffFields(before, updated, ["name", "color"]);
     await logAudit({
       userId: admin.id,
       action: "source.update",
       entity: "source",
       entityId: String(id),
-      detail: body,
+      detail: { ...body, ...(changes ? { changes } : {}) },
     });
 
     return NextResponse.json({ source: updated });
@@ -74,12 +77,13 @@ export async function DELETE(req: Request, ctx: Ctx) {
     await tx.delete(sources).where(eq(sources.id, id));
   });
 
+  const changes = diffFields(target, null, ["name", "color"]);
   await logAudit({
     userId: admin.id,
     action: "source.delete",
     entity: "source",
     entityId: String(id),
-    detail: { name: target.name, reassignTo },
+    detail: { name: target.name, reassignTo, ...(changes ? { changes } : {}) },
   });
 
   return NextResponse.json({ ok: true });

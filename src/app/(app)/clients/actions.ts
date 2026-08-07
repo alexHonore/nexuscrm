@@ -7,7 +7,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { appointments, clients, comments, followups, notifications, users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth/guards";
-import { logAudit } from "@/lib/audit";
+import { diffFields, logAudit } from "@/lib/audit";
 import { cancelEvent } from "@/lib/google";
 import { normalizePhone } from "@/lib/phone";
 import {
@@ -57,6 +57,24 @@ export type ClientFormInput = z.input<typeof clientFormSchema>;
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const timeStr = z.string().regex(/^\d{2}:\d{2}$/);
 
+/** Champs de la fiche client suivis par le journal d'audit (avant → après). */
+const CLIENT_AUDIT_FIELDS = [
+  "fullName",
+  "phone",
+  "phoneAlt",
+  "email",
+  "language",
+  "city",
+  "address",
+  "projectType",
+  "timing",
+  "budget",
+  "categoryId",
+  "sourceId",
+  "assignedToId",
+  "notes",
+] as const;
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Keep clients.nextFollowupAt = earliest OPEN follow-up (or null). */
@@ -94,33 +112,36 @@ export async function createClientAction(input: ClientFormInput): Promise<Action
   if (!phone) return { ok: false, error: "invalidPhone" };
   const phoneAlt = data.phoneAlt ? normalizePhone(data.phoneAlt) : null;
 
+  const values = {
+    fullName: data.fullName,
+    phone,
+    phoneAlt,
+    email: data.email,
+    language: data.language,
+    city: data.city,
+    address: data.address,
+    projectType: data.projectType,
+    timing: data.timing,
+    budget: data.budget,
+    categoryId: data.categoryId ?? null,
+    sourceId: data.sourceId ?? null,
+    assignedToId: data.assignedToId ?? null,
+    notes: data.notes,
+  };
+
   const [created] = await db
     .insert(clients)
-    .values({
-      fullName: data.fullName,
-      phone,
-      phoneAlt,
-      email: data.email,
-      language: data.language,
-      city: data.city,
-      address: data.address,
-      projectType: data.projectType,
-      timing: data.timing,
-      budget: data.budget,
-      categoryId: data.categoryId ?? null,
-      sourceId: data.sourceId ?? null,
-      assignedToId: data.assignedToId ?? null,
-      notes: data.notes,
-      createdById: user.id,
-    })
+    .values({ ...values, createdById: user.id })
     .returning({ id: clients.id });
 
+  // Création : « rien → valeur » pour chaque champ renseigné.
+  const changes = diffFields(null, values, CLIENT_AUDIT_FIELDS);
   await logAudit({
     userId: user.id,
     action: "client.create",
     entity: "client",
     entityId: created.id,
-    detail: { fullName: data.fullName, phone },
+    detail: { fullName: data.fullName, phone, ...(changes ? { changes } : {}) },
   });
   revalidateClient(created.id);
   return { ok: true, id: created.id };
@@ -146,32 +167,35 @@ export async function updateClientAction(
   if (!phone) return { ok: false, error: "invalidPhone" };
   const phoneAlt = data.phoneAlt ? normalizePhone(data.phoneAlt) : null;
 
+  const patch = {
+    fullName: data.fullName,
+    phone,
+    phoneAlt,
+    email: data.email,
+    language: data.language,
+    city: data.city,
+    address: data.address,
+    projectType: data.projectType,
+    timing: data.timing,
+    budget: data.budget,
+    sourceId: data.sourceId ?? null,
+    notes: data.notes,
+    // Un téléphoniste ne réassigne pas : le champ garde sa valeur actuelle.
+    ...(user.role === "admin" ? { assignedToId: data.assignedToId ?? null } : {}),
+  };
+
   await db
     .update(clients)
-    .set({
-      fullName: data.fullName,
-      phone,
-      phoneAlt,
-      email: data.email,
-      language: data.language,
-      city: data.city,
-      address: data.address,
-      projectType: data.projectType,
-      timing: data.timing,
-      budget: data.budget,
-      sourceId: data.sourceId ?? null,
-      notes: data.notes,
-      ...(user.role === "admin" ? { assignedToId: data.assignedToId ?? null } : {}),
-      updatedAt: new Date(),
-    })
+    .set({ ...patch, updatedAt: new Date() })
     .where(eq(clients.id, clientId));
 
+  const changes = diffFields(existing, { ...existing, ...patch }, CLIENT_AUDIT_FIELDS);
   await logAudit({
     userId: user.id,
     action: "client.update",
     entity: "client",
     entityId: clientId,
-    detail: { fullName: data.fullName, phone },
+    detail: { fullName: data.fullName, phone, ...(changes ? { changes } : {}) },
   });
   revalidateClient(clientId);
   return { ok: true, id: clientId };
@@ -195,12 +219,13 @@ export async function setClientCategoryAction(
     .set({ categoryId, updatedAt: new Date() })
     .where(eq(clients.id, clientId));
 
+  const changes = diffFields(existing, { categoryId }, ["categoryId"]);
   await logAudit({
     userId: user.id,
     action: "client.category",
     entity: "client",
     entityId: clientId,
-    detail: { from: existing.categoryId, to: categoryId },
+    detail: { from: existing.categoryId, to: categoryId, ...(changes ? { changes } : {}) },
   });
   revalidateClient(clientId);
   return { ok: true, id: clientId };
@@ -224,12 +249,13 @@ export async function assignClientAction(
     .set({ assignedToId, updatedAt: new Date() })
     .where(eq(clients.id, clientId));
 
+  const changes = diffFields(existing, { assignedToId }, ["assignedToId"]);
   await logAudit({
     userId: user.id,
     action: "client.assign",
     entity: "client",
     entityId: clientId,
-    detail: { from: existing.assignedToId, to: assignedToId },
+    detail: { from: existing.assignedToId, to: assignedToId, ...(changes ? { changes } : {}) },
   });
   revalidateClient(clientId);
   return { ok: true, id: clientId };
@@ -265,12 +291,18 @@ export async function deleteClientAction(clientId: string): Promise<ActionResult
 
   await db.delete(clients).where(eq(clients.id, clientId));
 
+  // Suppression : instantané de la fiche disparue (« valeur → rien »).
+  const changes = diffFields(existing, null, CLIENT_AUDIT_FIELDS);
   await logAudit({
     userId: user.id,
     action: "client.delete",
     entity: "client",
     entityId: clientId,
-    detail: { fullName: existing.fullName, phone: existing.phone },
+    detail: {
+      fullName: existing.fullName,
+      phone: existing.phone,
+      ...(changes ? { changes } : {}),
+    },
   });
   revalidatePath("/clients");
   revalidatePath("/dashboard");

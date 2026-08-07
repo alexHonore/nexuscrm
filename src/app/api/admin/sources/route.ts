@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { sources } from "@/db/schema";
-import { logAudit } from "@/lib/audit";
+import { diffFields, logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { readJson } from "../_helpers";
 
@@ -21,12 +21,13 @@ export async function POST(req: Request) {
   try {
     const [created] = await db.insert(sources).values(body).returning();
 
+    const changes = diffFields(null, created, ["name", "color"]);
     await logAudit({
       userId: admin.id,
       action: "source.create",
       entity: "source",
       entityId: String(created.id),
-      detail: { name: created.name },
+      detail: { name: created.name, ...(changes ? { changes } : {}) },
     });
 
     return NextResponse.json({ source: created });

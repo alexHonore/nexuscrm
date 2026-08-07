@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { appointments, calls, followups, users } from "@/db/schema";
-import { logAudit } from "@/lib/audit";
+import { diffFields, logAudit, secretChange } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { encryptSecret } from "@/lib/crypto";
@@ -24,6 +24,21 @@ const patchSchema = z.object({
 });
 
 type Ctx = { params: Promise<{ id: string }> };
+
+/**
+ * Champs du compte suivis par le journal d'audit (avant → après).
+ * Le mot de passe SIP en est absent : il est consigné à part, sous forme de
+ * marqueur — un secret ne doit JAMAIS atterrir dans `audit_logs`.
+ */
+const USER_AUDIT_FIELDS = [
+  "name",
+  "email",
+  "role",
+  "locale",
+  "isActive",
+  "didNumber",
+  "sipUsername",
+] as const;
 
 export async function PATCH(req: Request, ctx: Ctx) {
   const admin = await apiAdmin();
@@ -98,6 +113,11 @@ export async function PATCH(req: Request, ctx: Ctx) {
     });
 
     if (changed.length > 0) {
+      const changes = diffFields(target, updated, USER_AUDIT_FIELDS) ?? {};
+      // Mot de passe SIP : présence avant/après seulement, jamais la valeur.
+      if (changed.includes("sipPassword")) {
+        changes.sipPassword = secretChange(Boolean(target.sipPasswordEnc));
+      }
       await logAudit({
         userId: admin.id,
         action: "user.update",
@@ -108,6 +128,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
           email: updated.email,
           ...(changed.includes("email") ? { previousEmail: target.email } : {}),
           ...(released.length > 0 ? { didReleasedFrom: released } : {}),
+          ...(Object.keys(changes).length > 0 ? { changes } : {}),
         },
       });
     }
@@ -146,12 +167,14 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   // Les clients assignés sont automatiquement désassignés (FK ON DELETE SET NULL).
   await db.delete(users).where(eq(users.id, id));
 
+  // Instantané du compte supprimé (« valeur → rien »), secrets exclus.
+  const changes = diffFields(target, null, USER_AUDIT_FIELDS);
   await logAudit({
     userId: admin.id,
     action: "user.delete",
     entity: "user",
     entityId: id,
-    detail: { email: target.email, name: target.name },
+    detail: { email: target.email, name: target.name, ...(changes ? { changes } : {}) },
   });
 
   return NextResponse.json({ ok: true });

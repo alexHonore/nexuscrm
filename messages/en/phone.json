@@ -67,6 +67,10 @@
   },
   "errors": {
     "mic_denied": "Microphone access denied. Allow the microphone in your browser settings and try again.",
+    "mic_prompt": "Allow microphone access in the browser prompt to start the call.",
+    "mic_timeout": "Could not access the microphone (no response). Check the mic permission and try again.",
+    "mic_unavailable": "No usable microphone. Connect or allow a microphone, then try again.",
+    "dial_timeout": "The phone service is not responding. Reconnecting — try again in a few seconds.",
     "not_registered": "The line is not connected. Check the line status and try again.",
     "already_in_call": "A call is already in progress.",
     "busy": "The other party's line is busy.",
