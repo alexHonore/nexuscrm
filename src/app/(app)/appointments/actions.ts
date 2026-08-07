@@ -11,6 +11,7 @@ import { appointments, categories, clients, comments, notifications, users } fro
 import { logAudit } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth/guards";
 import {
+  bookingEventTitle,
   cancelEvent,
   createBookingEvent,
   GoogleNotConnectedError,
@@ -257,7 +258,8 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
           clientId: client.id,
           userId: user.id,
           type: data.type,
-          title: `RDV — ${client.fullName}`,
+          // Même libellé que l'événement Google, pour que le CRM et l'agenda concordent.
+          title: bookingEventTitle(client.fullName),
           startsAt,
           endsAt,
           location,

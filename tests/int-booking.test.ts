@@ -58,14 +58,20 @@ const googleMock = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/lib/google", () => ({
-  GoogleNotConnectedError: googleMock.GoogleNotConnectedError,
-  createBookingEvent: googleMock.createBookingEvent,
-  cancelEvent: googleMock.cancelEvent,
-  freeBusy: googleMock.freeBusy,
-  GOOGLE_STATE_COOKIE: "google_oauth_state",
-  GOOGLE_SCOPES: [],
-}));
+vi.mock("@/lib/google", async (importOriginal) => {
+  // Les helpers purs (titre, palette de couleurs) restent RÉELS : seul le
+  // réseau Google est simulé.
+  const actual = await importOriginal<typeof import("@/lib/google")>();
+  return {
+    ...actual,
+    GoogleNotConnectedError: googleMock.GoogleNotConnectedError,
+    createBookingEvent: googleMock.createBookingEvent,
+    cancelEvent: googleMock.cancelEvent,
+    freeBusy: googleMock.freeBusy,
+    GOOGLE_STATE_COOKIE: "google_oauth_state",
+    GOOGLE_SCOPES: [],
+  };
+});
 
 // ── Imports produit (après les mocks) ────────────────────────────────────────
 
@@ -223,7 +229,8 @@ describe("createAppointment", () => {
     expect(appt.userId).toBe(ids.caller);
     expect(appt.type).toBe("meet");
     expect(appt.status).toBe("scheduled");
-    expect(appt.title).toBe("RDV — Marie Tremblay");
+    // Le CRM porte le même libellé que l'événement Google.
+    expect(appt.title).toBe("1re Rencontre avec Marie - Alex-Honoré");
     expect(appt.startsAt.toISOString()).toBe(SLOT);
     expect(appt.endsAt.toISOString()).toBe("2026-08-10T15:30:00.000Z");
     expect(appt.googleEventId).toBe("gcal_evt_001");
