@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
+import { isUniqueViolation } from "@/lib/db-errors";
 import { hashPassword } from "@/lib/auth/password";
 import { generateTempPassword, readJson, toAdminUser } from "../_helpers";
 
@@ -45,8 +46,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ user: toAdminUser(created), tempPassword });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "";
-    if (message.includes("users_email_unique") || message.includes("duplicate key")) {
+    if (isUniqueViolation(err, "users_email_unique")) {
       return NextResponse.json({ error: "email_taken" }, { status: 409 });
     }
     throw err;

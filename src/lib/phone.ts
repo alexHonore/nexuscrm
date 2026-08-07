@@ -3,10 +3,17 @@
  * Usable on both server and client.
  */
 
+/**
+ * Extensions à écarter avant normalisation : « x22 », « ext. 22 », « poste 22 »,
+ * « #22 »… Sinon les chiffres de l'extension se recollent au numéro et le
+ * client n'est plus reconnu lors d'un appel entrant.
+ */
+const EXTENSION_RE = /(?:\s|^)(?:x|ext|ext\.|extension|p|poste|#)\s*\.?\s*\d{1,6}\s*$/i;
+
 /** Normalize to E.164. "418-476-1542" → "+14184761542". Returns null if unusable. */
 export function normalizePhone(input: string | null | undefined): string | null {
   if (!input) return null;
-  const trimmed = input.trim();
+  const trimmed = input.trim().replace(EXTENSION_RE, "").trim();
   if (!trimmed) return null;
   const hasPlus = trimmed.startsWith("+");
   const digits = trimmed.replace(/\D/g, "");

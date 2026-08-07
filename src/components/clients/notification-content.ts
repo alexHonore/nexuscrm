@@ -33,7 +33,11 @@ export function commentExcerpt(body: string, max = 140): string {
 /** Extract mentioned user ids from "@[Name](uuid)" tokens (deduplicated). */
 export function extractMentionIds(body: string): string[] {
   const ids = new Set<string>();
-  for (const match of body.matchAll(/@\[[^\]]+\]\(([0-9a-fA-F-]{36})\)/g)) {
+  // UUID strict : un « id » de 36 caractères non conforme (ex. 36 tirets) ferait
+  // échouer la requête Postgres sur une colonne uuid.
+  for (const match of body.matchAll(
+    /@\[[^\]]+\]\(([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\)/g,
+  )) {
     ids.add(match[1]);
   }
   return [...ids];

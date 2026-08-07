@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { appointments, calls, followups, users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
+import { isUniqueViolation } from "@/lib/db-errors";
 import { encryptSecret } from "@/lib/crypto";
 import { normalizePhone } from "@/lib/phone";
 import { releaseDidFromOthers } from "../../voipms/_assignments";
@@ -113,8 +114,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
     return NextResponse.json({ user: toAdminUser(updated), released });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "";
-    if (message.includes("users_email_unique") || message.includes("duplicate key")) {
+    if (isUniqueViolation(err, "users_email_unique")) {
       return NextResponse.json({ error: "email_taken" }, { status: 409 });
     }
     throw err;

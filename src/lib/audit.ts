@@ -48,10 +48,48 @@ function isPublicIp(value: string): boolean {
     return true;
   }
 
-  if (!ip.includes(":")) return false; // ni IPv4 valide ni IPv6
+  // IPv6 : la forme doit être VALIDE, pas seulement « contenir un ":" », sinon
+  // n'importe quelle chaîne (JSON, injection…) finirait dans audit_logs.ip et
+  // comme clé du limiteur par IP.
+  if (!isValidIpv6(ip)) return false;
   if (/^f[cd][0-9a-f]{2}:/.test(ip)) return false; // fc00::/7 (unique local)
   if (/^fe[89ab][0-9a-f]:/.test(ip)) return false; // fe80::/10 (link-local)
   return true;
+}
+
+/** Validation IPv6 stricte (avec « :: » compressé et suffixe IPv4 éventuel). */
+function isValidIpv6(value: string): boolean {
+  if (!value.includes(":")) return false;
+  if (/[^0-9a-f:.]/.test(value)) return false;
+  if ((value.match(/::/g) ?? []).length > 1) return false;
+
+  const [head, tail = null] = value.split("::");
+  const parse = (part: string): string[] | null => {
+    if (part === "") return [];
+    const groups = part.split(":");
+    const out: string[] = [];
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
+      // Un groupe IPv4 n'est permis qu'en dernière position (::ffff:1.2.3.4).
+      if (g.includes(".")) {
+        if (i !== groups.length - 1) return null;
+        const v4 = g.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+        if (!v4 || v4.slice(1).some((o) => Number(o) > 255)) return null;
+        out.push("0", "0"); // un IPv4 occupe deux groupes
+        continue;
+      }
+      if (!/^[0-9a-f]{1,4}$/.test(g)) return null;
+      out.push(g);
+    }
+    return out;
+  };
+
+  const left = parse(head);
+  if (left === null) return false;
+  if (tail === null) return left.length === 8; // pas de "::" → 8 groupes exacts
+  const right = parse(tail);
+  if (right === null) return false;
+  return left.length + right.length <= 7; // "::" remplace ≥ 1 groupe nul
 }
 
 /** Première IP publique d'une liste "a, b, c" (format x-forwarded-for). */

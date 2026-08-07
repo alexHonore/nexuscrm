@@ -35,6 +35,21 @@ export function durationFor(settings: BookingSettings, type: AppointmentType): n
 
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * Vrai seulement si la date existe VRAIMENT au calendrier : « 2026-02-30 »
+ * passe la regex mais provoque un débordement de mois (Invalid Date plus loin,
+ * puis une requête SQL invalide).
+ */
+export function isRealDate(date: string): boolean {
+  if (!DATE_RE.test(date)) return false;
+  const [y, m, d] = date.split("-").map(Number);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const probe = new Date(Date.UTC(y, m - 1, d));
+  return (
+    probe.getUTCFullYear() === y && probe.getUTCMonth() === m - 1 && probe.getUTCDate() === d
+  );
+}
+
 function overlaps(slotStart: Date, slotEnd: Date, busy: BusyInterval[], bufferMin: number): boolean {
   return busy.some(
     (b) =>
@@ -64,7 +79,7 @@ export async function computeAvailability(
     defaultLocation: settings.inPersonDefaultLocation,
   };
 
-  if (!DATE_RE.test(date)) return { ...base, slots: [], googleConnected: true };
+  if (!isRealDate(date)) return { ...base, slots: [], googleConnected: true };
 
   // Weekday of a calendar date is independent of timezone.
   const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();

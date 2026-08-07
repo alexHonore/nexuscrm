@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { apiUser } from "@/lib/auth/guards";
-import { computeAvailability, DATE_RE } from "./slots";
+import { computeAvailability, isRealDate } from "./slots";
 
 /**
  * GET /api/availability?date=YYYY-MM-DD&type=meet|inperson
@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   const date = params.get("date") ?? "";
   const type = params.get("type") === "inperson" ? "inperson" : "meet";
 
-  if (!DATE_RE.test(date)) {
+  if (!isRealDate(date)) {
     return NextResponse.json({ error: "invalid_date" }, { status: 400 });
   }
 
