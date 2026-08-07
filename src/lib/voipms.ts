@@ -65,8 +65,14 @@ export type VoipMsSubAccount = {
 };
 
 export async function getSubAccounts(): Promise<VoipMsSubAccount[]> {
-  const r = await voipms<{ accounts: VoipMsSubAccount[] }>("getSubAccounts");
-  return r.accounts ?? [];
+  try {
+    const r = await voipms<{ accounts: VoipMsSubAccount[] }>("getSubAccounts");
+    return r.accounts ?? [];
+  } catch (err) {
+    // « no_account » = aucun sous-compte créé pour l'instant, pas une erreur.
+    if (err instanceof VoipMsError && err.status === "no_account") return [];
+    throw err;
+  }
 }
 
 /** Crée un sous-compte SIP (un par téléphoniste). */
