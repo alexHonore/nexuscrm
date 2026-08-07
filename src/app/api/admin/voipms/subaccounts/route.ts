@@ -8,21 +8,44 @@ import { apiAdmin } from "@/lib/auth/guards";
 import { encryptSecret } from "@/lib/crypto";
 import { createSubAccount, getSubAccounts } from "@/lib/voipms";
 import { generateSipPassword, readJson, voipmsErrorResponse } from "../../_helpers";
+import { indexBySipAccount, loadAssignments } from "../_assignments";
 
-/** Liste les sous-comptes voip.ms (pour le sélecteur de sipUsername). */
+/**
+ * Liste les sous-comptes voip.ms annotés avec l'utilisateur qui les emploie
+ * déjà (mêmes règles que les DID : un sous-compte = un téléphoniste).
+ * Les sous-comptes libres sont remontés en tête.
+ */
 export async function GET() {
   const admin = await apiAdmin();
   if (admin instanceof NextResponse) return admin;
 
   try {
-    const accounts = await getSubAccounts();
-    return NextResponse.json({
-      accounts: accounts.map((a) => ({
+    const [accounts, assignments] = await Promise.all([getSubAccounts(), loadAssignments()]);
+    const bySip = indexBySipAccount(assignments);
+
+    const enriched = accounts.map((a) => {
+      const holder =
+        bySip.get(a.account.trim().toLowerCase()) ?? bySip.get(a.username.trim().toLowerCase()) ?? null;
+      return {
         id: a.id,
         account: a.account,
         username: a.username,
         description: a.description,
-      })),
+        assignedUserId: holder?.id ?? null,
+        assignedUserName: holder?.name ?? null,
+        available: holder === null,
+      };
+    });
+
+    enriched.sort((a, b) => {
+      if (a.available !== b.available) return a.available ? -1 : 1;
+      return a.account.localeCompare(b.account);
+    });
+
+    return NextResponse.json({
+      accounts: enriched,
+      availableCount: enriched.filter((a) => a.available).length,
+      assignedCount: enriched.filter((a) => !a.available).length,
     });
   } catch (err) {
     return voipmsErrorResponse(err);

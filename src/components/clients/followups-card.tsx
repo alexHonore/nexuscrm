@@ -2,11 +2,11 @@
 
 import { addDays, format } from "date-fns";
 import { enUS, fr } from "date-fns/locale";
-import { formatInTimeZone, toZonedTime } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
 import { CalendarClockIcon, CheckIcon, PencilIcon, PlusIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   completeFollowupAction,
@@ -25,6 +25,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { emitDataChange } from "@/lib/live";
 import { cn } from "@/lib/utils";
 import { APP_TZ } from "./timezone";
 
@@ -36,6 +37,9 @@ export type FollowupData = {
   /** Computed server-side at render time. */
   overdue: boolean;
 };
+
+/** Préfixe des lignes optimistes (pas encore d'id serveur). */
+const DRAFT_PREFIX = "draft:";
 
 export function FollowupsCard({
   clientId,
@@ -57,8 +61,56 @@ export function FollowupsCard({
   const [time, setTime] = useState("09:00");
   const [note, setNote] = useState("");
 
-  const open = followups.filter((f) => !f.doneAt);
-  const done = followups.filter((f) => f.doneAt).slice(0, 5);
+  // ── État optimiste ─────────────────────────────────────────────────────────
+  // Les suivis s'affichent instantanément (créé / terminé / échéance déplacée)
+  // et reviennent en arrière avec un toast si le serveur refuse.
+  const [rows, setRows] = useState<FollowupData[]>(followups);
+  const inFlightRef = useRef(0);
+  useEffect(() => {
+    // Resynchronisation serveur seulement hors mutation en vol : un sondage de
+    // fond ne doit jamais effacer une action que l'utilisateur vient de faire.
+    if (inFlightRef.current === 0 && !pending) setRows(followups);
+  }, [followups, pending]);
+
+  /** Exécute une mutation optimiste : applique `next`, restaure en cas d'échec. */
+  const mutate = (
+    next: (current: FollowupData[]) => FollowupData[],
+    run: () => Promise<{ ok: boolean }>,
+    successMessage: string,
+  ) => {
+    let snapshot: FollowupData[] = [];
+    setRows((current) => {
+      snapshot = current;
+      return next(current);
+    });
+    inFlightRef.current += 1;
+    startTransition(async () => {
+      const res = await run();
+      inFlightRef.current -= 1;
+      if (res.ok) {
+        toast.success(successMessage);
+        // Le prochain suivi change la ligne du panneau et la carte pipeline.
+        emitDataChange("followups");
+        router.refresh();
+      } else {
+        setRows(snapshot);
+        toast.error(t("errors.generic"));
+      }
+    });
+  };
+
+  const { open, done } = useMemo(() => {
+    const sorted = [...rows];
+    return {
+      open: sorted
+        .filter((f) => !f.doneAt)
+        .sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt)),
+      done: sorted
+        .filter((f) => f.doneAt)
+        .sort((a, b) => Date.parse(b.doneAt ?? "") - Date.parse(a.doneAt ?? ""))
+        .slice(0, 5),
+    };
+  }, [rows]);
 
   const fmtDue = (iso: string) =>
     formatInTimeZone(new Date(iso), APP_TZ, "EEE d MMM yyyy, HH:mm", { locale: dfnsLocale });
@@ -77,43 +129,50 @@ export function FollowupsCard({
     setEditId(f.id);
   };
 
+  /** Échéance saisie (heure locale Toronto) en ISO UTC — pour l'affichage optimiste. */
+  const draftDueIso = (d: string, tm: string) => fromZonedTime(`${d}T${tm}:00`, APP_TZ).toISOString();
+
   const submitCreate = () => {
-    startTransition(async () => {
-      const res = await createFollowupAction({ clientId, date, time, note: note || undefined });
-      if (res.ok) {
-        toast.success(t("followups.created"));
-        setCreateOpen(false);
-        router.refresh();
-      } else {
-        toast.error(t("errors.generic"));
-      }
-    });
+    const dueAt = draftDueIso(date, time);
+    const draft: FollowupData = {
+      id: `${DRAFT_PREFIX}${Date.now()}`,
+      dueAt,
+      note: note.trim() || null,
+      doneAt: null,
+      overdue: Date.parse(dueAt) < Date.now(),
+    };
+    const payload = { clientId, date, time, note: note || undefined };
+    setCreateOpen(false);
+    mutate(
+      (current) => [...current, draft],
+      () => createFollowupAction(payload),
+      t("followups.created"),
+    );
   };
 
   const submitEdit = () => {
     if (!editId) return;
-    startTransition(async () => {
-      const res = await updateFollowupDueAction({ followupId: editId, date, time });
-      if (res.ok) {
-        toast.success(t("followups.updated"));
-        setEditId(null);
-        router.refresh();
-      } else {
-        toast.error(t("errors.generic"));
-      }
-    });
+    const id = editId;
+    const dueAt = draftDueIso(date, time);
+    const payload = { followupId: id, date, time };
+    setEditId(null);
+    mutate(
+      (current) =>
+        current.map((f) =>
+          f.id === id ? { ...f, dueAt, overdue: !f.doneAt && Date.parse(dueAt) < Date.now() } : f,
+        ),
+      () => updateFollowupDueAction(payload),
+      t("followups.updated"),
+    );
   };
 
   const complete = (id: string) => {
-    startTransition(async () => {
-      const res = await completeFollowupAction(id);
-      if (res.ok) {
-        toast.success(t("followups.completed"));
-        router.refresh();
-      } else {
-        toast.error(t("errors.generic"));
-      }
-    });
+    const doneAt = new Date().toISOString();
+    mutate(
+      (current) => current.map((f) => (f.id === id ? { ...f, doneAt, overdue: false } : f)),
+      () => completeFollowupAction(id),
+      t("followups.completed"),
+    );
   };
 
   const dateTimeFields = (
@@ -170,12 +229,15 @@ export function FollowupsCard({
             <ul className="space-y-2">
               {open.map((f) => {
                 const overdue = f.overdue;
+                // Ligne optimiste : pas encore d'id serveur, actions inertes.
+                const isDraft = f.id.startsWith(DRAFT_PREFIX);
                 return (
                   <li
                     key={f.id}
                     className={cn(
-                      "flex items-center gap-2 rounded-lg border py-2 pr-1.5 pl-3",
+                      "flex items-center gap-2 rounded-lg border py-2 pr-1.5 pl-3 transition-opacity",
                       overdue && "border-l-4 border-l-destructive",
+                      isDraft && "opacity-60",
                     )}
                   >
                     <div className="min-w-0 flex-1">
@@ -200,6 +262,7 @@ export function FollowupsCard({
                       variant="ghost"
                       className="size-11 md:size-8"
                       aria-label={t("followups.editDue")}
+                      disabled={isDraft}
                       onClick={() => openEdit(f)}
                     >
                       <PencilIcon className="size-4" />
@@ -208,7 +271,7 @@ export function FollowupsCard({
                       variant="ghost"
                       className="size-11 text-emerald-600 md:size-8"
                       aria-label={t("followups.complete")}
-                      disabled={pending}
+                      disabled={isDraft}
                       onClick={() => complete(f.id)}
                     >
                       <CheckIcon className="size-5" />

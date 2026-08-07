@@ -1,12 +1,11 @@
 "use server";
 
 import { and, eq, gt, sql } from "drizzle-orm";
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/db";
 import { loginThrottle, users } from "@/db/schema";
-import { logAudit } from "@/lib/audit";
+import { getClientIp, logAudit } from "@/lib/audit";
 import { verifyPassword } from "@/lib/auth/password";
 import { createSession } from "@/lib/auth/session";
 
@@ -52,10 +51,12 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   if (!parsed.success) return { error: "invalid" };
   const { email, password, remember } = parsed.data;
 
-  const h = await headers();
-  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  // Pas d'IP exploitable (local, cron, en-têtes absents) → on saute le limiteur
+  // par IP au lieu de mettre tout le monde sous une clé partagée type « ::1 ».
+  const ip = await getClientIp();
+  const ipKey = ip ? `ip:${ip}` : null;
 
-  if ((await isThrottled(`ip:${ip}`)) || (await isThrottled(`email:${email}`))) {
+  if ((ipKey !== null && (await isThrottled(ipKey))) || (await isThrottled(`email:${email}`))) {
     return { error: "throttled" };
   }
 
@@ -63,7 +64,10 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   const valid = user ? await verifyPassword(password, user.passwordHash) : false;
 
   if (!user || !valid) {
-    await Promise.all([bumpThrottle(`ip:${ip}`), bumpThrottle(`email:${email}`)]);
+    await Promise.all([
+      ...(ipKey !== null ? [bumpThrottle(ipKey)] : []),
+      bumpThrottle(`email:${email}`),
+    ]);
     await logAudit({ action: "login.failed", detail: { email } });
     return { error: "invalid" };
   }

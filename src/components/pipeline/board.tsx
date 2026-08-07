@@ -10,13 +10,17 @@
  *
  * Drag & drop : événements HTML5 natifs seulement (desktop). Sur mobile,
  * le menu « Déplacer vers » de chaque carte fait le même travail.
+ *
+ * « Vivant » : le tableau se recharge sur GET /api/clients/board dès qu'une
+ * mutation locale le signale (useDataChange) et toutes les 20 s tant que
+ * l'onglet est visible — pour voir les fiches déplacées par les collègues.
  */
 
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useLocale, useTranslations } from "next-intl";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { setClientCategoryAction } from "@/app/(app)/clients/actions";
+import { emitDataChange, useDataChange, useVisiblePolling } from "@/lib/live";
 import { PipelineColumn } from "./board-column";
 
 export type PipelineCardData = {
@@ -52,6 +56,45 @@ export type MoveTargetData = {
 /** Type MIME du drag natif transportant l'id du client. */
 export const CLIENT_DRAG_MIME = "application/x-nexus-client";
 
+/** Cadence du rechargement de fond (collègues, leads entrants). */
+const BOARD_POLL_MS = 20_000;
+
+/** Couleur neutre de repli pour « Sans catégorie ». */
+const NO_CATEGORY_COLOR = "#94a3b8";
+
+/** Réponse de GET /api/clients/board (dates sérialisées en ISO). */
+type BoardPayload = {
+  columns: {
+    category: { id: number; nameFr: string; nameEn: string; color: string } | null;
+    total: number;
+    clients: {
+      id: string;
+      fullName: string;
+      phone: string;
+      city: string | null;
+      nextFollowupAt: string | null;
+      doNotCall: boolean;
+      lastDisposition: string | null;
+      updatedAt: string;
+    }[];
+  }[];
+};
+
+/** Empreinte d'affichage du tableau — évite un rendu inutile à chaque sondage. */
+function boardSignature(columns: PipelineColumnData[]): string {
+  return columns
+    .map(
+      (col) =>
+        `${columnKey(col.id)}#${col.name}#${col.total}#${col.cards
+          .map(
+            (c) =>
+              `${c.id}:${c.fullName}:${c.phone}:${c.city ?? ""}:${c.nextFollowupAt ?? ""}:${c.doNotCall ? 1 : 0}:${c.lastDisposition ?? ""}`,
+          )
+          .join(",")}`,
+    )
+    .join("|");
+}
+
 /** Clé React/DOM stable pour une colonne (id null inclus). */
 export function columnKey(id: number | null): string {
   return id === null ? "none" : String(id);
@@ -60,7 +103,7 @@ export function columnKey(id: number | null): string {
 export function PipelineBoard({
   initialColumns,
   targets,
-  now,
+  now: serverNow,
 }: {
   initialColumns: PipelineColumnData[];
   targets: MoveTargetData[];
@@ -68,19 +111,108 @@ export function PipelineBoard({
   now: number;
 }) {
   const t = useTranslations("pipeline");
-  const router = useRouter();
+  const locale = useLocale();
   const [columns, setColumns] = useState(initialColumns);
+  /** Référence « en retard » : suit le dernier chargement de données. */
+  const [now, setNow] = useState(serverNow);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [, startTransition] = useTransition();
   /** Déplacements en vol — bloque la resynchro serveur pendant ce temps. */
   const pendingMovesRef = useRef(0);
+  /** Rechargement de fond en cours. */
+  const refreshingRef = useRef(false);
+  /** Un rechargement a été demandé pendant qu'un autre était en vol. */
+  const rerunRef = useRef(false);
+  /** Incrémenté à chaque déplacement — invalide les réponses parties avant. */
+  const versionRef = useRef(0);
+  /** Drag en cours — remplacer les cartes casserait le glisser natif. */
+  const draggingRef = useRef(false);
 
-  // Resynchronise l'état local quand le payload serveur change (après un
-  // router.refresh()), sauf si un déplacement optimiste est encore en vol.
+  // Resynchronise l'état local quand un NOUVEAU payload serveur arrive (après
+  // un router.refresh() venu de la coquille), sauf si un déplacement optimiste
+  // ou un glisser est en cours : dans ce cas c'est l'état local qui fait foi.
   useEffect(() => {
-    if (pendingMovesRef.current === 0) setColumns(initialColumns);
-  }, [initialColumns]);
+    if (pendingMovesRef.current === 0 && !draggingRef.current) {
+      setColumns(initialColumns);
+      setNow(serverNow);
+    }
+  }, [initialColumns, serverNow]);
+
+  /**
+   * Rechargement de fond du tableau — même source que la page (getBoardData),
+   * mais sans re-rendre tout l'arbre serveur. Jamais appliqué si un
+   * déplacement optimiste est en vol : il gagne toujours.
+   */
+  const refreshBoard = useCallback(async function run(): Promise<void> {
+    if (pendingMovesRef.current > 0 || draggingRef.current) return;
+    if (refreshingRef.current) {
+      rerunRef.current = true;
+      return;
+    }
+    refreshingRef.current = true;
+    const startedVersion = versionRef.current;
+    try {
+      const res = await fetch("/api/clients/board");
+      if (!res.ok) return;
+      const data = (await res.json()) as BoardPayload;
+      // Un déplacement (ou un drag) a démarré pendant la requête → réponse
+      // périmée : elle écraserait le déplacement optimiste.
+      if (
+        pendingMovesRef.current > 0 ||
+        draggingRef.current ||
+        versionRef.current !== startedVersion
+      ) {
+        return;
+      }
+
+      const next: PipelineColumnData[] = data.columns.map((col) => {
+        const id = col.category?.id ?? null;
+        const target = targets.find((tg) => tg.id === id);
+        const fallbackName = col.category
+          ? locale === "en"
+            ? col.category.nameEn
+            : col.category.nameFr
+          : t("board.noCategory");
+        return {
+          id,
+          name: target?.name ?? fallbackName,
+          color: target?.color ?? col.category?.color ?? NO_CATEGORY_COLOR,
+          total: col.total,
+          cards: col.clients.map((c) => ({
+            id: c.id,
+            fullName: c.fullName,
+            phone: c.phone,
+            city: c.city,
+            nextFollowupAt: c.nextFollowupAt,
+            doNotCall: c.doNotCall,
+            lastDisposition: c.lastDisposition,
+            updatedAt: c.updatedAt,
+          })),
+        };
+      });
+
+      setNow(Date.now());
+      setColumns((current) => (boardSignature(current) === boardSignature(next) ? current : next));
+    } catch {
+      // Réseau indisponible : on retentera au prochain sondage.
+    } finally {
+      refreshingRef.current = false;
+      if (rerunRef.current) {
+        rerunRef.current = false;
+        await run();
+      }
+    }
+  }, [locale, t, targets]);
+
+  // Mutations locales (fiche client, suivis, déplacements) + collègues.
+  useDataChange(["clients", "followups"], () => {
+    versionRef.current += 1;
+    void refreshBoard();
+  });
+  useVisiblePolling(BOARD_POLL_MS, () => {
+    void refreshBoard();
+  });
 
   const moveCard = (cardId: string, toId: number | null) => {
     const from = columns.find((col) => col.cards.some((c) => c.id === cardId));
@@ -114,12 +246,15 @@ export function PipelineBoard({
 
     setColumns(next);
     pendingMovesRef.current += 1;
+    versionRef.current += 1;
     startTransition(async () => {
       const res = await setClientCategoryAction(cardId, toId);
       pendingMovesRef.current -= 1;
       if (res.ok) {
         if (target) toast.success(t("card.moved", { category: target.name }));
-        router.refresh();
+        // Le tableau se resynchronise via useDataChange (fetch léger), et le
+        // panneau /clients — s'il est monté — recharge sa liste au passage.
+        emitDataChange("clients");
       } else {
         setColumns(snapshot);
         toast.error(t("card.moveFailed"));
@@ -150,14 +285,19 @@ export function PipelineBoard({
             now={now}
             draggingId={draggingId}
             isDragOver={dragOverKey === key}
-            onCardDragStart={(id) => setDraggingId(id)}
+            onCardDragStart={(id) => {
+              draggingRef.current = true;
+              setDraggingId(id);
+            }}
             onCardDragEnd={() => {
+              draggingRef.current = false;
               setDraggingId(null);
               setDragOverKey(null);
             }}
             onDragOverColumn={() => setDragOverKey(key)}
             onDragLeaveColumn={() => setDragOverKey((k) => (k === key ? null : k))}
             onDropCard={(cardId) => {
+              draggingRef.current = false;
               setDraggingId(null);
               setDragOverKey(null);
               moveCard(cardId, column.id);

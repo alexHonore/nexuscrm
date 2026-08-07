@@ -19,7 +19,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useTransition } from "react";
 import { logoutAction, setLocaleAction } from "@/app/actions";
@@ -35,6 +35,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useDataChange, useVisiblePolling } from "@/lib/live";
 import { cn } from "@/lib/utils";
 
 export type ShellUser = {
@@ -73,6 +74,13 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin/settings", labelKey: "settings", icon: Settings },
 ];
 
+/**
+ * Cadence de rafraîchissement de la pastille « non lues ».
+ * Il n'existe pas de route de comptage dédiée : on redemande les données
+ * serveur (router.refresh()), et seulement quand l'onglet est au premier plan.
+ */
+const NOTIFICATIONS_POLL_MS = 30_000;
+
 function initials(name: string): string {
   return name
     .split(/\s+/)
@@ -94,7 +102,19 @@ export function AppShell({
 }) {
   const t = useTranslations("common");
   const pathname = usePathname();
+  const router = useRouter();
   const [, startTransition] = useTransition();
+
+  // `unreadCount` est rendu côté serveur : sans ça, la pastille reste figée
+  // jusqu'à un rechargement complet. On redemande les données serveur quand une
+  // notification change dans cet onglet, puis à intervalle tant que l'onglet est
+  // visible (les notifications des collègues arrivent ainsi toutes seules).
+  useDataChange(["notifications"], () => {
+    router.refresh();
+  });
+  useVisiblePolling(NOTIFICATIONS_POLL_MS, () => {
+    router.refresh();
+  });
 
   const isActive = (href: string) =>
     pathname === href || (href !== "/dashboard" && pathname.startsWith(`${href}/`));

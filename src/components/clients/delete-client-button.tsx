@@ -18,6 +18,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { emitDataChange } from "@/lib/live";
 
 /** Admin-only delete with confirmation (server refuses callers too). */
 export function DeleteClientButton({
@@ -39,6 +40,9 @@ export function DeleteClientButton({
       if (res.ok) {
         toast.success(t("delete.success"));
         setOpen(false);
+        // La ligne disparaît du panneau tout de suite ; on quitte la fiche
+        // supprimée AVANT tout rafraîchissement serveur (sinon flash 404).
+        emitDataChange("clients");
         if (pathname !== "/clients") router.push("/clients");
         else router.refresh();
       } else {

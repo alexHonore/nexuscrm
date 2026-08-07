@@ -11,7 +11,6 @@
   "edit": "Modifier",
   "loading": "Chargement…",
   "genericError": "Une erreur est survenue. Veuillez réessayer.",
-
   "users": {
     "title": "Utilisateurs",
     "subtitle": "Gérez les comptes des téléphonistes et des administrateurs.",
@@ -71,7 +70,17 @@
       "routeDid": "Router ce numéro vers le sous-compte",
       "routed": "Numéro routé vers le sous-compte",
       "ipHint": "Astuce : l'API voip.ms exige que l'adresse IP appelante soit autorisée (Menu principal → SOAP and REST/JSON API → Enable IP address).",
-      "apiError": "Erreur voip.ms"
+      "apiError": "Erreur voip.ms",
+      "hide": "Masquer",
+      "available": "Disponible",
+      "assignedTo": "Assigné à {name}",
+      "thisUser": "(cet utilisateur)",
+      "legend": "{available} disponibles · {assigned} assignés",
+      "routedTo": "→ {target}",
+      "routedMain": "→ compte principal",
+      "didConflict": "Ce numéro est déjà assigné à {name} — il sera retiré de son compte à l'enregistrement.",
+      "subConflict": "Ce sous-compte SIP est déjà utilisé par {name} — deux personnes ne peuvent pas partager le même poste.",
+      "didReleasedFrom": "Numéro retiré du compte de {name}."
     },
     "errors": {
       "email_taken": "Ce courriel est déjà utilisé.",
@@ -80,9 +89,20 @@
       "cannot_delete_self": "Vous ne pouvez pas supprimer votre propre compte.",
       "invalid_did": "Numéro (DID) invalide.",
       "has_activity": "Cet utilisateur a un historique (appels, rendez-vous ou relances) qui serait détruit. Désactivez plutôt son compte pour conserver les données."
+    },
+    "credentialsTitle": "Identifiants de connexion",
+    "emailTypoHint": "Vouliez-vous dire {suggestion} ?",
+    "emailTypoFix": "Corriger",
+    "credentials": {
+      "loginEmail": "Courriel de connexion",
+      "password": "Mot de passe",
+      "emailPrefix": "Courriel",
+      "passwordPrefix": "Mot de passe",
+      "copyBoth": "Copier les identifiants",
+      "copyPasswordOnly": "Copier le mot de passe",
+      "verifyEmail": "Vérifiez l'adresse courriel avant d'envoyer ces identifiants : c'est exactement avec celle-ci qu'il faudra se connecter. Une faute de frappe rend la connexion impossible."
     }
   },
-
   "ownPassword": {
     "title": "Mon mot de passe",
     "desc": "Changez le mot de passe de votre compte administrateur.",
@@ -95,7 +115,6 @@
     "success": "Mot de passe changé",
     "wrong": "Le mot de passe actuel est incorrect."
   },
-
   "pipeline": {
     "title": "Pipeline",
     "color": "Couleur",
@@ -134,7 +153,6 @@
       "nameTaken": "Une source porte déjà ce nom."
     }
   },
-
   "importExport": {
     "title": "Import / Export",
     "category": "Catégorie",
@@ -184,7 +202,6 @@
       "note": "L'export inclut toutes les fiches correspondant aux filtres, avec les noms de catégorie, de source et d'assigné. Chaque export est consigné au journal d'audit."
     }
   },
-
   "webhooks": {
     "title": "Webhooks",
     "neverUsed": "jamais utilisée",
@@ -223,7 +240,6 @@
       "deleted": "Clé supprimée"
     }
   },
-
   "settings": {
     "title": "Réglages",
     "google": {
@@ -269,7 +285,6 @@
       "twilioEnvNote": "Présence des variables d'environnement Twilio (les valeurs ne sont jamais affichées) :"
     }
   },
-
   "audit": {
     "title": "Journal d'audit",
     "subtitle": "{count, plural, =0 {Aucune entrée} one {# entrée} other {# entrées}} — les actions sensibles sont consignées ici.",

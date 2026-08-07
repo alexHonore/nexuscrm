@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { emitDataChange } from "@/lib/live";
 import type { FilterOption } from "./clients-filters";
 
 const NONE = "none";
@@ -41,6 +42,7 @@ export function AssignSelect({
       const res = await assignClientAction(clientId, next === NONE ? null : next);
       if (res.ok) {
         toast.success(t("assign.success"));
+        emitDataChange("clients");
         router.refresh();
       } else {
         setCurrent(previous);

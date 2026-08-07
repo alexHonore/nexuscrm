@@ -131,7 +131,8 @@
     "placeholder": "Écrire un commentaire… Tapez @ pour mentionner un collègue.",
     "submit": "Publier",
     "posted": "Commentaire publié",
-    "empty": "Aucun commentaire pour l'instant."
+    "empty": "Aucun commentaire pour l'instant.",
+    "you": "Vous"
   },
   "history": {
     "title": "Historique",

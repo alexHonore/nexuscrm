@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { emitDataChange } from "@/lib/live";
 import type { FilterOption } from "./clients-filters";
 
 const NONE = "none";
@@ -108,6 +109,8 @@ export function ClientInfoForm({
       });
       if (res.ok) {
         toast.success(t("detail.saved"));
+        // Le nom/téléphone/ville changent la ligne du panneau de gauche.
+        emitDataChange("clients");
         router.refresh();
       } else if (res.error === "invalidPhone") {
         toast.error(t("detail.invalidPhone"));

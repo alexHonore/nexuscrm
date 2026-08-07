@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -63,6 +63,61 @@ export function OneTimeSecret({ value, hint }: { value: string; hint?: string })
       <div className="flex items-center justify-center">
         <CopyButton value={value} label={t("copy")} />
       </div>
+      <p className="text-center text-xs text-muted-foreground">{hint ?? t("shownOnce")}</p>
+    </div>
+  );
+}
+
+/**
+ * Identifiants de connexion affichés une seule fois : le COURRIEL est montré
+ * aussi visiblement que le mot de passe, et copié avec lui.
+ *
+ * Sans cela, une adresse mal saisie à la création passe inaperçue et l'admin
+ * croit que le mot de passe généré est cassé (incident vécu en production).
+ */
+export function LoginCredentials({
+  email,
+  password,
+  hint,
+}: {
+  email: string;
+  password: string;
+  hint?: string;
+}) {
+  const t = useTranslations("admin");
+  const bothLines = `${t("users.credentials.emailPrefix")} : ${email}\n${t("users.credentials.passwordPrefix")} : ${password}`;
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2 rounded-lg border border-dashed bg-muted/50 p-3">
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-muted-foreground">{t("users.credentials.loginEmail")}</p>
+          <code className="block break-all font-mono text-sm font-semibold select-all">{email}</code>
+        </div>
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-muted-foreground">{t("users.credentials.password")}</p>
+          <code className="block break-all font-mono text-base font-semibold select-all">{password}</code>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <CopyButton
+          value={bothLines}
+          label={t("users.credentials.copyBoth")}
+          variant="secondary"
+          className="min-h-11 md:min-h-8"
+        />
+        <CopyButton
+          value={password}
+          label={t("users.credentials.copyPasswordOnly")}
+          className="min-h-11 md:min-h-8"
+        />
+      </div>
+
+      <p className="flex items-start gap-1.5 rounded-lg bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-400">
+        <TriangleAlert className="mt-px size-3.5 shrink-0" />
+        <span>{t("users.credentials.verifyEmail")}</span>
+      </p>
       <p className="text-center text-xs text-muted-foreground">{hint ?? t("shownOnce")}</p>
     </div>
   );

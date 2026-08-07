@@ -11,10 +11,11 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { RelativeTime } from "@/components/relative-time";
 import { Button } from "@/components/ui/button";
+import { emitDataChange } from "@/lib/live";
 import { cn } from "@/lib/utils";
 import { markAllNotificationsReadAction, markNotificationReadAction } from "./actions";
 
@@ -38,7 +39,6 @@ const TYPE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
 
 export function MarkAllReadButton({ disabled }: { disabled: boolean }) {
   const t = useTranslations("notifications");
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   return (
@@ -51,7 +51,9 @@ export function MarkAllReadButton({ disabled }: { disabled: boolean }) {
           const res = await markAllNotificationsReadAction();
           if (res.ok) {
             toast.success(t("allRead"));
-            router.refresh();
+            // Un seul rafraîchissement : la coquille écoute « notifications »
+            // et redemande l'arbre serveur (pastille + liste de cette page).
+            emitDataChange("notifications");
           } else {
             toast.error(t("error"));
           }
@@ -70,6 +72,15 @@ export function NotificationItem({ notification }: { notification: NotificationD
   const dfnsLocale = locale === "en" ? enUS : fr;
   const router = useRouter();
   const [, startTransition] = useTransition();
+  // Lecture optimiste : la puce disparaît au clic, sans attendre le serveur.
+  // Resynchronisation sur la donnée serveur pendant le rendu (motif React
+  // « ajuster l'état quand une prop change »), sans effet ni rendu en cascade.
+  const [read, setRead] = useState(notification.read);
+  const [serverRead, setServerRead] = useState(notification.read);
+  if (serverRead !== notification.read) {
+    setServerRead(notification.read);
+    setRead(notification.read);
+  }
 
   const Icon = TYPE_ICONS[notification.type] ?? BellIcon;
   const typeLabel =
@@ -78,8 +89,18 @@ export function NotificationItem({ notification }: { notification: NotificationD
       : notification.type;
 
   const open = () => {
+    const wasUnread = !read;
+    if (wasUnread) setRead(true);
     startTransition(async () => {
-      if (!notification.read) await markNotificationReadAction(notification.id);
+      if (wasUnread) {
+        const res = await markNotificationReadAction(notification.id);
+        // Échec : on rétablit la puce, mais on ouvre quand même la fiche.
+        if (res.ok) emitDataChange("notifications");
+        else {
+          setRead(false);
+          toast.error(t("error"));
+        }
+      }
       if (notification.link) router.push(notification.link);
       else router.refresh();
     });
@@ -92,13 +113,13 @@ export function NotificationItem({ notification }: { notification: NotificationD
         onClick={open}
         className={cn(
           "flex min-h-14 w-full items-start gap-3 rounded-xl p-3 text-left ring-1 ring-foreground/10 transition-colors hover:bg-muted/60 active:bg-muted",
-          notification.read ? "bg-card" : "bg-primary/5",
+          read ? "bg-card" : "bg-primary/5",
         )}
       >
         <span
           className={cn(
             "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full",
-            notification.read ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary",
+            read ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary",
           )}
           aria-label={typeLabel}
         >
@@ -109,7 +130,7 @@ export function NotificationItem({ notification }: { notification: NotificationD
             <span
               className={cn(
                 "truncate text-sm",
-                notification.read ? "font-normal" : "font-semibold",
+                read ? "font-normal" : "font-semibold",
               )}
             >
               {notification.title}
@@ -122,7 +143,7 @@ export function NotificationItem({ notification }: { notification: NotificationD
             <span className="block truncate text-xs text-muted-foreground">{notification.body}</span>
           ) : null}
         </span>
-        {!notification.read ? (
+        {!read ? (
           <span aria-hidden className="mt-2 size-2 shrink-0 rounded-full bg-primary" />
         ) : null}
       </button>

@@ -12,6 +12,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { emitDataChange } from "@/lib/live";
 import { cn } from "@/lib/utils";
 
 export type CommentData = {
@@ -24,6 +25,9 @@ export type CommentData = {
 type MentionUser = { id: string; name: string };
 
 const MENTION_TOKEN = /@\[([^\]]+)\]\(([0-9a-fA-F-]{36})\)/g;
+
+/** Préfixe du commentaire optimiste (pas encore confirmé par le serveur). */
+const DRAFT_PREFIX = "draft:";
 
 function initials(name: string): string {
   return name
@@ -82,6 +86,13 @@ export function CommentsTimeline({
   const [pending, startTransition] = useTransition();
 
   const [body, setBody] = useState("");
+  // Fil optimiste : le commentaire apparaît dès l'envoi, et disparaît (texte
+  // restitué dans le champ) si le serveur refuse.
+  const [rows, setRows] = useState<CommentData[]>(comments);
+  const inFlightRef = useRef(0);
+  useEffect(() => {
+    if (inFlightRef.current === 0 && !pending) setRows(comments);
+  }, [comments, pending]);
   const [users, setUsers] = useState<MentionUser[]>([]);
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
   const [highlighted, setHighlighted] = useState(0);
@@ -131,14 +142,31 @@ export function CommentsTimeline({
   const submit = () => {
     const trimmed = body.trim();
     if (!trimmed) return;
+    const draft: CommentData = {
+      id: `${DRAFT_PREFIX}${Date.now()}`,
+      body: trimmed,
+      createdAt: new Date().toISOString(),
+      author: { id: DRAFT_PREFIX, name: t("comments.you") },
+    };
+    let snapshot: CommentData[] = [];
+    setRows((current) => {
+      snapshot = current;
+      return [...current, draft];
+    });
+    setBody("");
+    setMention(null);
+    inFlightRef.current += 1;
     startTransition(async () => {
       const res = await addCommentAction({ clientId, body: trimmed });
+      inFlightRef.current -= 1;
       if (res.ok) {
         toast.success(t("comments.posted"));
-        setBody("");
-        setMention(null);
+        // Les mentions créent des notifications : pastille à réactualiser.
+        emitDataChange("notifications");
         router.refresh();
       } else {
+        setRows(snapshot);
+        setBody(trimmed);
         toast.error(t("errors.generic"));
       }
     });
@@ -153,12 +181,18 @@ export function CommentsTimeline({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {comments.length === 0 ? (
+        {rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("comments.empty")}</p>
         ) : (
           <ul className="space-y-4">
-            {comments.map((c) => (
-              <li key={c.id} className="flex gap-3">
+            {rows.map((c) => (
+              <li
+                key={c.id}
+                className={cn(
+                  "flex gap-3",
+                  c.id.startsWith(DRAFT_PREFIX) && "opacity-60",
+                )}
+              >
                 <Avatar className="mt-0.5 size-8 shrink-0">
                   <AvatarFallback className="bg-primary/10 text-xs font-medium text-primary">
                     {initials(c.author.name)}

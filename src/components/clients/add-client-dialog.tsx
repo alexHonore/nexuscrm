@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { emitDataChange } from "@/lib/live";
 import type { FilterOption } from "./clients-filters";
 
 const NONE = "none";
@@ -70,6 +71,18 @@ export function AddClientDialog({
     { value: "en", label: t("languages.en") },
   ];
 
+  const reset = () => {
+    setFullName("");
+    setPhone("");
+    setEmail("");
+    setCity("");
+    setLanguage("fr");
+    setCategoryId(NONE);
+    setSourceId(NONE);
+    setAssignedToId(NONE);
+    setNotes("");
+  };
+
   const submit = () => {
     startTransition(async () => {
       const res = await createClientAction({
@@ -86,7 +99,13 @@ export function AddClientDialog({
       if (res.ok) {
         toast.success(t("create.success"));
         setOpen(false);
-        router.push(`/clients/${res.id}`);
+        reset();
+        // 1. le panneau de gauche recharge sa page 1 tout de suite,
+        // 2. les données serveur (compteurs de catégories) sont réactualisées,
+        // 3. on ouvre la fiche créée : la création est visible sans F5.
+        emitDataChange("clients");
+        router.refresh();
+        if (res.id) router.push(`/clients/${res.id}`);
       } else if (res.error === "invalidPhone") {
         toast.error(t("create.invalidPhone"));
       } else if (res.error === "forbidden") {

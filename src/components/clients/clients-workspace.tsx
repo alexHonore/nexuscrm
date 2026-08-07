@@ -30,6 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useDataChange, useVisiblePolling } from "@/lib/live";
 import { formatPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +44,19 @@ type ListResponse = {
 };
 
 const ALL = "all";
+
+/** Cadence du rafraîchissement de fond (autres utilisateurs, leads webhook). */
+const PANEL_POLL_MS = 20_000;
+
+/** Signature d'affichage d'une ligne — évite les rendus inutiles au sondage. */
+function rowsSignature(rows: ClientListItem[]): string {
+  return rows
+    .map(
+      (r) =>
+        `${r.id}:${r.fullName}:${r.phone}:${r.city ?? ""}:${r.categoryColor ?? ""}:${r.nextFollowupAt ?? ""}:${r.doNotCall ? 1 : 0}`,
+    )
+    .join("|");
+}
 
 /**
  * Persistent master-detail workspace for /clients.
@@ -124,6 +138,14 @@ export function ClientsWorkspace({
   const hasMoreRef = useRef(false);
   const queryRef = useRef(filterQuery);
   const loadingMoreRef = useRef(false);
+  /** Chargement initial / changement de filtres en cours. */
+  const loadingRef = useRef(true);
+  /** Rafraîchissement de fond en cours (page 1, sans écran de chargement). */
+  const refreshingRef = useRef(false);
+  /** Un rafraîchissement a été demandé pendant qu'un autre était en vol. */
+  const rerunRef = useRef(false);
+  /** Incrémenté à chaque mutation locale — invalide les réponses parties avant. */
+  const versionRef = useRef(0);
   queryRef.current = filterQuery;
 
   const listUrl = (query: string, page: number) =>
@@ -150,6 +172,7 @@ export function ClientsWorkspace({
   // Page 1 (re)load whenever the filters change.
   useEffect(() => {
     const controller = new AbortController();
+    loadingRef.current = true;
     setLoading(true);
     setFailed(false);
     fetch(listUrl(filterQuery, 1), { signal: controller.signal })
@@ -159,15 +182,88 @@ export function ClientsWorkspace({
       })
       .then((data) => {
         applyPage(data, "replace");
+        loadingRef.current = false;
         setLoading(false);
       })
       .catch(() => {
         if (controller.signal.aborted) return;
+        loadingRef.current = false;
         setFailed(true);
         setLoading(false);
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      loadingRef.current = false;
+    };
   }, [filterQuery, refreshKey, applyPage]);
+
+  /**
+   * Rafraîchissement « vivant » : recharge la page 1 avec les filtres courants
+   * et la fusionne dans les pages déjà chargées — sans squelette, sans perdre
+   * le défilement, la recherche, la pagination ni la fiche sélectionnée.
+   * Les lignes au-delà de la page 1 sont conservées (dédupliquées), donc les
+   * nouveautés apparaissent en tête sans casser le « charger plus ».
+   */
+  const refreshFirstPage = useCallback(async function run(): Promise<void> {
+    // On ne concurrence ni le chargement initial ni un « charger plus ».
+    if (loadingRef.current || loadingMoreRef.current) return;
+    // Déjà en cours : on note qu'il faudra recommencer (le résultat en vol
+    // peut précéder la mutation qui vient d'arriver).
+    if (refreshingRef.current) {
+      rerunRef.current = true;
+      return;
+    }
+    refreshingRef.current = true;
+    const startedQuery = queryRef.current;
+    const startedVersion = versionRef.current;
+    try {
+      const res = await fetch(listUrl(startedQuery, 1));
+      if (!res.ok) return;
+      const data = (await res.json()) as ListResponse;
+      // Filtres changés, rechargement complet lancé, ou mutation survenue
+      // pendant la requête → réponse périmée, on la jette.
+      if (
+        queryRef.current !== startedQuery ||
+        loadingRef.current ||
+        versionRef.current !== startedVersion
+      ) {
+        return;
+      }
+
+      const fresh = new Set(data.items.map((item) => item.id));
+      // Les pages ≥ 2 déjà chargées restent en place, sans doublon avec la page 1.
+      const tail = itemsRef.current
+        .slice(data.pageSize)
+        .filter((item) => !fresh.has(item.id));
+      const merged = [...data.items, ...tail];
+
+      setFailed(false);
+      setTotal(data.total);
+      hasMoreRef.current = merged.length < data.total;
+      setHasMore(hasMoreRef.current);
+      if (rowsSignature(merged) === rowsSignature(itemsRef.current)) return;
+      itemsRef.current = merged;
+      setItems(merged);
+    } catch {
+      // Réseau indisponible : on retentera au prochain sondage.
+    } finally {
+      refreshingRef.current = false;
+      if (rerunRef.current) {
+        rerunRef.current = false;
+        await run();
+      }
+    }
+  }, []);
+
+  // Mutations faites dans cet onglet (création, catégorie, suivis, suppression…).
+  useDataChange(["clients", "followups"], () => {
+    versionRef.current += 1;
+    void refreshFirstPage();
+  });
+  // Changements faits par les AUTRES utilisateurs ou par les webhooks entrants.
+  useVisiblePolling(PANEL_POLL_MS, () => {
+    void refreshFirstPage();
+  });
 
   const loadMore = useCallback(async (): Promise<string[]> => {
     if (loadingMoreRef.current || !hasMoreRef.current) return [];

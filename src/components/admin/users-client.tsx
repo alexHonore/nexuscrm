@@ -2,7 +2,17 @@
 
 import { formatInTimeZone } from "date-fns-tz";
 import { enCA, fr } from "date-fns/locale";
-import { KeyRound, Loader2, Phone, Plus, RefreshCw, Trash2, UserRound } from "lucide-react";
+import {
+  Check,
+  KeyRound,
+  Loader2,
+  Phone,
+  Plus,
+  RefreshCw,
+  Trash2,
+  TriangleAlert,
+  UserRound,
+} from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -54,11 +64,98 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatPhone } from "@/lib/phone";
+import { cn } from "@/lib/utils";
 import { api, ApiError } from "./api";
-import { OneTimeSecret } from "./copy-button";
+import { LoginCredentials, OneTimeSecret } from "./copy-button";
 import type { AdminUserDto } from "./types";
 
 const TZ = "America/Toronto";
+
+// ── Détection de fautes de frappe dans les courriels ──────────────────────────
+
+/**
+ * Domaines mal orthographiés vus en pratique. Un compte créé avec « gmsil.com »
+ * ne peut jamais se connecter et le mot de passe généré semble « cassé » —
+ * mieux vaut le signaler AVANT la création (indice, jamais bloquant).
+ */
+const DOMAIN_TYPOS: Record<string, string> = {
+  "gmsil.com": "gmail.com",
+  "gmial.com": "gmail.com",
+  "gmai.com": "gmail.com",
+  "gmai.co": "gmail.com",
+  "gnail.com": "gmail.com",
+  "gmall.com": "gmail.com",
+  "gmaill.com": "gmail.com",
+  "gmil.com": "gmail.com",
+  "gamil.com": "gmail.com",
+  "gmaul.com": "gmail.com",
+  "gmail.co": "gmail.com",
+  "gmail.om": "gmail.com",
+  "gmail.vom": "gmail.com",
+  "hotnail.com": "hotmail.com",
+  "hotmai.com": "hotmail.com",
+  "hotmial.com": "hotmail.com",
+  "hotmil.com": "hotmail.com",
+  "hotmaill.com": "hotmail.com",
+  "hotmail.co": "hotmail.com",
+  "yaho.com": "yahoo.com",
+  "yahho.com": "yahoo.com",
+  "yahou.com": "yahoo.com",
+  "yhoo.com": "yahoo.com",
+  "yahoo.co": "yahoo.com",
+  "outlok.com": "outlook.com",
+  "outloo.com": "outlook.com",
+  "outlool.com": "outlook.com",
+  "outlook.co": "outlook.com",
+  "iclod.com": "icloud.com",
+  "icloud.co": "icloud.com",
+};
+
+/** Extensions manifestement ratées (« .con » pour « .com »). */
+const TLD_TYPOS: Record<string, string> = {
+  con: "com",
+  cmo: "com",
+  comm: "com",
+  cpm: "com",
+  xom: "com",
+  vom: "com",
+  coom: "com",
+  som: "com",
+  "c0m": "com",
+  cim: "com",
+  cm: "com",
+};
+
+/**
+ * Renvoie une adresse corrigée plausible, ou `null` si rien à signaler.
+ * Purement indicatif : l'envoi n'est jamais bloqué.
+ */
+export function suggestEmailFix(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  // Les espaces internes sont toujours une faute (« gmail.co m »).
+  const hasInnerSpace = /\s/.test(trimmed);
+  const canonical = trimmed.replace(/\s+/g, "").toLowerCase();
+
+  const at = canonical.lastIndexOf("@");
+  if (at <= 0 || at === canonical.length - 1) return null;
+  const local = canonical.slice(0, at);
+  const domain = canonical.slice(at + 1);
+  if (!domain.includes(".")) return null;
+
+  let fixedDomain = DOMAIN_TYPOS[domain] ?? null;
+  if (!fixedDomain) {
+    const lastDot = domain.lastIndexOf(".");
+    const tld = domain.slice(lastDot + 1);
+    const fixedTld = TLD_TYPOS[tld];
+    if (fixedTld) fixedDomain = `${domain.slice(0, lastDot)}.${fixedTld}`;
+  }
+
+  const suggestion = `${local}@${fixedDomain ?? domain}`;
+  if (suggestion === canonical && !hasInnerSpace) return null;
+  return suggestion;
+}
 
 function useDateFmt() {
   const locale = useLocale();
@@ -87,6 +184,104 @@ function errorMessage(t: Tr, err: unknown): string {
     if (typeof err.data.message === "string") return err.data.message;
   }
   return t("genericError");
+}
+
+// ── Champ courriel avec indice de faute de frappe ────────────────────────────
+
+function EmailField({
+  id,
+  value,
+  onChange,
+  label,
+}: {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  label: string;
+}) {
+  const t = useTranslations("admin");
+  const suggestion = suggestEmailFix(value);
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type="email"
+        inputMode="email"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        autoComplete="off"
+        autoCapitalize="off"
+        spellCheck={false}
+      />
+      {suggestion ? (
+        <div className="flex flex-wrap items-center gap-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+          <TriangleAlert className="size-3.5 shrink-0" />
+          <span>{t("users.emailTypoHint", { suggestion })}</span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="xs"
+            className="min-h-11 px-3 md:min-h-8"
+            onClick={() => onChange(suggestion)}
+          >
+            {t("users.emailTypoFix")}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ── Rendu des ressources voip.ms (DID / sous-comptes) ────────────────────────
+
+/** "account:551013_alex" → { target: "551013_alex", isMain: false }. */
+function parseRouting(routing: string | null | undefined) {
+  const raw = routing?.trim();
+  if (!raw) return null;
+  const m = raw.match(/^account:(.+)$/i);
+  const target = m ? m[1] : raw;
+  return { target, isMain: Boolean(m) && !target.includes("_") };
+}
+
+const last10 = (value: string | null | undefined) => (value ?? "").replace(/\D/g, "").slice(-10);
+
+/** Pastille verte « libre » / grise « pris par X ». */
+function AssignmentStatus({
+  available,
+  assignedUserName,
+  isCurrentUser,
+}: {
+  available: boolean;
+  assignedUserName: string | null;
+  isCurrentUser: boolean;
+}) {
+  const t = useTranslations("admin");
+  if (available) {
+    return (
+      <span className="flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
+        <Check className="size-3" />
+        {t("users.voip.available")}
+      </span>
+    );
+  }
+  return (
+    <span className="truncate text-muted-foreground">
+      {t("users.voip.assignedTo", { name: assignedUserName ?? "—" })}
+      {isCurrentUser ? ` ${t("users.voip.thisUser")}` : ""}
+    </span>
+  );
+}
+
+/** Légende « N disponibles · M assignés ». */
+function AssignmentLegend({ available, assigned }: { available: number; assigned: number }) {
+  const t = useTranslations("admin");
+  return (
+    <p className="px-1 text-xs text-muted-foreground">
+      {t("users.voip.legend", { available, assigned })}
+    </p>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -239,6 +434,11 @@ export function UsersClient({
         currentUserId={currentUserId}
         onClose={() => setEditingId(null)}
         onUpdated={upsert}
+        onDidReleased={(ids) =>
+          setUsers((prev) =>
+            prev.map((p) => (ids.includes(p.id) ? { ...p, didNumber: null } : p)),
+          )
+        }
         onDeleted={(id) => {
           setUsers((prev) => prev.filter((p) => p.id !== id));
           setEditingId(null);
@@ -255,11 +455,12 @@ function CreateUserDialog({ onCreated }: { onCreated: (u: AdminUserDto) => void 
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", role: "caller", locale: "fr" });
-  const [tempPassword, setTempPassword] = useState<string | null>(null);
+  /** Identifiants complets (courriel + mot de passe) montrés une seule fois. */
+  const [created, setCreated] = useState<{ email: string; password: string } | null>(null);
 
   const reset = () => {
     setForm({ name: "", email: "", role: "caller", locale: "fr" });
-    setTempPassword(null);
+    setCreated(null);
   };
 
   const submit = async () => {
@@ -267,10 +468,11 @@ function CreateUserDialog({ onCreated }: { onCreated: (u: AdminUserDto) => void 
     try {
       const res = await api<{ user: AdminUserDto; tempPassword: string }>("/api/admin/users", {
         method: "POST",
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, email: form.email.trim() }),
       });
       onCreated(res.user);
-      setTempPassword(res.tempPassword);
+      // Le courriel affiché est celui RÉELLEMENT enregistré (normalisé serveur).
+      setCreated({ email: res.user.email, password: res.tempPassword });
     } catch (err) {
       toast.error(errorMessage(t, err));
     } finally {
@@ -292,17 +494,19 @@ function CreateUserDialog({ onCreated }: { onCreated: (u: AdminUserDto) => void 
       </Button>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{tempPassword ? t("users.tempPasswordTitle") : t("users.createTitle")}</DialogTitle>
+          <DialogTitle>{created ? t("users.credentialsTitle") : t("users.createTitle")}</DialogTitle>
           <DialogDescription>
-            {tempPassword ? t("users.tempPasswordHint") : t("users.createDesc")}
+            {created ? t("users.tempPasswordHint") : t("users.createDesc")}
           </DialogDescription>
         </DialogHeader>
 
-        {tempPassword ? (
+        {created ? (
           <>
-            <OneTimeSecret value={tempPassword} />
+            <LoginCredentials email={created.email} password={created.password} />
             <DialogFooter>
-              <Button onClick={() => setOpen(false)}>{t("close")}</Button>
+              <Button onClick={() => setOpen(false)} className="min-h-11 md:min-h-8">
+                {t("close")}
+              </Button>
             </DialogFooter>
           </>
         ) : (
@@ -317,16 +521,12 @@ function CreateUserDialog({ onCreated }: { onCreated: (u: AdminUserDto) => void 
                   autoComplete="off"
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="new-user-email">{t("users.email")}</Label>
-                <Input
-                  id="new-user-email"
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  autoComplete="off"
-                />
-              </div>
+              <EmailField
+                id="new-user-email"
+                label={t("users.email")}
+                value={form.email}
+                onChange={(email) => setForm({ ...form, email })}
+              />
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label>{t("users.role")}</Label>
@@ -369,10 +569,15 @@ function CreateUserDialog({ onCreated }: { onCreated: (u: AdminUserDto) => void 
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setOpen(false)}>
+              <Button variant="outline" onClick={() => setOpen(false)} className="min-h-11 md:min-h-8">
                 {t("cancel")}
               </Button>
-              <Button onClick={() => void submit()} disabled={pending || !form.name || !form.email}>
+              {/* Une faute de frappe probable n'empêche JAMAIS la création. */}
+              <Button
+                onClick={() => void submit()}
+                disabled={pending || !form.name.trim() || !form.email.trim()}
+                className="min-h-11 md:min-h-8"
+              >
                 {pending ? <Loader2 className="size-4 animate-spin" /> : <UserRound className="size-4" />}
                 {t("users.create")}
               </Button>
@@ -386,8 +591,30 @@ function CreateUserDialog({ onCreated }: { onCreated: (u: AdminUserDto) => void 
 
 // ── Édition ──────────────────────────────────────────────────────────────────
 
-type VoipSubAccount = { id: string; account: string; username: string; description: string };
-type VoipDid = { did: string; description: string; routing: string; state: string };
+type VoipSubAccount = {
+  id: string;
+  account: string;
+  username: string;
+  description: string;
+  assignedUserId: string | null;
+  assignedUserName: string | null;
+  available: boolean;
+};
+
+type VoipDid = {
+  did: string;
+  e164: string | null;
+  description: string;
+  routing: string;
+  state: string;
+  assignedUserId: string | null;
+  assignedUserName: string | null;
+  assignedSipUsername: string | null;
+  available: boolean;
+};
+
+/** Utilisateur dépossédé de son DID par une réassignation. */
+type ReleasedUser = { id: string; name: string; email: string };
 
 function UserEditSheet({
   user,
@@ -395,12 +622,14 @@ function UserEditSheet({
   onClose,
   onUpdated,
   onDeleted,
+  onDidReleased,
 }: {
   user: AdminUserDto | null;
   currentUserId: string;
   onClose: () => void;
   onUpdated: (u: AdminUserDto) => void;
   onDeleted: (id: string) => void;
+  onDidReleased: (ids: string[]) => void;
 }) {
   const t = useTranslations("admin");
   const [pending, setPending] = useState(false);
@@ -413,11 +642,19 @@ function UserEditSheet({
     sipPassword: "",
     didNumber: user?.didNumber ?? "",
   }));
-  const [secret, setSecret] = useState<{ title: string; value: string; hint?: string } | null>(null);
+  const [secret, setSecret] = useState<{
+    title: string;
+    value: string;
+    hint?: string;
+    email?: string;
+  } | null>(null);
 
-  // voip.ms pickers
+  // voip.ms pickers — la liste reste en cache une fois chargée pour pouvoir
+  // afficher l'avertissement de conflit même après la fermeture du sélecteur.
   const [subaccounts, setSubaccounts] = useState<VoipSubAccount[] | null>(null);
+  const [subsOpen, setSubsOpen] = useState(false);
   const [dids, setDids] = useState<VoipDid[] | null>(null);
+  const [didsOpen, setDidsOpen] = useState(false);
   const [voipLoading, setVoipLoading] = useState<string | null>(null);
   const [subUsername, setSubUsername] = useState("");
   const [createSubOpen, setCreateSubOpen] = useState(false);
@@ -425,14 +662,27 @@ function UserEditSheet({
   if (!user) return null;
   const isSelf = user.id === currentUserId;
 
+  /** Prévient l'admin des comptes qui viennent de perdre leur numéro. */
+  const announceReleased = (released: ReleasedUser[] | undefined) => {
+    if (!released || released.length === 0) return;
+    onDidReleased(released.map((r) => r.id));
+    for (const r of released) {
+      toast.info(t("users.voip.didReleasedFrom", { name: r.name }));
+    }
+    // Le cache d'affectations n'est plus à jour : on force un rechargement.
+    setDids(null);
+    setDidsOpen(false);
+  };
+
   const patch = async (payload: Record<string, unknown>, successMsg?: string) => {
     setPending(true);
     try {
-      const res = await api<{ user: AdminUserDto }>(`/api/admin/users/${user.id}`, {
-        method: "PATCH",
-        body: JSON.stringify(payload),
-      });
+      const res = await api<{ user: AdminUserDto; released?: ReleasedUser[] }>(
+        `/api/admin/users/${user.id}`,
+        { method: "PATCH", body: JSON.stringify(payload) },
+      );
       onUpdated(res.user);
+      announceReleased(res.released);
       toast.success(successMsg ?? t("saved"));
       return true;
     } catch (err) {
@@ -446,7 +696,7 @@ function UserEditSheet({
   const saveAll = async () => {
     const ok = await patch({
       name: form.name,
-      email: form.email,
+      email: form.email.trim(),
       role: form.role,
       locale: form.locale,
       sipUsername: form.sipUsername || null,
@@ -462,7 +712,13 @@ function UserEditSheet({
       const res = await api<{ tempPassword: string }>(`/api/admin/users/${user.id}/reset-password`, {
         method: "POST",
       });
-      setSecret({ title: t("users.newTempPassword"), value: res.tempPassword });
+      // Le courriel accompagne le mot de passe : c'est avec CE compte qu'il faut
+      // se connecter (une adresse mal saisie explique la plupart des « ça marche pas »).
+      setSecret({
+        title: t("users.credentialsTitle"),
+        value: res.tempPassword,
+        email: user.email,
+      });
     } catch (err) {
       toast.error(errorMessage(t, err));
     } finally {
@@ -471,10 +727,15 @@ function UserEditSheet({
   };
 
   const loadSubaccounts = async () => {
+    if (subsOpen) {
+      setSubsOpen(false);
+      return;
+    }
     setVoipLoading("subaccounts");
     try {
       const res = await api<{ accounts: VoipSubAccount[] }>("/api/admin/voipms/subaccounts");
       setSubaccounts(res.accounts);
+      setSubsOpen(true);
     } catch (err) {
       toast.error(errorMessage(t, err), { description: t("users.voip.ipHint") });
     } finally {
@@ -483,10 +744,15 @@ function UserEditSheet({
   };
 
   const loadDids = async () => {
+    if (didsOpen) {
+      setDidsOpen(false);
+      return;
+    }
     setVoipLoading("dids");
     try {
       const res = await api<{ dids: VoipDid[] }>("/api/admin/voipms/dids");
       setDids(res.dids);
+      setDidsOpen(true);
     } catch (err) {
       toast.error(errorMessage(t, err), { description: t("users.voip.ipHint") });
     } finally {
@@ -503,6 +769,8 @@ function UserEditSheet({
       });
       setForm((f) => ({ ...f, sipUsername: res.account }));
       onUpdated({ ...user, sipUsername: res.account, hasSipPassword: true });
+      setSubaccounts(null); // le cache d'affectations n'est plus à jour
+      setSubsOpen(false);
       setCreateSubOpen(false);
       setSecret({
         title: t("users.voip.sipPasswordCreated"),
@@ -519,12 +787,16 @@ function UserEditSheet({
   const routeDid = async () => {
     setVoipLoading("route");
     try {
-      const res = await api<{ ok: boolean; did: string }>("/api/admin/voipms/route-did", {
-        method: "POST",
-        body: JSON.stringify({ did: form.didNumber, account: form.sipUsername, userId: user.id }),
-      });
+      const res = await api<{ ok: boolean; did: string; released?: ReleasedUser[] }>(
+        "/api/admin/voipms/route-did",
+        {
+          method: "POST",
+          body: JSON.stringify({ did: form.didNumber, account: form.sipUsername, userId: user.id }),
+        },
+      );
       setForm((f) => ({ ...f, didNumber: res.did }));
       onUpdated({ ...user, didNumber: res.did });
+      announceReleased(res.released);
       toast.success(t("users.voip.routed"));
     } catch (err) {
       toast.error(errorMessage(t, err), { description: t("users.voip.ipHint") });
@@ -541,6 +813,28 @@ function UserEditSheet({
       .replace(/[^a-z0-9]/g, "");
     return `551013_${first || "agent"}`;
   };
+
+  // ── Conflits d'affectation (dérivés des listes voip.ms chargées) ──
+  // Le numéro saisi appartient-il DÉJÀ à quelqu'un d'autre ? On avertit avant
+  // l'enregistrement : le serveur le retirera de son détenteur actuel.
+  const didDigits = last10(form.didNumber);
+  const didConflict =
+    didDigits.length === 10
+      ? (dids?.find(
+          (d) =>
+            last10(d.did) === didDigits && d.assignedUserId !== null && d.assignedUserId !== user.id,
+        ) ?? null)
+      : null;
+
+  const sipKey = form.sipUsername.trim().toLowerCase();
+  const subConflict = sipKey
+    ? (subaccounts?.find(
+        (a) =>
+          a.account.trim().toLowerCase() === sipKey &&
+          a.assignedUserId !== null &&
+          a.assignedUserId !== user.id,
+      ) ?? null)
+    : null;
 
   return (
     <Sheet open={Boolean(user)} onOpenChange={(o) => (!o ? onClose() : undefined)}>
@@ -562,15 +856,13 @@ function UserEditSheet({
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-email">{t("users.email")}</Label>
-              <Input
-                id="edit-email"
-                type="email"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-              />
-            </div>
+            {/* Une adresse mal saisie se corrige ici — inutile de supprimer et recréer. */}
+            <EmailField
+              id="edit-email"
+              label={t("users.email")}
+              value={form.email}
+              onChange={(email) => setForm({ ...form, email })}
+            />
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>{t("users.role")}</Label>
@@ -634,7 +926,7 @@ function UserEditSheet({
                 <Button
                   type="button"
                   variant="outline"
-                  className="min-h-8 shrink-0"
+                  className="min-h-11 shrink-0 md:min-h-8"
                   onClick={() => void loadSubaccounts()}
                   disabled={voipLoading !== null}
                 >
@@ -643,36 +935,67 @@ function UserEditSheet({
                   ) : (
                     <RefreshCw className="size-4" />
                   )}
-                  {t("users.voip.listSubaccounts")}
+                  {subsOpen ? t("users.voip.hide") : t("users.voip.listSubaccounts")}
                 </Button>
               </div>
-              {subaccounts !== null ? (
-                <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border p-1.5">
-                  {subaccounts.length === 0 ? (
-                    <p className="p-2 text-xs text-muted-foreground">{t("users.voip.noSubaccounts")}</p>
-                  ) : (
-                    subaccounts.map((a) => (
-                      <button
-                        key={a.id}
-                        type="button"
-                        className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
-                        onClick={() => {
-                          setForm((f) => ({ ...f, sipUsername: a.account }));
-                          setSubaccounts(null);
-                        }}
-                      >
-                        <span className="font-mono text-xs">{a.account}</span>
-                        <span className="truncate text-xs text-muted-foreground">{a.description}</span>
-                      </button>
-                    ))
-                  )}
+              {subConflict ? (
+                <p className="flex items-start gap-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+                  <TriangleAlert className="mt-px size-3.5 shrink-0" />
+                  <span>{t("users.voip.subConflict", { name: subConflict.assignedUserName ?? "—" })}</span>
+                </p>
+              ) : null}
+              {subsOpen && subaccounts !== null ? (
+                <div className="space-y-1.5">
+                  <AssignmentLegend
+                    available={subaccounts.filter((a) => a.available).length}
+                    assigned={subaccounts.filter((a) => !a.available).length}
+                  />
+                  <div className="max-h-60 space-y-1 overflow-y-auto rounded-lg border p-1.5">
+                    {subaccounts.length === 0 ? (
+                      <p className="p-2 text-xs text-muted-foreground">{t("users.voip.noSubaccounts")}</p>
+                    ) : (
+                      subaccounts.map((a) => {
+                        const mine = a.assignedUserId === user.id;
+                        return (
+                          <button
+                            key={a.id}
+                            type="button"
+                            className={cn(
+                              "flex min-h-11 w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left hover:bg-muted",
+                              a.account === form.sipUsername && "bg-muted",
+                            )}
+                            onClick={() => {
+                              setForm((f) => ({ ...f, sipUsername: a.account }));
+                              setSubsOpen(false);
+                            }}
+                          >
+                            <span className="flex w-full items-center gap-1.5">
+                              <span className="truncate font-mono text-xs font-medium">{a.account}</span>
+                              {a.description ? (
+                                <span className="truncate text-xs text-muted-foreground">
+                                  · {a.description}
+                                </span>
+                              ) : null}
+                            </span>
+                            <span className="flex w-full items-center gap-1.5 text-xs">
+                              <AssignmentStatus
+                                available={a.available}
+                                assignedUserName={a.assignedUserName}
+                                isCurrentUser={mine}
+                              />
+                            </span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
               ) : null}
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="min-h-8"
+                className="min-h-11 md:min-h-8"
                 onClick={() => {
                   setSubUsername(suggestedUsername());
                   setCreateSubOpen(true);
@@ -709,7 +1032,7 @@ function UserEditSheet({
                 <Button
                   type="button"
                   variant="outline"
-                  className="min-h-8 shrink-0"
+                  className="min-h-11 shrink-0 md:min-h-8"
                   onClick={() => void loadDids()}
                   disabled={voipLoading !== null}
                 >
@@ -718,36 +1041,89 @@ function UserEditSheet({
                   ) : (
                     <RefreshCw className="size-4" />
                   )}
-                  {t("users.voip.listDids")}
+                  {didsOpen ? t("users.voip.hide") : t("users.voip.listDids")}
                 </Button>
               </div>
-              {dids !== null ? (
-                <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border p-1.5">
-                  {dids.length === 0 ? (
-                    <p className="p-2 text-xs text-muted-foreground">{t("users.voip.noDids")}</p>
-                  ) : (
-                    dids.map((d) => (
-                      <button
-                        key={d.did}
-                        type="button"
-                        className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
-                        onClick={() => {
-                          setForm((f) => ({ ...f, didNumber: `+1${d.did.replace(/\D/g, "").slice(-10)}` }));
-                          setDids(null);
-                        }}
-                      >
-                        <span className="font-mono text-xs">{formatPhone(`+1${d.did.replace(/\D/g, "").slice(-10)}`)}</span>
-                        <span className="truncate text-xs text-muted-foreground">{d.routing}</span>
-                      </button>
-                    ))
-                  )}
+              {didConflict ? (
+                <p className="flex items-start gap-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+                  <TriangleAlert className="mt-px size-3.5 shrink-0" />
+                  <span>{t("users.voip.didConflict", { name: didConflict.assignedUserName ?? "—" })}</span>
+                </p>
+              ) : null}
+              {didsOpen && dids !== null ? (
+                <div className="space-y-1.5">
+                  <AssignmentLegend
+                    available={dids.filter((d) => d.available).length}
+                    assigned={dids.filter((d) => !d.available).length}
+                  />
+                  <div className="max-h-60 space-y-1 overflow-y-auto rounded-lg border p-1.5">
+                    {dids.length === 0 ? (
+                      <p className="p-2 text-xs text-muted-foreground">{t("users.voip.noDids")}</p>
+                    ) : (
+                      dids.map((d) => {
+                        const e164 = d.e164 ?? `+1${last10(d.did)}`;
+                        const mine = d.assignedUserId === user.id;
+                        const routing = parseRouting(d.routing);
+                        // Numéro attribué dans le CRM mais routé ailleurs chez
+                        // voip.ms : les appels entrants n'arriveront pas au bon poste.
+                        const routingMismatch =
+                          !d.available &&
+                          routing !== null &&
+                          routing.target.toLowerCase() !== (d.assignedSipUsername ?? "").toLowerCase();
+                        return (
+                          <button
+                            key={d.did}
+                            type="button"
+                            className={cn(
+                              "flex min-h-11 w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left hover:bg-muted",
+                              last10(d.did) === didDigits && "bg-muted",
+                            )}
+                            onClick={() => {
+                              setForm((f) => ({ ...f, didNumber: e164 }));
+                              setDidsOpen(false);
+                            }}
+                          >
+                            <span className="flex w-full items-center gap-1.5">
+                              <span className="font-mono text-sm font-medium">{formatPhone(e164)}</span>
+                              {d.description ? (
+                                <span className="truncate text-xs text-muted-foreground">
+                                  · {d.description}
+                                </span>
+                              ) : null}
+                            </span>
+                            <span className="flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                              <AssignmentStatus
+                                available={d.available}
+                                assignedUserName={d.assignedUserName}
+                                isCurrentUser={mine}
+                              />
+                              {routing ? (
+                                <span
+                                  className={cn(
+                                    "truncate font-mono text-[0.7rem]",
+                                    routingMismatch
+                                      ? "text-amber-700 dark:text-amber-400"
+                                      : "text-muted-foreground",
+                                  )}
+                                >
+                                  {routing.isMain
+                                    ? t("users.voip.routedMain")
+                                    : t("users.voip.routedTo", { target: routing.target })}
+                                </span>
+                              ) : null}
+                            </span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
               ) : null}
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="min-h-8"
+                className="min-h-11 md:min-h-8"
                 onClick={() => void routeDid()}
                 disabled={!form.didNumber || !form.sipUsername || voipLoading !== null}
               >
@@ -879,9 +1255,17 @@ function UserEditSheet({
             <DialogHeader>
               <DialogTitle>{secret?.title}</DialogTitle>
             </DialogHeader>
-            {secret ? <OneTimeSecret value={secret.value} hint={secret.hint} /> : null}
+            {secret ? (
+              secret.email ? (
+                <LoginCredentials email={secret.email} password={secret.value} hint={secret.hint} />
+              ) : (
+                <OneTimeSecret value={secret.value} hint={secret.hint} />
+              )
+            ) : null}
             <DialogFooter>
-              <Button onClick={() => setSecret(null)}>{t("close")}</Button>
+              <Button onClick={() => setSecret(null)} className="min-h-11 md:min-h-8">
+                {t("close")}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

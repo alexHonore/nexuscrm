@@ -2,11 +2,10 @@
 
 import { randomBytes } from "crypto";
 import { and, eq, gt, isNull, sql as dsql } from "drizzle-orm";
-import { headers } from "next/headers";
 import { z } from "zod";
 import { db } from "@/db";
 import { loginThrottle, passwordResets, users } from "@/db/schema";
-import { logAudit } from "@/lib/audit";
+import { getClientIp, logAudit } from "@/lib/audit";
 import { hashPassword } from "@/lib/auth/password";
 import { sha256Hex } from "@/lib/crypto";
 import { isEmailConfigured, passwordResetEmail, sendEmail } from "@/lib/email";
@@ -51,12 +50,16 @@ export async function requestResetAction(_prev: ForgotState, formData: FormData)
 
   if (!isEmailConfigured()) return { error: "unavailable" };
 
-  const h = await headers();
-  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
-  if ((await throttled(`reset-ip:${ip}`)) || (await throttled(`reset-mail:${email}`))) {
+  // Pas d'IP exploitable → limiteur par IP ignoré (celui par courriel reste).
+  const ip = await getClientIp();
+  const ipKey = ip ? `reset-ip:${ip}` : null;
+  if ((ipKey !== null && (await throttled(ipKey))) || (await throttled(`reset-mail:${email}`))) {
     return { error: "throttled" };
   }
-  await Promise.all([bump(`reset-ip:${ip}`), bump(`reset-mail:${email}`)]);
+  await Promise.all([
+    ...(ipKey !== null ? [bump(ipKey)] : []),
+    bump(`reset-mail:${email}`),
+  ]);
 
   const user = await db.query.users.findFirst({ where: eq(users.email, email) });
 

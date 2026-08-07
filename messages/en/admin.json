@@ -11,7 +11,6 @@
   "edit": "Edit",
   "loading": "Loading…",
   "genericError": "Something went wrong. Please try again.",
-
   "users": {
     "title": "Users",
     "subtitle": "Manage caller and administrator accounts.",
@@ -71,7 +70,17 @@
       "routeDid": "Route this number to the subaccount",
       "routed": "Number routed to the subaccount",
       "ipHint": "Tip: the voip.ms API requires the calling IP address to be allowed (Main menu → SOAP and REST/JSON API → Enable IP address).",
-      "apiError": "voip.ms error"
+      "apiError": "voip.ms error",
+      "hide": "Hide",
+      "available": "Available",
+      "assignedTo": "Assigned to {name}",
+      "thisUser": "(this user)",
+      "legend": "{available} available · {assigned} assigned",
+      "routedTo": "→ {target}",
+      "routedMain": "→ main account",
+      "didConflict": "This number is already assigned to {name} — it will be removed from their account when you save.",
+      "subConflict": "This SIP subaccount is already used by {name} — two people cannot share the same extension.",
+      "didReleasedFrom": "Number removed from {name}'s account."
     },
     "errors": {
       "email_taken": "This email is already in use.",
@@ -80,9 +89,20 @@
       "cannot_delete_self": "You cannot delete your own account.",
       "invalid_did": "Invalid number (DID).",
       "has_activity": "This user has history (calls, appointments or follow-ups) that would be destroyed. Deactivate the account instead to keep the data."
+    },
+    "credentialsTitle": "Login credentials",
+    "emailTypoHint": "Did you mean {suggestion}?",
+    "emailTypoFix": "Fix it",
+    "credentials": {
+      "loginEmail": "Login email",
+      "password": "Password",
+      "emailPrefix": "Email",
+      "passwordPrefix": "Password",
+      "copyBoth": "Copy credentials",
+      "copyPasswordOnly": "Copy password only",
+      "verifyEmail": "Check the email address before sending these credentials: this exact address is the one to sign in with. A typo makes signing in impossible."
     }
   },
-
   "ownPassword": {
     "title": "My password",
     "desc": "Change the password of your administrator account.",
@@ -95,7 +115,6 @@
     "success": "Password changed",
     "wrong": "The current password is incorrect."
   },
-
   "pipeline": {
     "title": "Pipeline",
     "color": "Color",
@@ -134,7 +153,6 @@
       "nameTaken": "A source with this name already exists."
     }
   },
-
   "importExport": {
     "title": "Import / Export",
     "category": "Category",
@@ -184,7 +202,6 @@
       "note": "The export includes every record matching the filters, with category, source and assignee names. Every export is recorded in the audit log."
     }
   },
-
   "webhooks": {
     "title": "Webhooks",
     "neverUsed": "never used",
@@ -223,7 +240,6 @@
       "deleted": "Key deleted"
     }
   },
-
   "settings": {
     "title": "Settings",
     "google": {
@@ -269,7 +285,6 @@
       "twilioEnvNote": "Twilio environment variables present (values are never displayed):"
     }
   },
-
   "audit": {
     "title": "Audit log",
     "subtitle": "{count, plural, =0 {No entries} one {# entry} other {# entries}} — sensitive actions are recorded here.",

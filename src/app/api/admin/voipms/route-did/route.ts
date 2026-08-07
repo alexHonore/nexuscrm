@@ -8,6 +8,7 @@ import { apiAdmin } from "@/lib/auth/guards";
 import { normalizePhone } from "@/lib/phone";
 import { routeDidToSubAccount } from "@/lib/voipms";
 import { readJson, voipmsErrorResponse } from "../../_helpers";
+import { releaseDidFromOthers } from "../_assignments";
 
 const schema = z.object({
   did: z.string().trim().min(7).max(32),
@@ -34,11 +35,19 @@ export async function POST(req: Request) {
     return voipmsErrorResponse(err);
   }
 
+  // Un DID n'appartient qu'à une personne : on le retire de son détenteur
+  // précédent dans la MÊME transaction que l'assignation.
+  let released: { id: string; name: string; email: string }[] = [];
   if (body.userId) {
-    await db
-      .update(users)
-      .set({ didNumber: didE164, updatedAt: new Date() })
-      .where(eq(users.id, body.userId));
+    const userId = body.userId;
+    released = await db.transaction(async (tx) => {
+      const freed = await releaseDidFromOthers(tx, didE164, userId);
+      await tx
+        .update(users)
+        .set({ didNumber: didE164, updatedAt: new Date() })
+        .where(eq(users.id, userId));
+      return freed;
+    });
   }
 
   await logAudit({
@@ -46,8 +55,12 @@ export async function POST(req: Request) {
     action: "voipms.did_route",
     entity: "user",
     entityId: body.userId,
-    detail: { did: didE164, account: body.account },
+    detail: {
+      did: didE164,
+      account: body.account,
+      ...(released.length > 0 ? { releasedFrom: released } : {}),
+    },
   });
 
-  return NextResponse.json({ ok: true, did: didE164 });
+  return NextResponse.json({ ok: true, did: didE164, released });
 }

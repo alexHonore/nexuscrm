@@ -3,7 +3,7 @@
 import { ChevronDownIcon, MailIcon, MapPinIcon, PhoneIcon, PhoneOffIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { setClientCategoryAction } from "@/app/(app)/clients/actions";
 import { useTelephony } from "@/components/telephony/telephony-context";
@@ -20,6 +20,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { emitDataChange } from "@/lib/live";
 import { formatPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 import { BookingLauncher } from "./booking-launcher";
@@ -45,19 +46,37 @@ export function ClientHeader({
   const locale = useLocale();
   const router = useRouter();
   const { dial, ready } = useTelephony();
-  const [, startTransition] = useTransition();
+  const [pending, startTransition] = useTransition();
+
+  // Catégorie optimiste : la pastille change AVANT l'aller-retour serveur et
+  // revient en arrière (avec un toast) si l'action échoue.
+  const [categoryId, setCategoryId] = useState(client.categoryId);
+  const inFlightRef = useRef(0);
+  useEffect(() => {
+    // On ne resynchronise depuis le serveur que hors mutation en vol, sinon un
+    // rafraîchissement de fond ferait clignoter l'ancienne valeur.
+    if (inFlightRef.current === 0 && !pending) setCategoryId(client.categoryId);
+  }, [client.categoryId, pending]);
 
   const categoryName = (c: HeaderCategory) => (locale === "en" ? c.nameEn : c.nameFr);
-  const current = categories.find((c) => c.id === client.categoryId) ?? null;
+  const current = categories.find((c) => c.id === categoryId) ?? null;
 
-  const changeCategory = (categoryId: number | null) => {
+  const changeCategory = (nextCategoryId: number | null) => {
+    if (nextCategoryId === categoryId) return;
+    const previous = categoryId;
+    setCategoryId(nextCategoryId);
+    inFlightRef.current += 1;
     startTransition(async () => {
-      const res = await setClientCategoryAction(client.id, categoryId);
+      const res = await setClientCategoryAction(client.id, nextCategoryId);
+      inFlightRef.current -= 1;
       if (res.ok) {
         toast.success(t("detail.categoryUpdated"));
+        // Pastille de couleur du panneau + colonnes du pipeline.
+        emitDataChange("clients");
         router.refresh();
       } else {
-        toast.error(t("errors.generic"));
+        setCategoryId(previous);
+        toast.error(res.error === "forbidden" ? t("errors.forbidden") : t("errors.generic"));
       }
     });
   };

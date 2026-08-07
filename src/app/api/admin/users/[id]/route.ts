@@ -7,6 +7,7 @@ import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { encryptSecret } from "@/lib/crypto";
 import { normalizePhone } from "@/lib/phone";
+import { releaseDidFromOthers } from "../../voipms/_assignments";
 import { readJson, toAdminUser } from "../../_helpers";
 
 const patchSchema = z.object({
@@ -87,7 +88,13 @@ export async function PATCH(req: Request, ctx: Ctx) {
   }
 
   try {
-    const [updated] = await db.update(users).set(set).where(eq(users.id, id)).returning();
+    // Assignation d'un DID : on le retire de son détenteur précédent dans la
+    // MÊME transaction — deux comptes ne peuvent jamais partager un numéro.
+    const { updated, released } = await db.transaction(async (tx) => {
+      const freed = set.didNumber ? await releaseDidFromOthers(tx, set.didNumber, id) : [];
+      const [row] = await tx.update(users).set(set).where(eq(users.id, id)).returning();
+      return { updated: row, released: freed };
+    });
 
     if (changed.length > 0) {
       await logAudit({
@@ -95,11 +102,16 @@ export async function PATCH(req: Request, ctx: Ctx) {
         action: "user.update",
         entity: "user",
         entityId: id,
-        detail: { changed, email: updated.email },
+        detail: {
+          changed,
+          email: updated.email,
+          ...(changed.includes("email") ? { previousEmail: target.email } : {}),
+          ...(released.length > 0 ? { didReleasedFrom: released } : {}),
+        },
       });
     }
 
-    return NextResponse.json({ user: toAdminUser(updated) });
+    return NextResponse.json({ user: toAdminUser(updated), released });
   } catch (err) {
     const message = err instanceof Error ? err.message : "";
     if (message.includes("users_email_unique") || message.includes("duplicate key")) {

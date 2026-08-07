@@ -131,7 +131,8 @@
     "placeholder": "Write a comment… Type @ to mention a teammate.",
     "submit": "Post",
     "posted": "Comment posted",
-    "empty": "No comments yet."
+    "empty": "No comments yet.",
+    "you": "You"
   },
   "history": {
     "title": "History",
