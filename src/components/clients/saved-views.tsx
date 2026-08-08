@@ -21,6 +21,11 @@ export type SavedViewState = {
   assignedToIds: string[];
   statuses: string[];
   languages: string[];
+  /** Bornes yyyy-mm-dd des filtres de dates ("" = pas de borne). */
+  createdFrom: string;
+  createdTo: string;
+  updatedFrom: string;
+  updatedTo: string;
   sortKey: ClientSortKey;
   sortDir: ClientSortDir;
   view: "list" | "table";
@@ -53,6 +58,11 @@ function stringList(list: unknown, legacy: unknown): string[] {
   return [];
 }
 
+/** Borne de date d'une vue stockée : yyyy-mm-dd sinon « pas de borne ». */
+function dateBound(value: unknown): string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
+}
+
 /** Vue telle que stockée → état applicable, quel que soit son âge. */
 export function normalizeSavedView(view: SavedView): SavedViewState {
   const raw = view as SavedView & LegacyFields;
@@ -68,6 +78,10 @@ export function normalizeSavedView(view: SavedView): SavedViewState {
     assignedToIds: stringList(raw.assignedToIds, raw.assignedToId),
     statuses: stringList(raw.statuses, raw.status),
     languages: stringList(raw.languages, raw.language).filter((l) => l === "fr" || l === "en"),
+    createdFrom: dateBound(raw.createdFrom),
+    createdTo: dateBound(raw.createdTo),
+    updatedFrom: dateBound(raw.updatedFrom),
+    updatedTo: dateBound(raw.updatedTo),
     sortKey: raw.sortKey,
     sortDir: raw.sortDir === "asc" ? "asc" : "desc",
     view: raw.view === "table" ? "table" : "list",

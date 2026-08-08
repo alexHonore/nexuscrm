@@ -8,6 +8,7 @@ import {
   ArrowUpIcon,
   ChevronDownIcon,
   ClockAlertIcon,
+  Columns3Icon,
   MegaphoneIcon,
   PhoneOffIcon,
   TagsIcon,
@@ -18,7 +19,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useSyncExternalStore, useTransition } from "react";
 import { toast } from "sonner";
 import {
   assignClientAction,
@@ -49,6 +50,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -77,6 +79,66 @@ export type ClientSortKey =
   | "followupAt"
   | "lastContact";
 export type ClientSortDir = "asc" | "desc";
+
+// ── Colonnes affichées : préférence par utilisateur (localStorage) ───────────
+// Même patron de magasin externe que la préférence fiches/tableau du panneau.
+// On stocke les colonnes MASQUÉES : une colonne ajoutée plus tard apparaît
+// d'office chez tout le monde. « name » n'est pas masquable (ancre des lignes).
+
+const COLUMNS_STORAGE_KEY = "nexus.clientsTableHiddenColumns";
+
+/** Colonnes masquables, dans l'ordre d'affichage du tableau. */
+const TOGGLEABLE_COLUMNS = [
+  "phone",
+  "category",
+  "city",
+  "source",
+  "assignedTo",
+  "followup",
+  "lastContact",
+  "created",
+  "updated",
+] as const;
+type ToggleableColumn = (typeof TOGGLEABLE_COLUMNS)[number];
+
+const NO_HIDDEN: ReadonlySet<ToggleableColumn> = new Set();
+let hiddenCache: ReadonlySet<ToggleableColumn> | null = null;
+const columnListeners = new Set<() => void>();
+
+function parseHiddenColumns(): ReadonlySet<ToggleableColumn> {
+  try {
+    const raw = window.localStorage.getItem(COLUMNS_STORAGE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return NO_HIDDEN;
+    return new Set(
+      parsed.filter((v): v is ToggleableColumn =>
+        (TOGGLEABLE_COLUMNS as readonly string[]).includes(v as string),
+      ),
+    );
+  } catch {
+    return NO_HIDDEN;
+  }
+}
+
+function readHiddenColumns(): ReadonlySet<ToggleableColumn> {
+  if (hiddenCache === null) hiddenCache = parseHiddenColumns();
+  return hiddenCache;
+}
+
+function writeHiddenColumns(next: ReadonlySet<ToggleableColumn>): void {
+  hiddenCache = next;
+  try {
+    window.localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify([...next]));
+  } catch {
+    // Stockage indisponible : la préférence ne survivra pas à la session.
+  }
+  for (const notify of columnListeners) notify();
+}
+
+function subscribeHiddenColumns(onChange: () => void): () => void {
+  columnListeners.add(onChange);
+  return () => columnListeners.delete(onChange);
+}
 
 /**
  * Vue tableau de /clients : colonnes triables (nom, création, modification) et,
@@ -115,6 +177,32 @@ export function ClientsTable({
   const dfnsLocale = locale === "en" ? enUS : fr;
   const [pending, startTransition] = useTransition();
   const [deleteOpen, setDeleteOpen] = useState(false);
+
+  // Colonnes affichées (desktop) — préférence propre à l'utilisateur.
+  const hiddenColumns = useSyncExternalStore(
+    subscribeHiddenColumns,
+    readHiddenColumns,
+    (): ReadonlySet<ToggleableColumn> => NO_HIDDEN,
+  );
+  const show = (column: ToggleableColumn) => !hiddenColumns.has(column);
+  const toggleColumn = (column: ToggleableColumn) => {
+    const next = new Set(hiddenColumns);
+    if (next.has(column)) next.delete(column);
+    else next.add(column);
+    writeHiddenColumns(next);
+  };
+  /** Libellés du menu — mêmes clés que les en-têtes du tableau. */
+  const columnLabel: Record<ToggleableColumn, string> = {
+    phone: t("table.phone"),
+    category: t("table.category"),
+    city: t("table.city"),
+    source: t("table.source"),
+    assignedTo: t("table.assignedTo"),
+    followup: t("table.followup"),
+    lastContact: t("table.lastContact"),
+    created: t("table.created"),
+    updated: t("table.updated"),
+  };
 
   const [selectedRaw, setSelectedRaw] = useState<ReadonlySet<string>>(new Set());
   // Une fiche disparue de la liste (supprimée ailleurs, filtre changé) ne doit
@@ -424,15 +512,50 @@ export function ClientsTable({
                 </TableHead>
               ) : null}
               <TableHead>{sortHead("name", t("table.name"))}</TableHead>
-              <TableHead>{t("table.phone")}</TableHead>
-              <TableHead>{t("table.category")}</TableHead>
-              <TableHead>{sortHead("city", t("table.city"))}</TableHead>
-              <TableHead>{t("table.source")}</TableHead>
-              <TableHead>{t("table.assignedTo")}</TableHead>
-              <TableHead>{sortHead("followupAt", t("table.followup"))}</TableHead>
-              <TableHead>{sortHead("lastContact", t("table.lastContact"))}</TableHead>
-              <TableHead>{sortHead("createdAt", t("table.created"))}</TableHead>
-              <TableHead>{sortHead("updatedAt", t("table.updated"))}</TableHead>
+              {show("phone") ? <TableHead>{t("table.phone")}</TableHead> : null}
+              {show("category") ? <TableHead>{t("table.category")}</TableHead> : null}
+              {show("city") ? <TableHead>{sortHead("city", t("table.city"))}</TableHead> : null}
+              {show("source") ? <TableHead>{t("table.source")}</TableHead> : null}
+              {show("assignedTo") ? <TableHead>{t("table.assignedTo")}</TableHead> : null}
+              {show("followup") ? (
+                <TableHead>{sortHead("followupAt", t("table.followup"))}</TableHead>
+              ) : null}
+              {show("lastContact") ? (
+                <TableHead>{sortHead("lastContact", t("table.lastContact"))}</TableHead>
+              ) : null}
+              {show("created") ? (
+                <TableHead>{sortHead("createdAt", t("table.created"))}</TableHead>
+              ) : null}
+              {show("updated") ? (
+                <TableHead>{sortHead("updatedAt", t("table.updated"))}</TableHead>
+              ) : null}
+              <TableHead className="w-10 text-right">
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        className="size-8 text-muted-foreground"
+                        aria-label={t("table.columns")}
+                      />
+                    }
+                  >
+                    <Columns3Icon />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    {TOGGLEABLE_COLUMNS.map((column) => (
+                      <DropdownMenuCheckboxItem
+                        key={column}
+                        checked={show(column)}
+                        onCheckedChange={() => toggleColumn(column)}
+                        closeOnClick={false}
+                      >
+                        {columnLabel[column]}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -472,56 +595,73 @@ export function ClientsTable({
                     ) : null}
                   </span>
                 </TableCell>
-                <TableCell className="tabular-nums">{formatPhone(item.phone)}</TableCell>
-                <TableCell onClick={isAdmin ? (e) => e.stopPropagation() : undefined}>
-                  {isAdmin
-                    ? inlineMenu(
-                        categoryChip(item),
-                        t("table.editCategory", { name: item.fullName }),
-                        categoryMenu(item),
-                      )
-                    : categoryChip(item)}
-                </TableCell>
-                <TableCell className="max-w-36 truncate text-muted-foreground">
-                  {item.city ?? "—"}
-                </TableCell>
-                <TableCell
-                  className="text-muted-foreground"
-                  onClick={isAdmin ? (e) => e.stopPropagation() : undefined}
-                >
-                  {isAdmin
-                    ? inlineMenu(
-                        sourceChip(item),
-                        t("table.editSource", { name: item.fullName }),
-                        sourceMenu(item),
-                      )
-                    : sourceChip(item)}
-                </TableCell>
-                <TableCell
-                  className="text-muted-foreground"
-                  onClick={isAdmin ? (e) => e.stopPropagation() : undefined}
-                >
-                  {isAdmin
-                    ? inlineMenu(
-                        assigneeText(item),
-                        t("table.editAssignee", { name: item.fullName }),
-                        assigneeMenu(item),
-                      )
-                    : assigneeText(item)}
-                </TableCell>
-                <TableCell>{followupCell(item)}</TableCell>
-                <TableCell
-                  className="text-muted-foreground tabular-nums"
-                  title={item.lastContactedAt ? dayTime(item.lastContactedAt) : undefined}
-                >
-                  {item.lastContactedAt ? day(item.lastContactedAt) : "—"}
-                </TableCell>
-                <TableCell className="text-muted-foreground" title={dayTime(item.createdAt)}>
-                  {day(item.createdAt)}
-                </TableCell>
-                <TableCell className="text-muted-foreground" title={dayTime(item.updatedAt)}>
-                  {day(item.updatedAt)}
-                </TableCell>
+                {show("phone") ? (
+                  <TableCell className="tabular-nums">{formatPhone(item.phone)}</TableCell>
+                ) : null}
+                {show("category") ? (
+                  <TableCell onClick={isAdmin ? (e) => e.stopPropagation() : undefined}>
+                    {isAdmin
+                      ? inlineMenu(
+                          categoryChip(item),
+                          t("table.editCategory", { name: item.fullName }),
+                          categoryMenu(item),
+                        )
+                      : categoryChip(item)}
+                  </TableCell>
+                ) : null}
+                {show("city") ? (
+                  <TableCell className="max-w-36 truncate text-muted-foreground">
+                    {item.city ?? "—"}
+                  </TableCell>
+                ) : null}
+                {show("source") ? (
+                  <TableCell
+                    className="text-muted-foreground"
+                    onClick={isAdmin ? (e) => e.stopPropagation() : undefined}
+                  >
+                    {isAdmin
+                      ? inlineMenu(
+                          sourceChip(item),
+                          t("table.editSource", { name: item.fullName }),
+                          sourceMenu(item),
+                        )
+                      : sourceChip(item)}
+                  </TableCell>
+                ) : null}
+                {show("assignedTo") ? (
+                  <TableCell
+                    className="text-muted-foreground"
+                    onClick={isAdmin ? (e) => e.stopPropagation() : undefined}
+                  >
+                    {isAdmin
+                      ? inlineMenu(
+                          assigneeText(item),
+                          t("table.editAssignee", { name: item.fullName }),
+                          assigneeMenu(item),
+                        )
+                      : assigneeText(item)}
+                  </TableCell>
+                ) : null}
+                {show("followup") ? <TableCell>{followupCell(item)}</TableCell> : null}
+                {show("lastContact") ? (
+                  <TableCell
+                    className="text-muted-foreground tabular-nums"
+                    title={item.lastContactedAt ? dayTime(item.lastContactedAt) : undefined}
+                  >
+                    {item.lastContactedAt ? day(item.lastContactedAt) : "—"}
+                  </TableCell>
+                ) : null}
+                {show("created") ? (
+                  <TableCell className="text-muted-foreground" title={dayTime(item.createdAt)}>
+                    {day(item.createdAt)}
+                  </TableCell>
+                ) : null}
+                {show("updated") ? (
+                  <TableCell className="text-muted-foreground" title={dayTime(item.updatedAt)}>
+                    {day(item.updatedAt)}
+                  </TableCell>
+                ) : null}
+                <TableCell className="w-10" aria-hidden />
               </TableRow>
             ))}
           </TableBody>

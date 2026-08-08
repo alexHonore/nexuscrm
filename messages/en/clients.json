@@ -18,7 +18,16 @@
       "noFollowup": "No follow-up planned",
       "neverContacted": "Never contacted",
       "clear": "Reset",
-      "remove": "Remove the {label} filter"
+      "remove": "Remove the {label} filter",
+      "createdAt": "Created",
+      "updatedAt": "Last edited",
+      "createdShort": "Created",
+      "updatedShort": "Edited",
+      "dateFrom": "From",
+      "dateTo": "To",
+      "fromTo": "{label} {from} – {to}",
+      "fromOnly": "{label} since {from}",
+      "toOnly": "{label} until {to}"
     },
     "empty": "No clients match your search.",
     "emptyTitle": "No clients found",
@@ -220,7 +229,8 @@
     "sortBy": "Sort by {column}",
     "editCategory": "Change the category of {name}",
     "editSource": "Change the source of {name}",
-    "editAssignee": "Change the assignee of {name}"
+    "editAssignee": "Change the assignee of {name}",
+    "columns": "Visible columns"
   },
   "bulk": {
     "selected": "{count, plural, one {# selected} other {# selected}}",

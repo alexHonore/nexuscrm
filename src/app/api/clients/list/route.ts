@@ -1,3 +1,4 @@
+import { fromZonedTime } from "date-fns-tz";
 import {
   and,
   asc,
@@ -10,6 +11,7 @@ import {
   isNull,
   like,
   lt,
+  lte,
   or,
   sql,
   type SQL,
@@ -18,7 +20,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
 import { apiUser } from "@/lib/auth/guards";
-import { torontoDayRange } from "@/components/clients/timezone";
+import { APP_TZ, torontoDayRange } from "@/components/clients/timezone";
 
 const MAX_PAGE_SIZE = 50;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -36,6 +38,18 @@ function tokens(raw: string): string[] {
     .map((s) => s.trim())
     .filter(Boolean)
     .slice(0, 50);
+}
+
+// Bornes des filtres de dates (yyyy-mm-dd), interprétées en heure de Toronto —
+// même convention que l'export admin. Valeur invalide : filtre ignoré.
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function torontoStart(raw: string | null): Date | undefined {
+  return raw && DATE_RE.test(raw) ? fromZonedTime(`${raw}T00:00:00`, APP_TZ) : undefined;
+}
+
+function torontoEnd(raw: string | null): Date | undefined {
+  return raw && DATE_RE.test(raw) ? fromZonedTime(`${raw}T23:59:59.999`, APP_TZ) : undefined;
 }
 
 /** Tris acceptés — `activity` reproduit l'ordre historique du panneau. */
@@ -59,6 +73,8 @@ type SortKey = keyof typeof SORT_COLUMNS;
  * - filter — overdue | today | upcoming | none (no follow-up) | never
  *   (never contacted) | dnc (do-not-call list), combinable
  * - language — fr | en
+ * - createdFrom / createdTo, updatedFrom / updatedTo — yyyy-mm-dd, bornes
+ *   inclusives en heure de Toronto (création / dernière modification)
  * - sort (activity | name | city | createdAt | updatedAt | followupAt |
  *   lastContact), dir (asc|desc), page, pageSize (capped at 50).
  * Ordered by recent activity by default.
@@ -132,6 +148,15 @@ export async function GET(req: NextRequest) {
 
   const langs = tokens(languageParam).filter((l) => l === "fr" || l === "en");
   if (langs.length > 0) conditions.push(inArray(clients.language, langs));
+
+  const createdFrom = torontoStart(sp.get("createdFrom"));
+  if (createdFrom) conditions.push(gte(clients.createdAt, createdFrom));
+  const createdTo = torontoEnd(sp.get("createdTo"));
+  if (createdTo) conditions.push(lte(clients.createdAt, createdTo));
+  const updatedFrom = torontoStart(sp.get("updatedFrom"));
+  if (updatedFrom) conditions.push(gte(clients.updatedAt, updatedFrom));
+  const updatedTo = torontoEnd(sp.get("updatedTo"));
+  if (updatedTo) conditions.push(lte(clients.updatedAt, updatedTo));
 
   /** Condition d'UN état de suivi — les états cochés se cumulent en OU. */
   const followupState = (state: string): SQL | undefined => {

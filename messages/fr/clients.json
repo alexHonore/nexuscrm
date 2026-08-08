@@ -18,7 +18,16 @@
       "noFollowup": "Sans suivi planifié",
       "neverContacted": "Jamais contacté",
       "clear": "Réinitialiser",
-      "remove": "Retirer le filtre {label}"
+      "remove": "Retirer le filtre {label}",
+      "createdAt": "Date de création",
+      "updatedAt": "Dernière modification",
+      "createdShort": "Créée",
+      "updatedShort": "Modifiée",
+      "dateFrom": "À partir du",
+      "dateTo": "Jusqu'au",
+      "fromTo": "{label} du {from} au {to}",
+      "fromOnly": "{label} depuis le {from}",
+      "toOnly": "{label} jusqu'au {to}"
     },
     "empty": "Aucun client ne correspond à votre recherche.",
     "emptyTitle": "Aucun client trouvé",
@@ -220,7 +229,8 @@
     "sortBy": "Trier par {column}",
     "editCategory": "Modifier la catégorie de {name}",
     "editSource": "Modifier la source de {name}",
-    "editAssignee": "Modifier l'assignation de {name}"
+    "editAssignee": "Modifier l'assignation de {name}",
+    "columns": "Colonnes affichées"
   },
   "bulk": {
     "selected": "{count, plural, one {# sélectionnée} other {# sélectionnées}}",

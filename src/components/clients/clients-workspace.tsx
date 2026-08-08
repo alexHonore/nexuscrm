@@ -1,5 +1,6 @@
 "use client";
 
+import { format as formatDate, parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { enUS, fr } from "date-fns/locale";
 import {
@@ -135,6 +136,10 @@ const SORT_KEYS: ClientSortKey[] = [
   "updatedAt",
 ];
 
+export type DateRange = { from: string; to: string };
+export const EMPTY_RANGE: DateRange = { from: "", to: "" };
+const hasRange = (r: DateRange) => r.from !== "" || r.to !== "";
+
 /**
  * Persistent master-detail workspace for /clients.
  * Lives in the route layout, so the panel state (search, filters, loaded
@@ -212,6 +217,9 @@ export function ClientsWorkspace({
   const [assignedToIds, setAssignedToIds] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
   const [languages, setLanguages] = useState<string[]>([]);
+  // Plages de dates (yyyy-mm-dd, vide = pas de borne) : création / modification.
+  const [createdRange, setCreatedRange] = useState<DateRange>(EMPTY_RANGE);
+  const [updatedRange, setUpdatedRange] = useState<DateRange>(EMPTY_RANGE);
 
   /** Ajoute/retire une valeur d'un filtre multi-sélection. */
   function toggleValue<T>(setter: React.Dispatch<React.SetStateAction<T[]>>, value: T): void {
@@ -250,12 +258,27 @@ export function ClientsWorkspace({
     if (assignedToIds.length > 0) p.set("assignedToId", assignedToIds.join(","));
     if (statuses.length > 0) p.set("filter", statuses.join(","));
     if (languages.length > 0) p.set("language", languages.join(","));
+    if (createdRange.from) p.set("createdFrom", createdRange.from);
+    if (createdRange.to) p.set("createdTo", createdRange.to);
+    if (updatedRange.from) p.set("updatedFrom", updatedRange.from);
+    if (updatedRange.to) p.set("updatedTo", updatedRange.to);
     if (sortKey !== "activity") {
       p.set("sort", sortKey);
       p.set("dir", sortDir);
     }
     return p.toString();
-  }, [appliedQ, categoryIds, sourceIds, assignedToIds, statuses, languages, sortKey, sortDir]);
+  }, [
+    appliedQ,
+    categoryIds,
+    sourceIds,
+    assignedToIds,
+    statuses,
+    languages,
+    createdRange,
+    updatedRange,
+    sortKey,
+    sortDir,
+  ]);
 
   // Latest-value refs so loadMore stays stable for the context consumers.
   const itemsRef = useRef<ClientListItem[]>([]);
@@ -467,7 +490,12 @@ export function ClientsWorkspace({
     label: t(`sort.${key}`),
   }));
   const activeFilterCount =
-    sourceIds.length + assignedToIds.length + statuses.length + languages.length;
+    sourceIds.length +
+    assignedToIds.length +
+    statuses.length +
+    languages.length +
+    (hasRange(createdRange) ? 1 : 0) +
+    (hasRange(updatedRange) ? 1 : 0);
   const hasAnyCriteria = activeFilterCount > 0 || categoryIds.length > 0 || appliedQ !== "";
 
   const clearFilters = () => {
@@ -475,6 +503,8 @@ export function ClientsWorkspace({
     setAssignedToIds([]);
     setStatuses([]);
     setLanguages([]);
+    setCreatedRange(EMPTY_RANGE);
+    setUpdatedRange(EMPTY_RANGE);
   };
   const clearEverything = () => {
     // Une frappe récente peut avoir un setAppliedQ en attente : on l'annule,
@@ -494,6 +524,10 @@ export function ClientsWorkspace({
     assignedToIds,
     statuses,
     languages,
+    createdFrom: createdRange.from,
+    createdTo: createdRange.to,
+    updatedFrom: updatedRange.from,
+    updatedTo: updatedRange.to,
     sortKey,
     sortDir,
     view,
@@ -509,6 +543,8 @@ export function ClientsWorkspace({
     setAssignedToIds(v.assignedToIds);
     setStatuses(v.statuses);
     setLanguages(v.languages);
+    setCreatedRange({ from: v.createdFrom, to: v.createdTo });
+    setUpdatedRange({ from: v.updatedFrom, to: v.updatedTo });
     setSortKey(SORT_KEYS.includes(v.sortKey) ? v.sortKey : "activity");
     setSortDir(v.sortDir);
     changeView(v.view);
@@ -557,6 +593,60 @@ export function ClientsWorkspace({
     </div>
   );
 
+  /** « 1 août » — la valeur yyyy-mm-dd est affichée telle quelle, sans fuseau. */
+  const chipDate = (ymd: string) => formatDate(parseISO(ymd), "d MMM", { locale: dfnsLocale });
+
+  /** Libellé de rappel d'une plage de dates : « Créée du 1 août au 8 août ». */
+  const rangeChipLabel = (
+    labelKey: "createdShort" | "updatedShort",
+    range: DateRange,
+  ): string => {
+    const label = t(`list.filters.${labelKey}`);
+    if (range.from && range.to) {
+      return t("list.filters.fromTo", {
+        label,
+        from: chipDate(range.from),
+        to: chipDate(range.to),
+      });
+    }
+    if (range.from) return t("list.filters.fromOnly", { label, from: chipDate(range.from) });
+    return t("list.filters.toOnly", { label, to: chipDate(range.to) });
+  };
+
+  /** Groupe « plage de dates » du popover : deux bornes facultatives. */
+  const dateRangeGroup = (
+    label: string,
+    range: DateRange,
+    setRange: React.Dispatch<React.SetStateAction<DateRange>>,
+  ) => (
+    <div className="space-y-1.5">
+      <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
+      </p>
+      <div className="flex items-center gap-1.5" role="group" aria-label={label}>
+        <Input
+          type="date"
+          value={range.from}
+          max={range.to || undefined}
+          onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
+          aria-label={`${label} — ${t("list.filters.dateFrom")}`}
+          className="min-h-11 flex-1 text-xs md:min-h-8"
+        />
+        <span aria-hidden className="shrink-0 text-xs text-muted-foreground">
+          –
+        </span>
+        <Input
+          type="date"
+          value={range.to}
+          min={range.from || undefined}
+          onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
+          aria-label={`${label} — ${t("list.filters.dateTo")}`}
+          className="min-h-11 flex-1 text-xs md:min-h-8"
+        />
+      </div>
+    </div>
+  );
+
   /** Filtres actifs hors catégorie — affichés en rappel sous la recherche. */
   const activeFilterChips: Array<{
     key: string;
@@ -585,6 +675,24 @@ export function ClientsWorkspace({
       label: languageOptions.find((o) => o.value === v)?.label ?? v,
       remove: () => toggleValue(setLanguages, v),
     })),
+    ...(hasRange(createdRange)
+      ? [
+          {
+            key: "created-range",
+            label: rangeChipLabel("createdShort", createdRange),
+            remove: () => setCreatedRange(EMPTY_RANGE),
+          },
+        ]
+      : []),
+    ...(hasRange(updatedRange)
+      ? [
+          {
+            key: "updated-range",
+            label: rangeChipLabel("updatedShort", updatedRange),
+            remove: () => setUpdatedRange(EMPTY_RANGE),
+          },
+        ]
+      : []),
   ];
 
   const chipBase =
@@ -769,6 +877,8 @@ export function ClientsWorkspace({
                     languages,
                     (v) => toggleValue(setLanguages, v),
                   )}
+                  {dateRangeGroup(t("list.filters.createdAt"), createdRange, setCreatedRange)}
+                  {dateRangeGroup(t("list.filters.updatedAt"), updatedRange, setUpdatedRange)}
                   {activeFilterCount > 0 ? (
                     <Button
                       variant="ghost"

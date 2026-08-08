@@ -251,6 +251,42 @@ describe("filtres et tris avancés de /api/clients/list", () => {
     expect(items[0].nextFollowupAt).toBe(t1.toISOString());
     expect(items[0].lastContactedAt).toBe(t2.toISOString());
   });
+
+  it("filtres de dates : createdFrom/To et updatedFrom/To en jour civil de Toronto", async () => {
+    const admin = await makeUser({ role: "admin" });
+    // 03:59 UTC le 5 janvier = 22:59 le 4 janvier à Toronto (UTC-5) — la borne
+    // createdFrom=2026-01-05 doit donc l'EXCLURE (jour civil de Toronto).
+    await makeClient({
+      fullName: "VeilleTard",
+      createdAt: new Date("2026-01-05T03:59:00Z"),
+      updatedAt: new Date("2026-01-10T12:00:00Z"),
+    });
+    await makeClient({
+      fullName: "LeCinq",
+      createdAt: new Date("2026-01-05T15:00:00Z"),
+      updatedAt: new Date("2026-02-01T12:00:00Z"),
+    });
+    await makeClient({
+      fullName: "EnFévrier",
+      createdAt: new Date("2026-02-10T15:00:00Z"),
+      updatedAt: new Date("2026-02-20T12:00:00Z"),
+    });
+    await login(admin);
+
+    expect(new Set(await names("createdFrom=2026-01-05"))).toEqual(
+      new Set(["LeCinq", "EnFévrier"]),
+    );
+    expect(await names("createdFrom=2026-01-05&createdTo=2026-01-31")).toEqual(["LeCinq"]);
+    expect(await names("createdTo=2026-01-04")).toEqual(["VeilleTard"]);
+    expect(new Set(await names("updatedFrom=2026-02-01"))).toEqual(
+      new Set(["LeCinq", "EnFévrier"]),
+    );
+    expect(await names("updatedFrom=2026-02-01&updatedTo=2026-02-15")).toEqual(["LeCinq"]);
+    // ET entre paramètres : création × modification.
+    expect(await names("createdFrom=2026-01-01&updatedTo=2026-01-31")).toEqual(["VeilleTard"]);
+    // Valeur invalide : filtre ignoré sans erreur.
+    expect((await listItems("createdFrom=pas-une-date")).total).toBe(3);
+  });
 });
 
 describe("changement de source (admin seulement)", () => {
