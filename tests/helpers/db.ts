@@ -78,6 +78,18 @@ export async function seedSystemCategories() {
   return Object.fromEntries(rows.map((r) => [r.key!, r]));
 }
 
+export async function makeSource(overrides: Partial<typeof schema.sources.$inferInsert> = {}) {
+  const [row] = await testDb
+    .insert(schema.sources)
+    .values({
+      name: overrides.name ?? `Source ${Math.random().toString(36).slice(2, 10)}`,
+      color: overrides.color ?? "#64748b",
+      ...overrides,
+    })
+    .returning();
+  return row;
+}
+
 export async function makeClient(overrides: Partial<typeof schema.clients.$inferInsert> = {}) {
   const [row] = await testDb
     .insert(schema.clients)

@@ -13,6 +13,7 @@ import {
   comments,
   followups,
   notifications,
+  sources,
   users,
 } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth/guards";
@@ -246,6 +247,40 @@ export async function setClientCategoryAction(
   return { ok: true, id: clientId };
 }
 
+/** Admin only — changement rapide de source depuis la vue tableau. */
+export async function setClientSourceAction(
+  clientId: string,
+  sourceId: number | null,
+): Promise<ActionResult> {
+  const user = await getCurrentUser();
+  if (!user || user.role !== "admin") return FORBIDDEN;
+  if (!z.string().uuid().safeParse(clientId).success) return INVALID;
+  if (sourceId !== null && !Number.isInteger(sourceId)) return INVALID;
+  if (sourceId !== null) {
+    const target = await db.query.sources.findFirst({ where: eq(sources.id, sourceId) });
+    if (!target) return NOT_FOUND;
+  }
+
+  const existing = await db.query.clients.findFirst({ where: eq(clients.id, clientId) });
+  if (!existing) return NOT_FOUND;
+
+  await db
+    .update(clients)
+    .set({ sourceId, updatedAt: new Date() })
+    .where(eq(clients.id, clientId));
+
+  const changes = diffFields(existing, { sourceId }, ["sourceId"]);
+  await logAudit({
+    userId: user.id,
+    action: "client.update",
+    entity: "client",
+    entityId: clientId,
+    detail: { from: existing.sourceId, to: sourceId, ...(changes ? { changes } : {}) },
+  });
+  revalidateClient(clientId);
+  return { ok: true, id: clientId };
+}
+
 /** Admin only. */
 export async function assignClientAction(
   clientId: string,
@@ -470,6 +505,56 @@ export async function bulkSetClientsCategoryAction(
           from: c.categoryId,
           to: categoryId,
           changes: { categoryId: { from: c.categoryId, to: categoryId } } as AuditChanges,
+        },
+      })),
+    );
+    revalidateClientLists();
+  }
+  return { ok: true, count: changed.length };
+}
+
+/** Admin only — change la source de plusieurs fiches d'un coup. */
+export async function bulkSetClientsSourceAction(
+  clientIds: string[],
+  sourceId: number | null,
+): Promise<BulkResult> {
+  const user = await getCurrentUser();
+  if (!user || user.role !== "admin") return FORBIDDEN;
+
+  const ids = bulkIdsSchema.safeParse(clientIds);
+  if (!ids.success) return INVALID;
+  if (sourceId !== null && !Number.isInteger(sourceId)) return INVALID;
+  if (sourceId !== null) {
+    const target = await db.query.sources.findFirst({ where: eq(sources.id, sourceId) });
+    if (!target) return NOT_FOUND;
+  }
+
+  const existing = await db
+    .select({ id: clients.id, sourceId: clients.sourceId })
+    .from(clients)
+    .where(inArray(clients.id, ids.data));
+  const changed = existing.filter((c) => c.sourceId !== sourceId);
+
+  if (changed.length > 0) {
+    await db
+      .update(clients)
+      .set({ sourceId, updatedAt: new Date() })
+      .where(
+        inArray(
+          clients.id,
+          changed.map((c) => c.id),
+        ),
+      );
+    await logBulkAudit(
+      changed.map((c) => ({
+        userId: user.id,
+        action: "client.update",
+        entityId: c.id,
+        detail: {
+          bulk: true,
+          from: c.sourceId,
+          to: sourceId,
+          changes: { sourceId: { from: c.sourceId, to: sourceId } } as AuditChanges,
         },
       })),
     );

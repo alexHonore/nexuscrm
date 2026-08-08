@@ -6,6 +6,7 @@ import {
   gte,
   ilike,
   isNotNull,
+  isNull,
   like,
   lt,
   or,
@@ -21,15 +22,35 @@ import { torontoDayRange } from "@/components/clients/timezone";
 const MAX_PAGE_SIZE = 50;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** « Aucun » explicite pour categoryId / sourceId / assignedToId. */
+const NONE = "none";
+
+/** États de suivi acceptés pour `filter`. */
+const FILTERS = new Set(["overdue", "today", "upcoming", "none", "never", "dnc"]);
+
 /** Tris acceptés — `activity` reproduit l'ordre historique du panneau. */
-const SORTS = new Set(["activity", "name", "createdAt", "updatedAt"]);
+const SORT_COLUMNS = {
+  name: clients.fullName,
+  city: clients.city,
+  createdAt: clients.createdAt,
+  updatedAt: clients.updatedAt,
+  followupAt: clients.nextFollowupAt,
+  lastContact: clients.lastContactedAt,
+} as const;
+
+type SortKey = keyof typeof SORT_COLUMNS;
 
 /**
  * GET /api/clients/list — paginated rows for the /clients left panel and the
- * table view. Params: q, categoryId, sourceId, assignedToId,
- * filter (overdue|today), sort (activity|name|createdAt|updatedAt), dir
- * (asc|desc), page, pageSize (capped at 50). Ordered by recent activity by
- * default.
+ * table view. Params:
+ * - q (name, email, phone, city)
+ * - categoryId / sourceId / assignedToId — id, or "none" for unset
+ * - filter — overdue | today | upcoming | none (no follow-up) | never
+ *   (never contacted) | dnc (do-not-call list)
+ * - language — fr | en
+ * - sort (activity | name | city | createdAt | updatedAt | followupAt |
+ *   lastContact), dir (asc|desc), page, pageSize (capped at 50).
+ * Ordered by recent activity by default.
  */
 export async function GET(req: NextRequest) {
   const auth = await apiUser();
@@ -40,9 +61,12 @@ export async function GET(req: NextRequest) {
   const categoryParam = sp.get("categoryId") ?? "";
   const sourceParam = sp.get("sourceId") ?? "";
   const assignedParam = sp.get("assignedToId") ?? "";
-  const filter = sp.get("filter") ?? "";
+  const filterParam = sp.get("filter") ?? "";
+  const filter = FILTERS.has(filterParam) ? filterParam : "";
+  const languageParam = sp.get("language") ?? "";
   const sortParam = sp.get("sort") ?? "activity";
-  const sort = SORTS.has(sortParam) ? sortParam : "activity";
+  const sort: SortKey | "activity" =
+    sortParam in SORT_COLUMNS ? (sortParam as SortKey) : "activity";
   const dir = sp.get("dir") === "asc" ? "asc" : "desc";
   const page = Math.max(1, Number.parseInt(sp.get("page") ?? "", 10) || 1);
   const pageSize = Math.min(
@@ -55,7 +79,11 @@ export async function GET(req: NextRequest) {
 
   if (q) {
     const digits = q.replace(/\D/g, "");
-    const textMatchers = [ilike(clients.fullName, `%${q}%`), ilike(clients.email, `%${q}%`)];
+    const textMatchers = [
+      ilike(clients.fullName, `%${q}%`),
+      ilike(clients.email, `%${q}%`),
+      ilike(clients.city, `%${q}%`),
+    ];
     const phoneMatchers =
       digits.length >= 3
         ? [like(clients.phone, `%${digits}%`), like(clients.phoneAlt, `%${digits}%`)]
@@ -63,22 +91,36 @@ export async function GET(req: NextRequest) {
     const merged = or(...textMatchers, ...phoneMatchers);
     if (merged) conditions.push(merged);
   }
-  if (/^\d+$/.test(categoryParam)) conditions.push(eq(clients.categoryId, Number(categoryParam)));
-  if (/^\d+$/.test(sourceParam)) conditions.push(eq(clients.sourceId, Number(sourceParam)));
-  if (UUID_RE.test(assignedParam)) conditions.push(eq(clients.assignedToId, assignedParam));
+  if (categoryParam === NONE) conditions.push(isNull(clients.categoryId));
+  else if (/^\d+$/.test(categoryParam)) conditions.push(eq(clients.categoryId, Number(categoryParam)));
+  if (sourceParam === NONE) conditions.push(isNull(clients.sourceId));
+  else if (/^\d+$/.test(sourceParam)) conditions.push(eq(clients.sourceId, Number(sourceParam)));
+  if (assignedParam === NONE) conditions.push(isNull(clients.assignedToId));
+  else if (UUID_RE.test(assignedParam)) conditions.push(eq(clients.assignedToId, assignedParam));
+  if (languageParam === "fr" || languageParam === "en") {
+    conditions.push(eq(clients.language, languageParam));
+  }
   if (filter === "overdue") {
     conditions.push(isNotNull(clients.nextFollowupAt), lt(clients.nextFollowupAt, now));
   } else if (filter === "today") {
     const { start, end } = torontoDayRange(now);
     conditions.push(gte(clients.nextFollowupAt, start), lt(clients.nextFollowupAt, end));
+  } else if (filter === "upcoming") {
+    conditions.push(gte(clients.nextFollowupAt, now));
+  } else if (filter === "none") {
+    conditions.push(isNull(clients.nextFollowupAt));
+  } else if (filter === "never") {
+    conditions.push(isNull(clients.lastContactedAt));
+  } else if (filter === "dnc") {
+    conditions.push(eq(clients.doNotCall, true));
   }
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
   // Activité récente par défaut (même tri que l'ancienne liste) ; la vue
-  // tableau peut trier par nom / création / modification. Toujours `id` en
-  // dernier pour une pagination stable.
-  const sortColumn =
-    sort === "name" ? clients.fullName : sort === "createdAt" ? clients.createdAt : clients.updatedAt;
+  // tableau peut trier par nom / ville / dates / suivi / dernier contact.
+  // Colonnes nullables : NULLS LAST dans les deux sens (Postgres met les NULL
+  // en premier sur un DESC par défaut — on veut les fiches sans valeur à la
+  // fin, pas en tête). Toujours `id` en dernier pour une pagination stable.
   const orderBy =
     sort === "activity"
       ? [
@@ -87,7 +129,12 @@ export async function GET(req: NextRequest) {
           ),
           asc(clients.id),
         ]
-      : [dir === "asc" ? asc(sortColumn) : desc(sortColumn), asc(clients.id)];
+      : [
+          dir === "asc"
+            ? asc(SORT_COLUMNS[sort])
+            : sql`${SORT_COLUMNS[sort]} DESC NULLS LAST`,
+          asc(clients.id),
+        ];
 
   const [total, rows] = await Promise.all([
     db.$count(clients, where),
@@ -102,6 +149,7 @@ export async function GET(req: NextRequest) {
         sourceId: true,
         assignedToId: true,
         nextFollowupAt: true,
+        lastContactedAt: true,
         doNotCall: true,
         city: true,
         createdAt: true,
@@ -125,6 +173,7 @@ export async function GET(req: NextRequest) {
       sourceId: r.sourceId,
       assignedToId: r.assignedToId,
       nextFollowupAt: r.nextFollowupAt?.toISOString() ?? null,
+      lastContactedAt: r.lastContactedAt?.toISOString() ?? null,
       doNotCall: r.doNotCall,
       city: r.city,
       createdAt: r.createdAt.toISOString(),

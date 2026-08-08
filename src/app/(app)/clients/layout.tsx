@@ -37,6 +37,7 @@ export default async function ClientsLayout({ children }: { children: React.Reac
   const sourceOptions: FilterOption[] = allSources.map((s) => ({
     value: String(s.id),
     label: s.name,
+    color: s.color,
   }));
   const userOptions: FilterOption[] = activeUsers.map((u) => ({ value: u.id, label: u.name }));
 
@@ -47,6 +48,7 @@ export default async function ClientsLayout({ children }: { children: React.Reac
       sources={sourceOptions}
       users={userOptions}
       totalClients={total}
+      noCategoryCount={countByCategory.get(null) ?? 0}
     >
       {children}
     </ClientsWorkspace>

@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-export type FilterOption = { value: string; label: string };
+export type FilterOption = { value: string; label: string; color?: string };
 
 const ALL = "all";
 

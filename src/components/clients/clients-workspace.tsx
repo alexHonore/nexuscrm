@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  ArrowDownIcon,
+  ArrowUpIcon,
   ClockAlertIcon,
   Loader2Icon,
   PhoneOffIcon,
@@ -26,6 +28,11 @@ import {
   type ClientListNav,
 } from "@/components/clients/client-list-nav";
 import type { FilterOption } from "@/components/clients/clients-filters";
+import {
+  SavedViews,
+  type SavedView,
+  type SavedViewState,
+} from "@/components/clients/saved-views";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -97,10 +104,30 @@ function rowsSignature(rows: ClientListItem[]): string {
   return rows
     .map(
       (r) =>
-        `${r.id}:${r.fullName}:${r.phone}:${r.city ?? ""}:${r.categoryColor ?? ""}:${r.nextFollowupAt ?? ""}:${r.doNotCall ? 1 : 0}:${r.updatedAt}:${r.assignedToId ?? ""}:${r.sourceId ?? ""}`,
+        `${r.id}:${r.fullName}:${r.phone}:${r.city ?? ""}:${r.categoryId ?? ""}:${r.categoryColor ?? ""}:${r.nextFollowupAt ?? ""}:${r.lastContactedAt ?? ""}:${r.doNotCall ? 1 : 0}:${r.updatedAt}:${r.assignedToId ?? ""}:${r.sourceId ?? ""}`,
     )
     .join("|");
 }
+
+/** Sens de tri initial par colonne — celui qu'on attend naturellement. */
+const SORT_DEFAULT_DIR: Record<Exclude<ClientSortKey, "activity">, ClientSortDir> = {
+  name: "asc",
+  city: "asc",
+  followupAt: "asc",
+  lastContact: "desc",
+  createdAt: "desc",
+  updatedAt: "desc",
+};
+
+const SORT_KEYS: ClientSortKey[] = [
+  "activity",
+  "name",
+  "city",
+  "followupAt",
+  "lastContact",
+  "createdAt",
+  "updatedAt",
+];
 
 /**
  * Persistent master-detail workspace for /clients.
@@ -114,6 +141,7 @@ export function ClientsWorkspace({
   sources,
   users,
   totalClients,
+  noCategoryCount,
   children,
 }: {
   isAdmin: boolean;
@@ -121,6 +149,7 @@ export function ClientsWorkspace({
   sources: FilterOption[];
   users: FilterOption[];
   totalClients: number;
+  noCategoryCount: number;
   children: React.ReactNode;
 }) {
   const t = useTranslations("clients");
@@ -132,7 +161,11 @@ export function ClientsWorkspace({
   const activeId = isDetail ? (pathname.split("/")[2] ?? null) : null;
 
   // ── Vue (fiches / tableau) ─────────────────────────────────────────────────
-  const view = useSyncExternalStore(subscribeStoredView, readStoredView, () => "list");
+  const view = useSyncExternalStore(
+    subscribeStoredView,
+    readStoredView,
+    (): ClientsView => "list",
+  );
 
   const [sortKey, setSortKey] = useState<ClientSortKey>("activity");
   const [sortDir, setSortDir] = useState<ClientSortDir>("desc");
@@ -141,11 +174,6 @@ export function ClientsWorkspace({
     writeStoredView(next);
     // Le tableau ne s'affiche que sur /clients — on quitte la fiche ouverte.
     if (next === "table" && isDetail) router.push("/clients");
-    // Retour aux fiches : on retrouve l'ordre « activité récente » du panneau.
-    if (next === "list") {
-      setSortKey("activity");
-      setSortDir("desc");
-    }
   };
 
   const onSort = (key: Exclude<ClientSortKey, "activity">) => {
@@ -153,7 +181,7 @@ export function ClientsWorkspace({
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortKey(key);
-      setSortDir(key === "name" ? "asc" : "desc");
+      setSortDir(SORT_DEFAULT_DIR[key]);
     }
   };
 
@@ -161,7 +189,7 @@ export function ClientsWorkspace({
   // Seeded from ?q= so the dashboard quick search keeps working.
   const [q, setQ] = useState(() => searchParams.get("q") ?? "");
   const [appliedQ, setAppliedQ] = useState(() => (searchParams.get("q") ?? "").trim());
-  const [categoryId, setCategoryId] = useState<number | null>(() => {
+  const [categoryId, setCategoryId] = useState<number | "none" | null>(() => {
     // Semée depuis l'URL (liens « +N autres » du tableau pipeline).
     const raw = searchParams.get("categoryId");
     const parsed = raw ? Number.parseInt(raw, 10) : NaN;
@@ -170,6 +198,7 @@ export function ClientsWorkspace({
   const [sourceId, setSourceId] = useState(ALL);
   const [assignedToId, setAssignedToId] = useState(ALL);
   const [status, setStatus] = useState(ALL);
+  const [language, setLanguage] = useState(ALL);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onSearchChange = (value: string) => {
@@ -200,12 +229,13 @@ export function ClientsWorkspace({
     if (sourceId !== ALL) p.set("sourceId", sourceId);
     if (assignedToId !== ALL) p.set("assignedToId", assignedToId);
     if (status !== ALL) p.set("filter", status);
+    if (language !== ALL) p.set("language", language);
     if (sortKey !== "activity") {
       p.set("sort", sortKey);
       p.set("dir", sortDir);
     }
     return p.toString();
-  }, [appliedQ, categoryId, sourceId, assignedToId, status, sortKey, sortDir]);
+  }, [appliedQ, categoryId, sourceId, assignedToId, status, language, sortKey, sortDir]);
 
   // Latest-value refs so loadMore stays stable for the context consumers.
   const itemsRef = useRef<ClientListItem[]>([]);
@@ -391,16 +421,64 @@ export function ClientsWorkspace({
     value: String(c.id),
     label: c.label,
   }));
-  const withAll = (options: FilterOption[]): FilterOption[] => [
+  const sourceFilterOptions: FilterOption[] = [
     { value: ALL, label: t("list.filters.all") },
-    ...options,
+    { value: "none", label: t("list.filters.noSource") },
+    ...sources,
+  ];
+  const userFilterOptions: FilterOption[] = [
+    { value: ALL, label: t("list.filters.all") },
+    { value: "none", label: t("list.unassigned") },
+    ...users,
   ];
   const statusOptions: FilterOption[] = [
     { value: ALL, label: t("list.filters.all") },
     { value: "overdue", label: t("list.filters.late") },
     { value: "today", label: t("list.filters.today") },
+    { value: "upcoming", label: t("list.filters.upcoming") },
+    { value: "none", label: t("list.filters.noFollowup") },
+    { value: "never", label: t("list.filters.neverContacted") },
+    { value: "dnc", label: t("list.doNotCall") },
   ];
-  const activeFilterCount = [sourceId, assignedToId, status].filter((v) => v !== ALL).length;
+  const languageOptions: FilterOption[] = [
+    { value: ALL, label: t("list.filters.all") },
+    { value: "fr", label: t("languages.fr") },
+    { value: "en", label: t("languages.en") },
+  ];
+  const sortOptions: FilterOption[] = SORT_KEYS.map((key) => ({
+    value: key,
+    label: t(`sort.${key}`),
+  }));
+  const activeFilterCount = [sourceId, assignedToId, status, language].filter(
+    (v) => v !== ALL,
+  ).length;
+
+  // ── Vues enregistrées : instantané courant + application ──────────────────
+  const currentViewState: SavedViewState = {
+    q: appliedQ,
+    categoryId,
+    sourceId,
+    assignedToId,
+    status,
+    language,
+    sortKey,
+    sortDir,
+    view,
+  };
+  const applySavedView = (v: SavedView) => {
+    // Données venues du localStorage : on ne fait confiance à rien.
+    const savedQ = typeof v.q === "string" ? v.q : "";
+    setQ(savedQ);
+    setAppliedQ(savedQ.trim());
+    setCategoryId(typeof v.categoryId === "number" || v.categoryId === "none" ? v.categoryId : null);
+    setSourceId(typeof v.sourceId === "string" ? v.sourceId : ALL);
+    setAssignedToId(typeof v.assignedToId === "string" ? v.assignedToId : ALL);
+    setStatus(typeof v.status === "string" ? v.status : ALL);
+    setLanguage(v.language === "fr" || v.language === "en" ? v.language : ALL);
+    setSortKey(SORT_KEYS.includes(v.sortKey) ? v.sortKey : "activity");
+    setSortDir(v.sortDir === "asc" ? "asc" : "desc");
+    if (v.view === "table" || v.view === "list") changeView(v.view);
+  };
 
   const selectField = (
     label: string,
@@ -505,15 +583,60 @@ export function ClientsWorkspace({
                     </span>
                   ) : null}
                 </PopoverTrigger>
-                <PopoverContent align="end" className="w-64 gap-3 p-3">
-                  {selectField(t("list.filters.source"), withAll(sources), sourceId, setSourceId)}
+                <PopoverContent
+                  align="end"
+                  className="max-h-[min(70vh,34rem)] w-72 gap-3 overflow-y-auto p-3"
+                >
+                  {/* Tri — accessible aussi en vue fiches, pas seulement via
+                      les en-têtes du tableau. */}
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">{t("sort.label")}</p>
+                    <div className="flex items-center gap-1.5">
+                      <Select
+                        items={sortOptions}
+                        value={sortKey}
+                        onValueChange={(v) => {
+                          const key = (v ?? "activity") as ClientSortKey;
+                          setSortKey(key);
+                          setSortDir(key === "activity" ? "desc" : SORT_DEFAULT_DIR[key]);
+                        }}
+                      >
+                        <SelectTrigger
+                          className="min-h-11 w-full md:min-h-9"
+                          aria-label={t("sort.label")}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {sortOptions.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>
+                              {o.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {sortKey !== "activity" ? (
+                        <Button
+                          variant="outline"
+                          className="size-11 shrink-0 md:size-9"
+                          aria-label={t(sortDir === "asc" ? "sort.asc" : "sort.desc")}
+                          onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+                        >
+                          {sortDir === "asc" ? <ArrowUpIcon /> : <ArrowDownIcon />}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {selectField(t("list.filters.source"), sourceFilterOptions, sourceId, setSourceId)}
                   {selectField(
                     t("list.filters.assignedTo"),
-                    withAll(users),
+                    userFilterOptions,
                     assignedToId,
                     setAssignedToId,
                   )}
                   {selectField(t("list.filters.status"), statusOptions, status, setStatus)}
+                  {selectField(t("list.filters.language"), languageOptions, language, setLanguage)}
                   {activeFilterCount > 0 ? (
                     <Button
                       variant="ghost"
@@ -522,12 +645,17 @@ export function ClientsWorkspace({
                         setSourceId(ALL);
                         setAssignedToId(ALL);
                         setStatus(ALL);
+                        setLanguage(ALL);
                       }}
                     >
                       <XIcon />
                       {t("list.filters.clear")}
                     </Button>
                   ) : null}
+
+                  <div className="border-t pt-3">
+                    <SavedViews current={currentViewState} onApply={applySavedView} />
+                  </div>
                 </PopoverContent>
               </Popover>
 
@@ -602,6 +730,23 @@ export function ClientsWorkspace({
                   </button>
                 );
               })}
+              {noCategoryCount > 0 ? (
+                <button
+                  type="button"
+                  aria-pressed={categoryId === "none"}
+                  onClick={() => setCategoryId(categoryId === "none" ? null : "none")}
+                  className={cn(
+                    chipBase,
+                    categoryId === "none"
+                      ? "border-primary/40 bg-primary/10 text-primary"
+                      : "border-border text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  <span aria-hidden className="size-2 shrink-0 rounded-full bg-muted-foreground/40" />
+                  {t("list.noCategory")}
+                  <span className="tabular-nums opacity-70">{noCategoryCount}</span>
+                </button>
+              ) : null}
             </div>
 
             <p className="mt-1.5 text-[11px] text-muted-foreground" aria-live="polite">
@@ -624,6 +769,7 @@ export function ClientsWorkspace({
                   sortKey={sortKey}
                   sortDir={sortDir}
                   onSort={onSort}
+                  now={now}
                 />
               )}
               {loadMoreBlock}

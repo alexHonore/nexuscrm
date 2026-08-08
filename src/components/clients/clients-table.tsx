@@ -6,6 +6,9 @@ import {
   ArrowDownIcon,
   ArrowUpDownIcon,
   ArrowUpIcon,
+  ChevronDownIcon,
+  ClockAlertIcon,
+  MegaphoneIcon,
   PhoneOffIcon,
   TagsIcon,
   Trash2Icon,
@@ -18,9 +21,14 @@ import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
+  assignClientAction,
   bulkAssignClientsAction,
   bulkDeleteClientsAction,
   bulkSetClientsCategoryAction,
+  bulkSetClientsSourceAction,
+  setClientCategoryAction,
+  setClientSourceAction,
+  type ActionResult,
   type BulkResult,
 } from "@/app/(app)/clients/actions";
 import type { ClientListItem } from "@/components/clients/client-list-nav";
@@ -60,7 +68,14 @@ import { emitDataChange } from "@/lib/live";
 import { formatPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 
-export type ClientSortKey = "activity" | "name" | "createdAt" | "updatedAt";
+export type ClientSortKey =
+  | "activity"
+  | "name"
+  | "city"
+  | "createdAt"
+  | "updatedAt"
+  | "followupAt"
+  | "lastContact";
 export type ClientSortDir = "asc" | "desc";
 
 /**
@@ -80,6 +95,7 @@ export function ClientsTable({
   sortKey,
   sortDir,
   onSort,
+  now,
 }: {
   items: ClientListItem[];
   loading: boolean;
@@ -90,6 +106,8 @@ export function ClientsTable({
   sortKey: ClientSortKey;
   sortDir: ClientSortDir;
   onSort: (key: Exclude<ClientSortKey, "activity">) => void;
+  /** Horodatage « maintenant » du parent — évite un Date.now() par cellule. */
+  now: number;
 }) {
   const t = useTranslations("clients");
   const locale = useLocale();
@@ -109,7 +127,7 @@ export function ClientsTable({
   }, [items, selectedRaw]);
 
   const categoryById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
-  const sourceLabels = useMemo(() => new Map(sources.map((s) => [s.value, s.label])), [sources]);
+  const sourceByValue = useMemo(() => new Map(sources.map((s) => [s.value, s])), [sources]);
   const userLabels = useMemo(() => new Map(users.map((u) => [u.value, u.label])), [users]);
 
   const allSelected = items.length > 0 && items.every((item) => selected.has(item.id));
@@ -141,6 +159,20 @@ export function ClientsTable({
         toast.success(t(successKey, { count: res.count }));
         setDeleteOpen(false);
         clearSelection();
+        emitDataChange("clients");
+        router.refresh();
+      } else {
+        toast.error(res.error === "forbidden" ? t("errors.forbidden") : t("errors.generic"));
+      }
+    });
+  };
+
+  /** Édition en ligne d'UNE fiche (admin) — même contrat que runBulk. */
+  const runRow = (run: () => Promise<ActionResult>, successMessage: string) => {
+    startTransition(async () => {
+      const res = await run();
+      if (res.ok) {
+        toast.success(successMessage);
         emitDataChange("clients");
         router.refresh();
       } else {
@@ -193,6 +225,148 @@ export function ClientsTable({
     );
   };
 
+  const sourceChip = (item: ClientListItem) => {
+    const source = item.sourceId !== null ? sourceByValue.get(String(item.sourceId)) : undefined;
+    if (!source) return <span className="text-muted-foreground">—</span>;
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        {source.color ? (
+          <span
+            aria-hidden
+            className="size-1.5 shrink-0 rounded-full"
+            style={{ backgroundColor: source.color }}
+          />
+        ) : null}
+        {source.label}
+      </span>
+    );
+  };
+
+  const assigneeText = (item: ClientListItem) =>
+    (item.assignedToId ? userLabels.get(item.assignedToId) : null) ?? t("list.unassigned");
+
+  const followupCell = (item: ClientListItem) => {
+    if (!item.nextFollowupAt) return <span className="text-muted-foreground">—</span>;
+    const overdue = Date.parse(item.nextFollowupAt) < now;
+    return (
+      <span
+        className={cn("inline-flex items-center gap-1 tabular-nums", overdue && "font-medium text-destructive")}
+        title={dayTime(item.nextFollowupAt)}
+      >
+        {overdue ? <ClockAlertIcon className="size-3.5 shrink-0" aria-label={t("list.filters.late")} /> : null}
+        {day(item.nextFollowupAt)}
+      </span>
+    );
+  };
+
+  /**
+   * Cellule éditable en ligne (admin) : le contenu affiché devient le
+   * déclencheur d'un menu. Le serveur revalide le rôle — le menu caché aux
+   * téléphonistes n'est pas la protection.
+   */
+  const inlineMenu = (
+    display: React.ReactNode,
+    ariaLabel: string,
+    menu: React.ReactNode,
+  ) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type="button"
+            disabled={pending}
+            aria-label={ariaLabel}
+            className="group/edit -mx-1.5 -my-1 inline-flex max-w-full items-center gap-1 rounded-md px-1.5 py-1 text-left hover:bg-muted"
+          />
+        }
+      >
+        <span className="min-w-0 truncate">{display}</span>
+        <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/edit:opacity-100" />
+      </DropdownMenuTrigger>
+      {menu}
+    </DropdownMenu>
+  );
+
+  const categoryMenu = (item: ClientListItem) => (
+    <DropdownMenuContent align="start" className="min-w-48">
+      {categories.map((c) => (
+        <DropdownMenuItem
+          key={c.id}
+          className="min-h-10"
+          disabled={c.id === item.categoryId}
+          onClick={() =>
+            runRow(() => setClientCategoryAction(item.id, c.id), t("detail.categoryUpdated"))
+          }
+        >
+          <span aria-hidden className="size-2.5 rounded-full" style={{ backgroundColor: c.color }} />
+          {c.label}
+        </DropdownMenuItem>
+      ))}
+      <DropdownMenuSeparator />
+      <DropdownMenuItem
+        className="min-h-10"
+        disabled={item.categoryId === null}
+        onClick={() =>
+          runRow(() => setClientCategoryAction(item.id, null), t("detail.categoryUpdated"))
+        }
+      >
+        <span aria-hidden className="size-2.5 rounded-full bg-muted-foreground/40" />
+        {t("detail.noCategory")}
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  );
+
+  const sourceMenu = (item: ClientListItem) => (
+    <DropdownMenuContent align="start" className="min-w-48">
+      {sources.map((s) => (
+        <DropdownMenuItem
+          key={s.value}
+          className="min-h-10"
+          disabled={String(item.sourceId ?? "") === s.value}
+          onClick={() =>
+            runRow(() => setClientSourceAction(item.id, Number(s.value)), t("detail.sourceUpdated"))
+          }
+        >
+          {s.color ? (
+            <span aria-hidden className="size-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+          ) : null}
+          {s.label}
+        </DropdownMenuItem>
+      ))}
+      <DropdownMenuSeparator />
+      <DropdownMenuItem
+        className="min-h-10"
+        disabled={item.sourceId === null}
+        onClick={() => runRow(() => setClientSourceAction(item.id, null), t("detail.sourceUpdated"))}
+      >
+        {t("list.filters.noSource")}
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  );
+
+  const assigneeMenu = (item: ClientListItem) => (
+    <DropdownMenuContent align="start" className="min-w-48">
+      {users.map((u) => (
+        <DropdownMenuItem
+          key={u.value}
+          className="min-h-10"
+          disabled={item.assignedToId === u.value}
+          onClick={() => runRow(() => assignClientAction(item.id, u.value), t("assign.success"))}
+        >
+          {u.label}
+        </DropdownMenuItem>
+      ))}
+      <DropdownMenuSeparator />
+      <DropdownMenuItem
+        className="min-h-10"
+        disabled={item.assignedToId === null}
+        onClick={() => runRow(() => assignClientAction(item.id, null), t("assign.success"))}
+      >
+        {t("list.unassigned")}
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  );
+
   if (loading) {
     return (
       <div className="space-y-1.5 p-3">
@@ -227,9 +401,11 @@ export function ClientsTable({
               <TableHead>{sortHead("name", t("table.name"))}</TableHead>
               <TableHead>{t("table.phone")}</TableHead>
               <TableHead>{t("table.category")}</TableHead>
-              <TableHead>{t("table.city")}</TableHead>
+              <TableHead>{sortHead("city", t("table.city"))}</TableHead>
               <TableHead>{t("table.source")}</TableHead>
               <TableHead>{t("table.assignedTo")}</TableHead>
+              <TableHead>{sortHead("followupAt", t("table.followup"))}</TableHead>
+              <TableHead>{sortHead("lastContact", t("table.lastContact"))}</TableHead>
               <TableHead>{sortHead("createdAt", t("table.created"))}</TableHead>
               <TableHead>{sortHead("updatedAt", t("table.updated"))}</TableHead>
             </TableRow>
@@ -272,16 +448,48 @@ export function ClientsTable({
                   </span>
                 </TableCell>
                 <TableCell className="tabular-nums">{formatPhone(item.phone)}</TableCell>
-                <TableCell>{categoryChip(item)}</TableCell>
+                <TableCell onClick={isAdmin ? (e) => e.stopPropagation() : undefined}>
+                  {isAdmin
+                    ? inlineMenu(
+                        categoryChip(item),
+                        t("table.editCategory", { name: item.fullName }),
+                        categoryMenu(item),
+                      )
+                    : categoryChip(item)}
+                </TableCell>
                 <TableCell className="max-w-36 truncate text-muted-foreground">
                   {item.city ?? "—"}
                 </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {(item.sourceId !== null ? sourceLabels.get(String(item.sourceId)) : null) ?? "—"}
+                <TableCell
+                  className="text-muted-foreground"
+                  onClick={isAdmin ? (e) => e.stopPropagation() : undefined}
+                >
+                  {isAdmin
+                    ? inlineMenu(
+                        sourceChip(item),
+                        t("table.editSource", { name: item.fullName }),
+                        sourceMenu(item),
+                      )
+                    : sourceChip(item)}
                 </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {(item.assignedToId ? userLabels.get(item.assignedToId) : null) ??
-                    t("list.unassigned")}
+                <TableCell
+                  className="text-muted-foreground"
+                  onClick={isAdmin ? (e) => e.stopPropagation() : undefined}
+                >
+                  {isAdmin
+                    ? inlineMenu(
+                        assigneeText(item),
+                        t("table.editAssignee", { name: item.fullName }),
+                        assigneeMenu(item),
+                      )
+                    : assigneeText(item)}
+                </TableCell>
+                <TableCell>{followupCell(item)}</TableCell>
+                <TableCell
+                  className="text-muted-foreground tabular-nums"
+                  title={item.lastContactedAt ? dayTime(item.lastContactedAt) : undefined}
+                >
+                  {item.lastContactedAt ? day(item.lastContactedAt) : "—"}
                 </TableCell>
                 <TableCell className="text-muted-foreground" title={dayTime(item.createdAt)}>
                   {day(item.createdAt)}
@@ -401,6 +609,47 @@ export function ClientsTable({
                 >
                   <span aria-hidden className="size-2.5 rounded-full bg-muted-foreground/40" />
                   {t("detail.noCategory")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={<Button variant="outline" className="min-h-11 md:min-h-8" disabled={pending} />}
+              >
+                <MegaphoneIcon />
+                {t("bulk.source")}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="min-w-48">
+                {sources.map((s) => (
+                  <DropdownMenuItem
+                    key={s.value}
+                    className="min-h-10"
+                    onClick={() =>
+                      runBulk(
+                        (ids) => bulkSetClientsSourceAction(ids, Number(s.value)),
+                        "bulk.sourced",
+                      )
+                    }
+                  >
+                    {s.color ? (
+                      <span
+                        aria-hidden
+                        className="size-2.5 rounded-full"
+                        style={{ backgroundColor: s.color }}
+                      />
+                    ) : null}
+                    {s.label}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="min-h-10"
+                  onClick={() =>
+                    runBulk((ids) => bulkSetClientsSourceAction(ids, null), "bulk.sourced")
+                  }
+                >
+                  {t("list.filters.noSource")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

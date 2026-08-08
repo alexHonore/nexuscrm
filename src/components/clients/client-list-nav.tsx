@@ -14,6 +14,8 @@ export type ClientListItem = {
   assignedToId: string | null;
   /** ISO string (UTC) or null. */
   nextFollowupAt: string | null;
+  /** ISO string (UTC) or null. */
+  lastContactedAt: string | null;
   doNotCall: boolean;
   city: string | null;
   /** ISO strings (UTC). */
