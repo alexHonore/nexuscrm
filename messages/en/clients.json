@@ -167,5 +167,41 @@
     "generic": "Something went wrong",
     "forbidden": "Not allowed",
     "notFound": "Client not found"
+  },
+  "views": {
+    "cards": "Card view",
+    "table": "Table view"
+  },
+  "table": {
+    "name": "Name",
+    "phone": "Phone",
+    "category": "Category",
+    "city": "City",
+    "source": "Source",
+    "assignedTo": "Assigned to",
+    "created": "Created",
+    "updated": "Updated",
+    "createdShort": "Created {date}",
+    "selectAll": "Select all",
+    "selectRow": "Select {name}",
+    "sortBy": "Sort by {column}"
+  },
+  "bulk": {
+    "selected": "{count, plural, one {# selected} other {# selected}}",
+    "assign": "Assign",
+    "category": "Category",
+    "delete": "Delete",
+    "deleteTitle": "Delete selected clients?",
+    "deleteDescription": "{count, plural, one {The selected client will be permanently deleted, along with their calls, appointments and comments.} other {The # selected clients will be permanently deleted, along with their calls, appointments and comments.}}",
+    "assigned": "{count, plural, =0 {No clients changed} one {# client assigned} other {# clients assigned}}",
+    "categorized": "{count, plural, =0 {No clients changed} one {# client recategorized} other {# clients recategorized}}",
+    "deleted": "{count, plural, =0 {No clients deleted} one {# client deleted} other {# clients deleted}}",
+    "clear": "Clear selection"
+  },
+  "meta": {
+    "created": "Created {date}",
+    "createdBy": "Created {date} by {name}",
+    "updated": "Edited {date}",
+    "updatedBy": "Edited {date} by {name}"
   }
 }

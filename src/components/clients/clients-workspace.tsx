@@ -4,15 +4,22 @@ import {
   ClockAlertIcon,
   Loader2Icon,
   PhoneOffIcon,
+  Rows3Icon,
   SearchIcon,
   SlidersHorizontalIcon,
+  Table2Icon,
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AddClientDialog } from "@/components/clients/add-client-dialog";
+import {
+  ClientsTable,
+  type ClientSortDir,
+  type ClientSortKey,
+} from "@/components/clients/clients-table";
 import {
   ClientListNavContext,
   type ClientListItem,
@@ -48,12 +55,49 @@ const ALL = "all";
 /** Cadence du rafraîchissement de fond (autres utilisateurs, leads webhook). */
 const PANEL_POLL_MS = 20_000;
 
+/** La vue choisie (fiches / tableau) survit aux sessions. */
+const VIEW_STORAGE_KEY = "nexus.clientsView";
+
+// ── Préférence de vue : petit magasin externe (localStorage) ─────────────────
+// useSyncExternalStore évite à la fois l'écart d'hydratation (le serveur rend
+// toujours « fiches ») et un setState dans un effet.
+
+type ClientsView = "list" | "table";
+
+const viewListeners = new Set<() => void>();
+/** Relais mémoire : la bascule fonctionne même sans localStorage (navigation privée). */
+let memoryView: ClientsView | null = null;
+
+function readStoredView(): ClientsView {
+  if (memoryView !== null) return memoryView;
+  try {
+    return window.localStorage.getItem(VIEW_STORAGE_KEY) === "table" ? "table" : "list";
+  } catch {
+    return "list";
+  }
+}
+
+function writeStoredView(view: ClientsView): void {
+  memoryView = view;
+  try {
+    window.localStorage.setItem(VIEW_STORAGE_KEY, view);
+  } catch {
+    // Stockage indisponible : la préférence ne survivra pas à la session.
+  }
+  for (const notify of viewListeners) notify();
+}
+
+function subscribeStoredView(onChange: () => void): () => void {
+  viewListeners.add(onChange);
+  return () => viewListeners.delete(onChange);
+}
+
 /** Signature d'affichage d'une ligne — évite les rendus inutiles au sondage. */
 function rowsSignature(rows: ClientListItem[]): string {
   return rows
     .map(
       (r) =>
-        `${r.id}:${r.fullName}:${r.phone}:${r.city ?? ""}:${r.categoryColor ?? ""}:${r.nextFollowupAt ?? ""}:${r.doNotCall ? 1 : 0}`,
+        `${r.id}:${r.fullName}:${r.phone}:${r.city ?? ""}:${r.categoryColor ?? ""}:${r.nextFollowupAt ?? ""}:${r.doNotCall ? 1 : 0}:${r.updatedAt}:${r.assignedToId ?? ""}:${r.sourceId ?? ""}`,
     )
     .join("|");
 }
@@ -81,10 +125,37 @@ export function ClientsWorkspace({
 }) {
   const t = useTranslations("clients");
   const pathname = usePathname();
+  const router = useRouter();
   const searchParams = useSearchParams();
 
   const isDetail = pathname !== "/clients";
   const activeId = isDetail ? (pathname.split("/")[2] ?? null) : null;
+
+  // ── Vue (fiches / tableau) ─────────────────────────────────────────────────
+  const view = useSyncExternalStore(subscribeStoredView, readStoredView, () => "list");
+
+  const [sortKey, setSortKey] = useState<ClientSortKey>("activity");
+  const [sortDir, setSortDir] = useState<ClientSortDir>("desc");
+
+  const changeView = (next: ClientsView) => {
+    writeStoredView(next);
+    // Le tableau ne s'affiche que sur /clients — on quitte la fiche ouverte.
+    if (next === "table" && isDetail) router.push("/clients");
+    // Retour aux fiches : on retrouve l'ordre « activité récente » du panneau.
+    if (next === "list") {
+      setSortKey("activity");
+      setSortDir("desc");
+    }
+  };
+
+  const onSort = (key: Exclude<ClientSortKey, "activity">) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(key === "name" ? "asc" : "desc");
+    }
+  };
 
   // ── Filters ────────────────────────────────────────────────────────────────
   // Seeded from ?q= so the dashboard quick search keeps working.
@@ -129,8 +200,12 @@ export function ClientsWorkspace({
     if (sourceId !== ALL) p.set("sourceId", sourceId);
     if (assignedToId !== ALL) p.set("assignedToId", assignedToId);
     if (status !== ALL) p.set("filter", status);
+    if (sortKey !== "activity") {
+      p.set("sort", sortKey);
+      p.set("dir", sortDir);
+    }
     return p.toString();
-  }, [appliedQ, categoryId, sourceId, assignedToId, status]);
+  }, [appliedQ, categoryId, sourceId, assignedToId, status, sortKey, sortDir]);
 
   // Latest-value refs so loadMore stays stable for the context consumers.
   const itemsRef = useRef<ClientListItem[]>([]);
@@ -354,14 +429,46 @@ export function ClientsWorkspace({
     "inline-flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-xs font-medium transition-colors md:h-7";
   const now = Date.now();
 
+  /** Vue tableau : pleine largeur, uniquement sur /clients (jamais sur une fiche). */
+  const showTable = view === "table" && !isDetail;
+
+  const failedBlock = (
+    <div className="space-y-2 p-6 text-center">
+      <p className="text-sm text-muted-foreground">{t("panel.loadError")}</p>
+      <Button
+        variant="outline"
+        className="min-h-11 md:min-h-9"
+        onClick={() => setRefreshKey((k) => k + 1)}
+      >
+        {t("panel.retry")}
+      </Button>
+    </div>
+  );
+
+  const loadMoreBlock =
+    hasMore && !loading && !failed ? (
+      <div ref={sentinelRef} className="p-3">
+        <Button
+          variant="outline"
+          className="min-h-11 w-full md:min-h-9"
+          disabled={loadingMore}
+          onClick={() => void loadMore()}
+        >
+          {loadingMore ? <Loader2Icon className="animate-spin" /> : null}
+          {t("panel.loadMore")}
+        </Button>
+      </div>
+    ) : null;
+
   return (
     <ClientListNavContext.Provider value={nav}>
-      <div className="md:flex">
-        {/* ── Left panel: the caller's cockpit ── */}
+      <div className={cn(!showTable && "md:flex")}>
+        {/* ── Left panel (or full-width table container) ── */}
         <aside
           aria-label={t("list.title")}
           className={cn(
-            "flex w-full flex-col md:sticky md:top-0 md:h-dvh md:w-[340px] md:shrink-0 md:border-r",
+            "flex w-full flex-col",
+            !showTable && "md:sticky md:top-0 md:h-dvh md:w-[340px] md:shrink-0 md:border-r",
             isDetail && "hidden md:flex",
           )}
         >
@@ -423,6 +530,15 @@ export function ClientsWorkspace({
                   ) : null}
                 </PopoverContent>
               </Popover>
+
+              <Button
+                variant="outline"
+                className="size-11 md:size-9"
+                aria-label={view === "list" ? t("views.table") : t("views.cards")}
+                onClick={() => changeView(view === "list" ? "table" : "list")}
+              >
+                {view === "list" ? <Table2Icon /> : <Rows3Icon />}
+              </Button>
 
               {isAdmin ? (
                 <AddClientDialog
@@ -493,7 +609,26 @@ export function ClientsWorkspace({
             </p>
           </div>
 
-          {/* List — own scroll container on desktop, body scroll on mobile */}
+          {showTable ? (
+            <div className="min-w-0">
+              {failed && !loading ? (
+                failedBlock
+              ) : (
+                <ClientsTable
+                  items={items}
+                  loading={loading}
+                  isAdmin={isAdmin}
+                  categories={categories}
+                  sources={sources}
+                  users={users}
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onSort={onSort}
+                />
+              )}
+              {loadMoreBlock}
+            </div>
+          ) : (
           <div className="md:min-h-0 md:flex-1 md:overflow-y-auto">
             {loading ? (
               <div className="space-y-1.5 p-3">
@@ -502,16 +637,7 @@ export function ClientsWorkspace({
                 ))}
               </div>
             ) : failed ? (
-              <div className="space-y-2 p-6 text-center">
-                <p className="text-sm text-muted-foreground">{t("panel.loadError")}</p>
-                <Button
-                  variant="outline"
-                  className="min-h-11 md:min-h-9"
-                  onClick={() => setRefreshKey((k) => k + 1)}
-                >
-                  {t("panel.retry")}
-                </Button>
-              </div>
+              failedBlock
             ) : items.length === 0 ? (
               <p className="p-6 text-center text-sm text-muted-foreground">{t("list.empty")}</p>
             ) : (
@@ -572,24 +698,15 @@ export function ClientsWorkspace({
               </ul>
             )}
 
-            {hasMore && !loading && !failed ? (
-              <div ref={sentinelRef} className="p-3">
-                <Button
-                  variant="outline"
-                  className="min-h-11 w-full md:min-h-9"
-                  disabled={loadingMore}
-                  onClick={() => void loadMore()}
-                >
-                  {loadingMore ? <Loader2Icon className="animate-spin" /> : null}
-                  {t("panel.loadMore")}
-                </Button>
-              </div>
-            ) : null}
+            {loadMoreBlock}
           </div>
+          )}
         </aside>
 
-        {/* ── Right side: detail (or desktop empty state) ── */}
-        <div className={cn("min-w-0 flex-1", !isDetail && "hidden md:block")}>{children}</div>
+        {/* ── Right side: detail (or desktop empty state) — masqué en vue tableau ── */}
+        {showTable ? null : (
+          <div className={cn("min-w-0 flex-1", !isDetail && "hidden md:block")}>{children}</div>
+        )}
       </div>
     </ClientListNavContext.Provider>
   );

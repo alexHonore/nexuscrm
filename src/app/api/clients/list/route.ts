@@ -21,10 +21,15 @@ import { torontoDayRange } from "@/components/clients/timezone";
 const MAX_PAGE_SIZE = 50;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Tris acceptés — `activity` reproduit l'ordre historique du panneau. */
+const SORTS = new Set(["activity", "name", "createdAt", "updatedAt"]);
+
 /**
- * GET /api/clients/list — paginated rows for the /clients left panel.
- * Params: q, categoryId, sourceId, assignedToId, filter (overdue|today),
- * page, pageSize (capped at 50). Ordered by recent activity.
+ * GET /api/clients/list — paginated rows for the /clients left panel and the
+ * table view. Params: q, categoryId, sourceId, assignedToId,
+ * filter (overdue|today), sort (activity|name|createdAt|updatedAt), dir
+ * (asc|desc), page, pageSize (capped at 50). Ordered by recent activity by
+ * default.
  */
 export async function GET(req: NextRequest) {
   const auth = await apiUser();
@@ -36,6 +41,9 @@ export async function GET(req: NextRequest) {
   const sourceParam = sp.get("sourceId") ?? "";
   const assignedParam = sp.get("assignedToId") ?? "";
   const filter = sp.get("filter") ?? "";
+  const sortParam = sp.get("sort") ?? "activity";
+  const sort = SORTS.has(sortParam) ? sortParam : "activity";
+  const dir = sp.get("dir") === "asc" ? "asc" : "desc";
   const page = Math.max(1, Number.parseInt(sp.get("page") ?? "", 10) || 1);
   const pageSize = Math.min(
     MAX_PAGE_SIZE,
@@ -66,6 +74,21 @@ export async function GET(req: NextRequest) {
   }
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
+  // Activité récente par défaut (même tri que l'ancienne liste) ; la vue
+  // tableau peut trier par nom / création / modification. Toujours `id` en
+  // dernier pour une pagination stable.
+  const sortColumn =
+    sort === "name" ? clients.fullName : sort === "createdAt" ? clients.createdAt : clients.updatedAt;
+  const orderBy =
+    sort === "activity"
+      ? [
+          desc(
+            sql`GREATEST(COALESCE(${clients.lastContactedAt}, to_timestamp(0)), ${clients.updatedAt})`,
+          ),
+          asc(clients.id),
+        ]
+      : [dir === "asc" ? asc(sortColumn) : desc(sortColumn), asc(clients.id)];
+
   const [total, rows] = await Promise.all([
     db.$count(clients, where),
     db.query.clients.findMany({
@@ -74,20 +97,18 @@ export async function GET(req: NextRequest) {
         id: true,
         fullName: true,
         phone: true,
+        email: true,
         categoryId: true,
+        sourceId: true,
+        assignedToId: true,
         nextFollowupAt: true,
         doNotCall: true,
         city: true,
+        createdAt: true,
+        updatedAt: true,
       },
       with: { category: { columns: { color: true } } },
-      // Activité récente d'abord (même tri que l'ancienne liste) + id pour une
-      // pagination stable.
-      orderBy: [
-        desc(
-          sql`GREATEST(COALESCE(${clients.lastContactedAt}, to_timestamp(0)), ${clients.updatedAt})`,
-        ),
-        asc(clients.id),
-      ],
+      orderBy,
       limit: pageSize,
       offset: (page - 1) * pageSize,
     }),
@@ -98,11 +119,16 @@ export async function GET(req: NextRequest) {
       id: r.id,
       fullName: r.fullName,
       phone: r.phone,
+      email: r.email,
       categoryId: r.categoryId,
       categoryColor: r.category?.color ?? null,
+      sourceId: r.sourceId,
+      assignedToId: r.assignedToId,
       nextFollowupAt: r.nextFollowupAt?.toISOString() ?? null,
       doNotCall: r.doNotCall,
       city: r.city,
+      createdAt: r.createdAt.toISOString(),
+      updatedAt: r.updatedAt.toISOString(),
     })),
     total,
     page,

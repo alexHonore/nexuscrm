@@ -5,9 +5,18 @@ import { revalidatePath } from "next/cache";
 import { fromZonedTime } from "date-fns-tz";
 import { z } from "zod";
 import { db } from "@/db";
-import { appointments, clients, comments, followups, notifications, users } from "@/db/schema";
+import {
+  appointments,
+  auditLogs,
+  categories,
+  clients,
+  comments,
+  followups,
+  notifications,
+  users,
+} from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth/guards";
-import { diffFields, logAudit } from "@/lib/audit";
+import { diffFields, getClientIp, logAudit, type AuditChanges } from "@/lib/audit";
 import { cancelEvent } from "@/lib/google";
 import { normalizePhone } from "@/lib/phone";
 import {
@@ -21,9 +30,15 @@ export type ActionResult =
   | { ok: true; id?: string }
   | { ok: false; error: "invalid" | "invalidPhone" | "forbidden" | "notFound" };
 
-const INVALID: ActionResult = { ok: false, error: "invalid" };
-const FORBIDDEN: ActionResult = { ok: false, error: "forbidden" };
-const NOT_FOUND: ActionResult = { ok: false, error: "notFound" };
+/** Résultat des actions en masse : nombre de fiches réellement modifiées. */
+export type BulkResult =
+  | { ok: true; count: number }
+  | { ok: false; error: "invalid" | "forbidden" | "notFound" };
+
+// `as const` : les mêmes constantes servent ActionResult ET BulkResult.
+const INVALID = { ok: false, error: "invalid" } as const;
+const FORBIDDEN = { ok: false, error: "forbidden" } as const;
+const NOT_FOUND = { ok: false, error: "notFound" } as const;
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -261,20 +276,20 @@ export async function assignClientAction(
   return { ok: true, id: clientId };
 }
 
-/** Admin only — callers can never delete. */
-export async function deleteClientAction(clientId: string): Promise<ActionResult> {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "admin") return FORBIDDEN;
-  if (!z.string().uuid().safeParse(clientId).success) return INVALID;
-
-  const existing = await db.query.clients.findFirst({ where: eq(clients.id, clientId) });
-  if (!existing) return NOT_FOUND;
-
-  // Annulation (au mieux) des événements Google des RDV planifiés — la cascade
-  // supprime les RDV sans prévenir l'agenda de l'admin. Ne bloque jamais la suppression.
+/**
+ * Cœur de la suppression d'UNE fiche, partagé entre l'action unitaire et la
+ * suppression en masse : annulation (au mieux) des événements Google des RDV
+ * planifiés — la cascade supprime les RDV sans prévenir l'agenda de l'admin —
+ * puis suppression et journal d'audit. Ne bloque jamais sur Google.
+ */
+async function deleteClientCore(
+  userId: string,
+  existing: typeof clients.$inferSelect,
+  bulk: boolean,
+): Promise<void> {
   const scheduled = await db.query.appointments.findMany({
     where: and(
-      eq(appointments.clientId, clientId),
+      eq(appointments.clientId, existing.id),
       eq(appointments.status, "scheduled"),
       isNotNull(appointments.googleEventId),
     ),
@@ -289,24 +304,195 @@ export async function deleteClientAction(clientId: string): Promise<ActionResult
     }
   }
 
-  await db.delete(clients).where(eq(clients.id, clientId));
+  await db.delete(clients).where(eq(clients.id, existing.id));
 
   // Suppression : instantané de la fiche disparue (« valeur → rien »).
   const changes = diffFields(existing, null, CLIENT_AUDIT_FIELDS);
   await logAudit({
-    userId: user.id,
+    userId,
     action: "client.delete",
     entity: "client",
-    entityId: clientId,
+    entityId: existing.id,
     detail: {
       fullName: existing.fullName,
       phone: existing.phone,
+      ...(bulk ? { bulk: true } : {}),
       ...(changes ? { changes } : {}),
     },
   });
+}
+
+/** Admin only — callers can never delete. */
+export async function deleteClientAction(clientId: string): Promise<ActionResult> {
+  const user = await getCurrentUser();
+  if (!user || user.role !== "admin") return FORBIDDEN;
+  if (!z.string().uuid().safeParse(clientId).success) return INVALID;
+
+  const existing = await db.query.clients.findFirst({ where: eq(clients.id, clientId) });
+  if (!existing) return NOT_FOUND;
+
+  await deleteClientCore(user.id, existing, false);
   revalidatePath("/clients");
   revalidatePath("/dashboard");
   return { ok: true };
+}
+
+// ── Actions en masse (vue tableau) ───────────────────────────────────────────
+// Admin uniquement — règle du dépôt : un téléphoniste ne fait JAMAIS d'action
+// en masse. Chaque fiche touchée reçoit SA ligne d'audit (marquée `bulk`), afin
+// que « modifiée par qui » et /admin/audit restent exacts fiche par fiche.
+
+const BULK_MAX = 200;
+const bulkIdsSchema = z.array(z.string().uuid()).min(1).max(BULK_MAX);
+
+/** Insertion d'audit groupée — même contrat que logAudit : ne casse jamais l'action. */
+async function logBulkAudit(
+  rows: Array<{
+    userId: string;
+    action: string;
+    entityId: string;
+    detail: Record<string, unknown>;
+  }>,
+): Promise<void> {
+  if (rows.length === 0) return;
+  try {
+    const ip = await getClientIp();
+    await db.insert(auditLogs).values(
+      rows.map((r) => ({
+        userId: r.userId,
+        action: r.action,
+        entity: "client",
+        entityId: r.entityId,
+        detail: r.detail,
+        ip,
+      })),
+    );
+  } catch (err) {
+    console.error("bulk audit log failed", err);
+  }
+}
+
+function revalidateClientLists(): void {
+  revalidatePath("/clients");
+  revalidatePath("/dashboard");
+  revalidatePath("/pipeline");
+}
+
+/** Admin only — assigne (ou désassigne) plusieurs fiches d'un coup. */
+export async function bulkAssignClientsAction(
+  clientIds: string[],
+  assignedToId: string | null,
+): Promise<BulkResult> {
+  const user = await getCurrentUser();
+  if (!user || user.role !== "admin") return FORBIDDEN;
+
+  const ids = bulkIdsSchema.safeParse(clientIds);
+  if (!ids.success) return INVALID;
+  if (assignedToId !== null && !z.string().uuid().safeParse(assignedToId).success) return INVALID;
+  if (assignedToId !== null) {
+    const target = await db.query.users.findFirst({ where: eq(users.id, assignedToId) });
+    if (!target) return NOT_FOUND;
+  }
+
+  const existing = await db
+    .select({ id: clients.id, assignedToId: clients.assignedToId })
+    .from(clients)
+    .where(inArray(clients.id, ids.data));
+  const changed = existing.filter((c) => c.assignedToId !== assignedToId);
+
+  if (changed.length > 0) {
+    await db
+      .update(clients)
+      .set({ assignedToId, updatedAt: new Date() })
+      .where(
+        inArray(
+          clients.id,
+          changed.map((c) => c.id),
+        ),
+      );
+    await logBulkAudit(
+      changed.map((c) => ({
+        userId: user.id,
+        action: "client.assign",
+        entityId: c.id,
+        detail: {
+          bulk: true,
+          from: c.assignedToId,
+          to: assignedToId,
+          changes: { assignedToId: { from: c.assignedToId, to: assignedToId } } as AuditChanges,
+        },
+      })),
+    );
+    revalidateClientLists();
+  }
+  return { ok: true, count: changed.length };
+}
+
+/** Admin only — change la catégorie pipeline de plusieurs fiches d'un coup. */
+export async function bulkSetClientsCategoryAction(
+  clientIds: string[],
+  categoryId: number | null,
+): Promise<BulkResult> {
+  const user = await getCurrentUser();
+  if (!user || user.role !== "admin") return FORBIDDEN;
+
+  const ids = bulkIdsSchema.safeParse(clientIds);
+  if (!ids.success) return INVALID;
+  if (categoryId !== null && !Number.isInteger(categoryId)) return INVALID;
+  if (categoryId !== null) {
+    const target = await db.query.categories.findFirst({ where: eq(categories.id, categoryId) });
+    if (!target) return NOT_FOUND;
+  }
+
+  const existing = await db
+    .select({ id: clients.id, categoryId: clients.categoryId })
+    .from(clients)
+    .where(inArray(clients.id, ids.data));
+  const changed = existing.filter((c) => c.categoryId !== categoryId);
+
+  if (changed.length > 0) {
+    await db
+      .update(clients)
+      .set({ categoryId, updatedAt: new Date() })
+      .where(
+        inArray(
+          clients.id,
+          changed.map((c) => c.id),
+        ),
+      );
+    await logBulkAudit(
+      changed.map((c) => ({
+        userId: user.id,
+        action: "client.category",
+        entityId: c.id,
+        detail: {
+          bulk: true,
+          from: c.categoryId,
+          to: categoryId,
+          changes: { categoryId: { from: c.categoryId, to: categoryId } } as AuditChanges,
+        },
+      })),
+    );
+    revalidateClientLists();
+  }
+  return { ok: true, count: changed.length };
+}
+
+/** Admin only — suppression en masse, avec annulation des événements Google. */
+export async function bulkDeleteClientsAction(clientIds: string[]): Promise<BulkResult> {
+  const user = await getCurrentUser();
+  if (!user || user.role !== "admin") return FORBIDDEN;
+
+  const ids = bulkIdsSchema.safeParse(clientIds);
+  if (!ids.success) return INVALID;
+
+  const existing = await db.query.clients.findMany({ where: inArray(clients.id, ids.data) });
+  for (const row of existing) {
+    await deleteClientCore(user.id, row, true);
+  }
+
+  if (existing.length > 0) revalidateClientLists();
+  return { ok: true, count: existing.length };
 }
 
 // ── Follow-ups ───────────────────────────────────────────────────────────────

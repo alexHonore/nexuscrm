@@ -1,8 +1,12 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { formatInTimeZone } from "date-fns-tz";
+import { enUS, fr } from "date-fns/locale";
 import { notFound } from "next/navigation";
+import { getLocale, getTranslations } from "next-intl/server";
 import { db } from "@/db";
-import { categories, sources, users } from "@/db/schema";
+import { auditLogs, categories, sources, users } from "@/db/schema";
 import { requireUser } from "@/lib/auth/guards";
+import { APP_TZ } from "@/components/clients/timezone";
 import { ClientHeader } from "@/components/clients/client-header";
 import { ClientHistory } from "@/components/clients/client-history";
 import { ClientInfoForm } from "@/components/clients/client-info-form";
@@ -16,12 +20,15 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export default async function ClientPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
+  const t = await getTranslations("clients");
+  const locale = await getLocale();
   const { id } = await params;
   if (!UUID_RE.test(id)) notFound();
 
   const client = await db.query.clients.findFirst({
     where: (c, { eq: eqOp }) => eqOp(c.id, id),
     with: {
+      createdBy: { columns: { name: true } },
       calls: { with: { user: true }, orderBy: (c) => [desc(c.startedAt)], limit: 100 },
       appointments: { with: { user: true }, orderBy: (a) => [desc(a.startsAt)], limit: 100 },
       comments: { with: { user: true }, orderBy: (c) => [asc(c.createdAt)], limit: 200 },
@@ -30,17 +37,53 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
   });
   if (!client) notFound();
 
-  const [allCategories, allSources, activeUsers] = await Promise.all([
+  const [allCategories, allSources, activeUsers, lastEditRows] = await Promise.all([
     db.query.categories.findMany({ orderBy: [asc(categories.sortOrder), asc(categories.id)] }),
     db.query.sources.findMany({ orderBy: [asc(sources.name)] }),
     db.query.users.findMany({ where: eq(users.isActive, true), orderBy: [asc(users.name)] }),
+    // « Modifiée par qui » : le schéma ne stocke pas d'updatedById — la
+    // dernière écriture HUMAINE vient du journal d'audit (les mises à jour
+    // système, ex. recalcul de relance, n'y figurent pas : c'est voulu).
+    db
+      .select({ at: auditLogs.createdAt, userName: users.name })
+      .from(auditLogs)
+      .leftJoin(users, eq(auditLogs.userId, users.id))
+      .where(
+        and(
+          eq(auditLogs.entity, "client"),
+          eq(auditLogs.entityId, id),
+          inArray(auditLogs.action, ["client.update", "client.category", "client.assign"]),
+        ),
+      )
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(1),
   ]);
+  const lastEdit = lastEditRows[0] ?? null;
 
   const sourceOptions: FilterOption[] = allSources.map((s) => ({
     value: String(s.id),
     label: s.name,
   }));
   const userOptions: FilterOption[] = activeUsers.map((u) => ({ value: u.id, label: u.name }));
+
+  // ── « Créée le … par … / Modifiée le … par … » ────────────────────────────
+  const dfnsLocale = locale === "en" ? enUS : fr;
+  const metaDate = (d: Date) =>
+    formatInTimeZone(d, APP_TZ, "d MMM yyyy, HH:mm", { locale: dfnsLocale });
+
+  const createdLine = client.createdBy?.name
+    ? t("meta.createdBy", { date: metaDate(client.createdAt), name: client.createdBy.name })
+    : t("meta.created", { date: metaDate(client.createdAt) });
+
+  // Priorité au journal d'audit (il porte l'auteur) ; sinon updatedAt seul, et
+  // rien du tout si la fiche n'a jamais bougé depuis sa création (± 1 min).
+  const updatedLine = lastEdit
+    ? lastEdit.userName
+      ? t("meta.updatedBy", { date: metaDate(lastEdit.at), name: lastEdit.userName })
+      : t("meta.updated", { date: metaDate(lastEdit.at) })
+    : client.updatedAt.getTime() - client.createdAt.getTime() > 60_000
+      ? t("meta.updated", { date: metaDate(client.updatedAt) })
+      : null;
 
   // Followups: open first (asc dueAt), then done (most recent first).
   const followupsSorted = [
@@ -157,6 +200,12 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
           </div>
         </div>
       </div>
+
+      {/* Provenance de la fiche : création et dernière modification humaine. */}
+      <p className="pb-2 text-xs text-muted-foreground">
+        {createdLine}
+        {updatedLine ? <span> · {updatedLine}</span> : null}
+      </p>
     </div>
   );
 }

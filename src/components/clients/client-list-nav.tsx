@@ -2,17 +2,23 @@
 
 import { createContext, useContext } from "react";
 
-/** One row of the left-panel client list (shape of GET /api/clients/list items). */
+/** One row of the /clients lists (shape of GET /api/clients/list items). */
 export type ClientListItem = {
   id: string;
   fullName: string;
   phone: string;
+  email: string | null;
   categoryId: number | null;
   categoryColor: string | null;
+  sourceId: number | null;
+  assignedToId: string | null;
   /** ISO string (UTC) or null. */
   nextFollowupAt: string | null;
   doNotCall: boolean;
   city: string | null;
+  /** ISO strings (UTC). */
+  createdAt: string;
+  updatedAt: string;
 };
 
 /**

@@ -167,5 +167,41 @@
     "generic": "Une erreur est survenue",
     "forbidden": "Action non autorisée",
     "notFound": "Client introuvable"
+  },
+  "views": {
+    "cards": "Vue fiches",
+    "table": "Vue tableau"
+  },
+  "table": {
+    "name": "Nom",
+    "phone": "Téléphone",
+    "category": "Catégorie",
+    "city": "Ville",
+    "source": "Source",
+    "assignedTo": "Assigné à",
+    "created": "Création",
+    "updated": "Modification",
+    "createdShort": "Créée {date}",
+    "selectAll": "Tout sélectionner",
+    "selectRow": "Sélectionner {name}",
+    "sortBy": "Trier par {column}"
+  },
+  "bulk": {
+    "selected": "{count, plural, one {# sélectionnée} other {# sélectionnées}}",
+    "assign": "Assigner",
+    "category": "Catégorie",
+    "delete": "Supprimer",
+    "deleteTitle": "Supprimer les fiches sélectionnées ?",
+    "deleteDescription": "{count, plural, one {La fiche sélectionnée sera supprimée définitivement, avec ses appels, rendez-vous et commentaires.} other {Les # fiches sélectionnées seront supprimées définitivement, avec leurs appels, rendez-vous et commentaires.}}",
+    "assigned": "{count, plural, =0 {Aucune fiche modifiée} one {# fiche assignée} other {# fiches assignées}}",
+    "categorized": "{count, plural, =0 {Aucune fiche modifiée} one {# fiche reclassée} other {# fiches reclassées}}",
+    "deleted": "{count, plural, =0 {Aucune fiche supprimée} one {# fiche supprimée} other {# fiches supprimées}}",
+    "clear": "Effacer la sélection"
+  },
+  "meta": {
+    "created": "Créée le {date}",
+    "createdBy": "Créée le {date} par {name}",
+    "updated": "Modifiée le {date}",
+    "updatedBy": "Modifiée le {date} par {name}"
   }
 }
