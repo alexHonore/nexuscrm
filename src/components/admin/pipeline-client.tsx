@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Loader2, Lock, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowRightLeft, ArrowUp, Loader2, Lock, Pencil, Plus, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -63,13 +64,36 @@ function ColorPicker({ value, onChange }: { value: string; onChange: (c: string)
 export function CategoriesCard({ initial }: { initial: CategoryDto[] }) {
   const t = useTranslations("admin");
   const locale = useLocale();
+  const router = useRouter();
   const [items, setItems] = useState(initial);
+  const [syncedFrom, setSyncedFrom] = useState(initial);
+  // Le serveur peut renvoyer des compteurs frais (router.refresh après un
+  // refus « fiches rattachées entre-temps ») : on les adopte. Patron React
+  // « ajuster l'état quand une prop change » — pendant le rendu, pas dans un
+  // effet, sinon useState(initial) resterait figé sur le premier rendu.
+  if (initial !== syncedFrom) {
+    setSyncedFrom(initial);
+    setItems(initial);
+  }
   const [pending, setPending] = useState(false);
   const [editing, setEditing] = useState<CategoryDto | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<CategoryDto | null>(null);
+  const [transferring, setTransferring] = useState<CategoryDto | null>(null);
 
   const label = (c: CategoryDto) => (locale === "fr" ? c.nameFr : c.nameEn);
+
+  /** Compteurs après un transfert : la source se vide, la cible encaisse. */
+  const applyTransfer = (fromId: number, targetId: number | null, moved: number) =>
+    setItems((prev) =>
+      prev.map((c) =>
+        c.id === fromId
+          ? { ...c, clientCount: 0 }
+          : c.id === targetId
+            ? { ...c, clientCount: c.clientCount + moved }
+            : c,
+      ),
+    );
 
   const move = async (index: number, dir: -1 | 1) => {
     const target = index + dir;
@@ -109,13 +133,27 @@ export function CategoriesCard({ initial }: { initial: CategoryDto[] }) {
                 <p className="truncate text-sm font-medium">{c.nameFr}</p>
                 <p className="truncate text-xs text-muted-foreground">{c.nameEn}</p>
               </div>
-              <Badge variant="secondary" className="shrink-0 tabular-nums">
-                {t("pipeline.categories.clientCount", { count: c.clientCount })}
+              {/* Compteur et cadenas en pastilles compactes : le nom des
+                  catégories est long (« Acheteur — 1re rencontre en ligne »)
+                  et c'est lui qui doit garder la place. */}
+              <Badge
+                variant="secondary"
+                className="shrink-0 tabular-nums"
+                title={t("pipeline.categories.clientCount", { count: c.clientCount })}
+              >
+                <span aria-hidden>{c.clientCount}</span>
+                <span className="sr-only">
+                  {t("pipeline.categories.clientCount", { count: c.clientCount })}
+                </span>
               </Badge>
               {c.isSystem ? (
-                <Badge variant="outline" className="shrink-0 gap-1">
+                <Badge
+                  variant="outline"
+                  className="shrink-0"
+                  title={t("pipeline.categories.system")}
+                >
                   <Lock className="size-3" />
-                  {t("pipeline.categories.system")}
+                  <span className="sr-only">{t("pipeline.categories.system")}</span>
                 </Badge>
               ) : null}
               {/* Sur md+, la grappe d'icônes n'apparaît qu'au survol ou au focus ;
@@ -149,6 +187,18 @@ export function CategoriesCard({ initial }: { initial: CategoryDto[] }) {
                   aria-label={t("edit")}
                 >
                   <Pencil className="size-4" />
+                </Button>
+                {/* Déplacer les fiches sans supprimer la catégorie : utile
+                    quand on réorganise le pipeline plutôt que de le réduire. */}
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-11 md:size-7"
+                  disabled={c.clientCount === 0}
+                  onClick={() => setTransferring(c)}
+                  aria-label={t("pipeline.transferAria", { name: label(c) })}
+                >
+                  <ArrowRightLeft className="size-4" />
                 </Button>
                 <Button
                   variant="ghost"
@@ -185,10 +235,38 @@ export function CategoriesCard({ initial }: { initial: CategoryDto[] }) {
         }}
       />
 
+      <TransferClientsDialog
+        key={transferring ? `transfer-${transferring.id}` : "transfer-closed"}
+        open={transferring !== null}
+        title={transferring ? t("pipeline.transferTitle", { name: label(transferring) }) : ""}
+        description={t("pipeline.transferDesc", { count: transferring?.clientCount ?? 0 })}
+        options={items
+          .filter((c) => c.id !== transferring?.id)
+          .map((c) => ({ value: String(c.id), label: label(c) }))}
+        noneLabel={t("pipeline.noCategory")}
+        onClose={() => setTransferring(null)}
+        onConfirm={async (targetId) => {
+          if (!transferring) return;
+          try {
+            const res = await api<{ moved: number }>(
+              `/api/admin/categories/${transferring.id}/transfer`,
+              { method: "POST", body: JSON.stringify({ targetId }) },
+            );
+            applyTransfer(transferring.id, targetId, res.moved);
+            toast.success(t("pipeline.transferred", { count: res.moved }));
+          } catch {
+            toast.error(t("genericError"));
+          } finally {
+            setTransferring(null);
+          }
+        }}
+      />
+
       <DeleteWithReassignDialog
         open={deleting !== null}
         title={deleting ? t("pipeline.categories.deleteTitle", { name: label(deleting) }) : ""}
         description={t("pipeline.categories.deleteDesc", { count: deleting?.clientCount ?? 0 })}
+        clientCount={deleting?.clientCount ?? 0}
         options={items
           .filter((c) => c.id !== deleting?.id)
           .map((c) => ({ value: String(c.id), label: label(c) }))}
@@ -197,18 +275,37 @@ export function CategoriesCard({ initial }: { initial: CategoryDto[] }) {
         onConfirm={async (reassignTo) => {
           if (!deleting) return;
           try {
-            await api(`/api/admin/categories/${deleting.id}`, {
-              method: "DELETE",
-              body: JSON.stringify({ reassignTo }),
-            });
-            setItems((prev) => prev.filter((p) => p.id !== deleting.id));
+            // `moved` vient du serveur : seul compte fiable si le compteur
+            // affiché avait pris du retard.
+            const { moved } = await api<{ moved: number }>(
+              `/api/admin/categories/${deleting.id}`,
+              {
+                method: "DELETE",
+                ...(reassignTo === undefined ? {} : { body: JSON.stringify({ reassignTo }) }),
+              },
+            );
+            setItems((prev) =>
+              prev
+                .filter((p) => p.id !== deleting.id)
+                .map((p) =>
+                  p.id === reassignTo ? { ...p, clientCount: p.clientCount + moved } : p,
+                ),
+            );
             toast.success(t("pipeline.categories.deleted"));
           } catch (err) {
-            toast.error(
-              err instanceof ApiError && err.code === "system_category"
-                ? t("pipeline.categories.systemError")
-                : t("genericError"),
-            );
+            const code = err instanceof ApiError ? err.code : null;
+            if (code === "reassign_required") {
+              // Des fiches sont arrivées depuis l'affichage : on recharge les
+              // compteurs pour que la boîte redemande une destination.
+              toast.error(t("pipeline.reassignRequired"));
+              router.refresh();
+            } else {
+              toast.error(
+                code === "system_category"
+                  ? t("pipeline.categories.systemError")
+                  : t("genericError"),
+              );
+            }
           } finally {
             setDeleting(null);
           }
@@ -298,9 +395,138 @@ function CategoryFormDialog({
   );
 }
 
-// ── Suppression avec réassignation ───────────────────────────────────────────
+// ── Choix d'une destination pour les fiches rattachées ───────────────────────
+// Valeur sentinelle : « aucune catégorie / aucune source » est un CHOIX
+// explicite, distinct de « rien de choisi » (null) qui bloque la validation.
+const NONE_VALUE = "__none__";
+
+/** Sélecteur « où partent les fiches ? » partagé par les deux boîtes. */
+function DestinationSelect({
+  value,
+  onChange,
+  options,
+  noneLabel,
+}: {
+  value: string | null;
+  onChange: (v: string | null) => void;
+  options: { value: string; label: string }[];
+  noneLabel: string;
+}) {
+  const t = useTranslations("admin");
+  return (
+    <div className="space-y-1.5">
+      <Label>{t("pipeline.reassignLabel")}</Label>
+      <Select
+        items={[{ value: NONE_VALUE, label: noneLabel }, ...options]}
+        value={value}
+        onValueChange={(v) => onChange(v === null ? null : String(v))}
+      >
+        <SelectTrigger className="min-h-11 w-full md:min-h-9">
+          <SelectValue placeholder={t("pipeline.reassignPlaceholder")} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NONE_VALUE}>{noneLabel}</SelectItem>
+          {options.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+/** `"__none__"` → null (sans catégorie/source) ; sinon l'id numérique. */
+function toTargetId(choice: string | null): number | null {
+  return choice === null || choice === NONE_VALUE ? null : Number(choice);
+}
+
+// ── Suppression avec transfert obligatoire ───────────────────────────────────
 
 function DeleteWithReassignDialog({
+  open,
+  title,
+  description,
+  clientCount,
+  options,
+  noneLabel,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  description: string;
+  /** Nombre de fiches rattachées — au-delà de 0, la destination est exigée. */
+  clientCount: number;
+  options: { value: string; label: string }[];
+  noneLabel: string;
+  onClose: () => void;
+  /** `undefined` = aucune décision transmise : le serveur tranche sur SON
+   *  propre compte, à jour, et refuse si des fiches sont apparues depuis. */
+  onConfirm: (reassignTo: number | null | undefined) => Promise<void>;
+}) {
+  const t = useTranslations("admin");
+  const [choice, setChoice] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  // Aucune fiche rattachée : rien à déplacer, on ne demande rien.
+  // Sinon la destination est obligatoire — le serveur refuse lui aussi une
+  // suppression sans décision explicite (jamais d'orpheline en silence).
+  const mustChoose = clientCount > 0;
+
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) {
+          setChoice(null);
+          onClose();
+        }
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        {mustChoose ? (
+          <DestinationSelect
+            value={choice}
+            onChange={setChoice}
+            options={options}
+            noneLabel={noneLabel}
+          />
+        ) : null}
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            disabled={pending || (mustChoose && choice === null)}
+            onClick={async () => {
+              setPending(true);
+              try {
+                // Rien à déplacer d'après l'affichage : on ne décide RIEN, pour
+                // que le serveur puisse refuser si le compteur était périmé.
+                await onConfirm(mustChoose ? toTargetId(choice) : undefined);
+              } finally {
+                setPending(false);
+                setChoice(null);
+              }
+            }}
+          >
+            {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+            {t("delete")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+// ── Transfert des fiches (sans suppression) ──────────────────────────────────
+
+function TransferClientsDialog({
   open,
   title,
   description,
@@ -315,68 +541,55 @@ function DeleteWithReassignDialog({
   options: { value: string; label: string }[];
   noneLabel: string;
   onClose: () => void;
-  onConfirm: (reassignTo: number | null) => Promise<void>;
+  onConfirm: (targetId: number | null) => Promise<void>;
 }) {
   const t = useTranslations("admin");
-  const [reassignTo, setReassignTo] = useState<string | null>(null);
+  const [choice, setChoice] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
   return (
-    <AlertDialog
+    <Dialog
       open={open}
       onOpenChange={(o) => {
         if (!o) {
-          setReassignTo(null);
+          setChoice(null);
           onClose();
         }
       }}
     >
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
-        </AlertDialogHeader>
-        <div className="space-y-1.5">
-          <Label>{t("pipeline.reassignLabel")}</Label>
-          <Select
-            items={[{ value: null as unknown as string, label: noneLabel }, ...options]}
-            value={reassignTo}
-            onValueChange={(v) => setReassignTo(v === null ? null : String(v))}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder={noneLabel} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={null}>{noneLabel}</SelectItem>
-              {options.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <AlertDialogFooter>
-          <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-          <AlertDialogAction
-            variant="destructive"
-            disabled={pending}
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <DestinationSelect
+          value={choice}
+          onChange={setChoice}
+          options={options}
+          noneLabel={noneLabel}
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            {t("cancel")}
+          </Button>
+          <Button
+            disabled={pending || choice === null}
             onClick={async () => {
               setPending(true);
               try {
-                await onConfirm(reassignTo === null ? null : Number(reassignTo));
+                await onConfirm(toTargetId(choice));
               } finally {
                 setPending(false);
-                setReassignTo(null);
+                setChoice(null);
               }
             }}
           >
             {pending ? <Loader2 className="size-4 animate-spin" /> : null}
-            {t("delete")}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+            {t("pipeline.transfer")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -384,10 +597,33 @@ function DeleteWithReassignDialog({
 
 export function SourcesCard({ initial }: { initial: SourceDto[] }) {
   const t = useTranslations("admin");
+  const router = useRouter();
   const [items, setItems] = useState(initial);
+  const [syncedFrom, setSyncedFrom] = useState(initial);
+  // Le serveur peut renvoyer des compteurs frais (router.refresh après un
+  // refus « fiches rattachées entre-temps ») : on les adopte. Patron React
+  // « ajuster l'état quand une prop change » — pendant le rendu, pas dans un
+  // effet, sinon useState(initial) resterait figé sur le premier rendu.
+  if (initial !== syncedFrom) {
+    setSyncedFrom(initial);
+    setItems(initial);
+  }
   const [editing, setEditing] = useState<SourceDto | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<SourceDto | null>(null);
+  const [transferring, setTransferring] = useState<SourceDto | null>(null);
+
+  /** Compteurs après un transfert : la source se vide, la cible encaisse. */
+  const applyTransfer = (fromId: number, targetId: number | null, moved: number) =>
+    setItems((prev) =>
+      prev.map((s) =>
+        s.id === fromId
+          ? { ...s, clientCount: 0 }
+          : s.id === targetId
+            ? { ...s, clientCount: s.clientCount + moved }
+            : s,
+      ),
+    );
 
   return (
     <Card className="shadow-xs">
@@ -406,8 +642,15 @@ export function SourcesCard({ initial }: { initial: SourceDto[] }) {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{s.name}</p>
               </div>
-              <Badge variant="secondary" className="shrink-0 tabular-nums">
-                {t("pipeline.categories.clientCount", { count: s.clientCount })}
+              <Badge
+                variant="secondary"
+                className="shrink-0 tabular-nums"
+                title={t("pipeline.categories.clientCount", { count: s.clientCount })}
+              >
+                <span aria-hidden>{s.clientCount}</span>
+                <span className="sr-only">
+                  {t("pipeline.categories.clientCount", { count: s.clientCount })}
+                </span>
               </Badge>
               {/* Même règle que les catégories : visible au survol/focus sur md+. */}
               <div className="flex shrink-0 items-center gap-0.5 md:opacity-0 md:transition-opacity md:group-hover:opacity-100 md:focus-within:opacity-100">
@@ -419,6 +662,16 @@ export function SourcesCard({ initial }: { initial: SourceDto[] }) {
                   aria-label={t("edit")}
                 >
                   <Pencil className="size-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-11 md:size-7"
+                  disabled={s.clientCount === 0}
+                  onClick={() => setTransferring(s)}
+                  aria-label={t("pipeline.transferAria", { name: s.name })}
+                >
+                  <ArrowRightLeft className="size-4" />
                 </Button>
                 <Button
                   variant="ghost"
@@ -454,24 +707,66 @@ export function SourcesCard({ initial }: { initial: SourceDto[] }) {
         }}
       />
 
+      <TransferClientsDialog
+        key={transferring ? `transfer-${transferring.id}` : "transfer-closed"}
+        open={transferring !== null}
+        title={transferring ? t("pipeline.transferTitle", { name: transferring.name }) : ""}
+        description={t("pipeline.transferDesc", { count: transferring?.clientCount ?? 0 })}
+        options={items
+          .filter((s) => s.id !== transferring?.id)
+          .map((s) => ({ value: String(s.id), label: s.name }))}
+        noneLabel={t("pipeline.noSource")}
+        onClose={() => setTransferring(null)}
+        onConfirm={async (targetId) => {
+          if (!transferring) return;
+          try {
+            const res = await api<{ moved: number }>(
+              `/api/admin/sources/${transferring.id}/transfer`,
+              { method: "POST", body: JSON.stringify({ targetId }) },
+            );
+            applyTransfer(transferring.id, targetId, res.moved);
+            toast.success(t("pipeline.transferred", { count: res.moved }));
+          } catch {
+            toast.error(t("genericError"));
+          } finally {
+            setTransferring(null);
+          }
+        }}
+      />
+
       <DeleteWithReassignDialog
         open={deleting !== null}
         title={deleting ? t("pipeline.sources.deleteTitle", { name: deleting.name }) : ""}
         description={t("pipeline.sources.deleteDesc", { count: deleting?.clientCount ?? 0 })}
+        clientCount={deleting?.clientCount ?? 0}
         options={items.filter((s) => s.id !== deleting?.id).map((s) => ({ value: String(s.id), label: s.name }))}
         noneLabel={t("pipeline.noSource")}
         onClose={() => setDeleting(null)}
         onConfirm={async (reassignTo) => {
           if (!deleting) return;
           try {
-            await api(`/api/admin/sources/${deleting.id}`, {
+            // `moved` vient du serveur : seul compte fiable si le compteur
+            // affiché avait pris du retard.
+            const { moved } = await api<{ moved: number }>(`/api/admin/sources/${deleting.id}`, {
               method: "DELETE",
-              body: JSON.stringify({ reassignTo }),
+              ...(reassignTo === undefined ? {} : { body: JSON.stringify({ reassignTo }) }),
             });
-            setItems((prev) => prev.filter((p) => p.id !== deleting.id));
+            setItems((prev) =>
+              prev
+                .filter((p) => p.id !== deleting.id)
+                .map((p) =>
+                  p.id === reassignTo ? { ...p, clientCount: p.clientCount + moved } : p,
+                ),
+            );
             toast.success(t("pipeline.sources.deleted"));
-          } catch {
-            toast.error(t("genericError"));
+          } catch (err) {
+            if (err instanceof ApiError && err.code === "reassign_required") {
+              // Des fiches sont arrivées depuis l'affichage : on recharge.
+              toast.error(t("pipeline.reassignRequired"));
+              router.refresh();
+            } else {
+              toast.error(t("genericError"));
+            }
           } finally {
             setDeleting(null);
           }

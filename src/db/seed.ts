@@ -16,6 +16,9 @@ async function main() {
   const { encryptSecret, sha256Hex } = await import("@/lib/crypto");
 
   // ── Catégories système (pipeline) ──
+  // Liées aux boutons d'après-appel (`src/lib/dispositions.ts`) : leur `key`
+  // est référencée par DISPOSITION_CONFIG, donc elles sont indéboulonnables
+  // (isSystem) — supprimer « Boîte vocale » casserait le bouton du même nom.
   const systemCategories = [
     { key: "new", nameFr: "Non contacté", nameEn: "Not contacted", color: "#8b5cf6", sortOrder: 0 },
     { key: "voicemail", nameFr: "Boîte vocale", nameEn: "Voicemail", color: "#3b82f6", sortOrder: 1 },
@@ -33,9 +36,45 @@ async function main() {
   }
   console.log("✓ Catégories système");
 
+  // ── Catégories métier (base Notion du courtier) ──
+  // Les valeurs « Category » de la base Notion qui n'ont pas d'équivalent
+  // système. Celles qui en ont un y sont déjà rattachées :
+  //   Not Contacted → new · Callback → callback · Not Intrested → not_interested
+  //   Disqualified → not_qualified · DNCL → dncl
+  // `key` seulement pour que le seed reste idempotent ; `isSystem: false`
+  // laisse l'admin les renommer, réordonner ou supprimer (avec transfert des
+  // clients) depuis /admin/pipeline.
+  const businessCategories = [
+    { key: "wrong_number", nameFr: "Mauvais numéro", nameEn: "Wrong number", color: "#f97316", sortOrder: 7 },
+    { key: "recent_transaction", nameFr: "Transaction récente", nameEn: "Recent transaction", color: "#14b8a6", sortOrder: 8 },
+    { key: "long_term", nameFr: "Long terme", nameEn: "Long term", color: "#0ea5e9", sortOrder: 9 },
+    { key: "buyer_meeting", nameFr: "Acheteur — 1re rencontre en ligne", nameEn: "Buyer — online 1st meeting", color: "#d946ef", sortOrder: 10 },
+    { key: "seller_meeting", nameFr: "Vendeur — 1re rencontre (évaluation)", nameEn: "Seller — evaluation 1st meeting", color: "#84cc16", sortOrder: 11 },
+    { key: "shopping_unsigned", nameFr: "Magasinage non signé", nameEn: "Shopping not signed", color: "#eab308", sortOrder: 12 },
+  ];
+  for (const cat of businessCategories) {
+    await db
+      .insert(categories)
+      .values({ ...cat, isSystem: false })
+      .onConflictDoNothing({ target: categories.key });
+  }
+  console.log("✓ Catégories métier");
+
   // ── Sources ──
-  for (const name of ["Facebook Acheteur", "Facebook Vendeur", "Référence", "Import", "Site web", "Autre"]) {
-    await db.insert(sources).values({ name }).onConflictDoNothing({ target: sources.name });
+  // « Appel à froid » et « DuProprio » viennent de la base Notion (Cold,
+  // Duproprio) ; Facebook Buyer → Facebook Acheteur et Other → Autre existaient.
+  const sourceRows: Array<{ name: string; color?: string }> = [
+    { name: "Appel à froid", color: "#d946ef" },
+    { name: "Facebook Acheteur" },
+    { name: "Facebook Vendeur" },
+    { name: "DuProprio", color: "#16a34a" },
+    { name: "Référence" },
+    { name: "Import" },
+    { name: "Site web" },
+    { name: "Autre" },
+  ];
+  for (const row of sourceRows) {
+    await db.insert(sources).values(row).onConflictDoNothing({ target: sources.name });
   }
   console.log("✓ Sources");
 

@@ -208,7 +208,7 @@
       "nameFr": "Name (French)",
       "nameEn": "Name (English)",
       "deleteTitle": "Delete “{name}”?",
-      "deleteDesc": "{count, plural, =0 {No client is in this category.} one {# client will be moved to the category selected below.} other {# clients will be moved to the category selected below.}}",
+      "deleteDesc": "{count, plural, =0 {No client in this category.} one {# client is in this category — choose where it should go.} other {# clients are in this category — choose where they should go.}}",
       "deleted": "Category deleted",
       "systemError": "System categories cannot be deleted."
     },
@@ -221,10 +221,17 @@
       "formDesc": "Name and display color.",
       "name": "Name",
       "deleteTitle": "Delete “{name}”?",
-      "deleteDesc": "{count, plural, =0 {No client has this source.} one {# client will be moved to the source selected below.} other {# clients will be moved to the source selected below.}}",
+      "deleteDesc": "{count, plural, =0 {No client uses this source.} one {# client uses this source — choose where it should go.} other {# clients use this source — choose where they should go.}}",
       "deleted": "Source deleted",
       "nameTaken": "A source with this name already exists."
-    }
+    },
+    "reassignPlaceholder": "Choose a destination…",
+    "transfer": "Transfer",
+    "transferAria": "Transfer clients from {name}",
+    "transferTitle": "Transfer clients from “{name}”",
+    "transferDesc": "{count, plural, =0 {No client to move.} one {# client will move to the chosen destination. The original row is kept (empty).} other {# clients will move to the chosen destination. The original row is kept (empty).}}",
+    "transferred": "{count, plural, =0 {No client moved} one {# client moved} other {# clients moved}}",
+    "reassignRequired": "Clients were attached in the meantime — counts refreshed, choose where they go."
   },
   "importExport": {
     "title": "Import / Export",
@@ -483,7 +490,8 @@
       "keyId": "Webhook key (id)",
       "keyName": "Webhook key",
       "url": "URL",
-      "detail": "Detail"
+      "detail": "Detail",
+      "movedClients": "Clients moved"
     },
     "actions": {
       "client_create": "Client created",
@@ -529,7 +537,9 @@
       "google_connect_start": "Google connection started",
       "google_connect_error": "Google connection failed",
       "google_disconnect": "Google disconnected",
-      "cron_sync_cdr": "Call sync (cron)"
+      "cron_sync_cdr": "Call sync (cron)",
+      "category_transfer": "Clients transferred (category)",
+      "source_transfer": "Clients transferred (source)"
     }
   }
 }

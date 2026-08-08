@@ -208,7 +208,7 @@
       "nameFr": "Nom (français)",
       "nameEn": "Nom (anglais)",
       "deleteTitle": "Supprimer « {name} » ?",
-      "deleteDesc": "{count, plural, =0 {Aucun client n'est dans cette catégorie.} one {# client sera déplacé vers la catégorie choisie ci-dessous.} other {# clients seront déplacés vers la catégorie choisie ci-dessous.}}",
+      "deleteDesc": "{count, plural, =0 {Aucune fiche dans cette catégorie.} one {# fiche est dans cette catégorie — choisissez où elle doit aller.} other {# fiches sont dans cette catégorie — choisissez où elles doivent aller.}}",
       "deleted": "Catégorie supprimée",
       "systemError": "Les catégories système ne peuvent pas être supprimées."
     },
@@ -221,10 +221,17 @@
       "formDesc": "Nom et couleur d'affichage.",
       "name": "Nom",
       "deleteTitle": "Supprimer « {name} » ?",
-      "deleteDesc": "{count, plural, =0 {Aucun client n'a cette source.} one {# client sera déplacé vers la source choisie ci-dessous.} other {# clients seront déplacés vers la source choisie ci-dessous.}}",
+      "deleteDesc": "{count, plural, =0 {Aucune fiche n'utilise cette source.} one {# fiche utilise cette source — choisissez où elle doit aller.} other {# fiches utilisent cette source — choisissez où elles doivent aller.}}",
       "deleted": "Source supprimée",
       "nameTaken": "Une source porte déjà ce nom."
-    }
+    },
+    "reassignPlaceholder": "Choisir une destination…",
+    "transfer": "Transférer",
+    "transferAria": "Transférer les clients de {name}",
+    "transferTitle": "Transférer les clients de « {name} »",
+    "transferDesc": "{count, plural, =0 {Aucune fiche à déplacer.} one {# fiche sera déplacée vers la destination choisie. La ligne d'origine est conservée (vide).} other {# fiches seront déplacées vers la destination choisie. La ligne d'origine est conservée (vide).}}",
+    "transferred": "{count, plural, =0 {Aucune fiche déplacée} one {# fiche déplacée} other {# fiches déplacées}}",
+    "reassignRequired": "Des fiches ont été rattachées entre-temps — compteurs mis à jour, choisissez leur destination."
   },
   "importExport": {
     "title": "Import / Export",
@@ -483,7 +490,8 @@
       "keyId": "Clé webhook (id)",
       "keyName": "Clé webhook",
       "url": "Adresse",
-      "detail": "Détail"
+      "detail": "Détail",
+      "movedClients": "Fiches déplacées"
     },
     "actions": {
       "client_create": "Fiche client créée",
@@ -529,7 +537,9 @@
       "google_connect_start": "Connexion Google amorcée",
       "google_connect_error": "Échec de la connexion Google",
       "google_disconnect": "Google déconnecté",
-      "cron_sync_cdr": "Synchronisation des appels (cron)"
+      "cron_sync_cdr": "Synchronisation des appels (cron)",
+      "category_transfer": "Clients transférés (catégorie)",
+      "source_transfer": "Clients transférés (source)"
     }
   }
 }

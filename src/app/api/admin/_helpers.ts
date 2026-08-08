@@ -1,7 +1,7 @@
 import "server-only";
 import { randomInt } from "crypto";
 import { NextResponse } from "next/server";
-import type { z } from "zod";
+import { z } from "zod";
 import { users } from "@/db/schema";
 import { VoipMsError } from "@/lib/voipms";
 import { computePhoneStatus, sipGatewayConfigured } from "./users/_phone-status";
@@ -59,6 +59,54 @@ export async function readJson<S extends z.ZodType>(
     return NextResponse.json({ error: "validation", issues: parsed.error.issues }, { status: 422 });
   }
   return parsed.data as z.infer<S>;
+}
+
+// ── Transfert des fiches (suppression d'une catégorie / d'une source) ────────
+
+const reassignSchema = z.object({ reassignTo: z.number().int().nullable() });
+
+/**
+ * Interrompt (et annule) la transaction de suppression avec un code d'erreur.
+ * Le compte des fiches doit être fait DANS la transaction : une fiche arrivée
+ * entre une lecture préalable et la suppression passerait sinon entre les
+ * mailles et perdrait sa catégorie / sa source.
+ */
+export class AbortDelete extends Error {
+  constructor(
+    readonly code: "reassign_required" | "invalid_target",
+    readonly clientCount = 0,
+  ) {
+    super(code);
+  }
+}
+
+/** Réponse 400 correspondante, ou relance si l'erreur est d'une autre nature. */
+export function abortDeleteResponse(err: unknown): NextResponse {
+  if (err instanceof AbortDelete) {
+    return NextResponse.json(
+      { error: err.code, ...(err.clientCount > 0 ? { clientCount: err.clientCount } : {}) },
+      { status: 400 },
+    );
+  }
+  throw err;
+}
+
+/**
+ * Lit la destination des fiches rattachées à l'entité qu'on supprime.
+ * `provided` distingue « l'admin a choisi Aucune » (null explicite) de
+ * « l'admin n'a rien décidé » — l'appelant refuse le second cas dès qu'une
+ * fiche est rattachée, pour ne jamais orphelin­iser des données en silence.
+ */
+export async function readReassignTarget(
+  req: Request,
+): Promise<{ provided: boolean; reassignTo: number | null }> {
+  try {
+    const parsed = reassignSchema.safeParse(await req.json());
+    if (parsed.success) return { provided: true, reassignTo: parsed.data.reassignTo };
+  } catch {
+    // Corps absent ou illisible : accepté seulement si rien n'est rattaché.
+  }
+  return { provided: false, reassignTo: null };
 }
 
 // ── voip.ms — enveloppe d'erreur uniforme ────────────────────────────────────

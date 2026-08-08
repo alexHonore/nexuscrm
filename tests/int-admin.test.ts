@@ -15,6 +15,7 @@ import {
   closeDb,
   makeCategory,
   makeClient,
+  makeSource,
   makeUser,
   resetDb,
   seedSystemCategories,
@@ -46,6 +47,9 @@ const resetPasswordRoute = await import("@/app/api/admin/users/[id]/reset-passwo
 const importRoute = await import("@/app/api/admin/import/route");
 const exportRoute = await import("@/app/api/admin/export/route");
 const categoryIdRoute = await import("@/app/api/admin/categories/[id]/route");
+const categoryTransferRoute = await import("@/app/api/admin/categories/[id]/transfer/route");
+const sourceIdRoute = await import("@/app/api/admin/sources/[id]/route");
+const sourceTransferRoute = await import("@/app/api/admin/sources/[id]/transfer/route");
 const didsRoute = await import("@/app/api/admin/voipms/dids/route");
 const { verifyPassword } = await import("@/lib/auth/password");
 
@@ -607,6 +611,200 @@ describe("opérations d'administration", () => {
       ).toHaveLength(1);
       const [untouched] = await testDb.select().from(clients).where(eq(clients.id, client.id));
       expect(untouched.categoryId).toBe(cats.callback.id);
+    });
+
+    it("exige une destination explicite tant que des fiches sont rattachées", async () => {
+      await seedSystemCategories();
+      const admin = await makeUser({ role: "admin" });
+      await loginAs(admin);
+      const custom = await makeCategory({ nameFr: "Lead chaud", nameEn: "Hot lead" });
+      const client = await makeClient({ categoryId: custom.id });
+
+      // Corps absent : refusé — sinon la fiche perdrait sa catégorie en silence.
+      const res = await categoryIdRoute.DELETE(
+        jsonRequest(`http://localhost/api/admin/categories/${custom.id}`, "DELETE"),
+        ctx(String(custom.id)),
+      );
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        error: "reassign_required",
+        clientCount: 1,
+      });
+      expect(
+        await testDb.select().from(categories).where(eq(categories.id, custom.id)),
+      ).toHaveLength(1);
+      const [kept] = await testDb.select().from(clients).where(eq(clients.id, client.id));
+      expect(kept.categoryId).toBe(custom.id);
+
+      // « Aucune catégorie » choisi explicitement : accepté.
+      const explicit = await categoryIdRoute.DELETE(
+        jsonRequest(`http://localhost/api/admin/categories/${custom.id}`, "DELETE", {
+          reassignTo: null,
+        }),
+        ctx(String(custom.id)),
+      );
+      expect(explicit.status).toBe(200);
+      const [orphan] = await testDb.select().from(clients).where(eq(clients.id, client.id));
+      expect(orphan.categoryId).toBeNull();
+    });
+
+    it("refuse une destination inexistante ou la catégorie elle-même", async () => {
+      await seedSystemCategories();
+      const admin = await makeUser({ role: "admin" });
+      await loginAs(admin);
+      const custom = await makeCategory({ nameFr: "Lead chaud", nameEn: "Hot lead" });
+      await makeClient({ categoryId: custom.id });
+
+      for (const reassignTo of [999_999, custom.id]) {
+        const res = await categoryIdRoute.DELETE(
+          jsonRequest(`http://localhost/api/admin/categories/${custom.id}`, "DELETE", {
+            reassignTo,
+          }),
+          ctx(String(custom.id)),
+        );
+        expect(res.status).toBe(400);
+        await expect(res.json()).resolves.toEqual({ error: "invalid_target" });
+      }
+      expect(
+        await testDb.select().from(categories).where(eq(categories.id, custom.id)),
+      ).toHaveLength(1);
+    });
+
+    it("sans fiche rattachée, la suppression n'exige aucune destination", async () => {
+      await seedSystemCategories();
+      const admin = await makeUser({ role: "admin" });
+      await loginAs(admin);
+      const empty = await makeCategory({ nameFr: "Vide", nameEn: "Empty" });
+
+      const res = await categoryIdRoute.DELETE(
+        jsonRequest(`http://localhost/api/admin/categories/${empty.id}`, "DELETE"),
+        ctx(String(empty.id)),
+      );
+      expect(res.status).toBe(200);
+      expect(
+        await testDb.select().from(categories).where(eq(categories.id, empty.id)),
+      ).toHaveLength(0);
+    });
+  });
+
+  // ══ Transfert des fiches (sans suppression) ════════════════════════════════
+
+  describe("POST /api/admin/categories|sources/[id]/transfer", () => {
+    it("déplace les fiches d'une catégorie vers une autre et journalise", async () => {
+      const cats = await seedSystemCategories();
+      const admin = await makeUser({ role: "admin" });
+      await loginAs(admin);
+      const from = await makeCategory({ nameFr: "Ancienne", nameEn: "Old" });
+      const a = await makeClient({ phone: "+14184761542", categoryId: from.id });
+      const b = await makeClient({ phone: "+15145550142", categoryId: from.id });
+      const other = await makeClient({ phone: "+15145550143", categoryId: cats.new.id });
+
+      const res = await categoryTransferRoute.POST(
+        jsonRequest(`http://localhost/api/admin/categories/${from.id}/transfer`, "POST", {
+          targetId: cats.callback.id,
+        }),
+        ctx(String(from.id)),
+      );
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({ moved: 2 });
+
+      // La catégorie d'origine survit, vidée de ses fiches.
+      expect(
+        await testDb.select().from(categories).where(eq(categories.id, from.id)),
+      ).toHaveLength(1);
+      for (const id of [a.id, b.id]) {
+        const [row] = await testDb.select().from(clients).where(eq(clients.id, id));
+        expect(row.categoryId).toBe(cats.callback.id);
+      }
+      // Les fiches des autres catégories ne bougent pas.
+      const [untouched] = await testDb.select().from(clients).where(eq(clients.id, other.id));
+      expect(untouched.categoryId).toBe(cats.new.id);
+
+      const [entry] = await testDb
+        .select()
+        .from(auditLogs)
+        .where(eq(auditLogs.action, "category.transfer"));
+      // Des ids (résolus à l'affichage selon la langue), pas des noms figés.
+      expect(entry.detail).toMatchObject({
+        count: 2,
+        changes: { categoryId: { from: from.id, to: cats.callback.id } },
+      });
+    });
+
+    it("déplace les fiches d'une source, cible nulle acceptée", async () => {
+      const admin = await makeUser({ role: "admin" });
+      await loginAs(admin);
+      const from = await makeSource({ name: "Kijiji" });
+      const client = await makeClient({ sourceId: from.id });
+
+      const res = await sourceTransferRoute.POST(
+        jsonRequest(`http://localhost/api/admin/sources/${from.id}/transfer`, "POST", {
+          targetId: null,
+        }),
+        ctx(String(from.id)),
+      );
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({ moved: 1 });
+      const [row] = await testDb.select().from(clients).where(eq(clients.id, client.id));
+      expect(row.sourceId).toBeNull();
+    });
+
+    it("refuse une cible inexistante et refuse un téléphoniste", async () => {
+      const admin = await makeUser({ role: "admin" });
+      const caller = await makeUser({ role: "caller" });
+      const from = await makeSource({ name: "Kijiji" });
+      const client = await makeClient({ sourceId: from.id });
+
+      await loginAs(admin);
+      const bad = await sourceTransferRoute.POST(
+        jsonRequest(`http://localhost/api/admin/sources/${from.id}/transfer`, "POST", {
+          targetId: 999_999,
+        }),
+        ctx(String(from.id)),
+      );
+      expect(bad.status).toBe(400);
+      await expect(bad.json()).resolves.toEqual({ error: "invalid_target" });
+
+      // Protection serveur : le téléphoniste n'a pas accès au pipeline.
+      await loginAs(caller);
+      const forbidden = await sourceTransferRoute.POST(
+        jsonRequest(`http://localhost/api/admin/sources/${from.id}/transfer`, "POST", {
+          targetId: null,
+        }),
+        ctx(String(from.id)),
+      );
+      expect(forbidden.status).toBe(403);
+      const [row] = await testDb.select().from(clients).where(eq(clients.id, client.id));
+      expect(row.sourceId).toBe(from.id);
+    });
+  });
+
+  // ══ Sources ════════════════════════════════════════════════════════════════
+
+  describe("DELETE /api/admin/sources/[id]", () => {
+    it("exige une destination explicite, puis réaffecte les fiches", async () => {
+      const admin = await makeUser({ role: "admin" });
+      await loginAs(admin);
+      const from = await makeSource({ name: "Kijiji" });
+      const to = await makeSource({ name: "Site web" });
+      const client = await makeClient({ sourceId: from.id });
+
+      const missing = await sourceIdRoute.DELETE(
+        jsonRequest(`http://localhost/api/admin/sources/${from.id}`, "DELETE"),
+        ctx(String(from.id)),
+      );
+      expect(missing.status).toBe(400);
+      await expect(missing.json()).resolves.toMatchObject({ error: "reassign_required" });
+
+      const res = await sourceIdRoute.DELETE(
+        jsonRequest(`http://localhost/api/admin/sources/${from.id}`, "DELETE", {
+          reassignTo: to.id,
+        }),
+        ctx(String(from.id)),
+      );
+      expect(res.status).toBe(200);
+      const [row] = await testDb.select().from(clients).where(eq(clients.id, client.id));
+      expect(row.sourceId).toBe(to.id);
     });
   });
 

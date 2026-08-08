@@ -49,7 +49,7 @@ export function actionFamily(action: string): AuditActionFamily {
   if (a.includes("create") || a === "webhook.lead") return "create";
   if (a.includes("delete") || a.includes("cancel")) return "delete";
   if (
-    /(update|reorder|resync|route|assign|disposition|reassign)/.test(a) ||
+    /(update|reorder|resync|route|assign|disposition|reassign|transfer)/.test(a) ||
     a.startsWith("settings.") ||
     a === "client.category"
   ) {
