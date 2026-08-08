@@ -280,7 +280,12 @@ function UserMenu({
         </DropdownMenuTrigger>
       )}
       <DropdownMenuContent align={align} className="w-52">
-        <DropdownMenuLabel className="truncate">{user.name}</DropdownMenuLabel>
+        {/* Base UI : GroupLabel DOIT être dans un Group, sinon le menu jette
+            « error #31 » à l'ouverture et démonte toute l'app (constaté en
+            prod : le menu utilisateur ne s'ouvrait jamais). */}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="truncate">{user.name}</DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           className={cn(pathname === "/profile" && "bg-accent text-accent-foreground")}
