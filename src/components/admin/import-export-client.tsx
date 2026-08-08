@@ -6,7 +6,14 @@ import Papa from "papaparse";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
@@ -26,8 +33,33 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import { api } from "./api";
 import type { OptionDto } from "./types";
+
+/** Pastille d'icône commune aux en-têtes des cartes Import / Export. */
+function CardIcon({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      aria-hidden
+      className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary [&_svg]:size-4"
+    >
+      {children}
+    </div>
+  );
+}
+
+/** Numéro d'étape (1, 2, 3…) affiché à côté du titre de chaque section d'import. */
+function StepBadge({ n }: { n: number }) {
+  return (
+    <span
+      aria-hidden
+      className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary tabular-nums"
+    >
+      {n}
+    </span>
+  );
+}
 
 const FIELDS = [
   "fullName",
@@ -235,45 +267,63 @@ export function ImportCard({
   );
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Upload className="size-4" />
-          {t("importExport.import.title")}
-        </CardTitle>
-        <CardDescription>{t("importExport.import.desc")}</CardDescription>
+    <Card className="shadow-xs">
+      <CardHeader className="border-b">
+        <div className="flex items-center gap-3">
+          <CardIcon>
+            <Upload />
+          </CardIcon>
+          <div className="space-y-0.5">
+            <CardTitle>{t("importExport.import.title")}</CardTitle>
+            <CardDescription>{t("importExport.import.desc")}</CardDescription>
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="csv-file">{t("importExport.import.file")}</Label>
-          <Input
-            id="csv-file"
-            ref={fileRef}
-            type="file"
-            accept=".csv,text/csv"
-            className="h-11 py-2.5 md:h-8 md:py-1"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) onFile(f);
-            }}
-          />
+        {/* ── Étape 1 : fichier ── */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <StepBadge n={1} />
+            <Label htmlFor="csv-file" className="text-sm font-semibold">
+              {t("importExport.import.file")}
+            </Label>
+          </div>
+          <div className="relative flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed bg-muted/30 px-4 py-10 text-center transition-colors hover:bg-muted/50 has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-ring">
+            <div
+              aria-hidden
+              className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary"
+            >
+              <FileSpreadsheet className="size-4" />
+            </div>
+            <p className="text-sm font-medium">{fileName ?? t("importExport.import.dropHint")}</p>
+            <Input
+              id="csv-file"
+              ref={fileRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) onFile(f);
+              }}
+            />
+          </div>
+          {rows.length > 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {t("importExport.import.parsed", { count: rows.length, file: fileName ?? "" })}
+            </p>
+          ) : null}
         </div>
 
         {rows.length > 0 ? (
           <>
-            <p className="text-sm text-muted-foreground">
-              {t("importExport.import.parsed", { count: rows.length, file: fileName ?? "" })}
-            </p>
-
             {/* ── Aperçu (5 premières lignes) ── */}
-            <div className="overflow-x-auto rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
+            <div className="overflow-x-auto rounded-xl ring-1 ring-foreground/10">
+              <Table className="[&_th]:h-10 [&_th]:whitespace-nowrap [&_th]:text-[11px] [&_th]:font-medium [&_th]:uppercase [&_th]:tracking-wider">
+                <TableHeader className="bg-muted/40">
+                  <TableRow className="hover:bg-transparent">
                     {headers.map((h) => (
-                      <TableHead key={h} className="text-xs">
-                        {h}
-                      </TableHead>
+                      <TableHead key={h}>{h}</TableHead>
                     ))}
                   </TableRow>
                 </TableHeader>
@@ -291,17 +341,23 @@ export function ImportCard({
               </Table>
             </div>
 
-            {/* ── Correspondance des colonnes ── */}
-            <div>
-              <h4 className="mb-2 text-sm font-semibold">{t("importExport.import.mapping")}</h4>
+            {/* ── Étape 2 : correspondance des colonnes ── */}
+            <div className="border-t pt-4">
+              <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                <StepBadge n={2} />
+                {t("importExport.import.mapping")}
+              </h4>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
                 {FIELDS.map(mappingSelect)}
               </div>
             </div>
 
-            {/* ── Valeurs par défaut ── */}
-            <div>
-              <h4 className="mb-2 text-sm font-semibold">{t("importExport.import.defaults")}</h4>
+            {/* ── Étape 3 : valeurs par défaut ── */}
+            <div className="border-t pt-4">
+              <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                <StepBadge n={3} />
+                {t("importExport.import.defaults")}
+              </h4>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 {defaultSelect(t("importExport.category"), categories, defaults.categoryId, (v) =>
                   setDefaults((d) => ({ ...d, categoryId: v })),
@@ -315,9 +371,12 @@ export function ImportCard({
               </div>
             </div>
 
-            {/* ── Doublons ── */}
-            <div>
-              <h4 className="mb-2 text-sm font-semibold">{t("importExport.import.dedupe")}</h4>
+            {/* ── Étape 4 : doublons ── */}
+            <div className="border-t pt-4">
+              <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                <StepBadge n={4} />
+                {t("importExport.import.dedupe")}
+              </h4>
               <RadioGroup
                 value={mode}
                 onValueChange={(v) => setMode(v as "skip" | "update")}
@@ -334,43 +393,46 @@ export function ImportCard({
               </RadioGroup>
             </div>
 
-            {progress !== null ? (
-              <div className="space-y-1.5">
-                <Progress value={progress} />
-                <p className="text-xs text-muted-foreground">{progress} %</p>
-              </div>
-            ) : null}
-
-            <Button
-              onClick={() => void runImport()}
-              disabled={progress !== null || !mapping.phone}
-              className="min-h-11 md:min-h-8"
-            >
-              {progress !== null ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-              {t("importExport.import.run", { count: rows.length })}
-            </Button>
           </>
         ) : null}
 
         {/* ── Résumé ── */}
         {result ? (
-          <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/40 p-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 border-t pt-4 sm:grid-cols-4">
             {(
               [
-                ["created", result.created],
-                ["updated", result.updated],
-                ["skipped", result.skipped],
-                ["invalid", result.invalid],
+                ["created", result.created, "bg-emerald-500/10", "text-emerald-700 dark:text-emerald-400"],
+                ["updated", result.updated, "bg-primary/10", "text-primary"],
+                ["skipped", result.skipped, "bg-muted/40", ""],
+                ["invalid", result.invalid, "bg-destructive/10", "text-destructive"],
               ] as const
-            ).map(([k, v]) => (
-              <div key={k} className="text-center">
-                <p className="text-2xl font-semibold tabular-nums">{v}</p>
+            ).map(([k, v, box, num]) => (
+              <div key={k} className={cn("rounded-lg p-3 text-center", box)}>
+                <p className={cn("text-2xl font-semibold tabular-nums", num)}>{v}</p>
                 <p className="text-xs text-muted-foreground">{t(`importExport.import.result.${k}`)}</p>
               </div>
             ))}
           </div>
         ) : null}
       </CardContent>
+      {rows.length > 0 ? (
+        <CardFooter className="flex-wrap gap-3">
+          <Button
+            onClick={() => void runImport()}
+            disabled={progress !== null || !mapping.phone}
+            className="min-h-11 md:min-h-8"
+          >
+            {progress !== null ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+            {t("importExport.import.run", { count: rows.length })}
+          </Button>
+          {progress !== null ? (
+            <div className="min-w-40 flex-1 space-y-1">
+              <Progress value={progress} />
+              <p className="text-xs text-muted-foreground tabular-nums">{progress} %</p>
+            </div>
+          ) : null}
+        </CardFooter>
+      ) : null}
     </Card>
   );
 }
@@ -440,13 +502,17 @@ export function ExportCard({
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <FileSpreadsheet className="size-4" />
-          {t("importExport.export.title")}
-        </CardTitle>
-        <CardDescription>{t("importExport.export.desc")}</CardDescription>
+    <Card className="shadow-xs">
+      <CardHeader className="border-b">
+        <div className="flex items-center gap-3">
+          <CardIcon>
+            <FileSpreadsheet />
+          </CardIcon>
+          <div className="space-y-0.5">
+            <CardTitle>{t("importExport.export.title")}</CardTitle>
+            <CardDescription>{t("importExport.export.desc")}</CardDescription>
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -482,12 +548,14 @@ export function ExportCard({
             />
           </div>
         </div>
+      </CardContent>
+      <CardFooter className="flex-wrap gap-x-4 gap-y-2">
         <Button onClick={download} className="min-h-11 md:min-h-8">
           <Download className="size-4" />
           {t("importExport.export.run")}
         </Button>
-        <p className="text-xs text-muted-foreground">{t("importExport.export.note")}</p>
-      </CardContent>
+        <p className="min-w-56 flex-1 text-xs text-muted-foreground">{t("importExport.export.note")}</p>
+      </CardFooter>
     </Card>
   );
 }

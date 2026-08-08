@@ -83,6 +83,7 @@
     "listen": "Listen",
     "close": "Close player",
     "empty": "No calls found",
+    "emptyHint": "Adjust the filters or widen the period.",
     "pagination": "Pagination",
     "page": "Page {page} of {total}",
     "prev": "Previous",

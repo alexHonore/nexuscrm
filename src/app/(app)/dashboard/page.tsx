@@ -5,6 +5,8 @@ import {
   BarChart3Icon,
   CalendarCheckIcon,
   CalendarDaysIcon,
+  CheckCircle2Icon,
+  ChevronRightIcon,
   ClockIcon,
   MapPinIcon,
   PhoneCallIcon,
@@ -19,7 +21,8 @@ import { formatPhone } from "@/lib/phone";
 import { APP_TZ, torontoDayRange } from "@/components/clients/timezone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { FollowupItem, type FollowupItemData } from "./followup-item";
 import { QuickSearch } from "./quick-search";
 
@@ -88,20 +91,35 @@ export default async function DashboardPage() {
 
   const firstName = user.name.split(/\s+/)[0] ?? user.name;
   const stats = [
-    { icon: PhoneCallIcon, label: t("stats.calls"), value: callStats?.count ?? 0 },
+    {
+      icon: PhoneCallIcon,
+      label: t("stats.calls"),
+      value: callStats?.count ?? 0,
+      chip: "bg-primary/10 text-primary",
+    },
     {
       icon: ClockIcon,
       label: t("stats.minutes"),
       value: Math.round((callStats?.seconds ?? 0) / 60),
+      // chart-3 est un gris neutre en mode sombre — repli sur primary à un autre poids.
+      chip: "bg-chart-3/15 text-chart-3 dark:bg-primary/15 dark:text-primary",
     },
-    { icon: CalendarCheckIcon, label: t("stats.booked"), value: bookedToday },
+    {
+      icon: CalendarCheckIcon,
+      label: t("stats.booked"),
+      value: bookedToday,
+      chip: "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400",
+    },
   ];
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-6 md:px-8">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="font-heading text-2xl font-semibold tracking-tight">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {formatInTimeZone(now, APP_TZ, locale === "en" ? "EEEE, MMMM d" : "EEEE d MMMM", { locale: dfnsLocale })}
+          </p>
+          <h1 className="font-heading text-2xl font-semibold tracking-tight md:text-3xl">
             {t("greeting", { name: firstName })}
           </h1>
           <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
@@ -117,13 +135,22 @@ export default async function DashboardPage() {
       <QuickSearch />
 
       {/* Quick stats — current user, today */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-2 md:gap-3">
         {stats.map((s) => (
-          <Card key={s.label} size="sm">
-            <CardContent className="flex flex-col gap-1">
-              <s.icon className="size-4 text-muted-foreground" />
-              <span className="text-2xl font-semibold tabular-nums">{s.value}</span>
-              <span className="text-xs text-muted-foreground">{s.label}</span>
+          <Card key={s.label} size="sm" className="shadow-xs">
+            <CardContent className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <span
+                  aria-hidden
+                  className={`flex size-8 shrink-0 items-center justify-center rounded-md ${s.chip}`}
+                >
+                  <s.icon className="size-4" />
+                </span>
+                <span className="min-w-0 text-xs font-medium leading-tight text-muted-foreground">
+                  {s.label}
+                </span>
+              </div>
+              <span className="text-3xl font-bold tracking-tight tabular-nums">{s.value}</span>
             </CardContent>
           </Card>
         ))}
@@ -131,19 +158,31 @@ export default async function DashboardPage() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Follow-ups */}
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("followups.title")}</CardTitle>
+        <Card className="shadow-xs">
+          <CardHeader className="border-b">
+            <CardTitle className="flex items-center gap-2">
+              {t("followups.title")}
+              <Badge variant="secondary" className="tabular-nums">
+                {pendingFollowups.length}
+              </Badge>
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {overdueItems.length === 0 && dueTodayItems.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t("followups.empty")}</p>
+              <EmptyState
+                className="py-8"
+                icon={<CheckCircle2Icon className="text-emerald-700! dark:text-emerald-400!" />}
+                title={t("followups.empty")}
+              />
             ) : (
               <>
                 {overdueItems.length > 0 ? (
                   <div className="space-y-2">
-                    <p className="text-xs font-semibold text-destructive uppercase tracking-wide">
-                      {t("followups.overdue")} ({overdueItems.length})
+                    <p className="flex items-center gap-2 text-xs font-semibold text-destructive uppercase tracking-wide">
+                      {t("followups.overdue")}
+                      <Badge variant="destructive" className="tabular-nums">
+                        {overdueItems.length}
+                      </Badge>
                     </p>
                     <ul className="space-y-2">
                       {overdueItems.map((item) => (
@@ -154,8 +193,11 @@ export default async function DashboardPage() {
                 ) : null}
                 {dueTodayItems.length > 0 ? (
                   <div className="space-y-2">
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                      {t("followups.dueToday")} ({dueTodayItems.length})
+                    <p className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      {t("followups.dueToday")}
+                      <Badge variant="secondary" className="tabular-nums">
+                        {dueTodayItems.length}
+                      </Badge>
                     </p>
                     <ul className="space-y-2">
                       {dueTodayItems.map((item) => (
@@ -170,18 +212,47 @@ export default async function DashboardPage() {
         </Card>
 
         {/* Today's appointments */}
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("appointments.title")}</CardTitle>
+        <Card className="shadow-xs">
+          <CardHeader className="border-b">
+            <CardTitle className="flex items-center gap-2">
+              {t("appointments.title")}
+              <Badge variant="secondary" className="tabular-nums">
+                {todayAppointments.length}
+              </Badge>
+            </CardTitle>
+            <CardAction>
+              <Button
+                variant="ghost"
+                className="min-h-11 text-muted-foreground md:min-h-8"
+                render={<Link href="/appointments" />}
+              >
+                {t("appointments.viewAll")}
+                <ChevronRightIcon />
+              </Button>
+            </CardAction>
           </CardHeader>
           <CardContent>
             {todayAppointments.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t("appointments.empty")}</p>
+              <EmptyState
+                className="py-8"
+                icon={<CalendarDaysIcon />}
+                title={t("appointments.empty")}
+              />
             ) : (
               <ul className="space-y-2">
                 {todayAppointments.map((a) => (
-                  <li key={a.id} className="flex items-center gap-3 rounded-lg border p-3">
-                    <CalendarDaysIcon className="size-5 shrink-0 text-muted-foreground" />
+                  <li
+                    key={a.id}
+                    className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50"
+                  >
+                    <div className="flex shrink-0 flex-col items-center rounded-md bg-muted px-2 py-1 tabular-nums">
+                      <span className="text-sm font-semibold leading-tight">
+                        {formatInTimeZone(a.startsAt, APP_TZ, "HH:mm", { locale: dfnsLocale })}
+                      </span>
+                      <span className="text-[11px] leading-tight text-muted-foreground">
+                        {formatInTimeZone(a.endsAt, APP_TZ, "HH:mm", { locale: dfnsLocale })}
+                      </span>
+                    </div>
                     <div className="min-w-0 flex-1">
                       <Link
                         href={`/clients/${a.clientId}`}
@@ -189,15 +260,7 @@ export default async function DashboardPage() {
                       >
                         {a.client?.fullName ?? a.title}
                       </Link>
-                      <p className="truncate text-xs text-muted-foreground">
-                        <span className="font-medium tabular-nums">
-                          {formatInTimeZone(a.startsAt, APP_TZ, "HH:mm", { locale: dfnsLocale })}
-                          {" – "}
-                          {formatInTimeZone(a.endsAt, APP_TZ, "HH:mm", { locale: dfnsLocale })}
-                        </span>
-                        {" · "}
-                        {a.title}
-                      </p>
+                      <p className="truncate text-xs text-muted-foreground">{a.title}</p>
                     </div>
                     <Badge variant="secondary" className="shrink-0 gap-1">
                       {a.type === "meet" ? (
@@ -205,7 +268,9 @@ export default async function DashboardPage() {
                       ) : (
                         <MapPinIcon className="size-3" />
                       )}
-                      {a.type === "meet" ? t("appointments.meet") : t("appointments.inperson")}
+                      <span className="max-sm:sr-only">
+                        {a.type === "meet" ? t("appointments.meet") : t("appointments.inperson")}
+                      </span>
                     </Badge>
                   </li>
                 ))}

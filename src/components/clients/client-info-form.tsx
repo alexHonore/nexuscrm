@@ -1,12 +1,13 @@
 "use client";
 
+import { UserRoundIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { updateClientAction } from "@/app/(app)/clients/actions";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -144,18 +145,25 @@ export function ClientInfoForm({
   );
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("detail.infoTitle")}</CardTitle>
+    <Card className="shadow-xs">
+      <CardHeader className="border-b">
+        <CardTitle className="flex items-center gap-2">
+          <UserRoundIcon className="size-4 text-muted-foreground" />
+          {t("detail.infoTitle")}
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <form
+          id="client-info-form"
           className="grid gap-3 sm:grid-cols-2"
           onSubmit={(e) => {
             e.preventDefault();
             submit();
           }}
         >
+          <p className="pt-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase first:pt-0 sm:col-span-2">
+            {t("detail.sectionContact")}
+          </p>
           <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="ci-fullName">{t("fields.fullName")}</Label>
             <Input
@@ -219,6 +227,9 @@ export function ClientInfoForm({
               onChange={(e) => set("address", e.target.value)}
             />
           </div>
+          <p className="pt-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase first:pt-0 sm:col-span-2">
+            {t("detail.sectionProject")}
+          </p>
           {selectField(t("fields.projectType"), projectTypeOptions, form.projectType, (v) =>
             set("projectType", v),
           )}
@@ -259,13 +270,18 @@ export function ClientInfoForm({
               rows={4}
             />
           </div>
-          <div className="sm:col-span-2">
-            <Button type="submit" className="min-h-11 w-full sm:w-auto md:min-h-8" disabled={pending}>
-              {t("detail.save")}
-            </Button>
-          </div>
         </form>
       </CardContent>
+      <CardFooter>
+        <Button
+          type="submit"
+          form="client-info-form"
+          className="min-h-11 w-full sm:w-auto md:min-h-8"
+          disabled={pending}
+        >
+          {t("detail.save")}
+        </Button>
+      </CardFooter>
     </Card>
   );
 }

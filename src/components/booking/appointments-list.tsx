@@ -4,6 +4,7 @@ import { fr as frLocale, enCA } from "date-fns/locale";
 import { formatInTimeZone } from "date-fns-tz";
 import {
   CalendarX,
+  CalendarX2,
   ChevronDown,
   Copy,
   ExternalLink,
@@ -31,6 +32,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { formatPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 
@@ -53,16 +55,31 @@ export type AppointmentItem = {
 
 function StatusBadge({ status }: { status: AppointmentItem["status"] }) {
   const t = useTranslations("booking");
-  const variant =
-    status === "scheduled"
-      ? "secondary"
-      : status === "cancelled"
-        ? "destructive"
-        : "outline";
-  return <Badge variant={variant}>{t(`page.status.${status}`)}</Badge>;
+  if (status === "cancelled") {
+    return <Badge variant="destructive">{t("page.status.cancelled")}</Badge>;
+  }
+  return (
+    <Badge
+      variant="secondary"
+      className={cn(
+        status === "completed" &&
+          "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+        status === "noshow" && "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+      )}
+    >
+      {t(`page.status.${status}`)}
+    </Badge>
+  );
 }
 
-function AppointmentCard({ item }: { item: AppointmentItem }) {
+function AppointmentCard({
+  item,
+  showDate = false,
+}: {
+  item: AppointmentItem;
+  /** Section « Passés » : affiche la date sur md+ (pas d'en-têtes de jour). */
+  showDate?: boolean;
+}) {
   const t = useTranslations("booking");
   const locale = useLocale();
   const dateLocale = locale === "en" ? enCA : frLocale;
@@ -100,22 +117,40 @@ function AppointmentCard({ item }: { item: AppointmentItem }) {
   return (
     <div
       className={cn(
-        "rounded-xl bg-card p-3 text-sm ring-1 ring-foreground/10",
+        "rounded-xl bg-card p-3 text-sm shadow-xs ring-1 ring-foreground/10 transition-shadow hover:shadow-sm",
         cancelled && "opacity-60",
       )}
     >
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-          <TypeIcon className="size-4.5 text-muted-foreground" />
+        <div
+          className={cn(
+            "mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg",
+            item.type === "meet"
+              ? "bg-primary/10 text-primary"
+              : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+          )}
+        >
+          <TypeIcon className="size-4.5" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className={cn("font-medium tabular-nums", cancelled && "line-through")}>
               {timeRange}
             </span>
-            <StatusBadge status={item.status} />
+            {/* À venir = tous « scheduled » par construction : le badge n'y est que du bruit.
+                Section « Passés » (showDate) : toujours afficher le statut. */}
+            {showDate || item.status !== "scheduled" ? (
+              <StatusBadge status={item.status} />
+            ) : null}
           </div>
-          <p className="mt-0.5 text-xs text-muted-foreground md:hidden">{fullDate}</p>
+          <p
+            className={cn(
+              "mt-0.5 text-xs text-muted-foreground",
+              !showDate && "md:hidden",
+            )}
+          >
+            {fullDate}
+          </p>
           <p className="mt-1 truncate">
             <Link
               href={`/clients/${item.clientId}`}
@@ -214,7 +249,7 @@ export function AppointmentsList({ items, now }: { items: AppointmentItem[]; now
   const dateLocale = locale === "en" ? enCA : frLocale;
   const [showPast, setShowPast] = useState(false);
 
-  const { groups, past } = useMemo(() => {
+  const { groups, past, todayKey } = useMemo(() => {
     const upcoming = items.filter(
       (a) => a.status === "scheduled" && new Date(a.endsAt).getTime() >= now,
     );
@@ -243,21 +278,34 @@ export function AppointmentsList({ items, now }: { items: AppointmentItem[]; now
       }
       map.get(key)?.items.push(a);
     }
-    return { groups: Array.from(map.entries()), past: pastItems };
+    return { groups: Array.from(map.entries()), past: pastItems, todayKey };
   }, [items, now, t, locale, dateLocale]);
 
   return (
     <div className="space-y-6">
       {groups.length === 0 ? (
-        <div className="rounded-xl border border-dashed p-8 text-center">
-          <p className="font-medium">{t("page.empty")}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{t("page.emptyHint")}</p>
-        </div>
+        <EmptyState
+          icon={<CalendarX2 />}
+          title={t("page.empty")}
+          hint={t("page.emptyHint")}
+          className="rounded-xl border border-dashed"
+        />
       ) : (
         groups.map(([key, group]) => (
           <section key={key} className="space-y-2">
-            <h2 className="text-sm font-semibold text-muted-foreground capitalize">
+            <h2
+              className={cn(
+                "flex items-center gap-1.5 text-sm font-semibold capitalize",
+                key === todayKey ? "text-foreground" : "text-muted-foreground",
+              )}
+            >
+              {key === todayKey ? (
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-primary" />
+              ) : null}
               {group.label}
+              <span className="text-xs font-normal text-muted-foreground tabular-nums">
+                {group.items.length}
+              </span>
             </h2>
             <div className="space-y-2">
               {group.items.map((a) => (
@@ -282,7 +330,7 @@ export function AppointmentsList({ items, now }: { items: AppointmentItem[]; now
           {showPast && (
             <div className="space-y-2">
               {past.map((a) => (
-                <AppointmentCard key={a.id} item={a} />
+                <AppointmentCard key={a.id} item={a} showDate />
               ))}
             </div>
           )}

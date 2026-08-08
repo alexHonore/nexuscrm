@@ -9,8 +9,14 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -21,9 +27,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import { api } from "./api";
 
 const TZ = "America/Toronto";
+
+/** Pastille d'icône commune aux en-têtes de cartes de réglages. */
+function CardIcon({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      aria-hidden
+      className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary [&_svg]:size-4"
+    >
+      {children}
+    </div>
+  );
+}
 
 // ── a. Google Calendar ───────────────────────────────────────────────────────
 
@@ -88,19 +107,26 @@ export function GoogleCard({
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <CalendarDays className="size-4" />
-          {t("settings.google.title")}
-        </CardTitle>
-        <CardDescription>{t("settings.google.desc")}</CardDescription>
+    <Card className="shadow-xs">
+      <CardHeader className="border-b">
+        <div className="flex items-center gap-3">
+          <CardIcon>
+            <CalendarDays />
+          </CardIcon>
+          <div className="space-y-0.5">
+            <CardTitle>{t("settings.google.title")}</CardTitle>
+            <CardDescription>{t("settings.google.desc")}</CardDescription>
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {connected ? (
           <>
             <div className="flex flex-wrap items-center gap-2 text-sm">
-              <Badge className="gap-1 bg-green-600 text-white dark:bg-green-700">
+              <Badge
+                variant="secondary"
+                className="gap-1 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+              >
                 <CheckCircle2 className="size-3" />
                 {t("settings.google.connected")}
               </Badge>
@@ -148,26 +174,28 @@ export function GoogleCard({
                 </Select>
               )}
             </div>
-
-            <Button
-              variant="outline"
-              onClick={() => void disconnect()}
-              disabled={pending}
-              className="min-h-11 md:min-h-8"
-            >
-              {pending ? <Loader2 className="size-4 animate-spin" /> : <Unplug className="size-4" />}
-              {t("settings.google.disconnect")}
-            </Button>
           </>
         ) : (
-          <>
-            <p className="text-sm text-muted-foreground">{t("settings.google.notConnected")}</p>
-            <Button render={<a href="/api/google/connect" />} className="min-h-11 md:min-h-8">
-              {t("settings.google.connect")}
-            </Button>
-          </>
+          <p className="text-sm text-muted-foreground">{t("settings.google.notConnected")}</p>
         )}
       </CardContent>
+      <CardFooter>
+        {connected ? (
+          <Button
+            variant="outline"
+            onClick={() => void disconnect()}
+            disabled={pending}
+            className="min-h-11 md:min-h-8"
+          >
+            {pending ? <Loader2 className="size-4 animate-spin" /> : <Unplug className="size-4" />}
+            {t("settings.google.disconnect")}
+          </Button>
+        ) : (
+          <Button render={<a href="/api/google/connect" />} className="min-h-11 md:min-h-8">
+            {t("settings.google.connect")}
+          </Button>
+        )}
+      </CardFooter>
     </Card>
   );
 }
@@ -232,27 +260,41 @@ export function BookingCard({ initial }: { initial: BookingFormValues }) {
   );
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <CalendarDays className="size-4" />
-          {t("settings.booking.title")}
-        </CardTitle>
-        <CardDescription>{t("settings.booking.desc")}</CardDescription>
+    <Card className="shadow-xs">
+      <CardHeader className="border-b">
+        <div className="flex items-center gap-3">
+          <CardIcon>
+            <CalendarDays />
+          </CardIcon>
+          <div className="space-y-0.5">
+            <CardTitle>{t("settings.booking.title")}</CardTitle>
+            <CardDescription>{t("settings.booking.desc")}</CardDescription>
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-1.5">
           <Label>{t("settings.booking.days")}</Label>
-          <div className="flex flex-wrap gap-x-4 gap-y-2">
-            {DAY_ORDER.map((day) => (
-              <label key={day} className="flex min-h-11 items-center gap-2 text-sm md:min-h-0">
-                <Checkbox
-                  checked={form.days.includes(day)}
-                  onCheckedChange={(checked) => toggleDay(day, checked === true)}
-                />
-                {t(`settings.booking.day${day}`)}
-              </label>
-            ))}
+          <div className="flex flex-wrap gap-2">
+            {DAY_ORDER.map((day) => {
+              const active = form.days.includes(day);
+              return (
+                <button
+                  key={day}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => toggleDay(day, !active)}
+                  className={cn(
+                    "inline-flex min-h-11 items-center rounded-full border px-3 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring md:min-h-7",
+                    active
+                      ? "border-primary/40 bg-primary/10 text-primary"
+                      : "bg-background text-muted-foreground hover:bg-muted/50",
+                  )}
+                >
+                  {t(`settings.booking.day${day}`)}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -301,12 +343,13 @@ export function BookingCard({ initial }: { initial: BookingFormValues }) {
             placeholder={t("settings.booking.locationPlaceholder")}
           />
         </div>
-
+      </CardContent>
+      <CardFooter>
         <Button onClick={() => void submit()} disabled={pending} className="min-h-11 md:min-h-8">
           {pending ? <Loader2 className="size-4 animate-spin" /> : null}
           {t("save")}
         </Button>
-      </CardContent>
+      </CardFooter>
     </Card>
   );
 }
@@ -317,7 +360,7 @@ function EnvHint({ ok, label }: { ok: boolean; label: string }) {
   return (
     <span className="flex items-center gap-1.5 text-sm">
       {ok ? (
-        <CheckCircle2 className="size-4 text-green-600" />
+        <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />
       ) : (
         <XCircle className="size-4 text-destructive" />
       )}
@@ -375,13 +418,17 @@ export function TelephonyCard({
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <PhoneCall className="size-4" />
-          {t("settings.telephony.title")}
-        </CardTitle>
-        <CardDescription>{t("settings.telephony.desc")}</CardDescription>
+    <Card className="shadow-xs">
+      <CardHeader className="border-b">
+        <div className="flex items-center gap-3">
+          <CardIcon>
+            <PhoneCall />
+          </CardIcon>
+          <div className="space-y-0.5">
+            <CardTitle>{t("settings.telephony.title")}</CardTitle>
+            <CardDescription>{t("settings.telephony.desc")}</CardDescription>
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <RadioGroup
@@ -417,7 +464,7 @@ export function TelephonyCard({
             </div>
             {test ? (
               test.ok ? (
-                <p className="flex items-center gap-1.5 text-sm text-green-600">
+                <p className="flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-400">
                   <CheckCircle2 className="size-4" />
                   {t("settings.telephony.testOk", { count: test.count ?? 0 })}
                 </p>

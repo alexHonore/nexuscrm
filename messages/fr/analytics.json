@@ -83,6 +83,7 @@
     "listen": "Écouter",
     "close": "Fermer le lecteur",
     "empty": "Aucun appel trouvé",
+    "emptyHint": "Ajustez les filtres ou élargissez la période.",
     "pagination": "Pagination",
     "page": "Page {page} de {total}",
     "prev": "Précédent",

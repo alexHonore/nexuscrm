@@ -22,6 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -203,8 +204,8 @@ export function FollowupsCard({
   );
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className="shadow-xs">
+      <CardHeader className="border-b">
         <CardTitle className="flex items-center gap-2">
           <CalendarClockIcon className="size-4 text-muted-foreground" />
           {t("followups.title")}
@@ -218,7 +219,7 @@ export function FollowupsCard({
       </CardHeader>
       <CardContent className="space-y-4">
         {open.length === 0 && done.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("followups.empty")}</p>
+          <EmptyState icon={<CalendarClockIcon />} title={t("followups.empty")} className="py-6" />
         ) : null}
 
         {open.length > 0 ? (
@@ -235,8 +236,8 @@ export function FollowupsCard({
                   <li
                     key={f.id}
                     className={cn(
-                      "flex items-center gap-2 rounded-lg border py-2 pr-1.5 pl-3 transition-opacity",
-                      overdue && "border-l-4 border-l-destructive",
+                      "flex items-center gap-2 rounded-lg border py-2 pr-1.5 pl-3 transition hover:bg-muted/40",
+                      overdue && "border-l-4 border-l-destructive bg-destructive/5",
                       isDraft && "opacity-60",
                     )}
                   >
@@ -249,7 +250,7 @@ export function FollowupsCard({
                       >
                         {fmtDue(f.dueAt)}
                         {overdue ? (
-                          <span className="ml-2 text-xs font-semibold uppercase">
+                          <span className="ml-2 inline-flex items-center rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive uppercase">
                             {t("followups.overdue")}
                           </span>
                         ) : null}

@@ -79,13 +79,13 @@ export function ClientSwitcher({ clientId }: { clientId: string }) {
       </Button>
 
       {known ? (
-        <div className="ml-auto flex items-center gap-1.5">
-          <span className="px-1 text-sm text-muted-foreground tabular-nums">
+        <div className="ml-auto flex items-center rounded-lg border bg-card px-1">
+          <span className="px-2 text-sm text-muted-foreground tabular-nums">
             {t("switcher.position", { position: index + 1, total: nav.total })}
           </span>
           <Button
-            variant="outline"
-            className="size-11"
+            variant="ghost"
+            className="size-11 md:size-9"
             aria-label={t("switcher.previous")}
             disabled={prevDisabled}
             onClick={goPrev}
@@ -93,8 +93,8 @@ export function ClientSwitcher({ clientId }: { clientId: string }) {
             <ChevronLeftIcon />
           </Button>
           <Button
-            variant="outline"
-            className="size-11"
+            variant="ghost"
+            className="size-11 md:size-9"
             aria-label={t("switcher.next")}
             disabled={nextDisabled}
             onClick={() => void goNext()}

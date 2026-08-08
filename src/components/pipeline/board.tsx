@@ -16,10 +16,12 @@
  * l'onglet est visible — pour voir les fiches déplacées par les collègues.
  */
 
+import { Columns3 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { setClientCategoryAction } from "@/app/(app)/clients/actions";
+import { EmptyState } from "@/components/ui/empty-state";
 import { emitDataChange, useDataChange, useVisiblePolling } from "@/lib/live";
 import { PipelineColumn } from "./board-column";
 
@@ -264,9 +266,11 @@ export function PipelineBoard({
 
   if (columns.length === 0) {
     return (
-      <p className="mx-4 rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground md:mx-8">
-        {t("board.empty")}
-      </p>
+      <EmptyState
+        icon={<Columns3 />}
+        title={t("board.empty")}
+        className="mx-4 rounded-xl border border-dashed md:mx-8"
+      />
     );
   }
 

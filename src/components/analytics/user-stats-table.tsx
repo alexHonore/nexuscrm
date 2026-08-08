@@ -1,8 +1,9 @@
 "use client";
 
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Users } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Select,
   SelectContent,
@@ -114,16 +115,16 @@ export function UserStatsTable({ rows }: { rows: UserStatsRow[] }) {
   ];
 
   if (rows.length === 0) {
-    return <p className="py-6 text-center text-sm text-muted-foreground">{t("table.empty")}</p>;
+    return <EmptyState icon={<Users />} title={t("table.empty")} className="py-8" />;
   }
 
   return (
     <div>
       {/* ── Tableau (md+) ── */}
-      <div className="hidden md:block">
-        <Table>
-          <TableHeader>
-            <TableRow>
+      <div className="hidden overflow-hidden rounded-lg ring-1 ring-foreground/10 md:block">
+        <Table className="[&_th]:h-10 [&_th]:whitespace-nowrap [&_th]:text-[11px] [&_th]:font-medium [&_th]:uppercase [&_th]:tracking-wider">
+          <TableHeader className="bg-muted/40">
+            <TableRow className="hover:bg-transparent">
               {columns.map((col) => (
                 <TableHead
                   key={col.key}
@@ -140,7 +141,7 @@ export function UserStatsTable({ rows }: { rows: UserStatsRow[] }) {
                     type="button"
                     onClick={() => toggleSort(col.key)}
                     className={cn(
-                      "inline-flex items-center gap-1 rounded-md py-1 text-left font-medium outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
+                      "inline-flex items-center gap-1 rounded-md py-1 text-left font-medium outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
                       sortKey === col.key ? "text-foreground" : "text-muted-foreground",
                     )}
                   >
@@ -208,7 +209,7 @@ export function UserStatsTable({ rows }: { rows: UserStatsRow[] }) {
           </Select>
         </div>
         {sorted.map((r) => (
-          <div key={r.userId} className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
+          <div key={r.userId} className="rounded-xl bg-card p-4 ring-1 ring-foreground/10 shadow-xs">
             <p className="mb-2 font-medium">{r.name}</p>
             <dl className="grid grid-cols-3 gap-x-3 gap-y-2 text-sm">
               <div>

@@ -4,6 +4,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { CopyButton } from "@/components/admin/copy-button";
 import type { OptionDto, WebhookDefaults, WebhookKeyDto } from "@/components/admin/types";
 import { WebhookKeysCard } from "@/components/admin/webhooks-client";
+import { PageHeader } from "@/components/shell/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { db } from "@/db";
@@ -64,10 +65,19 @@ export default async function AdminWebhooksPage() {
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-4 md:p-6">
-      <h1 className="font-heading text-xl font-semibold tracking-tight">{t("webhooks.title")}</h1>
+      <PageHeader
+        icon={<Webhook />}
+        title={t("webhooks.title")}
+        subtitle={t("webhooks.subtitle")}
+        titleAccessory={
+          <Badge variant="secondary" className="tabular-nums">
+            {t("webhooks.keyCount", { count: keys.length })}
+          </Badge>
+        }
+      />
 
       {/* ── Explication de l'endpoint ── */}
-      <Card>
+      <Card className="shadow-xs">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Webhook className="size-4" />
@@ -92,11 +102,21 @@ export default async function AdminWebhooksPage() {
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {t("webhooks.explain.fields")}
             </p>
-            <div className="overflow-x-auto rounded-lg border">
+            <div className="overflow-x-auto rounded-xl bg-card shadow-xs ring-1 ring-foreground/10">
               <table className="w-full text-sm">
+                <thead className="bg-muted/40">
+                  <tr className="border-b">
+                    <th className="px-3 py-2 text-left text-[11px] font-medium tracking-wider uppercase">
+                      {t("webhooks.explain.fieldCol")}
+                    </th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium tracking-wider uppercase">
+                      {t("webhooks.explain.statusCol")}
+                    </th>
+                  </tr>
+                </thead>
                 <tbody>
                   {PAYLOAD_FIELDS.map((f) => (
-                    <tr key={f.key} className="border-b last:border-0">
+                    <tr key={f.key} className="border-b transition-colors last:border-0 hover:bg-muted/50">
                       <td className="px-3 py-1.5 font-mono text-xs break-all">{f.aliases}</td>
                       <td className="px-3 py-1.5 text-right text-xs text-muted-foreground">
                         {f.required ? (

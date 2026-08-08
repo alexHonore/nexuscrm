@@ -19,6 +19,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Dialog,
   DialogContent,
@@ -134,7 +135,7 @@ export function WebhookKeysCard({
   };
 
   return (
-    <Card>
+    <Card className="shadow-xs">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <KeyRound className="size-4" />
@@ -144,11 +145,11 @@ export function WebhookKeysCard({
       </CardHeader>
       <CardContent className="space-y-3">
         {keys.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("webhooks.keys.empty")}</p>
+          <EmptyState icon={<KeyRound />} title={t("webhooks.keys.empty")} />
         ) : (
           <ul className="space-y-3">
             {keys.map((k) => (
-              <li key={k.id} className="space-y-3 rounded-xl border p-3">
+              <li key={k.id} className="space-y-3 rounded-xl border p-3 shadow-xs">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <p className="truncate font-medium">{k.name}</p>
@@ -194,7 +195,7 @@ export function WebhookKeysCard({
                   {defaultsSelect(k, "assignedToId", users, t("webhooks.keys.defaultAssignee"))}
                 </div>
 
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground tabular-nums">
                   {t("webhooks.keys.lastUsed")} : {fmt(k.lastUsedAt)}
                 </p>
               </li>

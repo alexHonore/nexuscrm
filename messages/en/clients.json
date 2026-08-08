@@ -17,9 +17,11 @@
       "upcoming": "Upcoming follow-up",
       "noFollowup": "No follow-up planned",
       "neverContacted": "Never contacted",
-      "clear": "Reset"
+      "clear": "Reset",
+      "remove": "Remove the {label} filter"
     },
     "empty": "No clients match your search.",
+    "emptyTitle": "No clients found",
     "unassigned": "Unassigned",
     "noCategory": "No category",
     "doNotCall": "Do not call"
@@ -108,6 +110,8 @@
     "sourceUpdated": "Source updated",
     "book": "Book an appointment",
     "infoTitle": "Information",
+    "sectionContact": "Contact details",
+    "sectionProject": "Project",
     "save": "Save",
     "saved": "Changes saved",
     "invalidPhone": "Invalid phone number"

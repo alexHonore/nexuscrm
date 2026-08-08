@@ -16,12 +16,14 @@ import {
   Trash2,
   TriangleAlert,
   UserRound,
+  UsersRound,
   X,
   Zap,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/shell/page-header";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -276,7 +278,7 @@ function AssignmentStatus({
   const t = useTranslations("admin");
   if (available) {
     return (
-      <span className="flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
+      <span className="flex items-center gap-1 font-medium text-emerald-700 dark:text-emerald-400">
         <Check className="size-3" />
         {t("users.voip.available")}
       </span>
@@ -427,16 +429,18 @@ export function UsersClient({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm text-muted-foreground">{t("users.subtitle")}</p>
-        <CreateUserDialog onCreated={upsert} onConfigure={setEditingId} />
-      </div>
+      <PageHeader
+        icon={<UsersRound />}
+        title={t("users.title")}
+        subtitle={t("users.subtitle")}
+        actions={<CreateUserDialog onCreated={upsert} onConfigure={setEditingId} />}
+      />
 
       {/* ── Tableau (desktop) ── */}
-      <div className="hidden overflow-hidden rounded-xl ring-1 ring-foreground/10 md:block">
-        <Table>
-          <TableHeader>
-            <TableRow>
+      <div className="hidden overflow-hidden rounded-xl bg-card shadow-xs ring-1 ring-foreground/10 md:block">
+        <Table className="[&_th]:h-10 [&_th]:whitespace-nowrap [&_th]:text-[11px] [&_th]:font-medium [&_th]:uppercase [&_th]:tracking-wider">
+          <TableHeader className="bg-muted/40">
+            <TableRow className="hover:bg-transparent">
               <TableHead>{t("users.name")}</TableHead>
               <TableHead>{t("users.role")}</TableHead>
               <TableHead>{t("users.active")}</TableHead>
@@ -474,9 +478,9 @@ export function UsersClient({
                 <TableCell>
                   <PhoneStatusCell phone={u.phone} />
                 </TableCell>
-                <TableCell className="text-sm">{u.didNumber ? formatPhone(u.didNumber) : "—"}</TableCell>
+                <TableCell className="text-sm tabular-nums">{u.didNumber ? formatPhone(u.didNumber) : "—"}</TableCell>
                 <TableCell className="max-w-40 truncate font-mono text-xs">{u.sipUsername ?? "—"}</TableCell>
-                <TableCell className="text-sm text-muted-foreground">
+                <TableCell className="text-sm text-muted-foreground tabular-nums">
                   {fmt(u.lastLoginAt) ?? t("users.neverLogged")}
                 </TableCell>
                 <TableCell className="text-sm uppercase">{u.locale}</TableCell>
@@ -498,7 +502,7 @@ export function UsersClient({
             key={u.id}
             type="button"
             onClick={() => setEditingId(u.id)}
-            className="w-full rounded-xl bg-card p-4 text-left ring-1 ring-foreground/10 transition-colors active:bg-muted"
+            className="w-full rounded-xl bg-card p-4 text-left shadow-xs ring-1 ring-foreground/10 outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring active:bg-muted"
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
@@ -526,7 +530,7 @@ export function UsersClient({
               ) : null}
             </div>
             <div className="mt-2 grid grid-cols-2 gap-1 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1 tabular-nums">
                 <Phone className="size-3" />
                 {u.didNumber ? formatPhone(u.didNumber) : "—"}
               </span>
@@ -726,7 +730,7 @@ function CreateUserDialog({
         if (!o) reset();
       }}
     >
-      <Button onClick={() => setOpen(true)}>
+      <Button onClick={() => setOpen(true)} className="min-h-11 md:min-h-9">
         <Plus className="size-4" />
         {t("users.create")}
       </Button>
@@ -1761,7 +1765,7 @@ export function OwnPasswordCard() {
   };
 
   return (
-    <div className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
+    <div className="rounded-xl bg-card p-4 shadow-xs ring-1 ring-foreground/10">
       <h2 className="font-heading text-base font-medium">{t("ownPassword.title")}</h2>
       <p className="mt-0.5 text-sm text-muted-foreground">{t("ownPassword.desc")}</p>
       <form

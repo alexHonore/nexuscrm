@@ -17,9 +17,11 @@
       "upcoming": "Suivi à venir",
       "noFollowup": "Sans suivi planifié",
       "neverContacted": "Jamais contacté",
-      "clear": "Réinitialiser"
+      "clear": "Réinitialiser",
+      "remove": "Retirer le filtre {label}"
     },
     "empty": "Aucun client ne correspond à votre recherche.",
+    "emptyTitle": "Aucun client trouvé",
     "unassigned": "Non assigné",
     "noCategory": "Sans catégorie",
     "doNotCall": "Ne pas appeler"
@@ -108,6 +110,8 @@
     "sourceUpdated": "Source mise à jour",
     "book": "Prendre rendez-vous",
     "infoTitle": "Informations",
+    "sectionContact": "Coordonnées",
+    "sectionProject": "Projet",
     "save": "Enregistrer",
     "saved": "Modifications enregistrées",
     "invalidPhone": "Numéro de téléphone invalide"

@@ -54,7 +54,13 @@ export function DeleteClientButton({
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger
-        render={<Button variant="destructive" className="size-11 md:size-8" aria-label={t("delete.label")} />}
+        render={
+          <Button
+            variant="ghost"
+            className="size-11 text-destructive hover:bg-destructive/10 md:size-8"
+            aria-label={t("delete.label")}
+          />
+        }
       >
         <Trash2Icon />
       </AlertDialogTrigger>

@@ -24,6 +24,7 @@
   "appointments": {
     "title": "Today's appointments",
     "empty": "No appointments today.",
+    "viewAll": "View all",
     "meet": "Video (Meet)",
     "inperson": "In person"
   },

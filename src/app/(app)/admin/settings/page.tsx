@@ -1,5 +1,7 @@
+import { Settings2 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { BookingCard, GoogleCard, TelephonyCard } from "@/components/admin/settings-client";
+import { PageHeader } from "@/components/shell/page-header";
 import { requireAdmin } from "@/lib/auth/guards";
 import { getSetting } from "@/lib/settings";
 
@@ -28,7 +30,7 @@ export default async function AdminSettingsPage() {
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6 p-4 md:p-6">
-      <h1 className="font-heading text-xl font-semibold tracking-tight">{t("settings.title")}</h1>
+      <PageHeader icon={<Settings2 />} title={t("settings.title")} subtitle={t("settings.subtitle")} />
 
       <GoogleCard
         connected={Boolean(google.refreshTokenEnc)}

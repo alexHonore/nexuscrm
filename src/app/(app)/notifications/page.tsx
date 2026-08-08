@@ -1,9 +1,13 @@
 import { desc, eq, and, isNull } from "drizzle-orm";
+import { Bell, BellOff } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { db } from "@/db";
 import { notifications } from "@/db/schema";
 import { requireUser } from "@/lib/auth/guards";
 import { Pagination } from "@/components/clients/pagination";
+import { PageHeader } from "@/components/shell/page-header";
+import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
 import { MarkAllReadButton, NotificationItem } from "./notification-list";
 
 const PAGE_SIZE = 20;
@@ -35,15 +39,27 @@ export default async function NotificationsPage({
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4 px-4 py-6 md:px-8">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="font-heading text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <MarkAllReadButton disabled={unreadCount === 0} />
-      </div>
+      <PageHeader
+        icon={<Bell />}
+        title={t("title")}
+        titleAccessory={
+          unreadCount > 0 ? (
+            <Badge className="tabular-nums">
+              <span aria-hidden>{unreadCount}</span>
+              <span className="sr-only">{t("unreadCount", { count: unreadCount })}</span>
+            </Badge>
+          ) : null
+        }
+        actions={<MarkAllReadButton disabled={unreadCount === 0} />}
+      />
 
       {rows.length === 0 ? (
-        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          {t("empty")}
-        </p>
+        <EmptyState
+          icon={<BellOff />}
+          title={t("empty")}
+          hint={t("emptyHint")}
+          className="rounded-xl border border-dashed"
+        />
       ) : (
         <ul className="space-y-2">
           {rows.map((n) => (

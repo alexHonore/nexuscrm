@@ -2,6 +2,16 @@ import type { Locale } from "date-fns";
 import { enCA } from "date-fns/locale/en-CA";
 import { fr } from "date-fns/locale/fr";
 import { formatInTimeZone } from "date-fns-tz";
+import {
+  CalendarCheck,
+  ChartColumn,
+  Clock,
+  Phone,
+  PhoneCall,
+  Timer,
+  UserPlus,
+  type LucideIcon,
+} from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import { AnalyticsFilters } from "@/components/analytics/analytics-filters";
 import {
@@ -16,8 +26,10 @@ import {
 import { listDays, resolvePeriod } from "@/components/analytics/period";
 import { UserStatsTable } from "@/components/analytics/user-stats-table";
 import { VizTheme } from "@/components/analytics/viz-theme";
+import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireAdmin } from "@/lib/auth/guards";
+import { cn } from "@/lib/utils";
 import {
   getBookingsPerWeek,
   getCallsPerDay,
@@ -133,37 +145,60 @@ export default async function AnalyticsPage({
   const connectRate =
     kpis.totalCalls > 0 ? Math.round((kpis.connectedCalls / kpis.totalCalls) * 100) : 0;
 
-  const kpiTiles: { key: string; label: string; value: string; hint?: string }[] = [
-    { key: "total", label: t("kpi.totalCalls"), value: nf.format(kpis.totalCalls) },
+  const kpiTiles: {
+    key: string;
+    label: string;
+    value: string;
+    hint?: string;
+    icon: LucideIcon;
+    accent?: boolean;
+  }[] = [
+    { key: "total", label: t("kpi.totalCalls"), value: nf.format(kpis.totalCalls), icon: Phone },
     {
       key: "connected",
       label: t("kpi.connectedCalls"),
       value: nf.format(kpis.connectedCalls),
       hint: t("kpi.connectRate", { rate: connectRate }),
+      icon: PhoneCall,
     },
     {
       key: "minutes",
       label: t("kpi.totalMinutes"),
       value: nf.format(Math.round(kpis.totalSec / 60)),
+      icon: Clock,
     },
     {
       key: "avg",
       label: t("kpi.avgDuration"),
       value: mmss(kpis.connectedCalls > 0 ? kpis.answeredSec / kpis.connectedCalls : 0),
       hint: t("kpi.avgDurationHint"),
+      icon: Timer,
     },
-    { key: "rdv", label: t("kpi.appointments"), value: nf.format(kpis.appointments) },
-    { key: "leads", label: t("kpi.leads"), value: nf.format(kpis.leads) },
+    {
+      key: "rdv",
+      label: t("kpi.appointments"),
+      value: nf.format(kpis.appointments),
+      icon: CalendarCheck,
+      accent: true,
+    },
+    {
+      key: "leads",
+      label: t("kpi.leads"),
+      value: nf.format(kpis.leads),
+      icon: UserPlus,
+      accent: true,
+    },
   ];
 
   return (
     <div className="nx-viz space-y-5 p-4 md:p-6">
       <VizTheme />
 
-      <header>
-        <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-      </header>
+      <PageHeader
+        icon={<ChartColumn />}
+        title={t("title")}
+        subtitle={t("subtitle")}
+      />
 
       {/* Une seule rangée de filtres — elle borne tout ce qui suit. */}
       <AnalyticsFilters
@@ -177,10 +212,20 @@ export default async function AnalyticsPage({
       {/* ── Tuiles KPI ── */}
       <section aria-label={t("kpi.sectionLabel")} className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         {kpiTiles.map((tile) => (
-          <Card key={tile.key} size="sm">
+          <Card key={tile.key} size="sm" className="shadow-xs">
             <CardContent className="space-y-0.5">
-              <p className="truncate text-xs text-muted-foreground">{tile.label}</p>
-              <p className="text-2xl font-semibold">{tile.value}</p>
+              <div className="flex items-start justify-between gap-2">
+                <p className="truncate text-xs text-muted-foreground">{tile.label}</p>
+                <tile.icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+              </div>
+              <p
+                className={cn(
+                  "text-2xl font-semibold tabular-nums",
+                  tile.accent && "text-emerald-600 dark:text-emerald-400",
+                )}
+              >
+                {tile.value}
+              </p>
               {tile.hint ? (
                 <p className="truncate text-xs text-muted-foreground">{tile.hint}</p>
               ) : null}
@@ -191,7 +236,7 @@ export default async function AnalyticsPage({
 
       {/* ── Graphiques ── */}
       <section className="grid gap-4 lg:grid-cols-2">
-        <Card className="lg:col-span-2">
+        <Card className="shadow-xs lg:col-span-2">
           <CardHeader>
             <CardTitle>{t("charts.callsPerDay")}</CardTitle>
           </CardHeader>
@@ -200,7 +245,7 @@ export default async function AnalyticsPage({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-xs">
           <CardHeader>
             <CardTitle>{t("charts.bookingsPerWeek")}</CardTitle>
           </CardHeader>
@@ -209,7 +254,7 @@ export default async function AnalyticsPage({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-xs">
           <CardHeader>
             <CardTitle>{t("charts.dispositions")}</CardTitle>
           </CardHeader>
@@ -218,7 +263,7 @@ export default async function AnalyticsPage({
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-2">
+        <Card className="shadow-xs lg:col-span-2">
           <CardHeader>
             <CardTitle>{t("charts.minutesPerUser")}</CardTitle>
           </CardHeader>
@@ -229,7 +274,7 @@ export default async function AnalyticsPage({
       </section>
 
       {/* ── Le tableau clé ── */}
-      <Card>
+      <Card className="shadow-xs">
         <CardHeader>
           <CardTitle>{t("table.title")}</CardTitle>
         </CardHeader>

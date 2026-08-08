@@ -1,6 +1,6 @@
 "use client";
 
-import { PlusIcon } from "lucide-react";
+import { Loader2Icon, PlusIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState, useTransition } from "react";
@@ -256,10 +256,20 @@ export function AddClientDialog({
             />
           </div>
           <DialogFooter className="sm:col-span-2">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11 md:min-h-8"
+              onClick={() => setOpen(false)}
+            >
               {t("create.cancel")}
             </Button>
-            <Button type="submit" disabled={pending || !fullName.trim() || !phone.trim()}>
+            <Button
+              type="submit"
+              className="min-h-11 md:min-h-8"
+              disabled={pending || !fullName.trim() || !phone.trim()}
+            >
+              {pending ? <Loader2Icon className="animate-spin" /> : null}
               {t("create.submit")}
             </Button>
           </DialogFooter>

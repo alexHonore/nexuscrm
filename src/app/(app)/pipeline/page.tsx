@@ -1,3 +1,4 @@
+import { Columns3 } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import { requireUser } from "@/lib/auth/guards";
 import {
@@ -6,6 +7,7 @@ import {
   type PipelineCardData,
   type PipelineColumnData,
 } from "@/components/pipeline/board";
+import { PageHeader } from "@/components/shell/page-header";
 import { getBoardData, type BoardClientRow } from "./board-data";
 
 /** Couleur neutre de la colonne « Sans catégorie ». */
@@ -68,10 +70,12 @@ export default async function PipelinePage() {
 
   return (
     <div className="space-y-4 py-6">
-      <div className="px-4 md:px-8">
-        <h1 className="font-heading text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="text-sm text-muted-foreground">{t("subtitle", { count: totalClients })}</p>
-      </div>
+      <PageHeader
+        className="px-4 md:px-8"
+        icon={<Columns3 />}
+        title={t("title")}
+        subtitle={t("subtitle", { count: totalClients })}
+      />
       <PipelineBoard initialColumns={columns} targets={targets} now={board.generatedAt} />
     </div>
   );

@@ -34,10 +34,36 @@ export type AuditChangeView = {
 /** Toute autre information du `detail` (entrées anciennes, contexte). */
 export type AuditFactView = { key: string; label: string; value: AuditValueView };
 
+/**
+ * Famille de verbe d'une action — pilote la teinte du badge dans le journal
+ * (création = émeraude, suppression = destructif, modification = primaire,
+ * connexion/mots de passe = violet, import/export = ambre). Purement visuel.
+ */
+export type AuditActionFamily = "create" | "delete" | "update" | "auth" | "data" | "other";
+
+export function actionFamily(action: string): AuditActionFamily {
+  const a = action.toLowerCase();
+  if (/(^|[._])(login|logout|auth|password)/.test(a)) return "auth";
+  if (/(^|[._])(export|import)/.test(a)) return "data";
+  // Un lead reçu par webhook crée une fiche : même famille qu'une création.
+  if (a.includes("create") || a === "webhook.lead") return "create";
+  if (a.includes("delete") || a.includes("cancel")) return "delete";
+  if (
+    /(update|reorder|resync|route|assign|disposition|reassign)/.test(a) ||
+    a.startsWith("settings.") ||
+    a === "client.category"
+  ) {
+    return "update";
+  }
+  return "other";
+}
+
 export type AuditEntryView = {
   id: number;
   action: string;
   actionLabel: string;
+  /** Famille de verbe — uniquement pour teinter le badge d'action. */
+  family: AuditActionFamily;
   dateLabel: string;
   dateIso: string;
   userLabel: string;
@@ -306,6 +332,7 @@ export function buildAuditEntry(
     id: log.id,
     action: log.action,
     actionLabel: actionLabel(t, log.action),
+    family: actionFamily(log.action),
     dateLabel: formatInTimeZone(log.createdAt, AUDIT_TZ, "d MMM yyyy, HH:mm:ss", {
       locale: base.dateLocale,
     }),

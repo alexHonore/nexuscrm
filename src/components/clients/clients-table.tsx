@@ -185,7 +185,10 @@ export function ClientsTable({
     <button
       type="button"
       onClick={() => onSort(key)}
-      className="inline-flex min-h-8 items-center gap-1 hover:text-foreground"
+      className={cn(
+        "-mx-1.5 inline-flex min-h-8 items-center gap-1 rounded-md px-1.5 transition-colors hover:bg-muted hover:text-foreground",
+        sortKey === key && "text-foreground",
+      )}
       aria-label={t("table.sortBy", { column: label })}
     >
       {label}
@@ -368,10 +371,32 @@ export function ClientsTable({
   );
 
   if (loading) {
+    // Silhouette structurelle du tableau : rythme d'en-tête + lignes aux
+    // largeurs variées, pour éviter le saut de mise en page au chargement.
+    const nameWidths = ["w-40", "w-32", "w-44", "w-36", "w-28"];
+    const cityWidths = ["w-24", "w-16", "w-20"];
     return (
-      <div className="space-y-1.5 p-3">
+      <div aria-hidden className="px-3 pb-2">
+        <div className="flex h-10 items-center gap-4 border-b border-border/60">
+          <Skeleton className="h-3 w-24 rounded" />
+          <Skeleton className="h-3 w-16 rounded" />
+          <Skeleton className="h-3 w-20 rounded" />
+          <Skeleton className="hidden h-3 w-16 rounded md:block" />
+          <Skeleton className="hidden h-3 w-20 rounded md:block" />
+        </div>
         {Array.from({ length: 10 }, (_, i) => (
-          <Skeleton key={i} className="h-11 w-full rounded-lg" />
+          <div
+            key={i}
+            className="flex h-[41px] items-center gap-4 border-b border-border/60"
+          >
+            <Skeleton className={cn("h-3.5 rounded", nameWidths[i % nameWidths.length])} />
+            <Skeleton className="h-3.5 w-28 rounded" />
+            <Skeleton className="h-5 w-20 rounded-full" />
+            <Skeleton
+              className={cn("hidden h-3.5 rounded md:block", cityWidths[i % cityWidths.length])}
+            />
+            <Skeleton className="hidden h-3.5 w-24 rounded md:block" />
+          </div>
         ))}
       </div>
     );
@@ -385,8 +410,8 @@ export function ClientsTable({
     <div className={cn(selected.size > 0 && "pb-24")}>
       {/* ── Desktop : vrai tableau ── */}
       <div className="hidden md:block">
-        <Table>
-          <TableHeader>
+        <Table className="[&_th]:h-10 [&_th]:whitespace-nowrap [&_th]:text-[11px] [&_th]:font-medium [&_th]:uppercase [&_th]:tracking-wider">
+          <TableHeader className="bg-muted/40">
             <TableRow className="hover:bg-transparent">
               {isAdmin ? (
                 <TableHead className="w-10">
@@ -506,13 +531,17 @@ export function ClientsTable({
       {/* ── Mobile : cartes cochables (règle « tableaux → cartes ») ── */}
       <ul className="divide-y divide-border/60 md:hidden">
         {items.map((item) => (
-          <li key={item.id} className="flex min-h-[52px] items-center gap-3 px-3">
+          <li key={item.id} className="flex min-h-[52px] items-center gap-1.5 px-3">
             {isAdmin ? (
-              <Checkbox
-                checked={selected.has(item.id)}
-                onCheckedChange={() => toggleOne(item.id)}
-                aria-label={t("table.selectRow", { name: item.fullName })}
-              />
+              <span className="-ml-2 flex size-11 shrink-0 items-center justify-center">
+                {/* after:-inset-3.5 : la zone de frappe du Checkbox remplit les 44px. */}
+                <Checkbox
+                  checked={selected.has(item.id)}
+                  onCheckedChange={() => toggleOne(item.id)}
+                  aria-label={t("table.selectRow", { name: item.fullName })}
+                  className="after:-inset-3.5"
+                />
+              </span>
             ) : null}
             <Link href={`/clients/${item.id}`} className="min-w-0 flex-1 py-2">
               <span className="flex items-center gap-1.5">
@@ -525,6 +554,12 @@ export function ClientsTable({
                   style={item.categoryColor ? { backgroundColor: item.categoryColor } : undefined}
                 />
                 <span className="truncate text-sm font-semibold">{item.fullName}</span>
+                {item.nextFollowupAt && Date.parse(item.nextFollowupAt) < now ? (
+                  <ClockAlertIcon
+                    className="size-3.5 shrink-0 text-destructive"
+                    aria-label={t("list.filters.late")}
+                  />
+                ) : null}
                 {item.doNotCall ? (
                   <PhoneOffIcon
                     className="size-3.5 shrink-0 text-destructive"
@@ -534,7 +569,10 @@ export function ClientsTable({
               </span>
               <span className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
                 <span className="tabular-nums">{formatPhone(item.phone)}</span>
-                <span>{t("table.createdShort", { date: day(item.createdAt) })}</span>
+                {item.city ? <span className="truncate">{item.city}</span> : null}
+                <span className="shrink-0">
+                  {t("table.createdShort", { date: day(item.createdAt) })}
+                </span>
               </span>
             </Link>
           </li>
@@ -543,12 +581,13 @@ export function ClientsTable({
 
       {/* ── Barre d'actions en masse (admin) ── */}
       {isAdmin && selected.size > 0 ? (
-        <div className="fixed inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 mx-auto max-w-3xl rounded-xl border bg-background/95 p-2 shadow-lg backdrop-blur md:bottom-6">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="px-1.5 text-sm font-medium tabular-nums">
+        <div className="fixed inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 mx-auto max-w-3xl animate-in rounded-xl border bg-background/95 p-2 shadow-lg ring-1 ring-border/60 backdrop-blur duration-200 fade-in-0 slide-in-from-bottom-3 md:bottom-6">
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 px-1.5 text-sm font-medium tabular-nums">
               {t("bulk.selected", { count: selected.size })}
             </span>
 
+            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto [scrollbar-width:none] md:flex-wrap [&::-webkit-scrollbar]:hidden">
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={<Button variant="outline" className="min-h-11 md:min-h-8" disabled={pending} />}
@@ -681,10 +720,11 @@ export function ClientsTable({
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
+            </div>
 
             <Button
               variant="ghost"
-              className="ml-auto size-11 md:size-8"
+              className="size-11 shrink-0 md:size-8"
               aria-label={t("bulk.clear")}
               disabled={pending}
               onClick={clearSelection}

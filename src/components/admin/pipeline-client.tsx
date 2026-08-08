@@ -58,10 +58,6 @@ function ColorPicker({ value, onChange }: { value: string; onChange: (c: string)
   );
 }
 
-function Dot({ color }: { color: string }) {
-  return <span className="inline-block size-3 shrink-0 rounded-full" style={{ backgroundColor: color }} />;
-}
-
 // ── Catégories ───────────────────────────────────────────────────────────────
 
 export function CategoriesCard({ initial }: { initial: CategoryDto[] }) {
@@ -96,7 +92,7 @@ export function CategoriesCard({ initial }: { initial: CategoryDto[] }) {
   };
 
   return (
-    <Card>
+    <Card className="shadow-xs">
       <CardHeader>
         <CardTitle>{t("pipeline.categories.title")}</CardTitle>
         <CardDescription>{t("pipeline.categories.desc")}</CardDescription>
@@ -106,22 +102,25 @@ export function CategoriesCard({ initial }: { initial: CategoryDto[] }) {
           {items.map((c, i) => (
             <li
               key={c.id}
-              className="flex items-center gap-2 rounded-lg border px-2.5 py-2"
+              className="group flex items-center gap-2 rounded-lg border border-l-4 px-2.5 py-2 transition-colors hover:bg-muted/50"
+              style={{ borderLeftColor: c.color }}
             >
-              <Dot color={c.color} />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{c.nameFr}</p>
-                <p className="truncate text-xs text-muted-foreground">
-                  {c.nameEn} · {t("pipeline.categories.clientCount", { count: c.clientCount })}
-                </p>
+                <p className="truncate text-xs text-muted-foreground">{c.nameEn}</p>
               </div>
+              <Badge variant="secondary" className="shrink-0 tabular-nums">
+                {t("pipeline.categories.clientCount", { count: c.clientCount })}
+              </Badge>
               {c.isSystem ? (
                 <Badge variant="outline" className="shrink-0 gap-1">
                   <Lock className="size-3" />
                   {t("pipeline.categories.system")}
                 </Badge>
               ) : null}
-              <div className="flex shrink-0 items-center gap-0.5">
+              {/* Sur md+, la grappe d'icônes n'apparaît qu'au survol ou au focus ;
+                  au tactile (pas de survol) elle reste toujours visible. */}
+              <div className="flex shrink-0 items-center gap-0.5 md:opacity-0 md:transition-opacity md:group-hover:opacity-100 md:focus-within:opacity-100">
                 <Button
                   variant="ghost"
                   size="icon-sm"
@@ -391,7 +390,7 @@ export function SourcesCard({ initial }: { initial: SourceDto[] }) {
   const [deleting, setDeleting] = useState<SourceDto | null>(null);
 
   return (
-    <Card>
+    <Card className="shadow-xs">
       <CardHeader>
         <CardTitle>{t("pipeline.sources.title")}</CardTitle>
         <CardDescription>{t("pipeline.sources.desc")}</CardDescription>
@@ -399,15 +398,19 @@ export function SourcesCard({ initial }: { initial: SourceDto[] }) {
       <CardContent className="space-y-3">
         <ul className="space-y-1.5">
           {items.map((s) => (
-            <li key={s.id} className="flex items-center gap-2 rounded-lg border px-2.5 py-2">
-              <Dot color={s.color} />
+            <li
+              key={s.id}
+              className="group flex items-center gap-2 rounded-lg border border-l-4 px-2.5 py-2 transition-colors hover:bg-muted/50"
+              style={{ borderLeftColor: s.color }}
+            >
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{s.name}</p>
-                <p className="truncate text-xs text-muted-foreground">
-                  {t("pipeline.categories.clientCount", { count: s.clientCount })}
-                </p>
               </div>
-              <div className="flex shrink-0 items-center gap-0.5">
+              <Badge variant="secondary" className="shrink-0 tabular-nums">
+                {t("pipeline.categories.clientCount", { count: s.clientCount })}
+              </Badge>
+              {/* Même règle que les catégories : visible au survol/focus sur md+. */}
+              <div className="flex shrink-0 items-center gap-0.5 md:opacity-0 md:transition-opacity md:group-hover:opacity-100 md:focus-within:opacity-100">
                 <Button
                   variant="ghost"
                   size="icon-sm"

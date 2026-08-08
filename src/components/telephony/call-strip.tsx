@@ -49,7 +49,10 @@ export function CallStrip({ className }: { className?: string }) {
     <div
       role="status"
       className={cn(
-        "flex items-center gap-2 rounded-xl border bg-muted/40 px-3 py-2",
+        "flex items-center gap-2 rounded-xl border px-3 py-2 transition-colors",
+        tel.callState === "active"
+          ? "border-emerald-500/30 bg-emerald-500/5"
+          : "border-amber-500/30 bg-amber-500/5",
         className,
       )}
     >
@@ -78,8 +81,11 @@ export function CallStrip({ className }: { className?: string }) {
         </p>
       </div>
       <Button
-        variant={tel.muted ? "default" : "secondary"}
-        className="size-11"
+        variant="secondary"
+        className={cn(
+          "size-11",
+          tel.muted && "bg-destructive/15 text-destructive hover:bg-destructive/25",
+        )}
         onClick={tel.toggleMute}
         aria-label={tel.muted ? t("call.unmute") : t("call.mute")}
         aria-pressed={tel.muted}
@@ -87,8 +93,11 @@ export function CallStrip({ className }: { className?: string }) {
         {tel.muted ? <MicOff className="size-4" /> : <Mic className="size-4" />}
       </Button>
       <Button
-        variant={tel.held ? "default" : "secondary"}
-        className="size-11"
+        variant="secondary"
+        className={cn(
+          "size-11",
+          tel.held && "bg-amber-500/20 text-amber-700 hover:bg-amber-500/30 dark:text-amber-400",
+        )}
         onClick={tel.toggleHold}
         aria-label={tel.held ? t("call.resume") : t("call.hold")}
         aria-pressed={tel.held}

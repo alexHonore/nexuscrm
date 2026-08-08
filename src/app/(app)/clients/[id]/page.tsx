@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { formatInTimeZone } from "date-fns-tz";
 import { enUS, fr } from "date-fns/locale";
+import { HistoryIcon } from "lucide-react";
 import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 import { db } from "@/db";
@@ -202,9 +203,12 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
       </div>
 
       {/* Provenance de la fiche : création et dernière modification humaine. */}
-      <p className="pb-2 text-xs text-muted-foreground">
-        {createdLine}
-        {updatedLine ? <span> · {updatedLine}</span> : null}
+      <p className="flex items-center gap-1.5 border-t pt-3 pb-2 text-xs text-muted-foreground">
+        <HistoryIcon aria-hidden className="size-3.5 shrink-0" />
+        <span>
+          {createdLine}
+          {updatedLine ? <span> · {updatedLine}</span> : null}
+        </span>
       </p>
     </div>
   );

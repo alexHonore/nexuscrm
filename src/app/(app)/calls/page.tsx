@@ -24,8 +24,10 @@ import {
   type CallRowData,
 } from "@/components/calls/calls-list";
 import { APP_TZ, torontoDayRange } from "@/components/clients/timezone";
+import { PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { db } from "@/db";
 import { appointments, calls, clients, DISPOSITIONS } from "@/db/schema";
 import { requireUser } from "@/lib/auth/guards";
@@ -194,13 +196,25 @@ export default async function MyCallsPage({
   }
 
   const stats = [
-    { icon: PhoneCallIcon, label: t("callsPage.stats.calls"), value: todayStats?.count ?? 0 },
+    {
+      icon: PhoneCallIcon,
+      label: t("callsPage.stats.calls"),
+      value: todayStats?.count ?? 0,
+      chip: "bg-primary/10 text-primary",
+    },
     {
       icon: ClockIcon,
       label: t("callsPage.stats.minutes"),
       value: Math.round((todayStats?.answeredSeconds ?? 0) / 60),
+      // chart-3 est un gris neutre en mode sombre — repli sur primary à un autre poids.
+      chip: "bg-chart-3/10 text-chart-3 dark:bg-primary/15 dark:text-primary",
     },
-    { icon: CalendarCheckIcon, label: t("callsPage.stats.booked"), value: bookedToday },
+    {
+      icon: CalendarCheckIcon,
+      label: t("callsPage.stats.booked"),
+      value: bookedToday,
+      chip: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+    },
   ];
 
   // ── Liens de pagination (les filtres restent) ──
@@ -216,21 +230,31 @@ export default async function MyCallsPage({
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-6 pb-safe md:px-8">
-      <header>
-        <h1 className="font-heading text-2xl font-semibold tracking-tight">
-          {t("callsPage.title")}
-        </h1>
-        <p className="text-sm text-muted-foreground">{t("callsPage.subtitle")}</p>
-      </header>
+      <PageHeader
+        icon={<PhoneCallIcon />}
+        title={t("callsPage.title")}
+        subtitle={t("callsPage.subtitle")}
+      />
 
       {/* Statistiques du jour — utilisateur courant */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-2 md:gap-3">
         {stats.map((s) => (
-          <Card key={s.label} size="sm">
-            <CardContent className="flex flex-col gap-1">
-              <s.icon className="size-4 text-muted-foreground" />
-              <span className="text-2xl font-semibold tabular-nums">{nf.format(s.value)}</span>
-              <span className="text-xs text-muted-foreground">{s.label}</span>
+          <Card key={s.label} size="sm" className="shadow-xs">
+            <CardContent className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <span
+                  aria-hidden
+                  className={`flex size-8 shrink-0 items-center justify-center rounded-md ${s.chip}`}
+                >
+                  <s.icon className="size-4" />
+                </span>
+                <span className="min-w-0 text-xs font-medium leading-tight text-muted-foreground">
+                  {s.label}
+                </span>
+              </div>
+              <span className="text-3xl font-bold tracking-tight tabular-nums">
+                {nf.format(s.value)}
+              </span>
             </CardContent>
           </Card>
         ))}
@@ -239,15 +263,12 @@ export default async function MyCallsPage({
       <CallsFilters period={period} direction={direction} disposition={disposition} />
 
       {total === 0 ? (
-        <div className="rounded-xl bg-card px-6 py-12 text-center ring-1 ring-foreground/10">
-          <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-muted">
-            <PhoneCallIcon aria-hidden className="size-6 text-muted-foreground" />
-          </div>
-          <p className="mt-4 text-sm font-medium">{t("callsPage.empty.title")}</p>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-            {t("callsPage.empty.hint")}
-          </p>
-        </div>
+        <EmptyState
+          icon={<PhoneCallIcon />}
+          title={t("callsPage.empty.title")}
+          hint={t("callsPage.empty.hint")}
+          className="rounded-xl border border-dashed"
+        />
       ) : (
         <>
           <p className="text-sm text-muted-foreground">

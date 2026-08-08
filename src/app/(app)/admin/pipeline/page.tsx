@@ -1,7 +1,9 @@
 import { asc, count } from "drizzle-orm";
+import { Workflow } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { CategoriesCard, SourcesCard } from "@/components/admin/pipeline-client";
 import type { CategoryDto, SourceDto } from "@/components/admin/types";
+import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/db";
 import { categories, clients, sources } from "@/db/schema";
 import { requireAdmin } from "@/lib/auth/guards";
@@ -40,7 +42,11 @@ export default async function AdminPipelinePage() {
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-4 md:p-6">
-      <h1 className="font-heading text-xl font-semibold tracking-tight">{t("pipeline.title")}</h1>
+      <PageHeader
+        icon={<Workflow />}
+        title={t("pipeline.title")}
+        subtitle={t("pipeline.subtitle")}
+      />
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <CategoriesCard initial={categoryDtos} />
         <SourcesCard initial={sourceDtos} />

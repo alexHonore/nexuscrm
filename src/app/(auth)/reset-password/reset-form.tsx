@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleCheckBig } from "lucide-react";
+import { CircleCheckBig, Loader2, Lock } from "lucide-react";
 import Link from "next/link";
 import { useActionState } from "react";
 import { useTranslations } from "next-intl";
@@ -8,6 +8,9 @@ import { applyResetAction, type ResetState } from "@/app/(auth)/forgot-password/
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+const FIELD_ICON_CLASS =
+  "pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground";
 
 export function ResetForm({ token }: { token: string }) {
   const t = useTranslations("auth");
@@ -21,7 +24,7 @@ export function ResetForm({ token }: { token: string }) {
           <p className="text-sm font-medium">{t("reset.doneTitle")}</p>
           <p className="mt-1 text-xs text-muted-foreground">{t("reset.doneBody")}</p>
         </div>
-        <Button className="h-11 w-full" render={<Link href="/login" />}>
+        <Button className="h-12 w-full text-base" render={<Link href="/login" />}>
           {t("signIn")}
         </Button>
       </div>
@@ -42,37 +45,53 @@ export function ResetForm({ token }: { token: string }) {
       <input type="hidden" name="token" value={token} />
       <div className="space-y-2">
         <Label htmlFor="password">{t("reset.newPassword")}</Label>
-        <Input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="new-password"
-          minLength={10}
-          required
-          autoFocus
-          className="h-11"
-        />
+        <div className="relative">
+          <Lock aria-hidden className={FIELD_ICON_CLASS} />
+          <Input
+            id="password"
+            name="password"
+            type="password"
+            autoComplete="new-password"
+            minLength={10}
+            required
+            autoFocus
+            className="h-11 rounded-xl pl-9"
+          />
+        </div>
         <p className="text-xs text-muted-foreground">{t("reset.hint")}</p>
       </div>
       <div className="space-y-2">
         <Label htmlFor="confirm">{t("reset.confirmPassword")}</Label>
-        <Input
-          id="confirm"
-          name="confirm"
-          type="password"
-          autoComplete="new-password"
-          minLength={10}
-          required
-          className="h-11"
-        />
+        <div className="relative">
+          <Lock aria-hidden className={FIELD_ICON_CLASS} />
+          <Input
+            id="confirm"
+            name="confirm"
+            type="password"
+            autoComplete="new-password"
+            minLength={10}
+            required
+            className="h-11 rounded-xl pl-9"
+          />
+        </div>
       </div>
       {error ? (
-        <p className="text-sm font-medium text-destructive" role="alert">
+        <p
+          className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm font-medium text-destructive"
+          role="alert"
+        >
           {error}
         </p>
       ) : null}
-      <Button type="submit" className="h-11 w-full" disabled={pending}>
-        {pending ? t("reset.saving") : t("reset.submit")}
+      <Button type="submit" className="h-12 w-full text-base" disabled={pending}>
+        {pending ? (
+          <>
+            <Loader2 data-icon="inline-start" className="size-4 animate-spin" />
+            {t("reset.saving")}
+          </>
+        ) : (
+          t("reset.submit")
+        )}
       </Button>
     </form>
   );

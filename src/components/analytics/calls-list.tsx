@@ -1,11 +1,12 @@
 "use client";
 
-import { PhoneIncoming, PhoneOutgoing, Play, X } from "lucide-react";
+import { PhoneIncoming, PhoneOff, PhoneOutgoing, Play, X } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { dispositionColorVar } from "@/components/analytics/viz-theme";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Table,
   TableBody,
@@ -61,7 +62,13 @@ function DispositionChip({
   label: string;
 }) {
   return (
-    <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-muted/60 px-2 text-xs font-medium ring-1 ring-foreground/10">
+    <span
+      className="inline-flex h-6 items-center gap-1.5 rounded-full px-2 text-xs font-medium ring-1 ring-foreground/10"
+      style={{
+        // Voile translucide de la couleur de disposition — jamais d'aplat opaque.
+        background: `color-mix(in srgb, ${dispositionColorVar(disposition)} 10%, transparent)`,
+      }}
+    >
       <span
         aria-hidden
         className="size-2 shrink-0 rounded-full ring-1 ring-foreground/10"
@@ -148,19 +155,21 @@ export function CallsList({ rows }: { rows: CallRow[] }) {
 
   if (rows.length === 0) {
     return (
-      <p className="py-10 text-center text-sm text-muted-foreground">
-        {t("callsPage.empty")}
-      </p>
+      <EmptyState
+        icon={<PhoneOff />}
+        title={t("callsPage.empty")}
+        hint={t("callsPage.emptyHint")}
+      />
     );
   }
 
   return (
     <div>
       {/* ── Tableau (md+) ── */}
-      <div className="hidden md:block">
-        <Table>
-          <TableHeader>
-            <TableRow>
+      <div className="hidden overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10 shadow-xs md:block">
+        <Table className="[&_th]:h-10 [&_th]:whitespace-nowrap [&_th]:text-[11px] [&_th]:font-medium [&_th]:uppercase [&_th]:tracking-wider">
+          <TableHeader className="bg-muted/40">
+            <TableRow className="hover:bg-transparent">
               <TableHead>{t("callsPage.date")}</TableHead>
               <TableHead>{t("callsPage.user")}</TableHead>
               <TableHead>
@@ -225,7 +234,7 @@ export function CallsList({ rows }: { rows: CallRow[] }) {
       {/* ── Cartes (mobile) ── */}
       <ul className="space-y-3 md:hidden">
         {rows.map((row) => (
-          <li key={row.id} className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
+          <li key={row.id} className="rounded-xl bg-card p-4 ring-1 ring-foreground/10 shadow-xs">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <ClientCell row={row} />

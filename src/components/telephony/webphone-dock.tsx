@@ -68,6 +68,19 @@ const ABOVE_NAV = "bottom-[calc(4.5rem+env(safe-area-inset-bottom))]";
 
 const DIAL_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"] as const;
 
+/** Lettres classiques du cadran téléphonique — universelles, pas d'i18n. */
+const DIAL_KEY_LETTERS: Partial<Record<(typeof DIAL_KEYS)[number], string>> = {
+  "2": "ABC",
+  "3": "DEF",
+  "4": "GHI",
+  "5": "JKL",
+  "6": "MNO",
+  "7": "PQRS",
+  "8": "TUV",
+  "9": "WXYZ",
+  "0": "+",
+};
+
 function formatTimer(totalSec: number): string {
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
@@ -177,16 +190,27 @@ function ActiveCallPanelCard({
   const title = call.clientName || formatPhone(call.remoteNumber) || t("call.unknownNumber");
 
   return (
-    <div className="flex flex-col items-center gap-4 pt-4 text-center">
+    <div
+      className={cn(
+        "flex flex-col items-center gap-4 rounded-2xl p-4 pt-6 text-center transition-colors",
+        tel.callState === "active" && "bg-emerald-500/5",
+        tel.callState === "held" && "bg-amber-500/5",
+      )}
+    >
       <span
         className={cn(
           "flex size-16 items-center justify-center rounded-full",
           tel.callState === "active"
-            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
+            ? "bg-emerald-100 text-emerald-700 ring-4 ring-emerald-500/15 dark:bg-emerald-950 dark:text-emerald-400"
             : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
+          tel.callState === "held" && "ring-4 ring-amber-500/15",
         )}
       >
-        <Phone className={cn("size-7", tel.callState !== "active" && "animate-pulse")} />
+        {tel.callState === "held" ? (
+          <Pause className="size-7" />
+        ) : (
+          <Phone className={cn("size-7", tel.callState !== "active" && "animate-pulse")} />
+        )}
       </span>
       <div className="min-w-0 space-y-0.5">
         {call.clientId ? (
@@ -203,7 +227,7 @@ function ActiveCallPanelCard({
           {stateLabel}
           {call.clientName ? ` · ${formatPhone(call.remoteNumber)}` : ""}
         </p>
-        <p className="font-mono text-2xl tabular-nums">
+        <p className="font-mono text-4xl font-semibold tracking-tight tabular-nums">
           {elapsed !== null ? formatTimer(elapsed) : "—"}
         </p>
       </div>
@@ -271,7 +295,7 @@ function DialFab({ onOpenPanel }: { onOpenPanel: () => void }) {
               onClick={() => (isDesktopViewport() ? onOpenPanel() : setOpen(true))}
               aria-label={t("fab.open")}
               className={cn(
-                "fixed right-4 z-40 size-14 rounded-full shadow-lg md:right-6 md:bottom-6",
+                "fixed right-4 z-40 size-14 rounded-full shadow-lg transition-all hover:scale-105 hover:shadow-xl active:scale-95 md:right-6 md:bottom-6",
                 ABOVE_NAV,
               )}
             />
@@ -350,7 +374,7 @@ function DialpadContent({ onCalled }: { onCalled?: () => void }) {
           }}
           placeholder={t("dialpad.placeholder")}
           aria-label={t("dialpad.placeholder")}
-          className="h-12 text-center text-lg font-medium tracking-wide"
+          className="h-12 text-center text-lg font-medium tracking-wide tabular-nums"
         />
         <Button
           variant="ghost"
@@ -367,10 +391,16 @@ function DialpadContent({ onCalled }: { onCalled?: () => void }) {
           <Button
             key={key}
             variant="secondary"
-            className="h-14 text-xl font-semibold"
+            className="h-14 flex-col gap-0.5 rounded-2xl text-xl font-semibold active:scale-95"
             onClick={() => setNumber((n) => n + key)}
           >
-            {key}
+            <span className="leading-none">{key}</span>
+            <span
+              aria-hidden
+              className="h-3 text-[10px] leading-none font-normal tracking-widest text-muted-foreground"
+            >
+              {DIAL_KEY_LETTERS[key] ?? ""}
+            </span>
           </Button>
         ))}
       </div>
@@ -378,7 +408,7 @@ function DialpadContent({ onCalled }: { onCalled?: () => void }) {
       <Button
         onClick={placeCall}
         disabled={tel.registration !== "registered" || !number.trim()}
-        className="h-14 w-full bg-emerald-600 text-base text-white hover:bg-emerald-700"
+        className="h-14 w-full bg-emerald-600 text-base text-white shadow-lg shadow-emerald-600/30 hover:bg-emerald-700"
       >
         <Phone data-icon="inline-start" className="size-5" />
         {t("dialpad.call")}
@@ -454,7 +484,11 @@ function ActiveCallBar({
           <span
             className={cn(
               "absolute inline-flex h-full w-full rounded-full opacity-75",
-              tel.callState === "active" ? "animate-ping bg-emerald-500" : "bg-amber-500",
+              tel.callState === "active"
+                ? "animate-ping bg-emerald-500"
+                : tel.callState === "held"
+                  ? "bg-amber-500"
+                  : "animate-pulse bg-amber-500",
             )}
           />
           <span
@@ -502,8 +536,11 @@ function CallControlsSection({ tel }: { tel: TelephonyContextValue }) {
     <div>
       <div className="flex items-center justify-between gap-2">
         <Button
-          variant={tel.muted ? "default" : "secondary"}
-          className="size-11"
+          variant="secondary"
+          className={cn(
+            "size-11",
+            tel.muted && "bg-destructive/15 text-destructive hover:bg-destructive/25",
+          )}
           onClick={tel.toggleMute}
           aria-label={tel.muted ? t("call.unmute") : t("call.mute")}
           aria-pressed={tel.muted}
@@ -511,8 +548,12 @@ function CallControlsSection({ tel }: { tel: TelephonyContextValue }) {
           {tel.muted ? <MicOff className="size-5" /> : <Mic className="size-5" />}
         </Button>
         <Button
-          variant={tel.held ? "default" : "secondary"}
-          className="size-11"
+          variant="secondary"
+          className={cn(
+            "size-11",
+            tel.held &&
+              "bg-amber-500/20 text-amber-700 hover:bg-amber-500/30 dark:text-amber-400",
+          )}
           onClick={tel.toggleHold}
           aria-label={tel.held ? t("call.resume") : t("call.hold")}
           aria-pressed={tel.held}
@@ -564,7 +605,7 @@ function CallControlsSection({ tel }: { tel: TelephonyContextValue }) {
               <Button
                 key={key}
                 variant="secondary"
-                className="h-11 text-base font-semibold"
+                className="h-11 rounded-xl text-base font-semibold active:scale-95"
                 onClick={() => {
                   tel.sendDTMF(key);
                   setDtmfHistory((h) => (h + key).slice(-24));
@@ -645,8 +686,14 @@ function IncomingCallDialog() {
       <DialogContent showCloseButton={false} className="sm:max-w-md">
         {incoming ? (
           <div className="flex flex-col items-center gap-4 py-2 text-center">
-            <div className="flex size-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
-              <PhoneIncoming className="size-8 animate-pulse" />
+            <div className="relative">
+              <span
+                aria-hidden
+                className="absolute inset-0 animate-ping rounded-full bg-emerald-500/40"
+              />
+              <div className="relative flex size-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
+                <PhoneIncoming className="size-8" />
+              </div>
             </div>
             <DialogHeader className="items-center gap-1">
               <DialogDescription>{t("incoming.title")}</DialogDescription>
@@ -682,14 +729,14 @@ function IncomingCallDialog() {
             <div className="flex w-full gap-3">
               <Button
                 onClick={tel.reject}
-                className="h-14 flex-1 bg-red-600 text-base text-white hover:bg-red-700"
+                className="h-14 flex-1 bg-red-600 text-base text-white shadow-lg shadow-red-600/25 hover:bg-red-700"
               >
                 <PhoneOff data-icon="inline-start" className="size-5" />
                 {t("incoming.decline")}
               </Button>
               <Button
                 onClick={tel.answer}
-                className="h-14 flex-1 bg-emerald-600 text-base text-white hover:bg-emerald-700"
+                className="h-14 flex-1 bg-emerald-600 text-base text-white shadow-lg shadow-emerald-600/25 hover:bg-emerald-700"
               >
                 <Phone data-icon="inline-start" className="size-5" />
                 {t("incoming.answer")}
@@ -828,12 +875,12 @@ function DispositionForm({
                 aria-pressed={active}
                 className={cn(
                   "flex min-h-12 items-center gap-2.5 rounded-xl border-2 px-3 py-2 text-left text-sm font-semibold transition-all outline-none focus-visible:ring-3 focus-visible:ring-ring/50 active:translate-y-px",
-                  active ? "text-white shadow-md" : "bg-background hover:bg-muted",
+                  active ? "text-white shadow-md" : "hover:shadow-sm",
                 )}
                 style={
                   active
                     ? { backgroundColor: config.color, borderColor: config.color }
-                    : { borderColor: `${config.color}66` }
+                    : { borderColor: `${config.color}66`, backgroundColor: `${config.color}14` }
                 }
               >
                 <span

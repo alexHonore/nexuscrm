@@ -1,13 +1,16 @@
 import { and, desc, eq, gte, inArray, like, lte, sql, type SQL } from "drizzle-orm";
 import { fromZonedTime } from "date-fns-tz";
 import { enCA, fr } from "date-fns/locale";
+import { ScrollText } from "lucide-react";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { AuditDetailCard, AuditDetailRow } from "@/components/admin/audit-detail-dialog";
 import { AuditFilters } from "@/components/admin/audit-filters";
 import type { OptionDto } from "@/components/admin/types";
+import { PageHeader } from "@/components/shell/page-header";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Table,
   TableBody,
@@ -20,7 +23,37 @@ import { db } from "@/db";
 import { auditLogs, clients, users } from "@/db/schema";
 import { requireAdmin } from "@/lib/auth/guards";
 import { cn } from "@/lib/utils";
-import { AUDIT_TZ, buildAuditEntry, isUuid, type AuditLookups } from "./audit-view";
+import {
+  AUDIT_TZ,
+  buildAuditEntry,
+  isUuid,
+  type AuditActionFamily,
+  type AuditLookups,
+} from "./audit-view";
+
+/** Teintes douces par famille d'action — translucides, lisibles dans les deux thèmes. */
+const FAMILY_TONE: Record<AuditActionFamily, string> = {
+  create: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  delete: "bg-destructive/10 text-destructive",
+  update: "bg-primary/10 text-primary",
+  auth: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+  data: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  other: "bg-muted text-muted-foreground",
+};
+
+/** Badge doux : libellé de l'action teinté selon sa famille de verbe. */
+function ActionBadge({ family, label }: { family: AuditActionFamily; label: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex max-w-full min-w-0 items-center rounded-md px-2 py-0.5 text-xs font-medium",
+        FAMILY_TONE[family],
+      )}
+    >
+      <span className="truncate">{label}</span>
+    </span>
+  );
+}
 
 const TZ = AUDIT_TZ;
 const PAGE_SIZE = 50;
@@ -124,16 +157,19 @@ export default async function AdminAuditPage({
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4 p-4 md:p-6">
-      <h1 className="font-heading text-xl font-semibold tracking-tight">{t("audit.title")}</h1>
-      <p className="text-sm text-muted-foreground">{t("audit.subtitle", { count: total })}</p>
+      <PageHeader
+        icon={<ScrollText />}
+        title={t("audit.title")}
+        subtitle={t("audit.subtitle", { count: total })}
+      />
 
       <AuditFilters actions={prefixRows.map((p) => p.prefix)} users={userOptions} />
 
       {/* ── Tableau (desktop) ── */}
-      <div className="hidden overflow-hidden rounded-xl ring-1 ring-foreground/10 md:block">
-        <Table>
-          <TableHeader>
-            <TableRow>
+      <div className="hidden overflow-hidden rounded-xl bg-card shadow-xs ring-1 ring-foreground/10 md:block">
+        <Table className="[&_th]:h-10 [&_th]:whitespace-nowrap [&_th]:text-[11px] [&_th]:font-medium [&_th]:uppercase [&_th]:tracking-wider">
+          <TableHeader className="bg-muted/40">
+            <TableRow className="hover:bg-transparent">
               <TableHead>{t("audit.date")}</TableHead>
               <TableHead>{t("audit.user")}</TableHead>
               <TableHead>{t("audit.action")}</TableHead>
@@ -147,15 +183,15 @@ export default async function AdminAuditPage({
           </TableHeader>
           <TableBody>
             {entries.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
-                  {t("audit.empty")}
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={7} className="whitespace-normal p-0">
+                  <EmptyState icon={<ScrollText />} title={t("audit.empty")} />
                 </TableCell>
               </TableRow>
             ) : (
               entries.map(({ entry, summary }) => (
                 <AuditDetailRow key={entry.id} entry={entry}>
-                  <TableCell className="text-xs whitespace-nowrap">
+                  <TableCell className="text-xs whitespace-nowrap tabular-nums">
                     <time dateTime={entry.dateIso}>{entry.dateLabel}</time>
                   </TableCell>
                   <TableCell className="max-w-32 truncate text-sm">
@@ -166,9 +202,9 @@ export default async function AdminAuditPage({
                     )}
                   </TableCell>
                   <TableCell className="max-w-52">
-                    <span className="block text-sm">{entry.actionLabel}</span>
+                    <ActionBadge family={entry.family} label={entry.actionLabel} />
                     {entry.actionLabel === entry.action ? null : (
-                      <span className="block font-mono text-[11px] text-muted-foreground">
+                      <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
                         {entry.action}
                       </span>
                     )}
@@ -197,13 +233,17 @@ export default async function AdminAuditPage({
       {/* ── Cartes (mobile) ── */}
       <div className="space-y-3 md:hidden">
         {entries.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">{t("audit.empty")}</p>
+          <EmptyState
+            icon={<ScrollText />}
+            title={t("audit.empty")}
+            className="rounded-xl bg-card shadow-xs ring-1 ring-foreground/10"
+          />
         ) : (
           entries.map(({ entry, summary }) => (
             <AuditDetailCard key={entry.id} entry={entry}>
               <span className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-sm font-medium">{entry.actionLabel}</span>
-                <span className="text-xs text-muted-foreground">{entry.dateLabel}</span>
+                <ActionBadge family={entry.family} label={entry.actionLabel} />
+                <span className="text-xs text-muted-foreground tabular-nums">{entry.dateLabel}</span>
               </span>
               {entry.actionLabel === entry.action ? null : (
                 <Badge variant="outline" className="font-mono text-[11px]">

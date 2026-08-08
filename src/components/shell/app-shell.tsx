@@ -4,6 +4,7 @@ import {
   BarChart3,
   Bell,
   CalendarDays,
+  ChevronsUpDown,
   Columns3,
   FileText,
   Globe,
@@ -134,17 +135,20 @@ export function AppShell({
       <Link
         key={item.href}
         href={item.href}
+        aria-current={active ? "page" : undefined}
         className={cn(
-          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+          "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring",
           active
-            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+            ? "bg-sidebar-accent text-sidebar-accent-foreground ring-1 ring-white/5 before:absolute before:left-0 before:top-1/2 before:h-5 before:w-1 before:-translate-y-1/2 before:rounded-r-full before:bg-sidebar-primary"
             : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
         )}
       >
-        <Icon className="size-4 shrink-0" />
+        <Icon className={cn("size-4 shrink-0", active && "text-sidebar-primary")} />
         <span className="truncate">{t(`nav.${item.labelKey}`)}</span>
         {item.labelKey === "notifications" && unreadCount > 0 ? (
-          <Badge className="ml-auto h-5 min-w-5 rounded-full px-1.5 text-[11px]">{unreadCount}</Badge>
+          <Badge className="ml-auto h-5 min-w-5 rounded-full bg-sidebar-primary px-1.5 text-[11px] text-sidebar-primary-foreground">
+            {unreadCount}
+          </Badge>
         ) : null}
       </Link>
     );
@@ -154,21 +158,28 @@ export function AppShell({
     <div className="flex min-h-dvh">
       {/* ── Sidebar (desktop) ── */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col bg-sidebar text-sidebar-foreground md:flex">
-        <div className="flex items-center gap-2.5 px-5 py-5">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sm font-bold text-sidebar-primary-foreground">
+        <div className="flex items-center gap-2.5 border-b border-sidebar-border/60 px-5 py-4">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-sidebar-primary to-sidebar-ring text-sm font-bold text-sidebar-primary-foreground shadow-md ring-1 ring-white/10">
             N
           </div>
-          <span className="text-base font-semibold tracking-tight">Groupe Nexus</span>
+          <div className="min-w-0">
+            <span className="block truncate text-base font-semibold tracking-tight">
+              Groupe Nexus
+            </span>
+            <span className="block truncate text-[11px] text-sidebar-foreground/50">
+              {t("tagline")}
+            </span>
+          </div>
         </div>
-        <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-4">
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-4 pt-4">
           {MAIN_NAV.map(navLink)}
           {user.role === "admin" ? (
-            <>
-              <p className="px-3 pb-1 pt-5 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
+            <div className="mt-4 space-y-1 border-t border-sidebar-border/60 pt-4">
+              <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
                 {t("nav.admin")}
               </p>
               {ADMIN_NAV.map(navLink)}
-            </>
+            </div>
           ) : null}
         </nav>
         <div className="border-t border-sidebar-border p-3">
@@ -179,9 +190,9 @@ export function AppShell({
       {/* ── Contenu ── */}
       <div className="flex min-w-0 flex-1 flex-col md:pl-60">
         {/* Barre supérieure mobile */}
-        <header className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b bg-background/95 px-4 py-2.5 backdrop-blur md:hidden">
+        <header className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b bg-background/95 px-4 py-2.5 shadow-[0_1px_8px_-4px_rgb(0_0_0/0.15)] backdrop-blur md:hidden">
           <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="flex size-7 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
+            <div className="flex size-7 items-center justify-center rounded-md bg-gradient-to-br from-sidebar-primary to-sidebar-ring text-xs font-bold text-sidebar-primary-foreground shadow-sm ring-1 ring-white/10">
               N
             </div>
             <span className="text-sm font-semibold">Groupe Nexus</span>
@@ -190,7 +201,7 @@ export function AppShell({
             <Button
               variant="ghost"
               size="icon"
-              className="relative"
+              className="relative size-11"
               render={<Link href="/notifications" aria-label={t("nav.notifications")} />}
             >
               <Bell className="size-5" />
@@ -210,7 +221,7 @@ export function AppShell({
         </main>
 
         {/* ── Nav basse (mobile) ── */}
-        <nav className="pb-safe fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t bg-background/95 backdrop-blur md:hidden">
+        <nav className="pb-safe fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t bg-background/95 shadow-[0_-2px_10px_-6px_rgb(0_0_0/0.2)] backdrop-blur md:hidden">
           {MOBILE_NAV.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
@@ -218,18 +229,26 @@ export function AppShell({
               <Link
                 key={item.href}
                 href={item.href}
+                aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-medium",
+                  "flex h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                   active ? "text-primary" : "text-muted-foreground",
                 )}
               >
-                <span className="relative">
-                  <Icon className="size-5" />
-                  {item.labelKey === "notifications" && unreadCount > 0 ? (
-                    <span className="absolute -right-1.5 -top-1 size-2 rounded-full bg-destructive" />
-                  ) : null}
+                <span
+                  className={cn(
+                    "flex h-7 w-12 items-center justify-center rounded-full transition-colors",
+                    active && "bg-primary/10 [&_svg]:stroke-[2.4]",
+                  )}
+                >
+                  <span className="relative">
+                    <Icon className="size-5" />
+                    {item.labelKey === "notifications" && unreadCount > 0 ? (
+                      <span className="absolute -right-1.5 -top-1 size-2 rounded-full bg-destructive" />
+                    ) : null}
+                  </span>
                 </span>
-                {t(`nav.${item.labelKey}`)}
+                <span className="max-w-full truncate px-1">{t(`nav.${item.labelKey}`)}</span>
               </Link>
             );
           })}
@@ -256,7 +275,9 @@ function UserMenu({
     <DropdownMenu>
       {compact ? (
         <DropdownMenuTrigger
-          render={<Button variant="ghost" size="icon" aria-label={t("nav.profile")} />}
+          render={
+            <Button variant="ghost" size="icon" className="size-11" aria-label={t("nav.profile")} />
+          }
         >
           <Avatar className="size-7">
             <AvatarFallback className="bg-primary text-xs text-primary-foreground">
@@ -265,7 +286,7 @@ function UserMenu({
           </Avatar>
         </DropdownMenuTrigger>
       ) : (
-        <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-sidebar-accent/60">
+        <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left outline-none transition-colors hover:bg-sidebar-accent/60 focus-visible:ring-2 focus-visible:ring-sidebar-ring">
           <Avatar className="size-8">
             <AvatarFallback className="bg-sidebar-primary text-xs text-sidebar-primary-foreground">
               {initials(user.name)}
@@ -277,9 +298,10 @@ function UserMenu({
               {user.role === "admin" ? t("roleAdmin") : t("roleCaller")}
             </span>
           </span>
+          <ChevronsUpDown className="size-4 shrink-0 text-sidebar-foreground/50" />
         </DropdownMenuTrigger>
       )}
-      <DropdownMenuContent align={align} className="w-52">
+      <DropdownMenuContent align={align} className="w-60">
         {/* Base UI : GroupLabel DOIT être dans un Group, sinon le menu jette
             « error #31 » à l'ouverture et démonte toute l'app (constaté en
             prod : le menu utilisateur ne s'ouvrait jamais). */}
@@ -288,7 +310,10 @@ function UserMenu({
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem
-          className={cn(pathname === "/profile" && "bg-accent text-accent-foreground")}
+          className={cn(
+            compact && "h-11",
+            pathname === "/profile" && "bg-accent text-accent-foreground",
+          )}
           render={<Link href="/profile" />}
         >
           <UserRound className="size-4" />
@@ -319,13 +344,17 @@ function UserMenu({
             <DropdownMenuSeparator />
           </>
         ) : null}
-        <DropdownMenuItem onClick={() => onSwitchLocale(user.locale === "fr" ? "en" : "fr")}>
+        <DropdownMenuItem
+          className={cn(compact && "h-11")}
+          onClick={() => onSwitchLocale(user.locale === "fr" ? "en" : "fr")}
+        >
           <Globe className="size-4" />
           {user.locale === "fr" ? "English" : "Français"}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           variant="destructive"
+          className={cn(compact && "h-11")}
           onClick={() => {
             void logoutAction();
           }}

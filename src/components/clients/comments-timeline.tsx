@@ -11,6 +11,7 @@ import { RelativeTime } from "@/components/relative-time";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Textarea } from "@/components/ui/textarea";
 import { emitDataChange } from "@/lib/live";
 import { cn } from "@/lib/utils";
@@ -173,8 +174,8 @@ export function CommentsTimeline({
   };
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className="shadow-xs">
+      <CardHeader className="border-b">
         <CardTitle className="flex items-center gap-2">
           <MessageSquareIcon className="size-4 text-muted-foreground" />
           {t("comments.title")}
@@ -182,7 +183,7 @@ export function CommentsTimeline({
       </CardHeader>
       <CardContent className="space-y-4">
         {rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("comments.empty")}</p>
+          <EmptyState icon={<MessageSquareIcon />} title={t("comments.empty")} className="py-6" />
         ) : (
           <ul className="space-y-4">
             {rows.map((c) => (
@@ -205,7 +206,9 @@ export function CommentsTimeline({
                       <RelativeTime date={c.createdAt} locale={dfnsLocale} />
                     </span>
                   </p>
-                  <p className="text-sm whitespace-pre-wrap break-words">{renderBody(c.body)}</p>
+                  <p className="mt-1 rounded-lg rounded-tl-sm bg-muted/50 px-3 py-2 text-sm break-words whitespace-pre-wrap">
+                    {renderBody(c.body)}
+                  </p>
                 </div>
               </li>
             ))}

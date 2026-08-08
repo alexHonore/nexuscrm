@@ -156,6 +156,73 @@ describe("filtres et tris avancés de /api/clients/list", () => {
     expect((await listItems("language=es")).total).toBe(2);
   });
 
+  it("multi-sélection : plusieurs catégories, « none » mélangé aux ids", async () => {
+    const admin = await makeUser({ role: "admin" });
+    const catA = await makeCategory({ nameFr: "A" });
+    const catB = await makeCategory({ nameFr: "B" });
+    await makeClient({ fullName: "DansA", categoryId: catA.id });
+    await makeClient({ fullName: "DansB", categoryId: catB.id });
+    await makeClient({ fullName: "SansCat" });
+    await login(admin);
+
+    expect(new Set(await names(`categoryId=${catA.id},${catB.id}`))).toEqual(
+      new Set(["DansA", "DansB"]),
+    );
+    expect(new Set(await names(`categoryId=${catA.id},none`))).toEqual(
+      new Set(["DansA", "SansCat"]),
+    );
+    // Jetons invalides ignorés sans erreur, valeur unique toujours acceptée.
+    expect(new Set(await names(`categoryId=abc,${catA.id},`))).toEqual(new Set(["DansA"]));
+    expect(await names(`categoryId=${catB.id}`)).toEqual(["DansB"]);
+  });
+
+  it("multi-sélection : sources, assignations et langues", async () => {
+    const admin = await makeUser({ role: "admin" });
+    const caller1 = await makeUser({ role: "caller" });
+    const caller2 = await makeUser({ role: "caller" });
+    const srcA = await makeSource({ name: "Facebook" });
+    const srcB = await makeSource({ name: "Kijiji" });
+    await makeClient({ fullName: "FbFr", sourceId: srcA.id, assignedToId: caller1.id, language: "fr" });
+    await makeClient({ fullName: "KjEn", sourceId: srcB.id, assignedToId: caller2.id, language: "en" });
+    await makeClient({ fullName: "Vierge", language: "en" });
+    await login(admin);
+
+    expect(new Set(await names(`sourceId=${srcA.id},${srcB.id}`))).toEqual(
+      new Set(["FbFr", "KjEn"]),
+    );
+    expect(new Set(await names(`sourceId=${srcB.id},none`))).toEqual(
+      new Set(["KjEn", "Vierge"]),
+    );
+    expect(new Set(await names(`assignedToId=${caller1.id},${caller2.id}`))).toEqual(
+      new Set(["FbFr", "KjEn"]),
+    );
+    expect(new Set(await names(`assignedToId=${caller1.id},none`))).toEqual(
+      new Set(["FbFr", "Vierge"]),
+    );
+    // Les deux langues cochées = tout le monde.
+    expect((await listItems("language=fr,en")).total).toBe(3);
+  });
+
+  it("multi-sélection : états de suivi cumulés en OU, ET entre paramètres", async () => {
+    const admin = await makeUser({ role: "admin" });
+    const cat = await makeCategory();
+    const past = new Date(Date.now() - 24 * 3600_000);
+    const future = new Date(Date.now() + 48 * 3600_000);
+    await makeClient({ fullName: "Retard", nextFollowupAt: past, categoryId: cat.id });
+    await makeClient({ fullName: "Bientôt", nextFollowupAt: future });
+    await makeClient({ fullName: "ListeRouge", doNotCall: true });
+    await login(admin);
+
+    expect(new Set(await names("filter=overdue,upcoming"))).toEqual(
+      new Set(["Retard", "Bientôt"]),
+    );
+    expect(new Set(await names("filter=overdue,dnc"))).toEqual(
+      new Set(["Retard", "ListeRouge"]),
+    );
+    // ET entre paramètres : états de suivi × catégorie.
+    expect(await names(`filter=overdue,upcoming&categoryId=${cat.id}`)).toEqual(["Retard"]);
+  });
+
   it("tri followupAt / lastContact / city : NULLS LAST dans les deux sens", async () => {
     const admin = await makeUser({ role: "admin" });
     const t1 = new Date("2026-01-05T12:00:00Z");

@@ -125,7 +125,7 @@ export function PipelineClientCard({
       }}
       onDragEnd={onDragEnd}
       className={cn(
-        "group relative flex flex-col gap-1 rounded-lg bg-card p-3 ring-1 ring-foreground/10 transition-opacity select-none md:cursor-grab md:active:cursor-grabbing",
+        "group relative flex flex-col gap-1 rounded-lg bg-card p-3 shadow-xs ring-1 ring-foreground/10 transition select-none hover:shadow-sm md:cursor-grab md:active:cursor-grabbing",
         isDragging && "opacity-40",
       )}
     >

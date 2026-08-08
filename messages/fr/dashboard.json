@@ -24,6 +24,7 @@
   "appointments": {
     "title": "Rendez-vous d'aujourd'hui",
     "empty": "Aucun rendez-vous aujourd'hui.",
+    "viewAll": "Voir tout",
     "meet": "Vidéo (Meet)",
     "inperson": "En personne"
   },

@@ -1,6 +1,6 @@
 "use client";
 
-import { MailCheck } from "lucide-react";
+import { Loader2, Mail, MailCheck } from "lucide-react";
 import { useActionState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
@@ -38,24 +38,40 @@ export function ForgotForm() {
     <form action={formAction} className="space-y-4">
       <div className="space-y-2">
         <Label htmlFor="email">{t("email")}</Label>
-        <Input
-          id="email"
-          name="email"
-          type="email"
-          inputMode="email"
-          autoComplete="email"
-          required
-          autoFocus
-          className="h-11"
-        />
+        <div className="relative">
+          <Mail
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            id="email"
+            name="email"
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            required
+            autoFocus
+            className="h-11 rounded-xl pl-9"
+          />
+        </div>
       </div>
       {error ? (
-        <p className="text-sm font-medium text-destructive" role="alert">
+        <p
+          className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm font-medium text-destructive"
+          role="alert"
+        >
           {error}
         </p>
       ) : null}
-      <Button type="submit" className="h-11 w-full" disabled={pending}>
-        {pending ? t("forgot.sending") : t("forgot.submit")}
+      <Button type="submit" className="h-12 w-full text-base" disabled={pending}>
+        {pending ? (
+          <>
+            <Loader2 data-icon="inline-start" className="size-4 animate-spin" />
+            {t("forgot.sending")}
+          </>
+        ) : (
+          t("forgot.submit")
+        )}
       </Button>
     </form>
   );

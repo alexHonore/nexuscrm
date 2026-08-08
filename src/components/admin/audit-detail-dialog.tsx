@@ -239,7 +239,7 @@ export function AuditDetailCard({
         type="button"
         aria-label={describe}
         onClick={() => setOpen(true)}
-        className="w-full space-y-1.5 rounded-xl bg-card p-4 text-left ring-1 ring-foreground/10 transition-colors active:bg-muted/60"
+        className="w-full space-y-1.5 rounded-xl bg-card p-4 text-left shadow-xs ring-1 ring-foreground/10 outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring active:bg-muted/60"
       >
         {children}
         <span className="flex items-center gap-1 pt-1 text-xs font-medium text-primary">

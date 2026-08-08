@@ -1,5 +1,6 @@
 {
   "appName": "Groupe Nexus",
+  "tagline": "CRM immobilier",
   "nav": {
     "dashboard": "Tableau de bord",
     "clients": "Clients",

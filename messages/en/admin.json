@@ -189,6 +189,7 @@
   },
   "pipeline": {
     "title": "Pipeline",
+    "subtitle": "Pipeline categories and lead sources — colors, order and reassignment.",
     "color": "Color",
     "moveUp": "Move up",
     "moveDown": "Move down",
@@ -227,6 +228,7 @@
   },
   "importExport": {
     "title": "Import / Export",
+    "subtitle": "Import clients from a CSV file or export the database using filters.",
     "category": "Category",
     "source": "Source",
     "assignedTo": "Assigned to",
@@ -247,6 +249,7 @@
       "title": "Import clients (CSV)",
       "desc": "Upload a CSV file (Excel, Notion, etc.), map the columns, then run the import.",
       "file": "CSV file",
+      "dropHint": "Click to choose a file or drop it here.",
       "emptyFile": "The file contains no rows.",
       "parseError": "Could not read this CSV file.",
       "parsed": "{count, plural, one {# row detected} other {# rows detected}} in {file}.",
@@ -276,6 +279,8 @@
   },
   "webhooks": {
     "title": "Webhooks",
+    "subtitle": "Receive leads automatically from n8n, Facebook or your website.",
+    "keyCount": "{count, plural, =0 {No keys} one {# key} other {# keys}}",
     "neverUsed": "never used",
     "explain": {
       "title": "Receive leads automatically",
@@ -283,6 +288,8 @@
       "endpoint": "Endpoint",
       "auth": "Authentication: send the API key in the “x-api-key” header (or “Authorization: Bearer” followed by the key).",
       "fields": "Accepted fields (JSON)",
+      "fieldCol": "Field (accepted aliases)",
+      "statusCol": "Status",
       "required": "required",
       "optional": "optional",
       "nested": "Fields can be at the root of the JSON or inside a “data” object (n8n format). Accented Facebook form field names are accepted as-is.",
@@ -314,6 +321,7 @@
   },
   "settings": {
     "title": "Settings",
+    "subtitle": "Google Calendar, booking hours and telephony provider.",
     "google": {
       "title": "Google Calendar",
       "desc": "Appointments booked by callers are created in this calendar (with a Google Meet link).",

@@ -43,8 +43,8 @@ export function FollowupItem({ item }: { item: FollowupItemData }) {
   return (
     <li
       className={cn(
-        "flex items-center gap-3 rounded-lg border py-2 pr-2 pl-3",
-        item.overdue && "border-l-4 border-l-destructive",
+        "flex items-center gap-3 rounded-lg border py-2 pr-2 pl-3 transition-colors hover:bg-muted/50",
+        item.overdue && "border-l-4 border-l-destructive bg-destructive/5 hover:bg-destructive/10",
       )}
     >
       <div className="min-w-0 flex-1">
@@ -63,7 +63,7 @@ export function FollowupItem({ item }: { item: FollowupItemData }) {
       <div className="flex shrink-0 items-center gap-1">
         <Button
           variant="ghost"
-          className="size-11 text-emerald-600 hover:text-emerald-700 dark:text-emerald-500"
+          className="size-11 rounded-full bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 hover:text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-400 dark:hover:bg-emerald-500/25 dark:hover:text-emerald-300"
           aria-label={t("followups.call")}
           disabled={!ready}
           onClick={() => dial({ number: item.phone, clientId: item.clientId, clientName: item.clientName })}

@@ -27,6 +27,17 @@ import { BookingLauncher } from "./booking-launcher";
 
 export type HeaderCategory = { id: number; nameFr: string; nameEn: string; color: string };
 
+/** Même motif d'initiales que le fil de commentaires. */
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .map((p) => p[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
 export function ClientHeader({
   client,
   categories,
@@ -109,82 +120,99 @@ export function ClientHeader({
       ) : null}
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 space-y-2">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="font-heading text-2xl font-semibold tracking-tight break-words">
-              {client.fullName}
-            </h1>
-            {/* Big category badge with quick-change dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                aria-label={t("detail.changeCategory")}
-                className={cn(
-                  "inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors",
-                  !current && "border-border text-muted-foreground hover:bg-muted",
-                )}
-                style={
-                  current
-                    ? {
-                        color: current.color,
-                        backgroundColor: `${current.color}1a`,
-                        borderColor: `${current.color}40`,
-                      }
-                    : undefined
-                }
-              >
-                {current ? (
-                  <span
-                    aria-hidden
-                    className="size-2 rounded-full"
-                    style={{ backgroundColor: current.color }}
-                  />
-                ) : null}
-                {current ? categoryName(current) : t("detail.noCategory")}
-                <ChevronDownIcon className="size-3.5 opacity-70" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="min-w-48">
-                {categories.map((c) => (
-                  <DropdownMenuItem
-                    key={c.id}
-                    className="min-h-10"
-                    onClick={() => changeCategory(c.id)}
-                  >
+        <div className="flex min-w-0 items-start gap-3">
+          {/* Avatar teinté par la catégorie courante (repli : couleur primaire). */}
+          <div
+            aria-hidden
+            className={cn(
+              "flex size-12 shrink-0 items-center justify-center rounded-full text-base font-semibold select-none",
+              !current && "bg-primary/10 text-primary",
+            )}
+            style={
+              current
+                ? { backgroundColor: `${current.color}1a`, color: current.color }
+                : undefined
+            }
+          >
+            {initials(client.fullName)}
+          </div>
+          <div className="min-w-0 space-y-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="font-heading text-2xl font-semibold tracking-tight break-words">
+                {client.fullName}
+              </h1>
+              {/* Big category badge with quick-change dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  aria-label={t("detail.changeCategory")}
+                  className={cn(
+                    "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition outline-none hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring/50 md:min-h-8 dark:hover:brightness-110",
+                    !current && "border-border text-muted-foreground hover:bg-muted",
+                  )}
+                  style={
+                    current
+                      ? {
+                          color: current.color,
+                          backgroundColor: `${current.color}1a`,
+                          borderColor: `${current.color}40`,
+                        }
+                      : undefined
+                  }
+                >
+                  {current ? (
                     <span
                       aria-hidden
-                      className="size-2.5 rounded-full"
-                      style={{ backgroundColor: c.color }}
+                      className="size-2 rounded-full"
+                      style={{ backgroundColor: current.color }}
                     />
-                    {categoryName(c)}
+                  ) : null}
+                  {current ? categoryName(current) : t("detail.noCategory")}
+                  <ChevronDownIcon className="size-3.5 opacity-70" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-48">
+                  {categories.map((c) => (
+                    <DropdownMenuItem
+                      key={c.id}
+                      className="min-h-10"
+                      onClick={() => changeCategory(c.id)}
+                    >
+                      <span
+                        aria-hidden
+                        className="size-2.5 rounded-full"
+                        style={{ backgroundColor: c.color }}
+                      />
+                      {categoryName(c)}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuItem className="min-h-10" onClick={() => changeCategory(null)}>
+                    <span aria-hidden className="size-2.5 rounded-full bg-muted-foreground/40" />
+                    {t("detail.noCategory")}
                   </DropdownMenuItem>
-                ))}
-                <DropdownMenuItem className="min-h-10" onClick={() => changeCategory(null)}>
-                  <span aria-hidden className="size-2.5 rounded-full bg-muted-foreground/40" />
-                  {t("detail.noCategory")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
 
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5 tabular-nums">
-              <PhoneIcon className="size-3.5" />
-              {formatPhone(client.phone)}
-            </span>
-            {client.email ? (
-              <a
-                href={`mailto:${client.email}`}
-                className="inline-flex items-center gap-1.5 hover:text-foreground hover:underline"
-              >
-                <MailIcon className="size-3.5" />
-                {client.email}
-              </a>
-            ) : null}
-            {client.city ? (
-              <span className="inline-flex items-center gap-1.5">
-                <MapPinIcon className="size-3.5" />
-                {client.city}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5 tabular-nums">
+                <PhoneIcon className="size-3.5" />
+                {formatPhone(client.phone)}
               </span>
-            ) : null}
+              {client.email ? (
+                <a
+                  href={`mailto:${client.email}`}
+                  className="inline-flex items-center gap-1.5 hover:text-foreground hover:underline"
+                >
+                  <MailIcon className="size-3.5" />
+                  {client.email}
+                </a>
+              ) : null}
+              {client.city ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <MapPinIcon className="size-3.5" />
+                  {client.city}
+                </span>
+              ) : null}
+            </div>
           </div>
         </div>
 

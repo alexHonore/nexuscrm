@@ -61,8 +61,8 @@ export function ProfileForm({ initialName, initialEmail }: { initialName: string
 
   return (
     <div className="grid items-start gap-4 md:grid-cols-2 md:gap-5">
-      <Card>
-        <CardHeader>
+      <Card className="shadow-xs">
+        <CardHeader className="border-b">
           <CardTitle>{t("profile.identityTitle")}</CardTitle>
         </CardHeader>
         <CardContent>
@@ -99,8 +99,8 @@ export function ProfileForm({ initialName, initialEmail }: { initialName: string
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
+      <Card className="shadow-xs">
+        <CardHeader className="border-b">
           <CardTitle>{t("profile.passwordTitle")}</CardTitle>
         </CardHeader>
         <CardContent>

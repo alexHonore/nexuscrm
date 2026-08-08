@@ -1,7 +1,9 @@
 import { asc, eq } from "drizzle-orm";
+import { ArrowDownUp } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import { ExportCard, ImportCard } from "@/components/admin/import-export-client";
 import type { OptionDto } from "@/components/admin/types";
+import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/db";
 import { categories, sources, users } from "@/db/schema";
 import { requireAdmin } from "@/lib/auth/guards";
@@ -25,7 +27,11 @@ export default async function AdminImportExportPage() {
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-4 md:p-6">
-      <h1 className="font-heading text-xl font-semibold tracking-tight">{t("importExport.title")}</h1>
+      <PageHeader
+        icon={<ArrowDownUp />}
+        title={t("importExport.title")}
+        subtitle={t("importExport.subtitle")}
+      />
       <ImportCard categories={categoryOptions} sources={sourceOptions} users={userOptions} />
       <ExportCard categories={categoryOptions} sources={sourceOptions} users={userOptions} />
     </div>

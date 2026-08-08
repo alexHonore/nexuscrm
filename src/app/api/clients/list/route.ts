@@ -5,6 +5,7 @@ import {
   eq,
   gte,
   ilike,
+  inArray,
   isNotNull,
   isNull,
   like,
@@ -28,6 +29,15 @@ const NONE = "none";
 /** États de suivi acceptés pour `filter`. */
 const FILTERS = new Set(["overdue", "today", "upcoming", "none", "never", "dnc"]);
 
+/** Découpe un paramètre multi-valeurs « a,b,c » — jetons inconnus ignorés. */
+function tokens(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 50);
+}
+
 /** Tris acceptés — `activity` reproduit l'ordre historique du panneau. */
 const SORT_COLUMNS = {
   name: clients.fullName,
@@ -42,11 +52,12 @@ type SortKey = keyof typeof SORT_COLUMNS;
 
 /**
  * GET /api/clients/list — paginated rows for the /clients left panel and the
- * table view. Params:
+ * table view. Every filter param accepts a comma-separated list (OR within
+ * the param, AND across params); a single value still works. Params:
  * - q (name, email, phone, city)
- * - categoryId / sourceId / assignedToId — id, or "none" for unset
+ * - categoryId / sourceId / assignedToId — ids and/or "none" for unset
  * - filter — overdue | today | upcoming | none (no follow-up) | never
- *   (never contacted) | dnc (do-not-call list)
+ *   (never contacted) | dnc (do-not-call list), combinable
  * - language — fr | en
  * - sort (activity | name | city | createdAt | updatedAt | followupAt |
  *   lastContact), dir (asc|desc), page, pageSize (capped at 50).
@@ -62,7 +73,6 @@ export async function GET(req: NextRequest) {
   const sourceParam = sp.get("sourceId") ?? "";
   const assignedParam = sp.get("assignedToId") ?? "";
   const filterParam = sp.get("filter") ?? "";
-  const filter = FILTERS.has(filterParam) ? filterParam : "";
   const languageParam = sp.get("language") ?? "";
   const sortParam = sp.get("sort") ?? "activity";
   const sort: SortKey | "activity" =
@@ -76,6 +86,13 @@ export async function GET(req: NextRequest) {
 
   const now = new Date();
   const conditions: SQL[] = [];
+
+  /** OU entre les branches d'un même paramètre (ET entre paramètres). */
+  const pushOr = (...parts: Array<SQL | undefined>) => {
+    const kept = parts.filter((p): p is SQL => p !== undefined);
+    if (kept.length === 1) conditions.push(kept[0]);
+    else if (kept.length > 1) conditions.push(or(...kept)!);
+  };
 
   if (q) {
     const digits = q.replace(/\D/g, "");
@@ -91,29 +108,54 @@ export async function GET(req: NextRequest) {
     const merged = or(...textMatchers, ...phoneMatchers);
     if (merged) conditions.push(merged);
   }
-  if (categoryParam === NONE) conditions.push(isNull(clients.categoryId));
-  else if (/^\d+$/.test(categoryParam)) conditions.push(eq(clients.categoryId, Number(categoryParam)));
-  if (sourceParam === NONE) conditions.push(isNull(clients.sourceId));
-  else if (/^\d+$/.test(sourceParam)) conditions.push(eq(clients.sourceId, Number(sourceParam)));
-  if (assignedParam === NONE) conditions.push(isNull(clients.assignedToId));
-  else if (UUID_RE.test(assignedParam)) conditions.push(eq(clients.assignedToId, assignedParam));
-  if (languageParam === "fr" || languageParam === "en") {
-    conditions.push(eq(clients.language, languageParam));
-  }
-  if (filter === "overdue") {
-    conditions.push(isNotNull(clients.nextFollowupAt), lt(clients.nextFollowupAt, now));
-  } else if (filter === "today") {
-    const { start, end } = torontoDayRange(now);
-    conditions.push(gte(clients.nextFollowupAt, start), lt(clients.nextFollowupAt, end));
-  } else if (filter === "upcoming") {
-    conditions.push(gte(clients.nextFollowupAt, now));
-  } else if (filter === "none") {
-    conditions.push(isNull(clients.nextFollowupAt));
-  } else if (filter === "never") {
-    conditions.push(isNull(clients.lastContactedAt));
-  } else if (filter === "dnc") {
-    conditions.push(eq(clients.doNotCall, true));
-  }
+
+  const catTokens = tokens(categoryParam);
+  const catIds = catTokens.filter((v) => /^\d+$/.test(v)).map(Number);
+  pushOr(
+    catIds.length > 0 ? inArray(clients.categoryId, catIds) : undefined,
+    catTokens.includes(NONE) ? isNull(clients.categoryId) : undefined,
+  );
+
+  const srcTokens = tokens(sourceParam);
+  const srcIds = srcTokens.filter((v) => /^\d+$/.test(v)).map(Number);
+  pushOr(
+    srcIds.length > 0 ? inArray(clients.sourceId, srcIds) : undefined,
+    srcTokens.includes(NONE) ? isNull(clients.sourceId) : undefined,
+  );
+
+  const userTokens = tokens(assignedParam);
+  const userIds = userTokens.filter((v) => UUID_RE.test(v));
+  pushOr(
+    userIds.length > 0 ? inArray(clients.assignedToId, userIds) : undefined,
+    userTokens.includes(NONE) ? isNull(clients.assignedToId) : undefined,
+  );
+
+  const langs = tokens(languageParam).filter((l) => l === "fr" || l === "en");
+  if (langs.length > 0) conditions.push(inArray(clients.language, langs));
+
+  /** Condition d'UN état de suivi — les états cochés se cumulent en OU. */
+  const followupState = (state: string): SQL | undefined => {
+    switch (state) {
+      case "overdue":
+        return and(isNotNull(clients.nextFollowupAt), lt(clients.nextFollowupAt, now));
+      case "today": {
+        const { start, end } = torontoDayRange(now);
+        return and(gte(clients.nextFollowupAt, start), lt(clients.nextFollowupAt, end));
+      }
+      case "upcoming":
+        return gte(clients.nextFollowupAt, now);
+      case "none":
+        return isNull(clients.nextFollowupAt);
+      case "never":
+        return isNull(clients.lastContactedAt);
+      case "dnc":
+        return eq(clients.doNotCall, true);
+      default:
+        return undefined;
+    }
+  };
+  pushOr(...tokens(filterParam).filter((f) => FILTERS.has(f)).map(followupState));
+
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
   // Activité récente par défaut (même tri que l'ancienne liste) ; la vue

@@ -3,6 +3,7 @@ import { enCA } from "date-fns/locale/en-CA";
 import { fr } from "date-fns/locale/fr";
 import { formatInTimeZone } from "date-fns-tz";
 import { and, desc, eq, gte, ilike, like, lt, or, sql, type SQL } from "drizzle-orm";
+import { PhoneCall } from "lucide-react";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { CallsFilters } from "@/components/analytics/calls-filters";
@@ -10,6 +11,7 @@ import { CallsList, type CallRow } from "@/components/analytics/calls-list";
 import { SyncCallsButton } from "@/components/analytics/sync-calls-button";
 import { APP_TZ, dayStartUtc, shiftDateStr } from "@/components/analytics/period";
 import { VizTheme } from "@/components/analytics/viz-theme";
+import { PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
 import { db } from "@/db";
 import { calls, clients, users } from "@/db/schema";
@@ -164,13 +166,12 @@ export default async function CallsPage({
     <div className="nx-viz space-y-4 p-4 md:p-6">
       <VizTheme />
 
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("callsPage.title")}</h1>
-          <p className="text-sm text-muted-foreground">{t("callsPage.subtitle")}</p>
-        </div>
-        <SyncCallsButton />
-      </header>
+      <PageHeader
+        icon={<PhoneCall />}
+        title={t("callsPage.title")}
+        subtitle={t("callsPage.subtitle")}
+        actions={<SyncCallsButton />}
+      />
 
       <CallsFilters
         q={q}
@@ -183,7 +184,7 @@ export default async function CallsPage({
         dispositions={[...DISPOSITION_ORDER]}
       />
 
-      <p className="text-sm text-muted-foreground">
+      <p className="text-sm tabular-nums text-muted-foreground">
         {t("callsPage.resultsCount", { count: nf.format(total) })}
       </p>
 

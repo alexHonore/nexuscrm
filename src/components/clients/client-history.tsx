@@ -14,6 +14,7 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DISPOSITION_CONFIG } from "@/lib/dispositions";
 import type { Disposition } from "@/db/schema";
@@ -79,8 +80,8 @@ export function ClientHistory({
   };
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className="shadow-xs">
+      <CardHeader className="border-b">
         <CardTitle className="flex items-center gap-2">
           <HistoryIcon className="size-4 text-muted-foreground" />
           {t("history.title")}
@@ -99,21 +100,32 @@ export function ClientHistory({
 
           <TabsContent value="calls">
             {calls.length === 0 ? (
-              <p className="py-2 text-sm text-muted-foreground">{t("history.noCalls")}</p>
+              <EmptyState
+                icon={<PhoneOutgoingIcon />}
+                title={t("history.noCalls")}
+                className="py-8"
+              />
             ) : (
               <ul className="divide-y">
                 {calls.map((c) => (
-                  <li key={c.id} className="flex items-start gap-3 py-3">
+                  <li
+                    key={c.id}
+                    className="-mx-2 flex items-start gap-3 rounded-lg px-2 py-3 transition-colors hover:bg-muted/50"
+                  >
                     {c.direction === "outbound" ? (
-                      <PhoneOutgoingIcon
-                        aria-label={t("history.outbound")}
-                        className="mt-0.5 size-4 shrink-0 text-emerald-600"
-                      />
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                        <PhoneOutgoingIcon
+                          aria-label={t("history.outbound")}
+                          className="size-4"
+                        />
+                      </span>
                     ) : (
-                      <PhoneIncomingIcon
-                        aria-label={t("history.inbound")}
-                        className="mt-0.5 size-4 shrink-0 text-blue-600"
-                      />
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                        <PhoneIncomingIcon
+                          aria-label={t("history.inbound")}
+                          className="size-4"
+                        />
+                      </span>
                     )}
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
@@ -132,7 +144,7 @@ export function ClientHistory({
                           href={c.recordingUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="mt-1 inline-flex min-h-8 items-center gap-1 text-xs font-medium text-primary hover:underline"
+                          className="mt-1 inline-flex min-h-8 items-center gap-1 rounded-full border px-2.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
                         >
                           <Mic2Icon className="size-3.5" />
                           {t("history.recording")}
@@ -147,12 +159,21 @@ export function ClientHistory({
 
           <TabsContent value="appointments">
             {appointments.length === 0 ? (
-              <p className="py-2 text-sm text-muted-foreground">{t("history.noAppointments")}</p>
+              <EmptyState
+                icon={<CalendarDaysIcon />}
+                title={t("history.noAppointments")}
+                className="py-8"
+              />
             ) : (
               <ul className="divide-y">
                 {appointments.map((a) => (
-                  <li key={a.id} className="flex items-start gap-3 py-3">
-                    <CalendarDaysIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                  <li
+                    key={a.id}
+                    className="-mx-2 flex items-start gap-3 rounded-lg px-2 py-3 transition-colors hover:bg-muted/50"
+                  >
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                      <CalendarDaysIcon className="size-4" />
+                    </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
                         <span className="font-medium tabular-nums">

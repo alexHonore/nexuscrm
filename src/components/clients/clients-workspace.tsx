@@ -1,20 +1,25 @@
 "use client";
 
+import { formatInTimeZone } from "date-fns-tz";
+import { enUS, fr } from "date-fns/locale";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  CheckIcon,
   ClockAlertIcon,
   Loader2Icon,
   PhoneOffIcon,
   Rows3Icon,
   SearchIcon,
+  SearchXIcon,
   SlidersHorizontalIcon,
   Table2Icon,
+  WifiOffIcon,
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AddClientDialog } from "@/components/clients/add-client-dialog";
 import {
@@ -29,11 +34,14 @@ import {
 } from "@/components/clients/client-list-nav";
 import type { FilterOption } from "@/components/clients/clients-filters";
 import {
+  normalizeSavedView,
   SavedViews,
   type SavedView,
   type SavedViewState,
 } from "@/components/clients/saved-views";
+import { APP_TZ } from "@/components/clients/timezone";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -56,8 +64,6 @@ type ListResponse = {
   page: number;
   pageSize: number;
 };
-
-const ALL = "all";
 
 /** Cadence du rafraîchissement de fond (autres utilisateurs, leads webhook). */
 const PANEL_POLL_MS = 20_000;
@@ -153,6 +159,8 @@ export function ClientsWorkspace({
   children: React.ReactNode;
 }) {
   const t = useTranslations("clients");
+  const locale = useLocale();
+  const dfnsLocale = locale === "en" ? enUS : fr;
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -186,19 +194,31 @@ export function ClientsWorkspace({
   };
 
   // ── Filters ────────────────────────────────────────────────────────────────
-  // Seeded from ?q= so the dashboard quick search keeps working.
+  // Multi-sélection partout : liste vide = « tous ». Semée depuis ?q= (recherche
+  // rapide du tableau de bord) et ?categoryId= (liens « +N autres » du pipeline).
   const [q, setQ] = useState(() => searchParams.get("q") ?? "");
   const [appliedQ, setAppliedQ] = useState(() => (searchParams.get("q") ?? "").trim());
-  const [categoryId, setCategoryId] = useState<number | "none" | null>(() => {
-    // Semée depuis l'URL (liens « +N autres » du tableau pipeline).
+  const [categoryIds, setCategoryIds] = useState<Array<number | "none">>(() => {
     const raw = searchParams.get("categoryId");
-    const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-    return Number.isFinite(parsed) ? parsed : null;
+    if (!raw) return [];
+    return raw.split(",").flatMap((token): Array<number | "none"> => {
+      const trimmed = token.trim();
+      if (trimmed === "none") return ["none"];
+      const parsed = Number.parseInt(trimmed, 10);
+      return Number.isFinite(parsed) ? [parsed] : [];
+    });
   });
-  const [sourceId, setSourceId] = useState(ALL);
-  const [assignedToId, setAssignedToId] = useState(ALL);
-  const [status, setStatus] = useState(ALL);
-  const [language, setLanguage] = useState(ALL);
+  const [sourceIds, setSourceIds] = useState<string[]>([]);
+  const [assignedToIds, setAssignedToIds] = useState<string[]>([]);
+  const [statuses, setStatuses] = useState<string[]>([]);
+  const [languages, setLanguages] = useState<string[]>([]);
+
+  /** Ajoute/retire une valeur d'un filtre multi-sélection. */
+  function toggleValue<T>(setter: React.Dispatch<React.SetStateAction<T[]>>, value: T): void {
+    setter((prev) =>
+      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
+    );
+  }
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onSearchChange = (value: string) => {
@@ -225,17 +245,17 @@ export function ClientsWorkspace({
   const filterQuery = useMemo(() => {
     const p = new URLSearchParams();
     if (appliedQ) p.set("q", appliedQ);
-    if (categoryId !== null) p.set("categoryId", String(categoryId));
-    if (sourceId !== ALL) p.set("sourceId", sourceId);
-    if (assignedToId !== ALL) p.set("assignedToId", assignedToId);
-    if (status !== ALL) p.set("filter", status);
-    if (language !== ALL) p.set("language", language);
+    if (categoryIds.length > 0) p.set("categoryId", categoryIds.join(","));
+    if (sourceIds.length > 0) p.set("sourceId", sourceIds.join(","));
+    if (assignedToIds.length > 0) p.set("assignedToId", assignedToIds.join(","));
+    if (statuses.length > 0) p.set("filter", statuses.join(","));
+    if (languages.length > 0) p.set("language", languages.join(","));
     if (sortKey !== "activity") {
       p.set("sort", sortKey);
       p.set("dir", sortDir);
     }
     return p.toString();
-  }, [appliedQ, categoryId, sourceId, assignedToId, status, language, sortKey, sortDir]);
+  }, [appliedQ, categoryIds, sourceIds, assignedToIds, statuses, languages, sortKey, sortDir]);
 
   // Latest-value refs so loadMore stays stable for the context consumers.
   const itemsRef = useRef<ClientListItem[]>([]);
@@ -417,22 +437,20 @@ export function ClientsWorkspace({
   );
 
   // ── Options ────────────────────────────────────────────────────────────────
+  // Plus d'entrée « Tous » : en multi-sélection, ne rien cocher = tout voir.
   const categoryOptions: FilterOption[] = categories.map((c) => ({
     value: String(c.id),
     label: c.label,
   }));
   const sourceFilterOptions: FilterOption[] = [
-    { value: ALL, label: t("list.filters.all") },
     { value: "none", label: t("list.filters.noSource") },
     ...sources,
   ];
   const userFilterOptions: FilterOption[] = [
-    { value: ALL, label: t("list.filters.all") },
     { value: "none", label: t("list.unassigned") },
     ...users,
   ];
   const statusOptions: FilterOption[] = [
-    { value: ALL, label: t("list.filters.all") },
     { value: "overdue", label: t("list.filters.late") },
     { value: "today", label: t("list.filters.today") },
     { value: "upcoming", label: t("list.filters.upcoming") },
@@ -441,7 +459,6 @@ export function ClientsWorkspace({
     { value: "dnc", label: t("list.doNotCall") },
   ];
   const languageOptions: FilterOption[] = [
-    { value: ALL, label: t("list.filters.all") },
     { value: "fr", label: t("languages.fr") },
     { value: "en", label: t("languages.en") },
   ];
@@ -449,78 +466,176 @@ export function ClientsWorkspace({
     value: key,
     label: t(`sort.${key}`),
   }));
-  const activeFilterCount = [sourceId, assignedToId, status, language].filter(
-    (v) => v !== ALL,
-  ).length;
+  const activeFilterCount =
+    sourceIds.length + assignedToIds.length + statuses.length + languages.length;
+  const hasAnyCriteria = activeFilterCount > 0 || categoryIds.length > 0 || appliedQ !== "";
+
+  const clearFilters = () => {
+    setSourceIds([]);
+    setAssignedToIds([]);
+    setStatuses([]);
+    setLanguages([]);
+  };
+  const clearEverything = () => {
+    // Une frappe récente peut avoir un setAppliedQ en attente : on l'annule,
+    // sinon il réappliquerait la recherche qu'on vient d'effacer.
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    clearFilters();
+    setCategoryIds([]);
+    setQ("");
+    setAppliedQ("");
+  };
 
   // ── Vues enregistrées : instantané courant + application ──────────────────
   const currentViewState: SavedViewState = {
     q: appliedQ,
-    categoryId,
-    sourceId,
-    assignedToId,
-    status,
-    language,
+    categoryIds,
+    sourceIds,
+    assignedToIds,
+    statuses,
+    languages,
     sortKey,
     sortDir,
     view,
   };
-  const applySavedView = (v: SavedView) => {
-    // Données venues du localStorage : on ne fait confiance à rien.
-    const savedQ = typeof v.q === "string" ? v.q : "";
-    setQ(savedQ);
-    setAppliedQ(savedQ.trim());
-    setCategoryId(typeof v.categoryId === "number" || v.categoryId === "none" ? v.categoryId : null);
-    setSourceId(typeof v.sourceId === "string" ? v.sourceId : ALL);
-    setAssignedToId(typeof v.assignedToId === "string" ? v.assignedToId : ALL);
-    setStatus(typeof v.status === "string" ? v.status : ALL);
-    setLanguage(v.language === "fr" || v.language === "en" ? v.language : ALL);
+  const applySavedView = (saved: SavedView) => {
+    // Données venues du localStorage (ancien ou nouveau format) : normalisées.
+    const v = normalizeSavedView(saved);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setQ(v.q);
+    setAppliedQ(v.q.trim());
+    setCategoryIds(v.categoryIds);
+    setSourceIds(v.sourceIds);
+    setAssignedToIds(v.assignedToIds);
+    setStatuses(v.statuses);
+    setLanguages(v.languages);
     setSortKey(SORT_KEYS.includes(v.sortKey) ? v.sortKey : "activity");
-    setSortDir(v.sortDir === "asc" ? "asc" : "desc");
-    if (v.view === "table" || v.view === "list") changeView(v.view);
+    setSortDir(v.sortDir);
+    changeView(v.view);
   };
 
-  const selectField = (
+  /** Groupe de filtres multi-sélection : pastilles à bascule dans le popover. */
+  const filterChipGroup = (
     label: string,
     options: FilterOption[],
-    value: string,
-    onChange: (v: string) => void,
+    values: string[],
+    onToggle: (v: string) => void,
   ) => (
-    <div className="space-y-1">
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <Select items={options} value={value} onValueChange={(v) => onChange(v ?? ALL)}>
-        <SelectTrigger className="min-h-11 w-full md:min-h-9" aria-label={label}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((o) => (
-            <SelectItem key={o.value} value={o.value}>
+    <div className="space-y-1.5">
+      <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
+      </p>
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label={label}>
+        {options.map((o) => {
+          const active = values.includes(o.value);
+          return (
+            <button
+              key={o.value}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onToggle(o.value)}
+              className={cn(
+                "inline-flex h-11 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors md:h-7",
+                active
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {o.color ? (
+                <span
+                  aria-hidden
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: o.color }}
+                />
+              ) : null}
               {o.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+              {active ? <CheckIcon aria-hidden className="size-3" /> : null}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
+
+  /** Filtres actifs hors catégorie — affichés en rappel sous la recherche. */
+  const activeFilterChips: Array<{
+    key: string;
+    label: string;
+    color?: string;
+    remove: () => void;
+  }> = [
+    ...sourceIds.map((v) => ({
+      key: `source-${v}`,
+      label: sourceFilterOptions.find((o) => o.value === v)?.label ?? v,
+      color: sourceFilterOptions.find((o) => o.value === v)?.color,
+      remove: () => toggleValue(setSourceIds, v),
+    })),
+    ...assignedToIds.map((v) => ({
+      key: `user-${v}`,
+      label: userFilterOptions.find((o) => o.value === v)?.label ?? v,
+      remove: () => toggleValue(setAssignedToIds, v),
+    })),
+    ...statuses.map((v) => ({
+      key: `status-${v}`,
+      label: statusOptions.find((o) => o.value === v)?.label ?? v,
+      remove: () => toggleValue(setStatuses, v),
+    })),
+    ...languages.map((v) => ({
+      key: `lang-${v}`,
+      label: languageOptions.find((o) => o.value === v)?.label ?? v,
+      remove: () => toggleValue(setLanguages, v),
+    })),
+  ];
 
   const chipBase =
     "inline-flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-xs font-medium transition-colors md:h-7";
   const now = Date.now();
 
+  /** « AB » pour l'avatar de fiche — teinté de la couleur de catégorie. */
+  const initials = (name: string) =>
+    name
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((word) => word[0]?.toUpperCase() ?? "")
+      .join("") || "?";
+
+  const shortDay = (iso: string) =>
+    formatInTimeZone(new Date(iso), APP_TZ, "d MMM", { locale: dfnsLocale });
+
   /** Vue tableau : pleine largeur, uniquement sur /clients (jamais sur une fiche). */
   const showTable = view === "table" && !isDetail;
 
   const failedBlock = (
-    <div className="space-y-2 p-6 text-center">
-      <p className="text-sm text-muted-foreground">{t("panel.loadError")}</p>
-      <Button
-        variant="outline"
-        className="min-h-11 md:min-h-9"
-        onClick={() => setRefreshKey((k) => k + 1)}
-      >
-        {t("panel.retry")}
-      </Button>
-    </div>
+    <EmptyState
+      icon={<WifiOffIcon />}
+      title={t("panel.loadError")}
+      action={
+        <Button
+          variant="outline"
+          className="min-h-11 md:min-h-9"
+          onClick={() => setRefreshKey((k) => k + 1)}
+        >
+          {t("panel.retry")}
+        </Button>
+      }
+    />
+  );
+
+  const emptyBlock = (
+    <EmptyState
+      icon={<SearchXIcon />}
+      title={t("list.emptyTitle")}
+      hint={t("list.empty")}
+      action={
+        hasAnyCriteria ? (
+          <Button variant="outline" className="min-h-11 md:min-h-9" onClick={clearEverything}>
+            <XIcon />
+            {t("list.filters.clear")}
+          </Button>
+        ) : undefined
+      }
+    />
   );
 
   const loadMoreBlock =
@@ -585,12 +700,14 @@ export function ClientsWorkspace({
                 </PopoverTrigger>
                 <PopoverContent
                   align="end"
-                  className="max-h-[min(70vh,34rem)] w-72 gap-3 overflow-y-auto p-3"
+                  className="max-h-[min(70vh,36rem)] w-80 gap-3.5 overflow-y-auto p-3.5"
                 >
                   {/* Tri — accessible aussi en vue fiches, pas seulement via
                       les en-têtes du tableau. */}
                   <div className="space-y-1">
-                    <p className="text-xs font-medium text-muted-foreground">{t("sort.label")}</p>
+                    <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                      {t("sort.label")}
+                    </p>
                     <div className="flex items-center gap-1.5">
                       <Select
                         items={sortOptions}
@@ -628,25 +745,35 @@ export function ClientsWorkspace({
                     </div>
                   </div>
 
-                  {selectField(t("list.filters.source"), sourceFilterOptions, sourceId, setSourceId)}
-                  {selectField(
+                  {filterChipGroup(
+                    t("list.filters.status"),
+                    statusOptions,
+                    statuses,
+                    (v) => toggleValue(setStatuses, v),
+                  )}
+                  {filterChipGroup(
+                    t("list.filters.source"),
+                    sourceFilterOptions,
+                    sourceIds,
+                    (v) => toggleValue(setSourceIds, v),
+                  )}
+                  {filterChipGroup(
                     t("list.filters.assignedTo"),
                     userFilterOptions,
-                    assignedToId,
-                    setAssignedToId,
+                    assignedToIds,
+                    (v) => toggleValue(setAssignedToIds, v),
                   )}
-                  {selectField(t("list.filters.status"), statusOptions, status, setStatus)}
-                  {selectField(t("list.filters.language"), languageOptions, language, setLanguage)}
+                  {filterChipGroup(
+                    t("list.filters.language"),
+                    languageOptions,
+                    languages,
+                    (v) => toggleValue(setLanguages, v),
+                  )}
                   {activeFilterCount > 0 ? (
                     <Button
                       variant="ghost"
                       className="min-h-11 w-full md:min-h-8"
-                      onClick={() => {
-                        setSourceId(ALL);
-                        setAssignedToId(ALL);
-                        setStatus(ALL);
-                        setLanguage(ALL);
-                      }}
+                      onClick={clearFilters}
                     >
                       <XIcon />
                       {t("list.filters.clear")}
@@ -678,19 +805,19 @@ export function ClientsWorkspace({
               ) : null}
             </div>
 
-            {/* Category chips — single-select, colored per categories.color */}
+            {/* Category chips — multi-select, colored per categories.color */}
             <div
               role="group"
               aria-label={t("list.filters.category")}
-              className="-mx-3 mt-2 flex gap-1.5 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="-mx-3 mt-2 flex gap-1.5 overflow-x-auto px-3 pb-0.5 [mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-16px),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               <button
                 type="button"
-                aria-pressed={categoryId === null}
-                onClick={() => setCategoryId(null)}
+                aria-pressed={categoryIds.length === 0}
+                onClick={() => setCategoryIds([])}
                 className={cn(
                   chipBase,
-                  categoryId === null
+                  categoryIds.length === 0
                     ? "border-primary/40 bg-primary/10 text-primary"
                     : "border-border text-muted-foreground hover:bg-muted",
                 )}
@@ -699,13 +826,13 @@ export function ClientsWorkspace({
                 <span className="tabular-nums opacity-70">{totalClients}</span>
               </button>
               {categories.map((c) => {
-                const active = categoryId === c.id;
+                const active = categoryIds.includes(c.id);
                 return (
                   <button
                     key={c.id}
                     type="button"
                     aria-pressed={active}
-                    onClick={() => setCategoryId(active ? null : c.id)}
+                    onClick={() => toggleValue<number | "none">(setCategoryIds, c.id)}
                     className={cn(
                       chipBase,
                       !active && "border-border text-muted-foreground hover:bg-muted",
@@ -733,11 +860,11 @@ export function ClientsWorkspace({
               {noCategoryCount > 0 ? (
                 <button
                   type="button"
-                  aria-pressed={categoryId === "none"}
-                  onClick={() => setCategoryId(categoryId === "none" ? null : "none")}
+                  aria-pressed={categoryIds.includes("none")}
+                  onClick={() => toggleValue<number | "none">(setCategoryIds, "none")}
                   className={cn(
                     chipBase,
-                    categoryId === "none"
+                    categoryIds.includes("none")
                       ? "border-primary/40 bg-primary/10 text-primary"
                       : "border-border text-muted-foreground hover:bg-muted",
                   )}
@@ -749,7 +876,39 @@ export function ClientsWorkspace({
               ) : null}
             </div>
 
-            <p className="mt-1.5 text-[11px] text-muted-foreground" aria-live="polite">
+            {/* Rappel des filtres actifs (hors catégorie) : retrait en un geste. */}
+            {activeFilterChips.length > 0 ? (
+              <div className="-mx-3 mt-1.5 flex gap-1.5 overflow-x-auto px-3 pb-0.5 [mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-16px),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {activeFilterChips.map((chip) => (
+                  <button
+                    key={chip.key}
+                    type="button"
+                    aria-label={t("list.filters.remove", { label: chip.label })}
+                    onClick={chip.remove}
+                    className="inline-flex h-11 shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-secondary px-2.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-secondary/70 md:h-7"
+                  >
+                    {chip.color ? (
+                      <span
+                        aria-hidden
+                        className="size-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: chip.color }}
+                      />
+                    ) : null}
+                    {chip.label}
+                    <XIcon aria-hidden className="size-3 opacity-60" />
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="inline-flex h-11 shrink-0 items-center whitespace-nowrap rounded-full px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted md:h-7"
+                >
+                  {t("list.filters.clear")}
+                </button>
+              </div>
+            ) : null}
+
+            <p className="mt-1.5 text-[11px] tabular-nums text-muted-foreground" aria-live="polite">
               {loading ? t("panel.loading") : t("list.count", { count: total })}
             </p>
           </div>
@@ -758,6 +917,8 @@ export function ClientsWorkspace({
             <div className="min-w-0">
               {failed && !loading ? (
                 failedBlock
+              ) : !loading && items.length === 0 ? (
+                emptyBlock
               ) : (
                 <ClientsTable
                   items={items}
@@ -779,13 +940,19 @@ export function ClientsWorkspace({
             {loading ? (
               <div className="space-y-1.5 p-3">
                 {Array.from({ length: 8 }, (_, i) => (
-                  <Skeleton key={i} className="h-[52px] w-full rounded-lg" />
+                  <div key={i} className="flex items-center gap-2.5 px-1 py-1">
+                    <Skeleton className="size-9 shrink-0 rounded-full" />
+                    <div className="flex-1 space-y-1.5">
+                      <Skeleton className="h-3.5 w-2/3 rounded" />
+                      <Skeleton className="h-3 w-1/2 rounded" />
+                    </div>
+                  </div>
                 ))}
               </div>
             ) : failed ? (
               failedBlock
             ) : items.length === 0 ? (
-              <p className="p-6 text-center text-sm text-muted-foreground">{t("list.empty")}</p>
+              emptyBlock
             ) : (
               <ul className="divide-y divide-border/60">
                 {items.map((item) => {
@@ -798,7 +965,7 @@ export function ClientsWorkspace({
                         href={`/clients/${item.id}`}
                         aria-current={active ? "page" : undefined}
                         className={cn(
-                          "flex min-h-[52px] items-center gap-2.5 border-l-2 px-3 py-1.5 transition-colors",
+                          "flex min-h-[56px] items-center gap-2.5 border-l-2 px-3 py-2 transition-colors",
                           active
                             ? "border-l-primary bg-accent text-accent-foreground"
                             : "border-l-transparent hover:bg-muted/60 active:bg-muted",
@@ -807,24 +974,25 @@ export function ClientsWorkspace({
                         <span
                           aria-hidden
                           className={cn(
-                            "size-2.5 shrink-0 rounded-full",
-                            !item.categoryColor && "bg-muted-foreground/25",
+                            "flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
+                            !item.categoryColor &&
+                              "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
                           )}
                           style={
                             item.categoryColor
-                              ? { backgroundColor: item.categoryColor }
+                              ? {
+                                  color: item.categoryColor,
+                                  backgroundColor: `${item.categoryColor}1f`,
+                                  boxShadow: `inset 0 0 0 1px ${item.categoryColor}33`,
+                                }
                               : undefined
                           }
-                        />
+                        >
+                          {initials(item.fullName)}
+                        </span>
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-1.5">
                             <span className="truncate text-sm font-semibold">{item.fullName}</span>
-                            {overdue ? (
-                              <ClockAlertIcon
-                                className="size-3.5 shrink-0 text-destructive"
-                                aria-label={t("list.filters.late")}
-                              />
-                            ) : null}
                             {item.doNotCall ? (
                               <PhoneOffIcon
                                 className="size-3.5 shrink-0 text-destructive"
@@ -837,6 +1005,22 @@ export function ClientsWorkspace({
                             {item.city ? <span className="truncate">{item.city}</span> : null}
                           </span>
                         </span>
+                        {item.nextFollowupAt ? (
+                          <span
+                            className={cn(
+                              "flex shrink-0 items-center gap-1 text-[11px] tabular-nums",
+                              overdue ? "font-medium text-destructive" : "text-muted-foreground",
+                            )}
+                          >
+                            {overdue ? (
+                              <ClockAlertIcon
+                                className="size-3.5"
+                                aria-label={t("list.filters.late")}
+                              />
+                            ) : null}
+                            {shortDay(item.nextFollowupAt)}
+                          </span>
+                        ) : null}
                       </Link>
                     </li>
                   );

@@ -1,4 +1,5 @@
 import { asc, desc, gte, lt } from "drizzle-orm";
+import { CalendarDays } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { db } from "@/db";
 import { appointments } from "@/db/schema";
@@ -7,6 +8,7 @@ import {
   AppointmentsList,
   type AppointmentItem,
 } from "@/components/booking/appointments-list";
+import { PageHeader } from "@/components/shell/page-header";
 
 export const dynamic = "force-dynamic";
 
@@ -59,11 +61,12 @@ export default async function AppointmentsPage() {
   }));
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-6 pb-safe">
-      <div>
-        <h1 className="font-heading text-xl font-semibold">{t("page.title")}</h1>
-        <p className="text-sm text-muted-foreground">{t("page.subtitle")}</p>
-      </div>
+    <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-6 pb-safe md:px-8">
+      <PageHeader
+        icon={<CalendarDays />}
+        title={t("page.title")}
+        subtitle={t("page.subtitle")}
+      />
       <AppointmentsList items={items} now={now} />
     </div>
   );

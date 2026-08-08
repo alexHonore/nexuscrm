@@ -189,6 +189,7 @@
   },
   "pipeline": {
     "title": "Pipeline",
+    "subtitle": "Catégories du pipeline et sources de leads — couleurs, ordre et réassignation.",
     "color": "Couleur",
     "moveUp": "Monter",
     "moveDown": "Descendre",
@@ -227,6 +228,7 @@
   },
   "importExport": {
     "title": "Import / Export",
+    "subtitle": "Importez des clients depuis un fichier CSV ou exportez la base selon vos filtres.",
     "category": "Catégorie",
     "source": "Source",
     "assignedTo": "Assigné à",
@@ -247,6 +249,7 @@
       "title": "Importer des clients (CSV)",
       "desc": "Téléversez un fichier CSV (Excel, Notion, etc.), associez les colonnes, puis lancez l'import.",
       "file": "Fichier CSV",
+      "dropHint": "Cliquez pour choisir un fichier ou déposez-le ici.",
       "emptyFile": "Le fichier ne contient aucune ligne.",
       "parseError": "Impossible de lire ce fichier CSV.",
       "parsed": "{count, plural, one {# ligne détectée} other {# lignes détectées}} dans {file}.",
@@ -276,6 +279,8 @@
   },
   "webhooks": {
     "title": "Webhooks",
+    "subtitle": "Recevez des leads automatiquement depuis n8n, Facebook ou votre site web.",
+    "keyCount": "{count, plural, =0 {Aucune clé} one {# clé} other {# clés}}",
     "neverUsed": "jamais utilisée",
     "explain": {
       "title": "Recevoir des leads automatiquement",
@@ -283,6 +288,8 @@
       "endpoint": "Point de terminaison",
       "auth": "Authentification : envoyez la clé API dans l'en-tête « x-api-key » (ou « Authorization: Bearer » suivi de la clé).",
       "fields": "Champs acceptés (JSON)",
+      "fieldCol": "Champ (alias acceptés)",
+      "statusCol": "Statut",
       "required": "requis",
       "optional": "optionnel",
       "nested": "Les champs peuvent être à la racine du JSON ou dans un objet « data » (format n8n). Les noms accentués des formulaires Facebook sont acceptés tels quels.",
@@ -314,6 +321,7 @@
   },
   "settings": {
     "title": "Réglages",
+    "subtitle": "Google Agenda, plages de réservation et fournisseur de téléphonie.",
     "google": {
       "title": "Google Agenda",
       "desc": "Les rendez-vous pris par les téléphonistes sont créés dans ce calendrier (avec lien Google Meet).",

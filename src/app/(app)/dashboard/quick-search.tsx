@@ -29,13 +29,14 @@ export function QuickSearch() {
           onChange={(e) => setQ(e.target.value)}
           placeholder={t("search.placeholder")}
           aria-label={t("search.label")}
-          className="h-11 pl-9"
+          className="h-11 rounded-xl pl-9 shadow-xs"
           inputMode="search"
           enterKeyHint="search"
         />
       </div>
-      <Button type="submit" className="h-11 px-4">
-        {t("search.submit")}
+      <Button type="submit" className="h-11 w-11 px-0 sm:w-auto sm:px-4">
+        <SearchIcon className="sm:hidden" />
+        <span className="max-sm:sr-only">{t("search.submit")}</span>
       </Button>
     </form>
   );
