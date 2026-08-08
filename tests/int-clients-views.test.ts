@@ -291,6 +291,58 @@ describe("filtres et tris avancés de /api/clients/list", () => {
     expect((await listItems("createdFrom=2026-02-30")).total).toBe(3);
     expect((await listItems("updatedTo=2026-13-01")).total).toBe(3);
   });
+
+  it("fenêtres nommées : createdWithin / updatedWithin résolues à la requête", async () => {
+    // Horloge épinglée (Date seulement) : « un jour = 24 h » devient exact et
+    // le test ne peut plus basculer autour de minuit ni des changements
+    // d'heure de Toronto — la route lit la même Date factice que la fixture.
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-08-08T19:00:00Z") });
+    try {
+      const admin = await makeUser({ role: "admin" });
+      const now = new Date();
+      const daysAgo = (n: number) => new Date(now.getTime() - n * 24 * 3600_000);
+      await makeClient({ fullName: "Maintenant", createdAt: now, updatedAt: now });
+      await makeClient({ fullName: "HierMême", createdAt: daysAgo(1), updatedAt: daysAgo(1) });
+      await makeClient({ fullName: "IlYa8Jours", createdAt: daysAgo(8), updatedAt: daysAgo(8) });
+      await makeClient({
+        fullName: "IlYa40Jours",
+        createdAt: daysAgo(40),
+        updatedAt: daysAgo(40),
+      });
+      await login(admin);
+
+      expect(await names("createdWithin=today")).toEqual(["Maintenant"]);
+      expect(await names("createdWithin=yesterday")).toEqual(["HierMême"]);
+      // « Cette semaine » contient toujours aujourd'hui, jamais il y a 8 jours
+      // (et hier peut en faire partie ou non selon le jour — non testé).
+      const week = await names("createdWithin=week");
+      expect(week).toContain("Maintenant");
+      expect(week).not.toContain("IlYa8Jours");
+      const month = await names("updatedWithin=month");
+      expect(month).toContain("Maintenant");
+      expect(month).not.toContain("IlYa40Jours");
+      // Jeton inconnu : ignoré sans erreur.
+      expect((await listItems("createdWithin=lastyear")).total).toBe(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bornes strictes : createdBefore / createdAfter excluent le jour choisi", async () => {
+    const admin = await makeUser({ role: "admin" });
+    await makeClient({ fullName: "Avant", createdAt: new Date("2026-01-04T15:00:00Z") });
+    await makeClient({ fullName: "LeJour", createdAt: new Date("2026-01-05T15:00:00Z") });
+    // 03:59 UTC le 6 janvier = 22:59 le 5 janvier à Toronto : encore « le jour ».
+    await makeClient({ fullName: "FinDuJour", createdAt: new Date("2026-01-06T03:59:00Z") });
+    await makeClient({ fullName: "Après", createdAt: new Date("2026-01-06T15:00:00Z") });
+    await login(admin);
+
+    expect(await names("createdBefore=2026-01-05")).toEqual(["Avant"]);
+    expect(await names("createdAfter=2026-01-05")).toEqual(["Après"]);
+    // Date impossible : ignorée.
+    expect((await listItems("createdBefore=2026-02-30")).total).toBe(4);
+    expect((await listItems("updatedAfter=2026-02-30")).total).toBe(4);
+  });
 });
 
 describe("changement de source (admin seulement)", () => {

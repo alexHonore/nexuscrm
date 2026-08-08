@@ -35,6 +35,7 @@ import {
 } from "@/components/clients/client-list-nav";
 import type { FilterOption } from "@/components/clients/clients-filters";
 import {
+  type DateFilterMode,
   normalizeSavedView,
   SavedViews,
   type SavedView,
@@ -136,9 +137,25 @@ const SORT_KEYS: ClientSortKey[] = [
   "updatedAt",
 ];
 
-export type DateRange = { from: string; to: string };
-export const EMPTY_RANGE: DateRange = { from: "", to: "" };
-const hasRange = (r: DateRange) => r.from !== "" || r.to !== "";
+/** Filtre de dates : un mode + les bornes que ce mode utilise. */
+export type DateFilter = { mode: DateFilterMode; from: string; to: string };
+export const NO_DATE_FILTER: DateFilter = { mode: "none", from: "", to: "" };
+
+/** Le filtre restreint-il réellement la liste ? (mode choisi ET borne saisie) */
+function hasDateFilter(f: DateFilter): boolean {
+  switch (f.mode) {
+    case "none":
+      return false;
+    case "before":
+      return f.to !== "";
+    case "after":
+      return f.from !== "";
+    case "custom":
+      return f.from !== "" || f.to !== "";
+    default:
+      return true; // fenêtres nommées : toujours effectives
+  }
+}
 
 /**
  * Persistent master-detail workspace for /clients.
@@ -217,9 +234,9 @@ export function ClientsWorkspace({
   const [assignedToIds, setAssignedToIds] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
   const [languages, setLanguages] = useState<string[]>([]);
-  // Plages de dates (yyyy-mm-dd, vide = pas de borne) : création / modification.
-  const [createdRange, setCreatedRange] = useState<DateRange>(EMPTY_RANGE);
-  const [updatedRange, setUpdatedRange] = useState<DateRange>(EMPTY_RANGE);
+  // Filtres de dates (mode + bornes yyyy-mm-dd) : création / modification.
+  const [createdFilter, setCreatedFilter] = useState<DateFilter>(NO_DATE_FILTER);
+  const [updatedFilter, setUpdatedFilter] = useState<DateFilter>(NO_DATE_FILTER);
 
   /** Ajoute/retire une valeur d'un filtre multi-sélection. */
   function toggleValue<T>(setter: React.Dispatch<React.SetStateAction<T[]>>, value: T): void {
@@ -258,10 +275,31 @@ export function ClientsWorkspace({
     if (assignedToIds.length > 0) p.set("assignedToId", assignedToIds.join(","));
     if (statuses.length > 0) p.set("filter", statuses.join(","));
     if (languages.length > 0) p.set("language", languages.join(","));
-    if (createdRange.from) p.set("createdFrom", createdRange.from);
-    if (createdRange.to) p.set("createdTo", createdRange.to);
-    if (updatedRange.from) p.set("updatedFrom", updatedRange.from);
-    if (updatedRange.to) p.set("updatedTo", updatedRange.to);
+    // Fenêtres nommées résolues par le serveur à chaque requête ; bornes
+    // avant/après strictes ; plage personnalisée inclusive.
+    for (const [prefix, f] of [
+      ["created", createdFilter],
+      ["updated", updatedFilter],
+    ] as const) {
+      switch (f.mode) {
+        case "today":
+        case "yesterday":
+        case "week":
+        case "month":
+          p.set(`${prefix}Within`, f.mode);
+          break;
+        case "before":
+          if (f.to) p.set(`${prefix}Before`, f.to);
+          break;
+        case "after":
+          if (f.from) p.set(`${prefix}After`, f.from);
+          break;
+        case "custom":
+          if (f.from) p.set(`${prefix}From`, f.from);
+          if (f.to) p.set(`${prefix}To`, f.to);
+          break;
+      }
+    }
     if (sortKey !== "activity") {
       p.set("sort", sortKey);
       p.set("dir", sortDir);
@@ -274,8 +312,8 @@ export function ClientsWorkspace({
     assignedToIds,
     statuses,
     languages,
-    createdRange,
-    updatedRange,
+    createdFilter,
+    updatedFilter,
     sortKey,
     sortDir,
   ]);
@@ -494,8 +532,8 @@ export function ClientsWorkspace({
     assignedToIds.length +
     statuses.length +
     languages.length +
-    (hasRange(createdRange) ? 1 : 0) +
-    (hasRange(updatedRange) ? 1 : 0);
+    (hasDateFilter(createdFilter) ? 1 : 0) +
+    (hasDateFilter(updatedFilter) ? 1 : 0);
   const hasAnyCriteria = activeFilterCount > 0 || categoryIds.length > 0 || appliedQ !== "";
 
   const clearFilters = () => {
@@ -503,8 +541,8 @@ export function ClientsWorkspace({
     setAssignedToIds([]);
     setStatuses([]);
     setLanguages([]);
-    setCreatedRange(EMPTY_RANGE);
-    setUpdatedRange(EMPTY_RANGE);
+    setCreatedFilter(NO_DATE_FILTER);
+    setUpdatedFilter(NO_DATE_FILTER);
   };
   const clearEverything = () => {
     // Une frappe récente peut avoir un setAppliedQ en attente : on l'annule,
@@ -524,10 +562,12 @@ export function ClientsWorkspace({
     assignedToIds,
     statuses,
     languages,
-    createdFrom: createdRange.from,
-    createdTo: createdRange.to,
-    updatedFrom: updatedRange.from,
-    updatedTo: updatedRange.to,
+    createdMode: createdFilter.mode,
+    createdFrom: createdFilter.from,
+    createdTo: createdFilter.to,
+    updatedMode: updatedFilter.mode,
+    updatedFrom: updatedFilter.from,
+    updatedTo: updatedFilter.to,
     sortKey,
     sortDir,
     view,
@@ -543,8 +583,8 @@ export function ClientsWorkspace({
     setAssignedToIds(v.assignedToIds);
     setStatuses(v.statuses);
     setLanguages(v.languages);
-    setCreatedRange({ from: v.createdFrom, to: v.createdTo });
-    setUpdatedRange({ from: v.updatedFrom, to: v.updatedTo });
+    setCreatedFilter({ mode: v.createdMode, from: v.createdFrom, to: v.createdTo });
+    setUpdatedFilter({ mode: v.updatedMode, from: v.updatedFrom, to: v.updatedTo });
     setSortKey(SORT_KEYS.includes(v.sortKey) ? v.sortKey : "activity");
     setSortDir(v.sortDir);
     changeView(v.view);
@@ -603,54 +643,119 @@ export function ClientsWorkspace({
     return formatDate(d, sameYear ? "d MMM" : "d MMM yyyy", { locale: dfnsLocale });
   };
 
-  /** Libellé de rappel d'une plage de dates : « Créée du 1 août au 8 août ». */
-  const rangeChipLabel = (
+  /** Libellé de rappel d'un filtre de dates : « Créée aujourd'hui »,
+   *  « Modifiée avant le 1 août », « Créée du 1 août au 8 août »… */
+  const dateChipLabel = (
     labelKey: "createdShort" | "updatedShort",
-    range: DateRange,
+    filter: DateFilter,
   ): string => {
     const label = t(`list.filters.${labelKey}`);
-    if (range.from && range.to) {
-      return t("list.filters.fromTo", {
-        label,
-        from: chipDate(range.from),
-        to: chipDate(range.to),
-      });
+    switch (filter.mode) {
+      case "today":
+        return t("list.filters.chipToday", { label });
+      case "yesterday":
+        return t("list.filters.chipYesterday", { label });
+      case "week":
+        return t("list.filters.chipThisWeek", { label });
+      case "month":
+        return t("list.filters.chipThisMonth", { label });
+      case "before":
+        return t("list.filters.chipBefore", { label, date: chipDate(filter.to) });
+      case "after":
+        return t("list.filters.chipAfter", { label, date: chipDate(filter.from) });
+      default: {
+        if (filter.from && filter.to) {
+          return t("list.filters.fromTo", {
+            label,
+            from: chipDate(filter.from),
+            to: chipDate(filter.to),
+          });
+        }
+        if (filter.from) return t("list.filters.fromOnly", { label, from: chipDate(filter.from) });
+        return t("list.filters.toOnly", { label, to: chipDate(filter.to) });
+      }
     }
-    if (range.from) return t("list.filters.fromOnly", { label, from: chipDate(range.from) });
-    return t("list.filters.toOnly", { label, to: chipDate(range.to) });
   };
 
-  /** Groupe « plage de dates » du popover : deux bornes facultatives. */
-  const dateRangeGroup = (
+  /** Choix de période proposés pour la création et la modification. */
+  const dateModeOptions: Array<{ value: DateFilterMode; label: string }> = [
+    { value: "none", label: t("list.filters.dateAny") },
+    { value: "today", label: t("list.filters.dateToday") },
+    { value: "yesterday", label: t("list.filters.dateYesterday") },
+    { value: "week", label: t("list.filters.dateThisWeek") },
+    { value: "month", label: t("list.filters.dateThisMonth") },
+    { value: "before", label: t("list.filters.dateBefore") },
+    { value: "after", label: t("list.filters.dateAfter") },
+    { value: "custom", label: t("list.filters.dateCustom") },
+  ];
+
+  /** Groupe « filtre de dates » du popover : mode + bornes selon le mode. */
+  const dateFilterGroup = (
     label: string,
-    range: DateRange,
-    setRange: React.Dispatch<React.SetStateAction<DateRange>>,
+    filter: DateFilter,
+    setFilter: React.Dispatch<React.SetStateAction<DateFilter>>,
   ) => (
     <div className="space-y-1.5">
       <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </p>
-      <div className="flex items-center gap-1.5" role="group" aria-label={label}>
+      <Select
+        items={dateModeOptions}
+        value={filter.mode}
+        onValueChange={(v) =>
+          setFilter((f) => ({ ...f, mode: (v ?? "none") as DateFilterMode }))
+        }
+      >
+        <SelectTrigger className="min-h-11 w-full md:min-h-8" aria-label={label}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {dateModeOptions.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {filter.mode === "before" ? (
         <Input
           type="date"
-          value={range.from}
-          max={range.to || undefined}
-          onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
-          aria-label={`${label} — ${t("list.filters.dateFrom")}`}
-          className="min-h-11 flex-1 text-xs md:min-h-8"
+          value={filter.to}
+          onChange={(e) => setFilter((f) => ({ ...f, to: e.target.value }))}
+          aria-label={`${label} — ${t("list.filters.dateBefore")}`}
+          className="min-h-11 w-full text-xs md:min-h-8"
         />
-        <span aria-hidden className="shrink-0 text-xs text-muted-foreground">
-          –
-        </span>
+      ) : filter.mode === "after" ? (
         <Input
           type="date"
-          value={range.to}
-          min={range.from || undefined}
-          onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
-          aria-label={`${label} — ${t("list.filters.dateTo")}`}
-          className="min-h-11 flex-1 text-xs md:min-h-8"
+          value={filter.from}
+          onChange={(e) => setFilter((f) => ({ ...f, from: e.target.value }))}
+          aria-label={`${label} — ${t("list.filters.dateAfter")}`}
+          className="min-h-11 w-full text-xs md:min-h-8"
         />
-      </div>
+      ) : filter.mode === "custom" ? (
+        <div className="flex items-center gap-1.5" role="group" aria-label={label}>
+          <Input
+            type="date"
+            value={filter.from}
+            max={filter.to || undefined}
+            onChange={(e) => setFilter((f) => ({ ...f, from: e.target.value }))}
+            aria-label={`${label} — ${t("list.filters.dateFrom")}`}
+            className="min-h-11 flex-1 text-xs md:min-h-8"
+          />
+          <span aria-hidden className="shrink-0 text-xs text-muted-foreground">
+            –
+          </span>
+          <Input
+            type="date"
+            value={filter.to}
+            min={filter.from || undefined}
+            onChange={(e) => setFilter((f) => ({ ...f, to: e.target.value }))}
+            aria-label={`${label} — ${t("list.filters.dateTo")}`}
+            className="min-h-11 flex-1 text-xs md:min-h-8"
+          />
+        </div>
+      ) : null}
     </div>
   );
 
@@ -682,21 +787,21 @@ export function ClientsWorkspace({
       label: languageOptions.find((o) => o.value === v)?.label ?? v,
       remove: () => toggleValue(setLanguages, v),
     })),
-    ...(hasRange(createdRange)
+    ...(hasDateFilter(createdFilter)
       ? [
           {
             key: "created-range",
-            label: rangeChipLabel("createdShort", createdRange),
-            remove: () => setCreatedRange(EMPTY_RANGE),
+            label: dateChipLabel("createdShort", createdFilter),
+            remove: () => setCreatedFilter(NO_DATE_FILTER),
           },
         ]
       : []),
-    ...(hasRange(updatedRange)
+    ...(hasDateFilter(updatedFilter)
       ? [
           {
             key: "updated-range",
-            label: rangeChipLabel("updatedShort", updatedRange),
-            remove: () => setUpdatedRange(EMPTY_RANGE),
+            label: dateChipLabel("updatedShort", updatedFilter),
+            remove: () => setUpdatedFilter(NO_DATE_FILTER),
           },
         ]
       : []),
@@ -883,8 +988,8 @@ export function ClientsWorkspace({
                     languages,
                     (v) => toggleValue(setLanguages, v),
                   )}
-                  {dateRangeGroup(t("list.filters.createdAt"), createdRange, setCreatedRange)}
-                  {dateRangeGroup(t("list.filters.updatedAt"), updatedRange, setUpdatedRange)}
+                  {dateFilterGroup(t("list.filters.createdAt"), createdFilter, setCreatedFilter)}
+                  {dateFilterGroup(t("list.filters.updatedAt"), updatedFilter, setUpdatedFilter)}
                   {activeFilterCount > 0 ? (
                     <Button
                       variant="ghost"

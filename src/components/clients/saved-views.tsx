@@ -15,6 +15,32 @@ import type { ClientSortDir, ClientSortKey } from "@/components/clients/clients-
  * navigateur (localStorage) — le schéma de la base est gelé, et une préférence
  * d'écran par appareil suffit ici.
  */
+/**
+ * Mode d'un filtre de dates : fenêtre nommée (résolue à l'application — un
+ * « aujourd'hui » enregistré reste vrai demain), borne stricte avant/après,
+ * ou plage inclusive libre.
+ */
+export type DateFilterMode =
+  | "none"
+  | "today"
+  | "yesterday"
+  | "week"
+  | "month"
+  | "before"
+  | "after"
+  | "custom";
+
+const DATE_MODES: ReadonlySet<string> = new Set([
+  "none",
+  "today",
+  "yesterday",
+  "week",
+  "month",
+  "before",
+  "after",
+  "custom",
+]);
+
 export type SavedViewState = {
   q: string;
   categoryIds: Array<number | "none">;
@@ -22,9 +48,11 @@ export type SavedViewState = {
   assignedToIds: string[];
   statuses: string[];
   languages: string[];
-  /** Bornes yyyy-mm-dd des filtres de dates ("" = pas de borne). */
+  /** Filtres de dates : mode + bornes yyyy-mm-dd ("" = pas de borne). */
+  createdMode: DateFilterMode;
   createdFrom: string;
   createdTo: string;
+  updatedMode: DateFilterMode;
   updatedFrom: string;
   updatedTo: string;
   sortKey: ClientSortKey;
@@ -71,6 +99,13 @@ function dateBound(value: unknown): string {
     : "";
 }
 
+/** Mode d'un filtre de dates stocké — les vues d'avant les modes (bornes
+ *  seules) deviennent une plage personnalisée. */
+function dateMode(value: unknown, from: string, to: string): DateFilterMode {
+  if (typeof value === "string" && DATE_MODES.has(value)) return value as DateFilterMode;
+  return from !== "" || to !== "" ? "custom" : "none";
+}
+
 /** Vue telle que stockée → état applicable, quel que soit son âge. */
 export function normalizeSavedView(view: SavedView): SavedViewState {
   const raw = view as SavedView & LegacyFields;
@@ -86,8 +121,10 @@ export function normalizeSavedView(view: SavedView): SavedViewState {
     assignedToIds: stringList(raw.assignedToIds, raw.assignedToId),
     statuses: stringList(raw.statuses, raw.status),
     languages: stringList(raw.languages, raw.language).filter((l) => l === "fr" || l === "en"),
+    createdMode: dateMode(raw.createdMode, dateBound(raw.createdFrom), dateBound(raw.createdTo)),
     createdFrom: dateBound(raw.createdFrom),
     createdTo: dateBound(raw.createdTo),
+    updatedMode: dateMode(raw.updatedMode, dateBound(raw.updatedFrom), dateBound(raw.updatedTo)),
     updatedFrom: dateBound(raw.updatedFrom),
     updatedTo: dateBound(raw.updatedTo),
     sortKey: raw.sortKey,

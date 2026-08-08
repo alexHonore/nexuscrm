@@ -1,4 +1,15 @@
-import { fromZonedTime } from "date-fns-tz";
+import {
+  addDays,
+  endOfMonth,
+  endOfWeek,
+  format,
+  isValid,
+  parseISO,
+  startOfMonth,
+  startOfWeek,
+  subDays,
+} from "date-fns";
+import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import {
   and,
   asc,
@@ -50,6 +61,11 @@ function validDate(d: Date): Date | undefined {
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
+/** yyyy-mm-dd de forme valide ET existant au calendrier, sinon undefined. */
+function calendarDay(raw: string | null): string | undefined {
+  return raw && DATE_RE.test(raw) && isValid(parseISO(raw)) ? raw : undefined;
+}
+
 function torontoStart(raw: string | null): Date | undefined {
   return raw && DATE_RE.test(raw)
     ? validDate(fromZonedTime(`${raw}T00:00:00`, APP_TZ))
@@ -60,6 +76,57 @@ function torontoEnd(raw: string | null): Date | undefined {
   return raw && DATE_RE.test(raw)
     ? validDate(fromZonedTime(`${raw}T23:59:59.999`, APP_TZ))
     : undefined;
+}
+
+// ── Fenêtres nommées et bornes strictes (« avant le / après le ») ────────────
+// Résolues CÔTÉ SERVEUR à chaque requête : un « aujourd'hui » enregistré dans
+// une vue reste vrai demain, et un onglet ouvert à cheval sur minuit se
+// rafraîchit correctement au prochain sondage.
+
+const WITHIN = new Set(["today", "yesterday", "week", "month"]);
+
+/** Minuit (heure de Toronto) du jour civil donné, en instant UTC. */
+function torontoMidnight(day: Date): Date {
+  return fromZonedTime(`${format(day, "yyyy-MM-dd")}T00:00:00`, APP_TZ);
+}
+
+/**
+ * Fenêtre [start, end) d'un raccourci de période, calculée dans le calendrier
+ * de Toronto. Semaine du lundi au dimanche (convention d'affaires).
+ */
+function torontoWindow(name: string, now: Date): { start: Date; end: Date } | undefined {
+  if (!WITHIN.has(name)) return undefined;
+  const zoned = toZonedTime(now, APP_TZ);
+  switch (name) {
+    case "today":
+      return { start: torontoMidnight(zoned), end: torontoMidnight(addDays(zoned, 1)) };
+    case "yesterday":
+      return { start: torontoMidnight(subDays(zoned, 1)), end: torontoMidnight(zoned) };
+    case "week": {
+      const first = startOfWeek(zoned, { weekStartsOn: 1 });
+      const last = endOfWeek(zoned, { weekStartsOn: 1 });
+      return { start: torontoMidnight(first), end: torontoMidnight(addDays(last, 1)) };
+    }
+    default: {
+      const first = startOfMonth(zoned);
+      const last = endOfMonth(zoned);
+      return { start: torontoMidnight(first), end: torontoMidnight(addDays(last, 1)) };
+    }
+  }
+}
+
+/** Strictement avant le jour J (Toronto) : instant-limite exclusif. */
+function torontoBefore(raw: string | null): Date | undefined {
+  const day = calendarDay(raw);
+  return day ? validDate(fromZonedTime(`${day}T00:00:00`, APP_TZ)) : undefined;
+}
+
+/** Strictement après le jour J (Toronto) : premier instant du jour J+1. */
+function torontoAfter(raw: string | null): Date | undefined {
+  const day = calendarDay(raw);
+  if (!day) return undefined;
+  const next = format(addDays(parseISO(day), 1), "yyyy-MM-dd");
+  return validDate(fromZonedTime(`${next}T00:00:00`, APP_TZ));
 }
 
 /** Tris acceptés — `activity` reproduit l'ordre historique du panneau. */
@@ -85,6 +152,10 @@ type SortKey = keyof typeof SORT_COLUMNS;
  * - language — fr | en
  * - createdFrom / createdTo, updatedFrom / updatedTo — yyyy-mm-dd, bornes
  *   inclusives en heure de Toronto (création / dernière modification)
+ * - createdWithin / updatedWithin — today | yesterday | week | month,
+ *   fenêtre résolue à la requête dans le calendrier de Toronto
+ * - createdBefore / createdAfter, updatedBefore / updatedAfter — yyyy-mm-dd,
+ *   strictement avant / après ce jour (Toronto)
  * - sort (activity | name | city | createdAt | updatedAt | followupAt |
  *   lastContact), dir (asc|desc), page, pageSize (capped at 50).
  * Ordered by recent activity by default.
@@ -159,14 +230,26 @@ export async function GET(req: NextRequest) {
   const langs = tokens(languageParam).filter((l) => l === "fr" || l === "en");
   if (langs.length > 0) conditions.push(inArray(clients.language, langs));
 
-  const createdFrom = torontoStart(sp.get("createdFrom"));
-  if (createdFrom) conditions.push(gte(clients.createdAt, createdFrom));
-  const createdTo = torontoEnd(sp.get("createdTo"));
-  if (createdTo) conditions.push(lte(clients.createdAt, createdTo));
-  const updatedFrom = torontoStart(sp.get("updatedFrom"));
-  if (updatedFrom) conditions.push(gte(clients.updatedAt, updatedFrom));
-  const updatedTo = torontoEnd(sp.get("updatedTo"));
-  if (updatedTo) conditions.push(lte(clients.updatedAt, updatedTo));
+  // Filtres de dates : mêmes options pour la création et la modification —
+  // fenêtre nommée (createdWithin), borne stricte (createdBefore/After) ou
+  // plage inclusive libre (createdFrom/To).
+  for (const [prefix, column] of [
+    ["created", clients.createdAt],
+    ["updated", clients.updatedAt],
+  ] as const) {
+    const win = torontoWindow(sp.get(`${prefix}Within`) ?? "", now);
+    if (win) {
+      conditions.push(gte(column, win.start), lt(column, win.end));
+    }
+    const before = torontoBefore(sp.get(`${prefix}Before`));
+    if (before) conditions.push(lt(column, before));
+    const after = torontoAfter(sp.get(`${prefix}After`));
+    if (after) conditions.push(gte(column, after));
+    const from = torontoStart(sp.get(`${prefix}From`));
+    if (from) conditions.push(gte(column, from));
+    const to = torontoEnd(sp.get(`${prefix}To`));
+    if (to) conditions.push(lte(column, to));
+  }
 
   /** Condition d'UN état de suivi — les états cochés se cumulent en OU. */
   const followupState = (state: string): SQL | undefined => {
