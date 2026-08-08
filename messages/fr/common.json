@@ -55,5 +55,23 @@
   "no": "Non",
   "optional": "optionnel",
   "roleAdmin": "Admin",
-  "roleCaller": "Téléphoniste"
+  "roleCaller": "Téléphoniste",
+  "profile": {
+    "identityTitle": "Informations",
+    "name": "Nom",
+    "email": "Courriel",
+    "save": "Enregistrer",
+    "saved": "Profil mis à jour",
+    "emailTaken": "Ce courriel est déjà utilisé par un autre compte",
+    "lineNumber": "Ligne",
+    "passwordTitle": "Mot de passe",
+    "currentPassword": "Mot de passe actuel",
+    "newPassword": "Nouveau mot de passe",
+    "confirmPassword": "Confirmer le nouveau mot de passe",
+    "passwordRule": "Au moins 8 caractères",
+    "change": "Changer le mot de passe",
+    "passwordChanged": "Mot de passe modifié",
+    "wrongPassword": "Mot de passe actuel incorrect",
+    "passwordMismatch": "Les deux nouveaux mots de passe ne correspondent pas"
+  }
 }

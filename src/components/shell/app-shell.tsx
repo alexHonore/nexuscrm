@@ -15,6 +15,7 @@ import {
   Settings,
   ShieldCheck,
   Upload,
+  UserRound,
   Users,
   UsersRound,
 } from "lucide-react";
@@ -280,6 +281,14 @@ function UserMenu({
       )}
       <DropdownMenuContent align={align} className="w-52">
         <DropdownMenuLabel className="truncate">{user.name}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          className={cn(pathname === "/profile" && "bg-accent text-accent-foreground")}
+          render={<Link href="/profile" />}
+        >
+          <UserRound className="size-4" />
+          {t("nav.profile")}
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         {compact && user.role === "admin" ? (
           <>

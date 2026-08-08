@@ -55,5 +55,23 @@
   "no": "No",
   "optional": "optional",
   "roleAdmin": "Admin",
-  "roleCaller": "Caller"
+  "roleCaller": "Caller",
+  "profile": {
+    "identityTitle": "Information",
+    "name": "Name",
+    "email": "Email",
+    "save": "Save",
+    "saved": "Profile updated",
+    "emailTaken": "This email is already used by another account",
+    "lineNumber": "Line",
+    "passwordTitle": "Password",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm new password",
+    "passwordRule": "At least 8 characters",
+    "change": "Change password",
+    "passwordChanged": "Password changed",
+    "wrongPassword": "Current password is incorrect",
+    "passwordMismatch": "The two new passwords do not match"
+  }
 }
