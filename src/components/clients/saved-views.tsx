@@ -1,5 +1,6 @@
 "use client";
 
+import { isValid, parseISO } from "date-fns";
 import { BookmarkIcon, BookmarkPlusIcon, Trash2Icon } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState, useSyncExternalStore } from "react";
@@ -58,9 +59,16 @@ function stringList(list: unknown, legacy: unknown): string[] {
   return [];
 }
 
-/** Borne de date d'une vue stockée : yyyy-mm-dd sinon « pas de borne ». */
+/** Borne de date d'une vue stockée : yyyy-mm-dd RÉEL sinon « pas de borne ».
+ *  isValid(parseISO(...)) rejette « 2026-02-30 » — Date.parse ne suffirait
+ *  pas (V8 le fait déborder sur le 2 mars), et l'affichage des pastilles
+ *  planterait sur une Invalid Date. */
 function dateBound(value: unknown): string {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
+  return typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    isValid(parseISO(value))
+    ? value
+    : "";
 }
 
 /** Vue telle que stockée → état applicable, quel que soit son âge. */

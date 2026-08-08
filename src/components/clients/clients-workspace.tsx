@@ -593,8 +593,15 @@ export function ClientsWorkspace({
     </div>
   );
 
-  /** « 1 août » — la valeur yyyy-mm-dd est affichée telle quelle, sans fuseau. */
-  const chipDate = (ymd: string) => formatDate(parseISO(ymd), "d MMM", { locale: dfnsLocale });
+  const now = Date.now();
+
+  /** « 1 août » (année courante) ou « 1 août 2025 » — la valeur yyyy-mm-dd
+   *  est affichée telle quelle, sans conversion de fuseau. */
+  const chipDate = (ymd: string) => {
+    const d = parseISO(ymd);
+    const sameYear = d.getFullYear() === new Date(now).getFullYear();
+    return formatDate(d, sameYear ? "d MMM" : "d MMM yyyy", { locale: dfnsLocale });
+  };
 
   /** Libellé de rappel d'une plage de dates : « Créée du 1 août au 8 août ». */
   const rangeChipLabel = (
@@ -697,7 +704,6 @@ export function ClientsWorkspace({
 
   const chipBase =
     "inline-flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-xs font-medium transition-colors md:h-7";
-  const now = Date.now();
 
   /** « AB » pour l'avatar de fiche — teinté de la couleur de catégorie. */
   const initials = (name: string) =>

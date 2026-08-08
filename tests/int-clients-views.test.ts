@@ -286,6 +286,10 @@ describe("filtres et tris avancés de /api/clients/list", () => {
     expect(await names("createdFrom=2026-01-01&updatedTo=2026-01-31")).toEqual(["VeilleTard"]);
     // Valeur invalide : filtre ignoré sans erreur.
     expect((await listItems("createdFrom=pas-une-date")).total).toBe(3);
+    // Date impossible au calendrier (bonne forme, Invalid Date) : ignorée
+    // aussi — elle ferait autrement planter la sérialisation Postgres (500).
+    expect((await listItems("createdFrom=2026-02-30")).total).toBe(3);
+    expect((await listItems("updatedTo=2026-13-01")).total).toBe(3);
   });
 });
 

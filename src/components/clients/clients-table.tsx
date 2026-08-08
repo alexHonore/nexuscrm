@@ -661,7 +661,7 @@ export function ClientsTable({
                     {day(item.updatedAt)}
                   </TableCell>
                 ) : null}
-                <TableCell className="w-10" aria-hidden />
+                <TableCell className="w-10" />
               </TableRow>
             ))}
           </TableBody>

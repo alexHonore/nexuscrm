@@ -44,12 +44,22 @@ function tokens(raw: string): string[] {
 // même convention que l'export admin. Valeur invalide : filtre ignoré.
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** La regex ne vérifie que la forme : « 2026-02-30 » donne une Invalid Date
+ *  (truthy !) qui ferait planter le driver Postgres — on la rejette ici. */
+function validDate(d: Date): Date | undefined {
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
 function torontoStart(raw: string | null): Date | undefined {
-  return raw && DATE_RE.test(raw) ? fromZonedTime(`${raw}T00:00:00`, APP_TZ) : undefined;
+  return raw && DATE_RE.test(raw)
+    ? validDate(fromZonedTime(`${raw}T00:00:00`, APP_TZ))
+    : undefined;
 }
 
 function torontoEnd(raw: string | null): Date | undefined {
-  return raw && DATE_RE.test(raw) ? fromZonedTime(`${raw}T23:59:59.999`, APP_TZ) : undefined;
+  return raw && DATE_RE.test(raw)
+    ? validDate(fromZonedTime(`${raw}T23:59:59.999`, APP_TZ))
+    : undefined;
 }
 
 /** Tris acceptés — `activity` reproduit l'ordre historique du panneau. */
