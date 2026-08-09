@@ -46,6 +46,32 @@ type CallRowLite = {
 };
 
 const MATCH_WINDOW_MS = 3 * 60 * 1000;
+
+/**
+ * Un même appel produit PLUSIEURS lignes CDR chez voip.ms — une par patte
+ * (sous-compte → passerelle, passerelle → destination). Observé en production :
+ * uniqueid consécutifs (…374 / …375), même seconde, même destination, seules
+ * les durées diffèrent. Sans regroupement, la 1re patte s'attachait à l'appel
+ * local et la 2e était insérée comme un appel fantôme.
+ *
+ * On garde une ligne par (sous-compte, destination, seconde exacte) : celle qui
+ * a la plus longue durée, c'est-à-dire la patte qui couvre tout l'appel. Deux
+ * appels distincts vers le même numéro, depuis le même poste, à la même
+ * seconde : impossible en pratique.
+ */
+export function collapseCdrLegs<T extends { account: string; destination: string; date: string; seconds: string }>(
+  rows: T[],
+): T[] {
+  const best = new Map<string, T>();
+  for (const row of rows) {
+    const key = `${row.account}|${phoneMatchKey(row.destination) ?? row.destination}|${row.date}`;
+    const current = best.get(key);
+    if (!current || (Number.parseInt(row.seconds, 10) || 0) > (Number.parseInt(current.seconds, 10) || 0)) {
+      best.set(key, row);
+    }
+  }
+  return [...best.values()];
+}
 const MAX_ERRORS = 25;
 /**
  * Clé du verrou consultatif Postgres de la synchro CDR. Entier littéral —
@@ -181,7 +207,7 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
     }
 
     // ── 4. Réconciliation CDR → calls ──
-    for (const row of cdrRows) {
+    for (const row of collapseCdrLegs(cdrRows)) {
       try {
         if (!row.uniqueid) continue;
         const user = userByAccount.get(row.account);

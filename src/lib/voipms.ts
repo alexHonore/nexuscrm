@@ -218,13 +218,33 @@ export function torontoUtcOffsetHours(dateStr: string): number {
   );
 }
 
+/**
+ * Décalage NORMAL (hors heure avancée) de Toronto : −5. Calculé en janvier
+ * plutôt qu'écrit en dur, pour rester juste si la règle change.
+ *
+ * C'est CE décalage qu'attend le paramètre `timezone` de getCDR : voip.ms
+ * applique l'heure avancée LUI-MÊME par-dessus la valeur demandée. Mesuré en
+ * production le 2026-08-09 — en demandant −4 (EDT), l'API a répondu « 11:37:53 »
+ * pour un appel passé à 10:37:52 heure de Toronto, soit UTC−3 : une heure de
+ * trop. En demandant −5, elle ajoute l'heure avancée et renvoie l'heure locale
+ * réelle, été comme hiver.
+ */
+export function torontoStandardUtcOffsetHours(): number {
+  return torontoUtcOffsetHours("2026-01-15");
+}
+
 /** « -4 » → « -04:00 » (suffixe ISO pour ré-interpréter une date CDR). */
 export function utcOffsetSuffix(offsetHours: number): string {
   const sign = offsetHours < 0 ? "-" : "+";
   return `${sign}${String(Math.abs(offsetHours)).padStart(2, "0")}:00`;
 }
 
-/** CDR du compte principal + sous-comptes. Dates au format YYYY-MM-DD (Toronto). */
+/**
+ * CDR du compte principal + sous-comptes. Dates au format YYYY-MM-DD (Toronto).
+ * Les horodatages reviennent en heure locale de Toronto (voir
+ * `torontoStandardUtcOffsetHours`) ; c'est l'appelant qui les ré-interprète
+ * avec le décalage RÉEL de la journée.
+ */
 export async function getCdr(dateFrom: string, dateTo: string): Promise<VoipMsCdr[]> {
   const r = await voipms<{ cdr: VoipMsCdr[] }>("getCDR", {
     date_from: dateFrom,
@@ -233,7 +253,7 @@ export async function getCdr(dateFrom: string, dateTo: string): Promise<VoipMsCd
     noanswer: 1,
     busy: 1,
     failed: 1,
-    timezone: torontoUtcOffsetHours(dateFrom),
+    timezone: torontoStandardUtcOffsetHours(),
   });
   return r.cdr ?? [];
 }

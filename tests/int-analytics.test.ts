@@ -747,7 +747,7 @@ describe("GET /api/cron/sync-cdr", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("demande les CDR d'hier et d'aujourd'hui au fuseau RÉEL de Toronto (EDT −4 en août)", async () => {
+  it("RÉGRESSION : demande les CDR au décalage NORMAL (−5), voip.ms ajoute l'heure avancée", async () => {
     await seedCdrFixture();
     const out = await runSync();
     expect(out.range).toEqual({ from: "2026-08-19", to: "2026-08-20" });
@@ -755,9 +755,14 @@ describe("GET /api/cron/sync-cdr", () => {
     const cdrReq = voip.requests.find((u) => u.searchParams.get("method") === "getCDR")!;
     expect(cdrReq.searchParams.get("date_from")).toBe("2026-08-19");
     expect(cdrReq.searchParams.get("date_to")).toBe("2026-08-20");
-    // Un −5 figé décalait d'une heure TOUS les horodatages d'été et faisait
-    // échouer le rapprochement à ±3 min : le fuseau suit l'heure avancée.
-    expect(cdrReq.searchParams.get("timezone")).toBe("-4");
+    // Mesuré en production le 2026-08-09 : en demandant −4 (le décalage réel
+    // d'été), voip.ms a renvoyé « 11:37:53 » pour un appel de 10:37:52 heure de
+    // Toronto — une heure de trop, parce qu'il applique l'heure avancée
+    // lui-même. Les appels apparaissaient donc dans le FUTUR et, décalés de
+    // 60 min, échappaient au rapprochement à ±3 min : chaque appel se
+    // dédoublait dans le journal. On demande le décalage normal ; c'est
+    // l'analyse de la date qui suit l'heure avancée.
+    expect(cdrReq.searchParams.get("timezone")).toBe("-5");
   });
 
   it("suit l'heure normale (EST −5) hors période d'heure avancée", async () => {
@@ -766,6 +771,46 @@ describe("GET /api/cron/sync-cdr", () => {
     expect(torontoUtcOffsetHours("2026-08-19")).toBe(-4); // été
     expect(utcOffsetSuffix(-5)).toBe("-05:00");
     expect(utcOffsetSuffix(-4)).toBe("-04:00");
+  });
+
+  it("RÉGRESSION : l'heure affichée est celle de l'appel, pas une heure dans le futur", async () => {
+    const f = await seedCdrFixture();
+    // Appel connu de voip.ms seulement (aucune trace locale) : c'est la date
+    // analysée qui est stockée. « 12:00:00 » renvoyé par voip.ms = midi heure
+    // de Toronto (le paramètre timezone lui fait déjà appliquer l'heure
+    // avancée) → 16:00 UTC en août. Une analyse qui « recorrigeait » plaçait
+    // l'appel une heure plus tard — d'où des appels affichés dans le futur.
+    void f;
+    const out = await runSync();
+    expect(out.inserted).toBeGreaterThan(0);
+    const [row] = await testDb
+      .select()
+      .from(calls)
+      .where(eq(calls.providerCallId, "uid-3"));
+    expect(row.startedAt.toISOString()).toBe("2026-08-19T16:00:00.000Z");
+  });
+
+  it("RÉGRESSION : les deux pattes CDR d'un même appel ne créent qu'une ligne", async () => {
+    await seedCdrFixture();
+    // voip.ms journalise une ligne par patte : uniqueid consécutifs, même
+    // seconde, même destination, durées différentes. Sans regroupement, la
+    // seconde patte était insérée comme un appel fantôme — l'appel apparaissait
+    // deux fois dans le journal.
+    voip.cdr = [
+      { uniqueid: "leg-a", account: "nexus_alice", date: "2026-08-19 11:00:00", callerid: "14180001111", destination: "14185551234", disposition: "ANSWERED", seconds: "21", duration: "0:00:21", description: "" },
+      { uniqueid: "leg-b", account: "nexus_alice", date: "2026-08-19 11:00:00", callerid: "14180001111", destination: "14185551234", disposition: "ANSWERED", seconds: "26", duration: "0:00:26", description: "" },
+    ];
+    const out = await runSync();
+
+    expect(out.cdrRows).toBe(2);
+    expect(out.inserted).toBe(0); // aucun fantôme
+    const rows = await testDb
+      .select()
+      .from(calls)
+      .where(eq(calls.toNumber, "+14185551234"));
+    expect(rows).toHaveLength(1);
+    // La patte retenue est la plus longue : elle couvre tout l'appel.
+    expect(rows[0].durationSec).toBe(26);
   });
 
   it("rattache un CDR à l'appel existant par uniqueid", async () => {
