@@ -389,7 +389,7 @@ describe("opérations d'administration", () => {
         }),
       );
       expect(res.status).toBe(200);
-      await expect(res.json()).resolves.toEqual({
+      await expect(res.json()).resolves.toMatchObject({
         created: 2,
         updated: 0,
         skipped: 1,
@@ -400,6 +400,65 @@ describe("opérations d'administration", () => {
       expect(rows.map((r) => r.phone).sort()).toEqual(["+14184761542", "+15145550142"]);
       expect(rows.every((r) => r.categoryId === cats.new.id)).toBe(true);
       expect(rows.every((r) => r.createdById === admin.id)).toBe(true);
+    });
+
+    it("dit POURQUOI chaque ligne est écartée, motif par motif", async () => {
+      await seedSystemCategories();
+      const admin = await makeUser({ role: "admin" });
+      await loginAs(admin);
+      // Fiche déjà en base → doublon « en base » (distinct du doublon interne).
+      await makeClient({ phone: "+15145550142" });
+
+      const res = await importRoute.POST(
+        jsonRequest(importUrl, "POST", {
+          rows: [
+            { fullName: "Valide", phone: "418-476-1542" },
+            { fullName: "Cellule vide", phone: "" },
+            { fullName: "Sans chiffre", phone: "à venir" },
+            { fullName: "Doublon fichier", phone: "4184761542" },
+            { fullName: "Déjà au CRM", phone: "514 555 0142" },
+            { fullName: "Colonne absente" },
+          ],
+          mode: "skip",
+        }),
+      );
+      const body = (await res.json()) as {
+        created: number;
+        skipped: number;
+        invalid: number;
+        issues: Array<{ index: number; reason: string; name?: string; existingId?: string }>;
+      };
+
+      expect(body).toMatchObject({ created: 1, skipped: 2, invalid: 3 });
+      // Une entrée par ligne écartée : aucun rejet muet.
+      expect(body.issues).toHaveLength(body.skipped + body.invalid);
+      expect(body.issues.map((i) => [i.index, i.reason])).toEqual([
+        [1, "phone_missing"],
+        [2, "phone_invalid"],
+        [3, "duplicate_in_file"],
+        [4, "duplicate_in_db"],
+        [5, "phone_missing"],
+      ]);
+      // Le motif « déjà en base » pointe la fiche existante (lien depuis l'UI).
+      const dup = body.issues.find((i) => i.reason === "duplicate_in_db")!;
+      expect(dup.existingId).toEqual(expect.any(String));
+      expect(dup.name).toBe("Déjà au CRM");
+    });
+
+    it("mode « update » : le doublon en base n'est plus signalé comme écarté", async () => {
+      const admin = await makeUser({ role: "admin" });
+      await loginAs(admin);
+      await makeClient({ phone: "+14184761542", fullName: "Ancien nom" });
+
+      const res = await importRoute.POST(
+        jsonRequest(importUrl, "POST", {
+          rows: [{ fullName: "Nom du CSV", phone: "418-476-1542" }],
+          mode: "update",
+        }),
+      );
+      const body = (await res.json()) as { updated: number; issues: unknown[] };
+      expect(body.updated).toBe(1);
+      expect(body.issues).toEqual([]);
     });
 
     it("mode « skip » : ignore un client déjà présent sans le modifier", async () => {

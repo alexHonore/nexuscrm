@@ -37,9 +37,26 @@ const bodySchema = z.object({
 });
 
 /**
+ * Motif de rejet d'une ligne — jamais de rejet muet : chaque ligne écartée
+ * repart avec sa raison, pour que l'UI puisse l'expliquer et proposer une
+ * suite (corriger et réimporter, mettre à jour la fiche existante…).
+ */
+export type ImportIssue = {
+  /** Index de la ligne DANS LE LOT ; le client y ajoute l'offset du lot. */
+  index: number;
+  reason: "phone_missing" | "phone_invalid" | "duplicate_in_file" | "duplicate_in_db";
+  /** Valeur brute du téléphone, pour que l'admin reconnaisse sa ligne. */
+  phone?: string;
+  name?: string;
+  /** Fiche déjà en base (duplicate_in_db) — permet d'y renvoyer l'admin. */
+  existingId?: string;
+};
+
+/**
  * Import CSV — reçoit des lots (max 500 lignes) déjà mappés côté client.
- * Lignes sans téléphone valide → invalid. Doublons par téléphone (E.164) →
- * ignorés ou mis à jour selon le mode.
+ * Lignes sans téléphone exploitable → invalid. Doublons par téléphone (E.164),
+ * dans le fichier ou déjà en base → ignorés ou mis à jour selon le mode.
+ * Chaque ligne écartée est renvoyée dans `issues` avec son motif.
  */
 export async function POST(req: Request) {
   const admin = await apiAdmin();
@@ -49,6 +66,7 @@ export async function POST(req: Request) {
   if (body instanceof NextResponse) return body;
 
   const counts = { created: 0, updated: 0, skipped: 0, invalid: 0 };
+  const issues: ImportIssue[] = [];
 
   // Catégorie par défaut : celle choisie, sinon « Non contacté » (key: new).
   let categoryId = body.defaults.categoryId ?? null;
@@ -58,21 +76,30 @@ export async function POST(req: Request) {
   }
 
   // Normalisation + dédoublonnage intra-lot.
-  type Prepared = { phone: string; row: z.infer<typeof rowSchema> };
+  type Prepared = { phone: string; row: z.infer<typeof rowSchema>; index: number };
   const seen = new Set<string>();
   const prepared: Prepared[] = [];
-  for (const row of body.rows) {
+  for (const [index, row] of body.rows.entries()) {
     const phone = normalizePhone(row.phone);
     if (!phone) {
       counts.invalid++;
+      // Cellule vide vs cellule remplie mais sans un seul chiffre : les deux
+      // se corrigent différemment, on ne les confond pas.
+      issues.push({
+        index,
+        reason: row.phone?.trim() ? "phone_invalid" : "phone_missing",
+        phone: row.phone,
+        name: row.fullName,
+      });
       continue;
     }
     if (seen.has(phone)) {
       counts.skipped++;
+      issues.push({ index, reason: "duplicate_in_file", phone: row.phone, name: row.fullName });
       continue;
     }
     seen.add(phone);
-    prepared.push({ phone, row });
+    prepared.push({ phone, row, index });
   }
 
   // Doublons existants en base (une seule requête pour le lot).
@@ -91,11 +118,18 @@ export async function POST(req: Request) {
 
   const toInsert: (typeof clients.$inferInsert)[] = [];
 
-  for (const { phone, row } of prepared) {
+  for (const { phone, row, index } of prepared) {
     const existingId = existingByPhone.get(phone);
     if (existingId) {
       if (body.mode === "skip") {
         counts.skipped++;
+        issues.push({
+          index,
+          reason: "duplicate_in_db",
+          phone: row.phone,
+          name: row.fullName,
+          existingId,
+        });
         continue;
       }
       const set: Partial<typeof clients.$inferInsert> = { updatedAt: new Date() };
@@ -151,5 +185,9 @@ export async function POST(req: Request) {
     detail: { ...counts, batch: body.batch ?? 0, mode: body.mode },
   });
 
-  return NextResponse.json(counts);
+  // Remis dans l'ordre du fichier : les doublons en base sont détectés dans
+  // une seconde passe, mais l'admin lit ses lignes de haut en bas.
+  issues.sort((a, b) => a.index - b.index);
+
+  return NextResponse.json({ ...counts, issues });
 }

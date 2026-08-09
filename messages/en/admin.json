@@ -273,6 +273,40 @@
         "updated": "Updated",
         "skipped": "Skipped",
         "invalid": "Invalid"
+      },
+      "issues": {
+        "title": "{count, plural, one {# row skipped — here's why} other {# rows skipped — here's why}}",
+        "subtitle": "Nothing is dropped silently. Each group explains the cause and what you can do.",
+        "suggestion": "What to do:",
+        "line": "Row {line}",
+        "updateExisting": "Update those clients",
+        "updated": "{count, plural, =0 {No client updated} one {# client updated} other {# clients updated}}",
+        "duplicate_in_db": {
+          "title": "Already in the CRM (same phone)",
+          "why": "A client already exists with this number. You chose “Skip duplicates”, so these rows were not imported and the existing clients were left untouched.",
+          "what": "Update the existing clients with the file's data. If it's actually a different person, fix the number below and re-import. Doing nothing leaves them as they are."
+        },
+        "duplicate_in_file": {
+          "title": "Duplicated inside the file",
+          "why": "This number appears more than once in your file. The first occurrence was imported and the rest skipped — no CRM data was lost.",
+          "what": "Nothing to do if the duplicates are identical. If they're two different people, fix the number below and re-import the row."
+        },
+        "phone_invalid": {
+          "title": "Unreadable phone number",
+          "why": "The phone cell contains no digits at all (for example “n/a”, “tbd”, or free text). A number is required — without one the client can't be called.",
+          "what": "Type the correct number below, then re-import these rows. Without a valid number they stay out of the CRM."
+        },
+        "phone_missing": {
+          "title": "Phone number missing",
+          "why": "The phone column is empty on these rows — or the wrong column was mapped to the Phone field in step 2.",
+          "what": "Check the column mapping in step 2 first. Otherwise type the number below and re-import these rows."
+        },
+        "retryFixed": "Fix and re-import",
+        "phonePlaceholder": "418 555 0123",
+        "phoneLabel": "Phone for row {line}",
+        "openClient": "Open client",
+        "fixed": "{count, plural, =0 {No client created} one {# client imported} other {# clients imported}}",
+        "editHint": "Fix the number right here, then re-import those rows."
       }
     },
     "export": {

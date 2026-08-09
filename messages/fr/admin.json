@@ -273,6 +273,40 @@
         "updated": "Mis à jour",
         "skipped": "Ignorés",
         "invalid": "Invalides"
+      },
+      "issues": {
+        "title": "{count, plural, one {# ligne écartée — voici pourquoi} other {# lignes écartées — voici pourquoi}}",
+        "subtitle": "Rien n'est écarté en silence. Chaque groupe indique la cause et ce que vous pouvez faire.",
+        "suggestion": "Que faire :",
+        "line": "Ligne {line}",
+        "updateExisting": "Mettre à jour ces fiches",
+        "updated": "{count, plural, =0 {Aucune fiche mise à jour} one {# fiche mise à jour} other {# fiches mises à jour}}",
+        "duplicate_in_db": {
+          "title": "Déjà dans le CRM (même téléphone)",
+          "why": "Une fiche existe déjà avec ce numéro. Vous aviez choisi « Ignorer les doublons », donc ces lignes n'ont pas été importées et les fiches existantes n'ont pas bougé.",
+          "what": "Mettez à jour les fiches existantes avec les données du fichier. Si c'est en fait une autre personne, corrigez le numéro ci-dessous et réimportez. Ne rien faire les laisse telles quelles."
+        },
+        "duplicate_in_file": {
+          "title": "En double dans le fichier",
+          "why": "Ce numéro apparaît plusieurs fois dans votre fichier. La première occurrence a été importée, les suivantes ignorées — aucune donnée n'a été perdue côté CRM.",
+          "what": "Rien à faire si les doublons sont identiques. S'il s'agit de deux personnes différentes, corrigez le numéro ci-dessous et réimportez la ligne."
+        },
+        "phone_invalid": {
+          "title": "Téléphone illisible",
+          "why": "La cellule téléphone ne contient aucun chiffre (par exemple « n/d », « à venir » ou du texte). Un numéro est obligatoire : sans lui, la fiche ne peut pas être appelée.",
+          "what": "Saisissez le bon numéro ci-dessous, puis réimportez ces lignes. Sans numéro valide, elles resteront hors du CRM."
+        },
+        "phone_missing": {
+          "title": "Téléphone absent",
+          "why": "La colonne téléphone est vide sur ces lignes — ou la mauvaise colonne a été associée au champ Téléphone à l'étape 2.",
+          "what": "Vérifiez d'abord l'association des colonnes à l'étape 2. Sinon, saisissez le numéro ci-dessous et réimportez ces lignes."
+        },
+        "retryFixed": "Corriger et réimporter",
+        "phonePlaceholder": "418 555 0123",
+        "phoneLabel": "Téléphone de la ligne {line}",
+        "openClient": "Voir la fiche",
+        "fixed": "{count, plural, =0 {Aucune fiche créée} one {# fiche importée} other {# fiches importées}}",
+        "editHint": "Corrigez le numéro directement ici, puis réimportez ces lignes."
       }
     },
     "export": {

@@ -1,6 +1,15 @@
 "use client";
 
-import { Download, FileSpreadsheet, Loader2, Upload } from "lucide-react";
+import {
+  Copy as CopyIcon,
+  Download,
+  FileSpreadsheet,
+  Loader2,
+  RefreshCw,
+  TriangleAlert,
+  Upload,
+} from "lucide-react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import Papa from "papaparse";
 import { useMemo, useRef, useState } from "react";
@@ -117,6 +126,28 @@ function guessMapping(headers: string[]): Partial<Record<Field, string>> {
 
 type Counts = { created: number; updated: number; skipped: number; invalid: number };
 
+/** Motifs de rejet renvoyés par l'API (voir src/app/api/admin/import/route.ts). */
+type IssueReason = "phone_missing" | "phone_invalid" | "duplicate_in_file" | "duplicate_in_db";
+type ImportIssue = {
+  index: number;
+  reason: IssueReason;
+  phone?: string;
+  name?: string;
+  existingId?: string;
+};
+type ImportResponse = Counts & { issues: ImportIssue[] };
+
+/** Ligne écartée, ramenée au numéro de ligne réel du fichier CSV. */
+type RejectedRow = ImportIssue & { csvLine: number; rowIndex: number };
+
+/** Ordre d'affichage : d'abord ce qui demande une action, puis l'informatif. */
+const REASON_ORDER: IssueReason[] = [
+  "duplicate_in_db",
+  "phone_invalid",
+  "phone_missing",
+  "duplicate_in_file",
+];
+
 export function ImportCard({
   categories,
   sources,
@@ -140,8 +171,22 @@ export function ImportCard({
   const [mode, setMode] = useState<"skip" | "update">("skip");
   const [progress, setProgress] = useState<number | null>(null);
   const [result, setResult] = useState<Counts | null>(null);
+  const [rejected, setRejected] = useState<RejectedRow[]>([]);
+  const [fixing, setFixing] = useState<IssueReason | null>(null);
+  /** Corrections saisies sur place : index de ligne → nouveau téléphone. */
+  const [fixes, setFixes] = useState<Record<number, string>>({});
 
   const preview = useMemo(() => rows.slice(0, 5), [rows]);
+
+  /** Lignes écartées regroupées par motif, dans l'ordre d'affichage. */
+  const rejectedGroups = useMemo(
+    () =>
+      REASON_ORDER.map((reason) => ({
+        reason,
+        items: rejected.filter((r) => r.reason === reason),
+      })).filter((g) => g.items.length > 0),
+    [rejected],
+  );
 
   const onFile = (file: File) => {
     setResult(null);
@@ -160,6 +205,60 @@ export function ImportCard({
     });
   };
 
+  /** Applique le mappage colonnes → champs à une ligne brute du CSV. */
+  const mapRow = (raw: Record<string, string>) => {
+    const mapped: Record<string, string> = {};
+    for (const field of FIELDS) {
+      const header = mapping[field];
+      if (header && raw[header] != null && String(raw[header]).trim() !== "") {
+        mapped[field] = String(raw[header]).trim();
+      }
+    }
+    return mapped;
+  };
+
+  /**
+   * Envoie par lots les lignes désignées (index dans `rows`) et agrège les
+   * compteurs ET les lignes écartées, ramenées à leur position dans le fichier.
+   * Sert autant à l'import initial qu'au rejeu d'un groupe d'erreurs.
+   */
+  const sendRows = async (
+    sourceRows: Record<string, string>[],
+    rowIndexes: number[],
+    sendMode: "skip" | "update",
+  ) => {
+    const totals: Counts = { created: 0, updated: 0, skipped: 0, invalid: 0 };
+    const collected: RejectedRow[] = [];
+    const BATCH = 200;
+    for (let i = 0; i < rowIndexes.length; i += BATCH) {
+      const slice = rowIndexes.slice(i, i + BATCH);
+      const res = await api<ImportResponse>("/api/admin/import", {
+        method: "POST",
+        body: JSON.stringify({
+          rows: slice.map((idx) => mapRow(sourceRows[idx])),
+          mode: sendMode,
+          batch: Math.floor(i / BATCH),
+          defaults: {
+            categoryId: defaults.categoryId ? Number(defaults.categoryId) : null,
+            sourceId: defaults.sourceId ? Number(defaults.sourceId) : null,
+            assignedToId: defaults.assignedToId || null,
+          },
+        }),
+      });
+      totals.created += res.created;
+      totals.updated += res.updated;
+      totals.skipped += res.skipped;
+      totals.invalid += res.invalid;
+      for (const issue of res.issues ?? []) {
+        const rowIndex = slice[issue.index];
+        // +2 : la ligne d'en-tête, puis la numérotation à partir de 1.
+        collected.push({ ...issue, rowIndex, csvLine: rowIndex + 2 });
+      }
+      setProgress(Math.round(((i + slice.length) / rowIndexes.length) * 100));
+    }
+    return { totals, collected };
+  };
+
   const runImport = async () => {
     if (!mapping.phone) {
       toast.error(t("importExport.import.phoneRequired"));
@@ -167,44 +266,103 @@ export function ImportCard({
     }
     setProgress(0);
     setResult(null);
-    const totals: Counts = { created: 0, updated: 0, skipped: 0, invalid: 0 };
-    const BATCH = 200;
+    setRejected([]);
+    setFixes({});
     try {
-      for (let i = 0; i < rows.length; i += BATCH) {
-        const batchRows = rows.slice(i, i + BATCH).map((raw) => {
-          const mapped: Record<string, string> = {};
-          for (const field of FIELDS) {
-            const header = mapping[field];
-            if (header && raw[header] != null && String(raw[header]).trim() !== "") {
-              mapped[field] = String(raw[header]).trim();
-            }
-          }
-          return mapped;
-        });
-        const counts = await api<Counts>("/api/admin/import", {
-          method: "POST",
-          body: JSON.stringify({
-            rows: batchRows,
-            mode,
-            batch: Math.floor(i / BATCH),
-            defaults: {
-              categoryId: defaults.categoryId ? Number(defaults.categoryId) : null,
-              sourceId: defaults.sourceId ? Number(defaults.sourceId) : null,
-              assignedToId: defaults.assignedToId || null,
-            },
-          }),
-        });
-        totals.created += counts.created;
-        totals.updated += counts.updated;
-        totals.skipped += counts.skipped;
-        totals.invalid += counts.invalid;
-        setProgress(Math.round(((i + batchRows.length) / rows.length) * 100));
-      }
+      const { totals, collected } = await sendRows(
+        rows,
+        rows.map((_, i) => i),
+        mode,
+      );
       setResult(totals);
+      setRejected(collected);
       toast.success(t("importExport.import.done"));
     } catch {
       toast.error(t("genericError"));
     } finally {
+      setProgress(null);
+    }
+  };
+
+  /** Compteurs après le rejeu d'un groupe : ce qui repasse quitte les écartés. */
+  const mergeRetry = (
+    group: { reason: IssueReason; items: RejectedRow[] },
+    retried: number[],
+    totals: Counts,
+    collected: RejectedRow[],
+  ) => {
+    const stillRejected = new Set(collected.map((r) => r.rowIndex));
+    setRejected((prev) => [
+      ...prev.filter((r) => !retried.includes(r.rowIndex) || stillRejected.has(r.rowIndex)),
+      ...collected.filter((r) => !prev.some((p) => p.rowIndex === r.rowIndex && p.reason === r.reason)),
+    ]);
+    const resolved = retried.length - collected.length;
+    setResult((prev) =>
+      prev
+        ? {
+            created: prev.created + totals.created,
+            updated: prev.updated + totals.updated,
+            // Les lignes réglées sortent du compteur d'où elles venaient.
+            skipped:
+              prev.skipped - (group.reason.startsWith("duplicate") ? resolved : 0) + totals.skipped,
+            invalid:
+              prev.invalid - (group.reason.startsWith("phone") ? resolved : 0) + totals.invalid,
+          }
+        : totals,
+    );
+  };
+
+  /** « Mettre à jour ces fiches » — rejoue le groupe en mode update. */
+  const updateGroup = async (group: { reason: IssueReason; items: RejectedRow[] }) => {
+    setFixing(group.reason);
+    setProgress(0);
+    const retried = group.items.map((r) => r.rowIndex);
+    try {
+      const { totals, collected } = await sendRows(rows, retried, "update");
+      mergeRetry(group, retried, totals, collected);
+      toast.success(t("importExport.import.issues.updated", { count: totals.updated }));
+    } catch {
+      toast.error(t("genericError"));
+    } finally {
+      setFixing(null);
+      setProgress(null);
+    }
+  };
+
+  /**
+   * « Corriger et réimporter » — applique les numéros saisis sur place dans les
+   * lignes du fichier chargé, puis rejoue uniquement ces lignes. La correction
+   * reste visible dans l'aperçu : plus besoin de retoucher le CSV à l'extérieur.
+   */
+  const retryFixed = async (group: { reason: IssueReason; items: RejectedRow[] }) => {
+    const phoneHeader = mapping.phone;
+    if (!phoneHeader) return;
+    const edited = group.items.filter(
+      (r) => (fixes[r.rowIndex] ?? "").trim() !== "" && fixes[r.rowIndex] !== r.phone,
+    );
+    if (edited.length === 0) return;
+
+    const nextRows = rows.map((raw, i) =>
+      edited.some((e) => e.rowIndex === i) ? { ...raw, [phoneHeader]: fixes[i].trim() } : raw,
+    );
+    setRows(nextRows);
+
+    setFixing(group.reason);
+    setProgress(0);
+    const retried = edited.map((r) => r.rowIndex);
+    try {
+      const { totals, collected } = await sendRows(nextRows, retried, mode);
+      mergeRetry(group, retried, totals, collected);
+      setFixes((prev) => {
+        const next = { ...prev };
+        for (const i of retried) if (!collected.some((c) => c.rowIndex === i)) delete next[i];
+        return next;
+      });
+      toast.success(t("importExport.import.issues.fixed", { count: totals.created }));
+    } catch {
+      toast.error(t("genericError"));
+    } finally {
+      setFixing(null);
       setProgress(null);
     }
   };
@@ -410,6 +568,141 @@ export function ImportCard({
               <div key={k} className={cn("rounded-lg p-3 text-center", box)}>
                 <p className={cn("text-2xl font-semibold tabular-nums", num)}>{v}</p>
                 <p className="text-xs text-muted-foreground">{t(`importExport.import.result.${k}`)}</p>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {/* ── Détail des lignes écartées ──
+            Aucun rejet muet : chaque groupe dit pourquoi et propose une suite. */}
+        {rejectedGroups.length > 0 ? (
+          <div className="space-y-3 border-t pt-4">
+            <div>
+              <p className="text-sm font-medium">
+                {t("importExport.import.issues.title", { count: rejected.length })}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {t("importExport.import.issues.subtitle")}
+              </p>
+            </div>
+            {rejectedGroups.map((group) => (
+              <div key={group.reason} className="space-y-2 rounded-xl border p-3 shadow-xs">
+                <div className="flex items-start gap-2">
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg",
+                      group.reason === "duplicate_in_db"
+                        ? "bg-primary/10 text-primary"
+                        : group.reason === "duplicate_in_file"
+                          ? "bg-muted text-muted-foreground"
+                          : "bg-destructive/10 text-destructive",
+                    )}
+                  >
+                    {group.reason === "duplicate_in_db" || group.reason === "duplicate_in_file" ? (
+                      <CopyIcon className="size-4" />
+                    ) : (
+                      <TriangleAlert className="size-4" />
+                    )}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">
+                      {t(`importExport.import.issues.${group.reason}.title`)}
+                      <span className="ml-1.5 tabular-nums text-muted-foreground">
+                        ({group.items.length})
+                      </span>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {t(`importExport.import.issues.${group.reason}.why`)}
+                    </p>
+                    <p className="mt-1 text-xs">
+                      <span className="font-medium">
+                        {t("importExport.import.issues.suggestion")}
+                      </span>{" "}
+                      <span className="text-muted-foreground">
+                        {t(`importExport.import.issues.${group.reason}.what`)}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+
+                {/* Correction sur place : le numéro se répare ici, pas dans
+                    Excel. Chaque ligne garde son n° pour être retrouvée. */}
+                <ul className="max-h-64 space-y-1.5 overflow-y-auto">
+                  {group.items.map((r) => (
+                    <li
+                      key={`${r.rowIndex}-${r.reason}`}
+                      className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 px-2 py-1.5"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                        <span className="tabular-nums">
+                          {t("importExport.import.issues.line", { line: r.csvLine })}
+                        </span>
+                        {r.name ? ` · ${r.name}` : ""}
+                      </span>
+                      <Input
+                        value={fixes[r.rowIndex] ?? r.phone ?? ""}
+                        onChange={(e) =>
+                          setFixes((prev) => ({ ...prev, [r.rowIndex]: e.target.value }))
+                        }
+                        placeholder={t("importExport.import.issues.phonePlaceholder")}
+                        aria-label={t("importExport.import.issues.phoneLabel", {
+                          line: r.csvLine,
+                        })}
+                        inputMode="tel"
+                        className="min-h-11 w-44 text-xs md:min-h-8"
+                      />
+                      {r.existingId ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="min-h-11 md:min-h-8"
+                          render={<Link href={`/clients/${r.existingId}`} target="_blank" />}
+                        >
+                          {t("importExport.import.issues.openClient")}
+                        </Button>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="flex flex-wrap gap-2">
+                  {group.reason === "duplicate_in_db" ? (
+                    <Button
+                      size="sm"
+                      className="min-h-11 md:min-h-8"
+                      disabled={progress !== null}
+                      onClick={() => void updateGroup(group)}
+                    >
+                      {fixing === group.reason ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="size-4" />
+                      )}
+                      {t("importExport.import.issues.updateExisting")}
+                    </Button>
+                  ) : null}
+                  <Button
+                    size="sm"
+                    variant={group.reason === "duplicate_in_db" ? "outline" : "default"}
+                    className="min-h-11 md:min-h-8"
+                    disabled={
+                      progress !== null ||
+                      !group.items.some(
+                        (r) =>
+                          (fixes[r.rowIndex] ?? "").trim() !== "" && fixes[r.rowIndex] !== r.phone,
+                      )
+                    }
+                    onClick={() => void retryFixed(group)}
+                  >
+                    {fixing === group.reason ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Upload className="size-4" />
+                    )}
+                    {t("importExport.import.issues.retryFixed")}
+                  </Button>
+                </div>
               </div>
             ))}
           </div>
