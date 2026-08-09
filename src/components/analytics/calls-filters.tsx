@@ -22,6 +22,7 @@ export function CallsFilters({
   userId,
   direction,
   disposition,
+  status,
   fromStr,
   toStr,
   users,
@@ -31,6 +32,7 @@ export function CallsFilters({
   userId?: string;
   direction?: "outbound" | "inbound";
   disposition?: string;
+  status?: "missed" | "answered";
   fromStr?: string;
   toStr?: string;
   users: { id: string; name: string }[];
@@ -57,7 +59,7 @@ export function CallsFilters({
   };
 
   const hasFilters =
-    q !== "" || userId || direction || disposition || fromStr || toStr;
+    q !== "" || userId || direction || disposition || status || fromStr || toStr;
 
   return (
     <div className="flex flex-col gap-2">
@@ -104,7 +106,13 @@ export function CallsFilters({
 
         <Select
           value={direction ?? ALL}
-          onValueChange={(value) => apply({ direction: value === ALL ? null : String(value) })}
+          // « Sortants » et « Manqués » (entrants par définition) s'excluent.
+          onValueChange={(value) =>
+            apply({
+              direction: value === ALL ? null : String(value),
+              ...(value === "outbound" && status === "missed" ? { status: null } : {}),
+            })
+          }
         >
           <SelectTrigger aria-label={t("callsPage.direction")} className="h-11 min-w-32 md:h-8">
             <SelectValue />
@@ -113,6 +121,25 @@ export function CallsFilters({
             <SelectItem value={ALL}>{t("callsPage.allDirections")}</SelectItem>
             <SelectItem value="outbound">{t("callsPage.outbound")}</SelectItem>
             <SelectItem value="inbound">{t("callsPage.inbound")}</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select
+          value={status ?? ALL}
+          onValueChange={(value) =>
+            apply({
+              status: value === ALL ? null : String(value),
+              ...(value === "missed" && direction === "outbound" ? { direction: null } : {}),
+            })
+          }
+        >
+          <SelectTrigger aria-label={t("callsPage.status")} className="h-11 min-w-32 md:h-8">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>{t("callsPage.allStatuses")}</SelectItem>
+            <SelectItem value="answered">{t("callsPage.answered")}</SelectItem>
+            <SelectItem value="missed">{t("callsPage.missed")}</SelectItem>
           </SelectContent>
         </Select>
 
@@ -175,7 +202,15 @@ export function CallsFilters({
               setSearch("");
               setFrom("");
               setTo("");
-              apply({ q: null, user: null, direction: null, dispo: null, from: null, to: null });
+              apply({
+                q: null,
+                user: null,
+                direction: null,
+                dispo: null,
+                status: null,
+                from: null,
+                to: null,
+              });
             }}
           >
             <XIcon className="size-4" />

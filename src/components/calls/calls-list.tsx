@@ -1,4 +1,4 @@
-import { PhoneIncoming, PhoneOutgoing } from "lucide-react";
+import { PhoneIncoming, PhoneMissed, PhoneOutgoing } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { RedialButton } from "./redial-button";
@@ -14,6 +14,8 @@ export type CallRowData = {
   /** HH:mm (America/Toronto). */
   timeLabel: string;
   direction: "outbound" | "inbound";
+  /** Entrant jamais décroché — icône « appel manqué » en rouge. */
+  missed: boolean;
   directionLabel: string;
   clientId: string | null;
   clientName: string | null;
@@ -39,21 +41,25 @@ export type CallDayGroup = {
 
 function DirectionIcon({
   direction,
+  missed,
   label,
   className,
 }: {
   direction: "outbound" | "inbound";
+  missed?: boolean;
   label: string;
   className?: string;
 }) {
-  const Icon = direction === "outbound" ? PhoneOutgoing : PhoneIncoming;
+  const Icon = missed ? PhoneMissed : direction === "outbound" ? PhoneOutgoing : PhoneIncoming;
   return (
     <span
       className={cn(
         "inline-flex shrink-0 items-center",
-        direction === "outbound"
-          ? "text-emerald-600 dark:text-emerald-500"
-          : "text-blue-600 dark:text-blue-400",
+        missed
+          ? "text-red-600 dark:text-red-400"
+          : direction === "outbound"
+            ? "text-emerald-600 dark:text-emerald-500"
+            : "text-blue-600 dark:text-blue-400",
         className,
       )}
     >
@@ -106,7 +112,11 @@ export function CallsDayList({ groups }: { groups: CallDayGroup[] }) {
                   <span className="w-12 shrink-0 text-sm tabular-nums text-muted-foreground">
                     {row.timeLabel}
                   </span>
-                  <DirectionIcon direction={row.direction} label={row.directionLabel} />
+                  <DirectionIcon
+                    direction={row.direction}
+                    missed={row.missed}
+                    label={row.directionLabel}
+                  />
                   <div className="w-52 min-w-0 shrink-0">
                     <ClientLink row={row} />
                   </div>
@@ -148,6 +158,7 @@ export function CallsDayList({ groups }: { groups: CallDayGroup[] }) {
                     <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                       <DirectionIcon
                         direction={row.direction}
+                        missed={row.missed}
                         label={row.directionLabel}
                         className="[&_svg]:size-3.5"
                       />

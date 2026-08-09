@@ -36,6 +36,10 @@
     "unknown": "Unrecognized number — no client record",
     "viewClient": "Client record"
   },
+  "missed": {
+    "toast": "Missed call from {name}",
+    "busyToast": "Missed call from {name} during your call"
+  },
   "disposition": {
     "title": "Call outcome",
     "save": "Save outcome",
@@ -100,7 +104,8 @@
       "outbound": "Outgoing",
       "inbound": "Incoming",
       "disposition": "Call outcome",
-      "reset": "Reset"
+      "reset": "Reset",
+      "missed": "Missed"
     },
     "days": {
       "today": "Today",
@@ -113,7 +118,8 @@
       "unknownNumber": "Unknown number",
       "noDisposition": "No outcome",
       "redial": "Call back",
-      "notReady": "Phone not ready"
+      "notReady": "Phone not ready",
+      "missed": "Missed"
     },
     "pagination": {
       "label": "Pagination",

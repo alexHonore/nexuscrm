@@ -1,6 +1,7 @@
 import "server-only";
 import enMessages from "../../../messages/en/notifications.json";
 import frMessages from "../../../messages/fr/notifications.json";
+import { formatPhone } from "@/lib/phone";
 
 const CONTENT = { fr: frMessages.content, en: enMessages.content } as const;
 
@@ -22,6 +23,42 @@ export function notificationContent(
     text = text.replaceAll(`{${name}}`, value);
   }
   return text;
+}
+
+/**
+ * Destination des notifications d'appel manqué sans fiche client. Fenêtre de
+ * 30 jours : la notification peut dater d'hier (synchro CDR du matin) — le
+ * filtre par défaut « aujourd'hui » cacherait l'appel.
+ */
+export const MISSED_CALLS_LINK = "/calls?direction=inbound&missed=1&period=30";
+
+/**
+ * Ligne de notification « appel manqué », identique quel que soit le chemin
+ * qui l'a détecté (webphone, synchro CDR voip.ms, rappel TwiML Twilio).
+ */
+export function missedCallNotification(opts: {
+  userId: string;
+  locale: "fr" | "en";
+  client: { id: string; fullName: string } | null;
+  /** E.164, ou null si le numéro est masqué. */
+  fromNumber: string | null;
+}): { userId: string; type: string; title: string; body: string | null; link: string } {
+  const number = opts.fromNumber ? formatPhone(opts.fromNumber) : null;
+  const body =
+    opts.client && number
+      ? notificationContent(opts.locale, "missedCallKnownBody", {
+          name: opts.client.fullName,
+          number,
+        })
+      : (opts.client?.fullName ??
+        (number ? notificationContent(opts.locale, "missedCallUnknownBody", { number }) : null));
+  return {
+    userId: opts.userId,
+    type: "missed_call",
+    title: notificationContent(opts.locale, "missedCallTitle"),
+    body,
+    link: opts.client ? `/clients/${opts.client.id}` : MISSED_CALLS_LINK,
+  };
 }
 
 /** Turn "@[Name](uuid)" tokens into plain "@Name" and clamp for excerpts. */

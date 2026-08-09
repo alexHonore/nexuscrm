@@ -1,9 +1,10 @@
 import { createHmac, timingSafeEqual } from "crypto";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, like, or } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
+import { missedCallNotification } from "@/components/clients/notification-content";
 import { db } from "@/db";
-import { users } from "@/db/schema";
-import { normalizePhone } from "@/lib/phone";
+import { calls, clients, notifications, users } from "@/db/schema";
+import { normalizePhone, phoneMatchKey } from "@/lib/phone";
 
 /**
  * POST /api/telephony/twiml — webhook TwiML appelé PAR LES SERVEURS TWILIO
@@ -17,6 +18,9 @@ import { normalizePhone } from "@/lib/phone";
  * Entrant (PSTN vers un DID Twilio) : To = numéro appelé
  *   → on route vers l'identité du navigateur de l'utilisateur qui possède ce DID
  *   → <Dial><Client>user-<uid></Client></Dial>
+ * Résultat du Dial entrant (?dialResult=1, attribut action) : un appel non
+ *   abouti (no-answer, busy, failed, canceled — fureteur fermé compris) est
+ *   journalisé comme appel manqué et notifié au propriétaire de la ligne.
  *
  * Pas d'apiUser ici (requête serveur-à-serveur) : l'authenticité est vérifiée via
  * la signature X-Twilio-Signature (HMAC-SHA1, spec Twilio) quand TWILIO_AUTH_TOKEN
@@ -48,9 +52,11 @@ function isValidTwilioSignature(req: NextRequest, params: URLSearchParams): bool
   const signature = req.headers.get("x-twilio-signature");
   if (!signature) return false;
 
-  // URL publique telle que configurée dans la TwiML App (derrière le proxy Vercel).
+  // URL publique telle que configurée dans la TwiML App (derrière le proxy
+  // Vercel). Twilio signe l'URL COMPLÈTE, chaîne de requête incluse
+  // (?dialResult=1 pour le rappel de l'attribut action).
   const base = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
-  const url = base ? `${base}/api/telephony/twiml` : req.url;
+  const url = base ? `${base}/api/telephony/twiml${req.nextUrl.search}` : req.url;
 
   const data =
     url +
@@ -65,12 +71,101 @@ function isValidTwilioSignature(req: NextRequest, params: URLSearchParams): bool
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/**
+ * Rappel de l'attribut action du Dial entrant. Un statut non abouti devient un
+ * appel manqué : rangée `calls` + notification — sauf si le webphone (encore
+ * ouvert) l'a déjà journalisé, ou si Twilio relivre le même rappel (CallSid).
+ */
+async function handleInboundDialResult(params: URLSearchParams): Promise<NextResponse> {
+  const status = (params.get("DialCallStatus") ?? "").toLowerCase();
+  if (status === "completed" || status === "answered") return twiml("");
+
+  const did = normalizePhone(params.get("To"));
+  const fromNumber = normalizePhone(params.get("From"));
+  const callSid = params.get("CallSid");
+  const owner = did
+    ? await db.query.users.findFirst({
+        where: eq(users.didNumber, did),
+        columns: { id: true, locale: true },
+      })
+    : undefined;
+  if (!owner) return twiml("<Hangup/>");
+
+  // La sonnerie a duré au plus les 30 s du timeout du Dial — « maintenant »
+  // reste dans la fenêtre de rapprochement de ±3 min du webphone.
+  const now = new Date();
+  const fromKey = phoneMatchKey(fromNumber);
+  const dupConds = [
+    ...(callSid ? [eq(calls.providerCallId, callSid)] : []),
+    ...(fromKey ? [like(calls.fromNumber, `%${fromKey}`)] : []),
+  ];
+  const existing =
+    dupConds.length > 0
+      ? await db.query.calls.findFirst({
+          where: and(
+            eq(calls.userId, owner.id),
+            eq(calls.direction, "inbound"),
+            // SANS réponse seulement : un appel répondu du même numéro il y a
+            // deux minutes n'est PAS ce manqué-ci — sans ce filtre, un rappel
+            // immédiat manqué serait avalé (et le CallSid apposé au mauvais appel).
+            isNull(calls.answeredAt),
+            gte(calls.startedAt, new Date(now.getTime() - 5 * 60_000)),
+            or(...dupConds),
+          ),
+          orderBy: [desc(calls.startedAt)],
+          columns: { id: true, providerCallId: true },
+        })
+      : undefined;
+  if (existing) {
+    if (callSid && !existing.providerCallId) {
+      await db.update(calls).set({ providerCallId: callSid }).where(eq(calls.id, existing.id));
+    }
+    return twiml("<Hangup/>");
+  }
+
+  let client: { id: string; fullName: string } | null = null;
+  if (fromKey) {
+    const [match] = await db
+      .select({ id: clients.id, fullName: clients.fullName })
+      .from(clients)
+      .where(or(like(clients.phone, `%${fromKey}`), like(clients.phoneAlt, `%${fromKey}`)))
+      .limit(1);
+    client = match ?? null;
+  }
+
+  await db.insert(calls).values({
+    userId: owner.id,
+    clientId: client?.id ?? null,
+    direction: "inbound",
+    fromNumber,
+    toNumber: did,
+    startedAt: now,
+    endedAt: now,
+    provider: "twilio",
+    providerCallId: callSid,
+  });
+  await db.insert(notifications).values(
+    missedCallNotification({
+      userId: owner.id,
+      locale: owner.locale === "en" ? "en" : "fr",
+      client,
+      fromNumber,
+    }),
+  );
+
+  return twiml("<Hangup/>");
+}
+
 export async function POST(req: NextRequest) {
   const raw = await req.text();
   const params = new URLSearchParams(raw);
 
   if (!isValidTwilioSignature(req, params)) {
     return new NextResponse("invalid signature", { status: 403 });
+  }
+
+  if (req.nextUrl.searchParams.get("dialResult") === "1") {
+    return handleInboundDialResult(params);
   }
 
   const from = params.get("From") ?? "";
@@ -93,7 +188,8 @@ export async function POST(req: NextRequest) {
     const owner = await db.query.users.findFirst({ where: eq(users.didNumber, did) });
     if (owner && owner.isActive) {
       return twiml(
-        `<Dial answerOnBridge="true" timeout="30"><Client>${xmlEscape(`user-${owner.id}`)}</Client></Dial>`,
+        `<Dial answerOnBridge="true" timeout="30" action="/api/telephony/twiml?dialResult=1">` +
+          `<Client>${xmlEscape(`user-${owner.id}`)}</Client></Dial>`,
       );
     }
   }

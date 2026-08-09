@@ -185,8 +185,14 @@ export class JsSipEngine implements TelephonyEngine {
   /** Flux micro acquis par dial() — à libérer nous-mêmes (JsSIP ne stoppe pas
    *  les flux fournis via l'option mediaStream). */
   private localStream: MediaStream | null = null;
-  /** Raccroché pendant l'attente du micro : dial() n'émettra pas l'INVITE. */
-  private dialAborted = false;
+  /**
+   * Génération d'appel sortant. Incrémentée à chaque dial() ET à chaque
+   * raccroché en préflight micro : un dial() dont la génération n'est plus
+   * courante n'émet pas l'INVITE. Un booléen partagé ne suffisait pas — un
+   * second dial() le remettait à faux et « ressuscitait » le premier appel
+   * annulé quand le micro était enfin accordé.
+   */
+  private dialGen = 0;
   private dialWatchdog: ReturnType<typeof setTimeout> | null = null;
   private iceSettleTimer: ReturnType<typeof setTimeout> | null = null;
   private iceMaxTimer: ReturnType<typeof setTimeout> | null = null;
@@ -287,7 +293,7 @@ export class JsSipEngine implements TelephonyEngine {
     const domain = this.config.sipDomain || "sip.voip.ms";
     const target = `sip:${toDialString(number)}@${domain}`;
 
-    this.dialAborted = false;
+    const gen = ++this.dialGen;
     this.call = { direction: "outbound", remoteNumber: number, startedAt: new Date() };
     this.events?.onCallStateChange("connecting", this.call);
 
@@ -295,9 +301,9 @@ export class JsSipEngine implements TelephonyEngine {
     try {
       stream = await this.acquireMic();
     } catch (err) {
-      // Si l'usager a raccroché pendant l'attente, hangup() a déjà remis
-      // l'UI au repos — ne pas ré-émettre ended/idle.
-      if (!this.dialAborted && this.call) {
+      // Si l'usager a raccroché pendant l'attente (génération périmée),
+      // hangup() a déjà remis l'UI au repos — ne pas ré-émettre ended/idle.
+      if (gen === this.dialGen && this.call) {
         const ended = this.call;
         this.call = null;
         this.events?.onCallStateChange("ended", ended);
@@ -305,9 +311,9 @@ export class JsSipEngine implements TelephonyEngine {
       }
       throw err;
     }
-    // L'état a pu changer pendant l'attente du micro : raccroché (dialAborted)
-    // ou — ceinture et bretelles — une session apparue entre-temps.
-    if (this.dialAborted || this.session || this.call?.direction !== "outbound") {
+    // L'état a pu changer pendant l'attente du micro : raccroché ou nouveau
+    // dial() (génération périmée), ou une session apparue entre-temps.
+    if (gen !== this.dialGen || this.session || this.call?.direction !== "outbound") {
       for (const track of stream.getTracks()) track.stop();
       throw new Error("canceled");
     }
@@ -348,10 +354,10 @@ export class JsSipEngine implements TelephonyEngine {
 
   hangup(): void {
     if (!this.session && this.call?.direction === "outbound") {
-      // Appel encore en préflight micro (aucune session SIP) : marquer
-      // l'abandon — dial() s'arrêtera au retour de getUserMedia sans émettre
+      // Appel encore en préflight micro (aucune session SIP) : périmer la
+      // génération — dial() s'arrêtera au retour de getUserMedia sans émettre
       // l'INVITE — et remettre l'UI au repos tout de suite.
-      this.dialAborted = true;
+      this.dialGen++;
       const ended = this.call;
       this.call = null;
       this.events?.onCallStateChange("ended", ended);
@@ -475,6 +481,11 @@ export class JsSipEngine implements TelephonyEngine {
   }
 
   private handleIncoming(e: IncomingRTCSessionEvent): void {
+    const user = e.request.from.uri.user || "";
+    const display = e.request.from.display_name || "";
+    // Brut (10 chiffres, 11 chiffres ou déjà E.164) — normalisé côté contexte.
+    const remoteNumber = user || display;
+
     // Déjà en ligne — ou un sortant en préflight micro (this.call sans
     // session) → 486 Busy pour le second appel.
     if (this.session || this.call) {
@@ -483,13 +494,9 @@ export class JsSipEngine implements TelephonyEngine {
       } catch {
         // rien
       }
+      this.events?.onMissedWhileBusy?.(remoteNumber);
       return;
     }
-
-    const user = e.request.from.uri.user || "";
-    const display = e.request.from.display_name || "";
-    // Brut (10 chiffres, 11 chiffres ou déjà E.164) — normalisé côté contexte.
-    const remoteNumber = user || display;
 
     this.call = { direction: "inbound", remoteNumber, startedAt: new Date() };
     this.attachSession(e.session);

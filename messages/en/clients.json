@@ -185,7 +185,8 @@
       "cancelled": "Cancelled",
       "completed": "Completed",
       "noshow": "No-show"
-    }
+    },
+    "missed": "Missed call"
   },
   "dispositions": {
     "voicemail": "Voicemail",

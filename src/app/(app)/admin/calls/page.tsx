@@ -2,7 +2,7 @@ import type { Locale } from "date-fns";
 import { enCA } from "date-fns/locale/en-CA";
 import { fr } from "date-fns/locale/fr";
 import { formatInTimeZone } from "date-fns-tz";
-import { and, desc, eq, gte, ilike, like, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, isNotNull, isNull, like, lt, or, sql, type SQL } from "drizzle-orm";
 import { PhoneCall } from "lucide-react";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
@@ -58,6 +58,9 @@ export default async function CallsPage({
       : undefined;
   const dispoParam = first(sp.dispo)?.slice(0, 40);
   const disposition = dispoParam || undefined;
+  const statusParam = first(sp.status);
+  const status =
+    statusParam === "missed" || statusParam === "answered" ? statusParam : undefined;
   const fromParam = first(sp.from);
   const toParam = first(sp.to);
   const fromStr = fromParam && DATE_RE.test(fromParam) ? fromParam : undefined;
@@ -67,8 +70,15 @@ export default async function CallsPage({
 
   const conds: SQL[] = [];
   if (userId) conds.push(eq(calls.userId, userId));
-  if (direction) conds.push(eq(calls.direction, direction));
+  // Manqués = entrants jamais décrochés (même définition que les analytiques).
+  // « direction=outbound&status=missed » serait contradictoire : « manqués »
+  // l'emporte sur la direction.
+  if (direction && !(status === "missed" && direction === "outbound")) {
+    conds.push(eq(calls.direction, direction));
+  }
   if (disposition) conds.push(eq(calls.disposition, disposition));
+  if (status === "missed") conds.push(eq(calls.direction, "inbound"), isNull(calls.answeredAt));
+  if (status === "answered") conds.push(isNotNull(calls.answeredAt));
   if (fromStr) conds.push(gte(calls.startedAt, dayStartUtc(fromStr)));
   if (toStr) conds.push(lt(calls.startedAt, dayStartUtc(shiftDateStr(toStr, 1))));
   if (q) {
@@ -93,6 +103,7 @@ export default async function CallsPage({
         id: calls.id,
         startedAt: calls.startedAt,
         direction: calls.direction,
+        answeredAt: calls.answeredAt,
         fromNumber: calls.fromNumber,
         toNumber: calls.toNumber,
         durationSec: calls.durationSec,
@@ -133,6 +144,7 @@ export default async function CallsPage({
       timeLabel: formatInTimeZone(row.startedAt, APP_TZ, timePattern, { locale: dateLocale }),
       userName: row.userName,
       direction: row.direction,
+      missed: row.direction === "inbound" && !row.answeredAt,
       clientId: row.clientId,
       clientName: row.clientName,
       number: rawNumber ? formatPhone(rawNumber) : t("callsPage.unknownNumber"),
@@ -155,6 +167,7 @@ export default async function CallsPage({
     if (userId) params.set("user", userId);
     if (direction) params.set("direction", direction);
     if (disposition) params.set("dispo", disposition);
+    if (status) params.set("status", status);
     if (fromStr) params.set("from", fromStr);
     if (toStr) params.set("to", toStr);
     if (target > 1) params.set("page", String(target));
@@ -178,6 +191,7 @@ export default async function CallsPage({
         userId={userId}
         direction={direction}
         disposition={disposition}
+        status={status}
         fromStr={fromStr}
         toStr={toStr}
         users={userOptions}

@@ -14,13 +14,17 @@
     "followup_due": "Suivi",
     "incoming_lead": "Nouveau prospect",
     "appointment": "Rendez-vous",
-    "system": "Système"
+    "system": "Système",
+    "missed_call": "Appel manqué"
   },
   "content": {
     "mentionTitle": "{name} vous a mentionné",
     "followupDueTitle": "Suivi à faire : {client}",
     "incomingLeadTitle": "Nouveau lead : {name}",
     "incomingLeadNewBody": "{phone} — via {source}",
-    "incomingLeadExistingBody": "Client existant recontacté — {phone} — via {source}"
+    "incomingLeadExistingBody": "Client existant recontacté — {phone} — via {source}",
+    "missedCallTitle": "Appel manqué",
+    "missedCallKnownBody": "{name} — {number}",
+    "missedCallUnknownBody": "{number}"
   }
 }

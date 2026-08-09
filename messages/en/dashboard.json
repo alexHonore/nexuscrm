@@ -29,5 +29,10 @@
     "inperson": "In person"
   },
   "analyticsLink": "View analytics",
-  "error": "Something went wrong"
+  "error": "Something went wrong",
+  "missedCalls": {
+    "title": "Missed calls to return",
+    "viewAll": "View all",
+    "attempts": "{count, plural, one {# missed call} other {# missed calls}}"
+  }
 }

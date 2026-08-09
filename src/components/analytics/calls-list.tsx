@@ -1,6 +1,6 @@
 "use client";
 
-import { PhoneIncoming, PhoneOff, PhoneOutgoing, Play, X } from "lucide-react";
+import { PhoneIncoming, PhoneMissed, PhoneOff, PhoneOutgoing, Play, X } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -22,6 +22,8 @@ export type CallRow = {
   timeLabel: string;
   userName: string;
   direction: "outbound" | "inbound";
+  /** Entrant jamais décroché. */
+  missed: boolean;
   clientId: string | null;
   clientName: string | null;
   number: string;
@@ -41,14 +43,30 @@ function proxyUrl(recordingUrl: string, callId: string): string {
   return `/api/admin/recordings?url=${encodeURIComponent(recordingUrl)}&callId=${encodeURIComponent(callId)}`;
 }
 
-function DirectionIcon({ direction }: { direction: "outbound" | "inbound" }) {
+function DirectionIcon({
+  direction,
+  missed,
+}: {
+  direction: "outbound" | "inbound";
+  missed?: boolean;
+}) {
   const t = useTranslations("analytics");
-  const Icon = direction === "outbound" ? PhoneOutgoing : PhoneIncoming;
+  const Icon = missed ? PhoneMissed : direction === "outbound" ? PhoneOutgoing : PhoneIncoming;
   return (
-    <span className="inline-flex items-center text-muted-foreground">
+    <span
+      className={
+        missed
+          ? "inline-flex items-center text-red-600 dark:text-red-400"
+          : "inline-flex items-center text-muted-foreground"
+      }
+    >
       <Icon aria-hidden className="size-4" />
       <span className="sr-only">
-        {direction === "outbound" ? t("callsPage.outbound") : t("callsPage.inbound")}
+        {missed
+          ? t("callsPage.missedCall")
+          : direction === "outbound"
+            ? t("callsPage.outbound")
+            : t("callsPage.inbound")}
       </span>
     </span>
   );
@@ -191,7 +209,7 @@ export function CallsList({ rows }: { rows: CallRow[] }) {
                 </TableCell>
                 <TableCell>{row.userName}</TableCell>
                 <TableCell>
-                  <DirectionIcon direction={row.direction} />
+                  <DirectionIcon direction={row.direction} missed={row.missed} />
                 </TableCell>
                 <TableCell>
                   <ClientCell row={row} />
@@ -205,6 +223,10 @@ export function CallsList({ rows }: { rows: CallRow[] }) {
                       disposition={row.disposition}
                       label={row.dispositionLabel}
                     />
+                  ) : row.missed ? (
+                    <span className="text-xs font-medium text-red-600 dark:text-red-400">
+                      {t("callsPage.missedCall")}
+                    </span>
                   ) : (
                     <span className="text-xs text-muted-foreground">—</span>
                   )}
@@ -247,10 +269,14 @@ export function CallsList({ rows }: { rows: CallRow[] }) {
                   disposition={row.disposition}
                   label={row.dispositionLabel}
                 />
+              ) : row.missed ? (
+                <span className="shrink-0 text-xs font-medium text-red-600 dark:text-red-400">
+                  {t("callsPage.missedCall")}
+                </span>
               ) : null}
             </div>
             <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-              <DirectionIcon direction={row.direction} />
+              <DirectionIcon direction={row.direction} missed={row.missed} />
               <span>
                 {row.dateLabel} · {row.timeLabel}
               </span>

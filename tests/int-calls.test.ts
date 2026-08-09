@@ -17,7 +17,7 @@ import {
   seedSystemCategories,
   testDb,
 } from "./helpers/db";
-import { auditLogs, calls, clients, followups } from "@/db/schema";
+import { auditLogs, calls, clients, followups, notifications } from "@/db/schema";
 import { DISPOSITION_CONFIG, DISPOSITION_ORDER } from "@/lib/dispositions";
 
 // ── Stubs de contexte Next (cookies/headers de requête) ─────────────────────
@@ -182,6 +182,152 @@ describe("pipeline d'appel", () => {
       const res = await POST(postReq({ direction: "sideways" }));
       expect(res.status).toBe(400);
       expect(await testDb.select().from(calls)).toHaveLength(0);
+    });
+  });
+
+  // ── POST /api/calls : appel manqué (entrant jamais décroché) ──────────────
+
+  describe("POST /api/calls — appel manqué", () => {
+    it("journalise un manqué complet, rattache la fiche par numéro et notifie", async () => {
+      const me = await makeUser();
+      await login(me);
+      const client = await makeClient({ fullName: "Jean Tremblay", phone: "+14184761542" });
+
+      const res = await POST(
+        postReq({
+          direction: "inbound",
+          fromNumber: "(418) 476-1542",
+          toNumber: "+14185550199",
+          startedAt: "2026-08-09T14:00:00.000Z",
+          endedAt: "2026-08-09T14:00:20.000Z",
+        }),
+      );
+      expect(res.status).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+
+      const row = await getCall(id);
+      // Fiche rattachée par numéro côté serveur — aucun clientId fourni.
+      expect(row.clientId).toBe(client.id);
+      expect(row.answeredAt).toBeNull();
+      expect(row.endedAt?.toISOString()).toBe("2026-08-09T14:00:20.000Z");
+      expect(row.durationSec).toBe(0);
+
+      const notifs = await testDb.select().from(notifications);
+      expect(notifs).toHaveLength(1);
+      expect(notifs[0].userId).toBe(me.id);
+      expect(notifs[0].type).toBe("missed_call");
+      expect(notifs[0].title).toBe("Appel manqué");
+      expect(notifs[0].body).toContain("Jean Tremblay");
+      expect(notifs[0].body).toContain("(418) 476-1542");
+      expect(notifs[0].link).toBe(`/clients/${client.id}`);
+    });
+
+    it("notifie dans la langue du destinataire et pointe vers le journal sans fiche", async () => {
+      const me = await makeUser({ locale: "en" });
+      await login(me);
+
+      const res = await POST(
+        postReq({
+          direction: "inbound",
+          fromNumber: "+14185550111",
+          startedAt: "2026-08-09T14:00:00.000Z",
+          endedAt: "2026-08-09T14:00:10.000Z",
+        }),
+      );
+      expect(res.status).toBe(201);
+
+      const [notif] = await testDb.select().from(notifications);
+      expect(notif.title).toBe("Missed call");
+      expect(notif.body).toBe("(418) 555-0111");
+      expect(notif.link).toBe("/calls?direction=inbound&missed=1&period=30");
+    });
+
+    it("ne notifie ni un entrant répondu, ni un sortant terminé, ni un entrant encore ouvert", async () => {
+      const me = await makeUser();
+      await login(me);
+
+      // Entrant complet et répondu — durée calculée de answeredAt à endedAt.
+      const answered = await POST(
+        postReq({
+          direction: "inbound",
+          fromNumber: "+14185550122",
+          startedAt: "2026-08-09T14:00:00.000Z",
+          answeredAt: "2026-08-09T14:00:05.000Z",
+          endedAt: "2026-08-09T14:02:05.000Z",
+        }),
+      );
+      expect(answered.status).toBe(201);
+      const { id } = (await answered.json()) as { id: string };
+      expect((await getCall(id)).durationSec).toBe(120);
+
+      // Sortant sans réponse, terminé.
+      const outbound = await POST(
+        postReq({
+          direction: "outbound",
+          toNumber: "+14185550123",
+          endedAt: "2026-08-09T14:00:30.000Z",
+        }),
+      );
+      expect(outbound.status).toBe(201);
+      // Entrant décroché en direct (complété plus tard via PATCH) — pas de endedAt.
+      const open = await POST(postReq({ direction: "inbound", fromNumber: "+14185550124" }));
+      expect(open.status).toBe(201);
+
+      expect(await testDb.select().from(calls)).toHaveLength(3);
+      expect(await testDb.select().from(notifications)).toHaveLength(0);
+    });
+
+    it("notifie via PATCH quand un entrant décroché-raccroché devient manqué — une seule fois", async () => {
+      const me = await makeUser();
+      await login(me);
+      // Décroché : le webphone journalise avec answeredAt (appel « répondu »).
+      const res = await POST(
+        postReq({
+          direction: "inbound",
+          fromNumber: "+14185550166",
+          startedAt: "2026-08-09T14:00:00.000Z",
+          answeredAt: "2026-08-09T14:00:04.000Z",
+        }),
+      );
+      expect(res.status).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+      expect(await testDb.select().from(notifications)).toHaveLength(0);
+
+      // L'appelant avait raccroché au même instant : finalisation SANS réponse.
+      const patch = {
+        answeredAt: null,
+        endedAt: "2026-08-09T14:00:05.000Z",
+        durationSec: 0,
+      };
+      expect((await PATCH(patchReq(id, patch), patchCtx(id))).status).toBe(200);
+
+      const row = await getCall(id);
+      expect(row.answeredAt).toBeNull();
+      expect(row.endedAt).not.toBeNull();
+
+      const notifs = await testDb.select().from(notifications);
+      expect(notifs).toHaveLength(1);
+      expect(notifs[0].type).toBe("missed_call");
+      expect(notifs[0].userId).toBe(me.id);
+
+      // Rejeu du même PATCH (réponse perdue) : pas de seconde notification.
+      expect((await PATCH(patchReq(id, patch), patchCtx(id))).status).toBe(200);
+      expect(await testDb.select().from(notifications)).toHaveLength(1);
+    });
+
+    it("ne notifie pas via PATCH quand la finalisation confirme un appel répondu", async () => {
+      const me = await makeUser();
+      await login(me);
+      const id = await openCall({ direction: "inbound", fromNumber: "+14185550177" });
+
+      await PATCH(
+        patchReq(id, {
+          answeredAt: "2026-08-09T14:00:05.000Z",
+          endedAt: "2026-08-09T14:02:05.000Z",
+        }),
+        patchCtx(id),
+      );
+      expect(await testDb.select().from(notifications)).toHaveLength(0);
     });
   });
 

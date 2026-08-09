@@ -155,6 +155,7 @@ export class TwilioEngine implements TelephonyEngine {
   private handleIncoming(call: Call): void {
     if (this.call) {
       call.reject(); // déjà en ligne
+      this.events?.onMissedWhileBusy?.(call.parameters.From ?? "");
       return;
     }
     const remoteNumber = call.parameters.From ?? "";

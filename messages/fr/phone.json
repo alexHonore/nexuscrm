@@ -36,6 +36,10 @@
     "unknown": "Numéro non reconnu — aucune fiche client",
     "viewClient": "Fiche client"
   },
+  "missed": {
+    "toast": "Appel manqué de {name}",
+    "busyToast": "Appel manqué de {name} pendant votre appel"
+  },
   "disposition": {
     "title": "Résultat de l'appel",
     "save": "Enregistrer le résultat",
@@ -100,7 +104,8 @@
       "outbound": "Sortants",
       "inbound": "Entrants",
       "disposition": "Résultat d'appel",
-      "reset": "Réinitialiser"
+      "reset": "Réinitialiser",
+      "missed": "Manqués"
     },
     "days": {
       "today": "Aujourd'hui",
@@ -113,7 +118,8 @@
       "unknownNumber": "Numéro inconnu",
       "noDisposition": "Sans résultat",
       "redial": "Rappeler",
-      "notReady": "Téléphone non prêt"
+      "notReady": "Téléphone non prêt",
+      "missed": "Manqué"
     },
     "pagination": {
       "label": "Pagination",

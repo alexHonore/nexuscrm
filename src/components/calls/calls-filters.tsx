@@ -1,6 +1,6 @@
 "use client";
 
-import { PhoneIncoming, PhoneOutgoing, XIcon } from "lucide-react";
+import { PhoneIncoming, PhoneMissed, PhoneOutgoing, XIcon } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useTransition } from "react";
@@ -20,10 +20,12 @@ export function CallsFilters({
   period,
   direction,
   disposition,
+  missed,
 }: {
   period: CallsPeriod;
   direction?: CallsDirection;
   disposition?: string;
+  missed?: boolean;
 }) {
   const t = useTranslations("phone");
   const router = useRouter();
@@ -58,7 +60,8 @@ export function CallsFilters({
     { value: "30", label: t("callsPage.filters.last30") },
   ];
 
-  const hasFilters = period !== "today" || Boolean(direction) || Boolean(disposition);
+  const hasFilters =
+    period !== "today" || Boolean(direction) || Boolean(disposition) || Boolean(missed);
 
   return (
     <div className="space-y-2">
@@ -101,7 +104,10 @@ export function CallsFilters({
             type="button"
             aria-pressed={direction === "outbound"}
             className={chipClass(direction === "outbound")}
-            onClick={() => apply({ direction: direction === "outbound" ? null : "outbound" })}
+            // « Sortants » et « Manqués » (entrants par définition) s'excluent.
+            onClick={() =>
+              apply({ direction: direction === "outbound" ? null : "outbound", missed: null })
+            }
           >
             <PhoneOutgoing
               aria-hidden
@@ -126,6 +132,23 @@ export function CallsFilters({
               )}
             />
             {t("callsPage.filters.inbound")}
+          </button>
+          <button
+            type="button"
+            aria-pressed={Boolean(missed)}
+            className={chipClass(Boolean(missed))}
+            onClick={() =>
+              apply({
+                missed: missed ? null : "1",
+                ...(direction === "outbound" ? { direction: null } : {}),
+              })
+            }
+          >
+            <PhoneMissed
+              aria-hidden
+              className={cn("size-3.5", !missed && "text-red-600 dark:text-red-400")}
+            />
+            {t("callsPage.filters.missed")}
           </button>
         </div>
       </div>
@@ -161,7 +184,7 @@ export function CallsFilters({
             type="button"
             variant="ghost"
             className="h-11 shrink-0 rounded-full md:h-8"
-            onClick={() => apply({ period: null, direction: null, dispo: null })}
+            onClick={() => apply({ period: null, direction: null, dispo: null, missed: null })}
           >
             <XIcon className="size-4" />
             {t("callsPage.filters.reset")}

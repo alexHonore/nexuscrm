@@ -8,6 +8,7 @@ import {
   MapPinIcon,
   Mic2Icon,
   PhoneIncomingIcon,
+  PhoneMissedIcon,
   PhoneOutgoingIcon,
   VideoIcon,
 } from "lucide-react";
@@ -23,6 +24,8 @@ import { APP_TZ } from "./timezone";
 export type CallData = {
   id: string;
   direction: "outbound" | "inbound";
+  /** Entrant jamais décroché — le client a tenté de nous joindre sans succès. */
+  missed: boolean;
   startedAt: string; // ISO
   durationSec: number;
   disposition: string | null;
@@ -112,7 +115,11 @@ export function ClientHistory({
                     key={c.id}
                     className="-mx-2 flex items-start gap-3 rounded-lg px-2 py-3 transition-colors hover:bg-muted/50"
                   >
-                    {c.direction === "outbound" ? (
+                    {c.missed ? (
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-red-500/10 text-red-600 dark:text-red-400">
+                        <PhoneMissedIcon aria-label={t("history.missed")} className="size-4" />
+                      </span>
+                    ) : c.direction === "outbound" ? (
                       <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                         <PhoneOutgoingIcon
                           aria-label={t("history.outbound")}
@@ -133,6 +140,11 @@ export function ClientHistory({
                         <span className="text-muted-foreground tabular-nums">
                           {formatDuration(c.durationSec)}
                         </span>
+                        {c.missed && !c.disposition ? (
+                          <span className="inline-flex h-5 items-center rounded-full border border-red-500/25 bg-red-500/10 px-2 text-xs font-medium whitespace-nowrap text-red-600 dark:text-red-400">
+                            {t("history.missed")}
+                          </span>
+                        ) : null}
                         {dispositionChip(c.disposition)}
                       </div>
                       <p className="text-xs text-muted-foreground">

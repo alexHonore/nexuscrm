@@ -29,6 +29,11 @@ export interface TelephonyEvents {
   onCallStateChange: (state: CallState, call: ActiveCall | null) => void;
   /** Appel entrant — l'UI affiche le popup avec la fiche client correspondante. */
   onIncoming: (remoteNumber: string) => void;
+  /**
+   * Second appel entrant refusé automatiquement (déjà en ligne) : il ne sonne
+   * jamais à l'écran — le contexte le journalise comme appel manqué.
+   */
+  onMissedWhileBusy?: (remoteNumber: string) => void;
   onError: (message: string) => void;
 }
 

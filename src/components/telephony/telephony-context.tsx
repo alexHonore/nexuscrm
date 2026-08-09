@@ -22,7 +22,8 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
-import { normalizePhone } from "@/lib/phone";
+import { emitDataChange } from "@/lib/live";
+import { formatPhone, normalizePhone } from "@/lib/phone";
 import type {
   ActiveCall,
   CallDirection,
@@ -115,6 +116,11 @@ async function createCallLog(body: {
   toNumber?: string | null;
   fromNumber?: string | null;
   startedAt: string;
+  /** Posé dès le décroché : si le PATCH final se perd (onglet fermé en plein
+   *  appel), la rangée reste classée « répondu » au lieu de « manqué ». */
+  answeredAt?: string;
+  /** Entrant jamais décroché : l'appel manqué se journalise en une requête. */
+  endedAt?: string;
 }): Promise<string | null> {
   try {
     const res = await fetch("/api/calls", {
@@ -166,6 +172,16 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
   /** Id (promis) de la ligne de journal d'appel en cours. */
   const callLogIdRef = useRef<Promise<string | null> | null>(null);
   const incomingRef = useRef<IncomingCallInfo | null>(null);
+  /**
+   * Sonnerie en cours (numéro, fiche trouvée, début) — survit au refus et à la
+   * fermeture du popup pour journaliser l'appel manqué et dater l'entrant au
+   * DÉBUT de la sonnerie (le CDR voip.ms date l'appel là, pas au décroché).
+   */
+  const ringRef = useRef<{
+    number: string;
+    client: IncomingCallInfo["client"];
+    startedAt: Date;
+  } | null>(null);
   /** Jeton de sonnerie — invalide le lookup en vol dès que le ring est consommé. */
   const ringTokenRef = useRef(0);
   /** i18n accessible depuis les callbacks du moteur (mis à jour par effet). */
@@ -218,16 +234,56 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
     const handleCallEnded = (endedCall: ActiveCall | null) => {
       const meta = callMetaRef.current;
       const logPromise = callLogIdRef.current;
+      const ring = ringRef.current;
       callMetaRef.current = {};
       callLogIdRef.current = null;
       incomingRef.current = null;
+      ringRef.current = null;
       setIncomingCall(null);
       setMuted(false);
       setHeld(false);
 
-      if (!endedCall || !logPromise) return;
+      if (!endedCall) return;
 
       const endedAt = new Date();
+
+      if (!logPromise) {
+        // Entrant jamais décroché (l'appelant a raccroché pendant la sonnerie,
+        // ou refus) : journaliser l'appel manqué en une seule requête — le
+        // serveur rattache la fiche client et crée la notification de suivi.
+        if (endedCall.direction === "inbound" && !endedCall.answeredAt) {
+          const number = normalizePhone(endedCall.remoteNumber) ?? endedCall.remoteNumber;
+          const missedToast = () =>
+            toast.info(
+              i18nRef.current.t("missed.toast", {
+                name: ring?.client?.fullName || formatPhone(number),
+              }),
+            );
+          // Twilio : le rappel TwiML (attribut action du Dial) est l'UNIQUE
+          // journaliseur des manqués — écrire aussi d'ici doublerait la rangée
+          // et la notification (les deux écritures partent au même instant).
+          if (configRef.current?.provider === "twilio") {
+            missedToast();
+            emitDataChange("calls");
+            emitDataChange("notifications");
+            return;
+          }
+          void createCallLog({
+            clientId: ring?.client?.id ?? null,
+            direction: "inbound",
+            fromNumber: number,
+            toNumber: configRef.current?.callerId ?? null,
+            startedAt: (ring?.startedAt ?? endedCall.startedAt).toISOString(),
+            endedAt: endedAt.toISOString(),
+          }).then((id) => {
+            if (!id) return;
+            missedToast();
+            emitDataChange("calls");
+            emitDataChange("notifications");
+          });
+        }
+        return;
+      }
       const durationSec = endedCall.answeredAt
         ? Math.max(0, Math.round((endedAt.getTime() - endedCall.answeredAt.getTime()) / 1000))
         : 0;
@@ -246,6 +302,20 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
           endedAt: endedAt.toISOString(),
           durationSec,
         });
+        if (endedCall.direction === "inbound" && !endedCall.answeredAt) {
+          // Décroché au moment même où l'appelant raccrochait : jamais
+          // connecté. Pas de popup de disposition — c'est un appel manqué
+          // (le PATCH ci-dessus vient de le classer ainsi, et le serveur
+          // crée la notification de rappel).
+          toast.info(
+            i18nRef.current.t("missed.toast", {
+              name: meta.clientName || formatPhone(normalizePhone(endedCall.remoteNumber) ?? ""),
+            }),
+          );
+          emitDataChange("calls");
+          emitDataChange("notifications");
+          return;
+        }
         setPendingDisposition({
           callLogId: id,
           clientId: meta.clientId,
@@ -330,20 +400,47 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
           const ringToken = ++ringTokenRef.current;
           const info: IncomingCallInfo = { number, client: null };
           incomingRef.current = info;
+          ringRef.current = { number, client: null, startedAt: new Date() };
           setIncomingCall(info);
           void lookupClient(number).then((client) => {
+            if (cancelled || ringTokenRef.current !== ringToken) return;
+            // La fiche sert au journal d'appel manqué même après un refus.
+            if (ringRef.current?.number === number) ringRef.current.client = client;
             // N'enrichit le popup que si CE ring sonne encore (ni décroché,
             // ni refusé, ni terminé) — sinon il rouvrirait par-dessus l'appel.
-            if (
-              cancelled ||
-              ringTokenRef.current !== ringToken ||
-              incomingRef.current?.number !== number
-            ) {
-              return;
-            }
+            if (incomingRef.current?.number !== number) return;
             const enriched = { number, client };
             incomingRef.current = enriched;
             setIncomingCall(enriched);
+          });
+        },
+        onMissedWhileBusy: (remoteNumber) => {
+          if (cancelled) return;
+          // Second appel pendant qu'on est en ligne : refusé par le moteur sans
+          // sonner à l'écran — journalisé tout de suite comme appel manqué.
+          // Twilio : le rappel TwiML s'en charge (statut busy), ne pas doubler.
+          const number = normalizePhone(remoteNumber) ?? remoteNumber;
+          const now = new Date().toISOString();
+          if (configRef.current?.provider !== "twilio") {
+            void createCallLog({
+              direction: "inbound",
+              fromNumber: number,
+              toNumber: configRef.current?.callerId ?? null,
+              startedAt: now,
+              endedAt: now,
+            }).then((id) => {
+              if (!id) return;
+              emitDataChange("calls");
+              emitDataChange("notifications");
+            });
+          }
+          void lookupClient(number).then((client) => {
+            if (cancelled) return;
+            toast.info(
+              i18nRef.current.t("missed.busyToast", {
+                name: client?.fullName || formatPhone(number),
+              }),
+            );
           });
         },
         onError: (code) => {
@@ -385,7 +482,7 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
       callMetaRef.current = { clientId: target.clientId, clientName: target.clientName };
       const startedAt = new Date().toISOString();
 
-      callLogIdRef.current = engine
+      const chain: Promise<string | null> = engine
         .dial(number)
         .then(() =>
           createCallLog({
@@ -397,11 +494,17 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
           }),
         )
         .catch(() => {
-          // dial() a échoué (déjà signalé via onError) — pas de ligne de journal
-          callMetaRef.current = {};
-          callLogIdRef.current = null;
+          // dial() a échoué (déjà signalé via onError) — pas de ligne de journal.
+          // Ne nettoyer que si les refs appartiennent ENCORE à cet appel : un
+          // échec tardif (micro refusé après 30 s) ne doit pas effacer le
+          // journal de l'appel suivant, déjà en cours.
+          if (callLogIdRef.current === chain) {
+            callMetaRef.current = {};
+            callLogIdRef.current = null;
+          }
           return null;
         });
+      callLogIdRef.current = chain;
     },
     [t],
   );
@@ -425,7 +528,11 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
       direction: "inbound",
       fromNumber: incoming.number,
       toNumber: configRef.current?.callerId ?? null,
-      startedAt: new Date().toISOString(),
+      // Début de sonnerie, pas du décroché — aligné sur la date des CDR voip.ms.
+      startedAt: (ringRef.current?.startedAt ?? new Date()).toISOString(),
+      // Posé tout de suite : un PATCH final perdu ne laisse pas la rangée
+      // classée « manqué » (le PATCH raffinera avec l'heure exacte du moteur).
+      answeredAt: new Date().toISOString(),
     });
     setIncomingCall(null);
     engine.answer();

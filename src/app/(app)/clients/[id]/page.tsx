@@ -175,6 +175,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
               calls={client.calls.map((c) => ({
                 id: c.id,
                 direction: c.direction,
+                missed: c.direction === "inbound" && !c.answeredAt,
                 startedAt: c.startedAt.toISOString(),
                 durationSec: c.durationSec,
                 disposition: c.disposition,

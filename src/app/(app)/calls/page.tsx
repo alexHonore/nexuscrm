@@ -2,7 +2,7 @@ import type { Locale } from "date-fns";
 import { enCA } from "date-fns/locale/en-CA";
 import { fr } from "date-fns/locale/fr";
 import { formatInTimeZone } from "date-fns-tz";
-import { and, desc, eq, gte, lt, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lt, sql, type SQL } from "drizzle-orm";
 import {
   CalendarCheckIcon,
   ChevronLeftIcon,
@@ -74,6 +74,7 @@ export default async function MyCallsPage({
   const dispoParam = first(sp.dispo);
   const disposition =
     dispoParam && (DISPOSITIONS as readonly string[]).includes(dispoParam) ? dispoParam : undefined;
+  const missed = first(sp.missed) === "1";
   const pageParam = Number(first(sp.page));
   const page = Number.isInteger(pageParam) && pageParam >= 1 ? pageParam : 1;
 
@@ -90,8 +91,14 @@ export default async function MyCallsPage({
     gte(calls.startedAt, periodStart),
     lt(calls.startedAt, todayEnd),
   ];
-  if (direction) conds.push(eq(calls.direction, direction));
+  // Manqués = entrants jamais décrochés (même définition que les analytiques).
+  // Une URL forgée « direction=outbound&missed=1 » serait contradictoire :
+  // « manqués » l'emporte sur la direction.
+  if (direction && !(missed && direction === "outbound")) {
+    conds.push(eq(calls.direction, direction));
+  }
   if (disposition) conds.push(eq(calls.disposition, disposition));
+  if (missed) conds.push(eq(calls.direction, "inbound"), isNull(calls.answeredAt));
   const where = and(...conds);
 
   const [rows, total, [todayStats], bookedToday] = await Promise.all([
@@ -100,6 +107,7 @@ export default async function MyCallsPage({
         id: calls.id,
         startedAt: calls.startedAt,
         direction: calls.direction,
+        answeredAt: calls.answeredAt,
         fromNumber: calls.fromNumber,
         toNumber: calls.toNumber,
         durationSec: calls.durationSec,
@@ -156,12 +164,17 @@ export default async function MyCallsPage({
     const notePreview =
       row.note && row.note.length > 160 ? `${row.note.slice(0, 160)}…` : row.note;
 
+    const rowMissed = row.direction === "inbound" && !row.answeredAt;
     const data: CallRowData = {
       id: row.id,
       timeLabel: formatInTimeZone(row.startedAt, APP_TZ, "HH:mm"),
       direction: row.direction,
-      directionLabel:
-        row.direction === "outbound" ? t("callsPage.list.outbound") : t("callsPage.list.inbound"),
+      missed: rowMissed,
+      directionLabel: rowMissed
+        ? t("callsPage.list.missed")
+        : row.direction === "outbound"
+          ? t("callsPage.list.outbound")
+          : t("callsPage.list.inbound"),
       clientId: row.clientId,
       clientName: row.clientName,
       numberDisplay: remoteNumber ? formatPhone(remoteNumber) : t("callsPage.list.unknownNumber"),
@@ -171,8 +184,11 @@ export default async function MyCallsPage({
         ? t.has(`disposition.options.${row.disposition}`)
           ? t(`disposition.options.${row.disposition}`)
           : row.disposition
-        : null,
-      dispositionColor: row.disposition ? (config?.color ?? "#6b7280") : null,
+        : rowMissed
+          ? t("callsPage.list.missed")
+          : null,
+      // Rouge « manqué » quand l'appel n'a encore aucun résultat d'après-appel.
+      dispositionColor: row.disposition ? (config?.color ?? "#6b7280") : rowMissed ? "#dc2626" : null,
       note: notePreview,
     };
 
@@ -223,6 +239,7 @@ export default async function MyCallsPage({
     if (period !== "today") params.set("period", period);
     if (direction) params.set("direction", direction);
     if (disposition) params.set("dispo", disposition);
+    if (missed) params.set("missed", "1");
     if (target > 1) params.set("page", String(target));
     const qs = params.toString();
     return qs ? `/calls?${qs}` : "/calls";
@@ -260,7 +277,7 @@ export default async function MyCallsPage({
         ))}
       </div>
 
-      <CallsFilters period={period} direction={direction} disposition={disposition} />
+      <CallsFilters period={period} direction={direction} disposition={disposition} missed={missed} />
 
       {total === 0 ? (
         <EmptyState

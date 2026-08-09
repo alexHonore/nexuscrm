@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { enUS, fr } from "date-fns/locale";
 import { formatInTimeZone } from "date-fns-tz";
 import {
@@ -10,14 +10,16 @@ import {
   ClockIcon,
   MapPinIcon,
   PhoneCallIcon,
+  PhoneMissedIcon,
   VideoIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { db } from "@/db";
-import { appointments, calls, followups } from "@/db/schema";
+import { appointments, calls, clients, followups } from "@/db/schema";
 import { requireUser } from "@/lib/auth/guards";
-import { formatPhone } from "@/lib/phone";
+import { formatPhone, phoneMatchKey } from "@/lib/phone";
+import { RedialButton } from "@/components/calls/redial-button";
 import { APP_TZ, torontoDayRange } from "@/components/clients/timezone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,8 +36,10 @@ export default async function DashboardPage() {
 
   const now = new Date();
   const { start, end } = torontoDayRange(now);
+  const missedWindowStart = new Date(now.getTime() - 7 * 24 * 3600_000);
 
-  const [pendingFollowups, todayAppointments, [callStats], bookedToday] = await Promise.all([
+  const [pendingFollowups, todayAppointments, [callStats], bookedToday, missedRows] =
+    await Promise.all([
     db.query.followups.findMany({
       where: and(
         eq(followups.assignedToId, user.id),
@@ -71,7 +75,66 @@ export default async function DashboardPage() {
         lt(appointments.createdAt, end),
       ),
     ),
+    // Appels manqués (7 jours) sur MA ligne — le filtre « jamais retourné »
+    // est calculé plus bas, en mémoire, pour épargner à la page d'accueil un
+    // anti-join à base d'expressions régulières sur toute la table.
+    db
+      .select({
+        id: calls.id,
+        startedAt: calls.startedAt,
+        fromNumber: calls.fromNumber,
+        clientId: clients.id,
+        clientName: clients.fullName,
+      })
+      .from(calls)
+      .leftJoin(clients, eq(clients.id, calls.clientId))
+      .where(
+        and(
+          eq(calls.userId, user.id),
+          eq(calls.direction, "inbound"),
+          isNull(calls.answeredAt),
+          isNotNull(calls.fromNumber),
+          gte(calls.startedAt, missedWindowStart),
+        ),
+      )
+      .orderBy(desc(calls.startedAt))
+      .limit(50),
   ]);
+
+  // « Jamais retourné » : aucun appel POSTÉRIEUR, de qui que ce soit dans
+  // l'équipe, vers ou depuis ce numéro (sortant = on a tenté un rappel ;
+  // entrant répondu = le client nous a rejoints). Ne coûte rien tant qu'il
+  // n'y a aucun manqué — le cas de loin le plus fréquent.
+  let unreturnedMissed: typeof missedRows = [];
+  if (missedRows.length > 0) {
+    const recent = await db
+      .select({
+        direction: calls.direction,
+        fromNumber: calls.fromNumber,
+        toNumber: calls.toNumber,
+        startedAt: calls.startedAt,
+        answeredAt: calls.answeredAt,
+      })
+      .from(calls)
+      .where(gte(calls.startedAt, missedWindowStart));
+    // Dernier contact par numéro : sortie (tentative de rappel) ou entrée répondue.
+    const lastContact = new Map<string, number>();
+    for (const c of recent) {
+      const key =
+        c.direction === "outbound"
+          ? phoneMatchKey(c.toNumber)
+          : c.answeredAt
+            ? phoneMatchKey(c.fromNumber)
+            : null;
+      if (!key) continue;
+      const t = c.startedAt.getTime();
+      if ((lastContact.get(key) ?? 0) < t) lastContact.set(key, t);
+    }
+    unreturnedMissed = missedRows.filter((row) => {
+      const key = phoneMatchKey(row.fromNumber);
+      return !key || (lastContact.get(key) ?? 0) <= row.startedAt.getTime();
+    });
+  }
 
   const toItem = (f: (typeof pendingFollowups)[number], overdue: boolean): FollowupItemData => ({
     id: f.id,
@@ -88,6 +151,37 @@ export default async function DashboardPage() {
 
   const overdueItems = pendingFollowups.filter((f) => f.dueAt < now).map((f) => toItem(f, true));
   const dueTodayItems = pendingFollowups.filter((f) => f.dueAt >= now).map((f) => toItem(f, false));
+
+  // Un numéro = une ligne (le plus récent d'abord, avec le nombre de tentatives).
+  const todayKey = formatInTimeZone(now, APP_TZ, "yyyy-MM-dd");
+  type MissedGroup = {
+    key: string;
+    latest: (typeof missedRows)[number];
+    timeLabel: string;
+    count: number;
+  };
+  const missedGroups: MissedGroup[] = [];
+  const missedByKey = new Map<string, MissedGroup>();
+  for (const row of unreturnedMissed) {
+    const key = phoneMatchKey(row.fromNumber) ?? row.fromNumber ?? row.id;
+    const existing = missedByKey.get(key);
+    if (existing) {
+      existing.count += 1; // trié du plus récent au plus ancien : le 1er vu reste affiché
+      continue;
+    }
+    const sameDay = formatInTimeZone(row.startedAt, APP_TZ, "yyyy-MM-dd") === todayKey;
+    const group: MissedGroup = {
+      key,
+      latest: row,
+      timeLabel: formatInTimeZone(row.startedAt, APP_TZ, sameDay ? "HH:mm" : "d MMM HH:mm", {
+        locale: dfnsLocale,
+      }),
+      count: 1,
+    };
+    missedByKey.set(key, group);
+    missedGroups.push(group);
+  }
+  const missedDisplay = missedGroups.slice(0, 6);
 
   const firstName = user.name.split(/\s+/)[0] ?? user.name;
   const stats = [
@@ -157,6 +251,67 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
+        {/* Appels manqués à rappeler — visible seulement quand il y en a */}
+        {missedGroups.length > 0 ? (
+          <Card className="shadow-xs lg:col-span-2">
+            <CardHeader className="border-b">
+              <CardTitle className="flex items-center gap-2">
+                <PhoneMissedIcon aria-hidden className="size-4 text-red-600 dark:text-red-400" />
+                {t("missedCalls.title")}
+                <Badge variant="destructive" className="tabular-nums">
+                  {missedGroups.length}
+                </Badge>
+              </CardTitle>
+              <CardAction>
+                <Button
+                  variant="ghost"
+                  className="min-h-11 text-muted-foreground md:min-h-8"
+                  render={<Link href="/calls?missed=1&period=7" />}
+                >
+                  {t("missedCalls.viewAll")}
+                  <ChevronRightIcon />
+                </Button>
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              <ul className="grid gap-2 md:grid-cols-2">
+                {missedDisplay.map((g) => (
+                  <li
+                    key={g.key}
+                    className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50"
+                  >
+                    <div className="min-w-0 flex-1">
+                      {g.latest.clientId && g.latest.clientName ? (
+                        <Link
+                          href={`/clients/${g.latest.clientId}`}
+                          className="block truncate text-sm font-medium hover:underline"
+                        >
+                          {g.latest.clientName}
+                        </Link>
+                      ) : (
+                        <span className="block truncate text-sm font-medium tabular-nums">
+                          {formatPhone(g.latest.fromNumber)}
+                        </span>
+                      )}
+                      <p className="truncate text-xs text-muted-foreground">
+                        <span className="tabular-nums">{g.timeLabel}</span>
+                        {g.count > 1 ? <> · {t("missedCalls.attempts", { count: g.count })}</> : null}
+                      </p>
+                    </div>
+                    <RedialButton
+                      number={g.latest.fromNumber ?? ""}
+                      clientId={g.latest.clientId ?? undefined}
+                      clientName={g.latest.clientName ?? undefined}
+                      iconOnly
+                      className="shrink-0"
+                    />
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        ) : null}
+
         {/* Follow-ups */}
         <Card className="shadow-xs">
           <CardHeader className="border-b">

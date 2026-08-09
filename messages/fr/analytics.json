@@ -91,6 +91,11 @@
     "syncNow": "Synchroniser voip.ms",
     "syncRunning": "Synchronisation…",
     "syncDone": "{cdr, plural, =0 {Aucun appel voip.ms} one {# appel voip.ms} other {# appels voip.ms}} — {attached, plural, =0 {aucun nouvel enregistrement} one {# nouvel enregistrement} other {# nouveaux enregistrements}}.",
-    "syncFailed": "Synchronisation voip.ms impossible. Réessayez dans un instant."
+    "syncFailed": "Synchronisation voip.ms impossible. Réessayez dans un instant.",
+    "status": "Statut",
+    "allStatuses": "Tous les appels",
+    "answered": "Répondus",
+    "missed": "Manqués",
+    "missedCall": "Manqué"
   }
 }

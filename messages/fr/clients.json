@@ -185,7 +185,8 @@
       "cancelled": "Annulé",
       "completed": "Complété",
       "noshow": "Absent"
-    }
+    },
+    "missed": "Appel manqué"
   },
   "dispositions": {
     "voicemail": "Boîte vocale",

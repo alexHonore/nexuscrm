@@ -29,5 +29,10 @@
     "inperson": "En personne"
   },
   "analyticsLink": "Voir l'analytique",
-  "error": "Une erreur est survenue"
+  "error": "Une erreur est survenue",
+  "missedCalls": {
+    "title": "Appels manqués à rappeler",
+    "viewAll": "Tout voir",
+    "attempts": "{count, plural, one {# appel manqué} other {# appels manqués}}"
+  }
 }

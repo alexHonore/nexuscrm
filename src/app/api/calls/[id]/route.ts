@@ -1,8 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { missedCallNotification } from "@/components/clients/notification-content";
 import { db } from "@/db";
-import { DISPOSITIONS, calls, categories, clients, followups } from "@/db/schema";
+import { DISPOSITIONS, calls, categories, clients, followups, notifications } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import { apiUser } from "@/lib/auth/guards";
 import { DISPOSITION_CONFIG } from "@/lib/dispositions";
@@ -113,6 +114,29 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       }
     }
   });
+
+  // Entrant qui DEVIENT manqué à la finalisation : décroché au moment même où
+  // l'appelant raccrochait — le POST du décroché semblait répondu, c'est donc
+  // ici que naît la notification de rappel. Une seule fois : la garde
+  // !call.endedAt rend les rejeux du même PATCH inoffensifs.
+  if (call.direction === "inbound" && !answeredAt && endedAt && !call.endedAt) {
+    let client: { id: string; fullName: string } | null = null;
+    if (call.clientId) {
+      client =
+        (await db.query.clients.findFirst({
+          where: eq(clients.id, call.clientId),
+          columns: { id: true, fullName: true },
+        })) ?? null;
+    }
+    await db.insert(notifications).values(
+      missedCallNotification({
+        userId: auth.id,
+        locale: auth.locale === "en" ? "en" : "fr",
+        client,
+        fromNumber: call.fromNumber,
+      }),
+    );
+  }
 
   if (body.disposition) {
     await logAudit({

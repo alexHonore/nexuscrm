@@ -7,6 +7,7 @@ import {
   CalendarDaysIcon,
   CheckCheckIcon,
   ClockIcon,
+  PhoneMissedIcon,
   UserPlusIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -34,6 +35,7 @@ const TYPE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
   followup_due: ClockIcon,
   incoming_lead: UserPlusIcon,
   appointment: CalendarDaysIcon,
+  missed_call: PhoneMissedIcon,
   system: BellIcon,
 };
 

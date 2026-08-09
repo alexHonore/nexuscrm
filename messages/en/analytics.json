@@ -91,6 +91,11 @@
     "syncNow": "Sync voip.ms",
     "syncRunning": "Syncing…",
     "syncDone": "{cdr, plural, =0 {No voip.ms calls} one {# voip.ms call} other {# voip.ms calls}} — {attached, plural, =0 {no new recordings} one {# new recording} other {# new recordings}}.",
-    "syncFailed": "voip.ms sync failed. Please try again shortly."
+    "syncFailed": "voip.ms sync failed. Please try again shortly.",
+    "status": "Status",
+    "allStatuses": "All calls",
+    "answered": "Answered",
+    "missed": "Missed",
+    "missedCall": "Missed"
   }
 }

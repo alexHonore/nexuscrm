@@ -1,8 +1,9 @@
 import "server-only";
 import { and, eq, gte, like, lt, or, sql } from "drizzle-orm";
 import { dayStartUtc } from "@/components/analytics/period";
+import { missedCallNotification } from "@/components/clients/notification-content";
 import { db } from "@/db";
-import { calls, clients, users } from "@/db/schema";
+import { calls, clients, notifications, users } from "@/db/schema";
 import { normalizePhone, phoneMatchKey } from "@/lib/phone";
 import {
   extractRecordingUrl,
@@ -72,6 +73,75 @@ export function collapseCdrLegs<T extends { account: string; destination: string
   }
   return [...best.values()];
 }
+
+/**
+ * Un appel ENTRANT peut produire des pattes sous des comptes DIFFÉRENTS
+ * (compte principal → DID, puis DID → sous-compte) : collapseCdrLegs ne les
+ * regroupe pas, sa clé incluant le compte. Sans ce second regroupement, la
+ * patte « compte principal » serait insérée en double par le repli
+ * d'attribution par DID.
+ *
+ * Deux règles, apprises à la dure :
+ * 1. Une patte d'un sous-compte CONNU n'est JAMAIS supprimée — chacune est une
+ *    attribution à part entière. Quand l'agent A appelle le DID de l'agent B,
+ *    le lot contient la patte sortante de A ET la patte entrante de B avec les
+ *    mêmes numéros à la même seconde : deux appels distincts, pas deux pattes.
+ *    Seules les pattes de comptes inconnus (compte principal) se font absorber.
+ * 2. Les pattes d'un même appel sont écrites par des sauts différents et
+ *    peuvent se chevaucher d'une seconde : la comparaison se fait à ±10 s,
+ *    pas à la seconde exacte.
+ */
+const LEG_TOLERANCE_MS = 10_000;
+
+export function collapseCrossAccountLegs<
+  T extends { account: string; callerid: string; destination: string; date: string; seconds: string },
+>(rows: T[], knownAccounts: ReadonlySet<string>): T[] {
+  const numKey = (r: T) =>
+    `${phoneMatchKey(r.callerid) ?? r.callerid}|${phoneMatchKey(r.destination) ?? r.destination}`;
+  // Dates locales Toronto sans fuseau — seules leurs différences comptent.
+  // (r.date peut manquer sur un CDR partiel : la boucle aval l'écartera.)
+  const legTime = (r: T) => (r.date ? Date.parse(r.date.replace(" ", "T")) || 0 : 0);
+  const secs = (r: T) => Number.parseInt(r.seconds, 10) || 0;
+
+  const out: T[] = [];
+  const knownTimes = new Map<string, number[]>();
+  const unknown: T[] = [];
+  for (const row of rows) {
+    if (knownAccounts.has(row.account)) {
+      out.push(row);
+      const key = numKey(row);
+      const list = knownTimes.get(key);
+      if (list) list.push(legTime(row));
+      else knownTimes.set(key, [legTime(row)]);
+    } else {
+      unknown.push(row);
+    }
+  }
+
+  // Pattes inconnues : absorbées par une patte connue du même appel, sinon
+  // regroupées entre elles (patte la plus longue conservée).
+  unknown.sort((a, b) => legTime(a) - legTime(b));
+  const lastUnknown = new Map<string, { time: number; index: number }>();
+  for (const row of unknown) {
+    const key = numKey(row);
+    const time = legTime(row);
+    const near = knownTimes.get(key);
+    if (near?.some((t) => Math.abs(t - time) <= LEG_TOLERANCE_MS)) continue;
+    const last = lastUnknown.get(key);
+    if (last && time - last.time <= LEG_TOLERANCE_MS) {
+      if (secs(row) > secs(out[last.index])) out[last.index] = row;
+      lastUnknown.set(key, { time, index: last.index });
+      continue;
+    }
+    lastUnknown.set(key, { time, index: out.length });
+    out.push(row);
+  }
+  return out;
+}
+
+/** Ne notifier que les appels manqués récents — un rattrapage d'archives ne doit pas spammer. */
+const MISSED_NOTIFY_WINDOW_MS = 48 * 3600_000;
+
 const MAX_ERRORS = 25;
 /**
  * Clé du verrou consultatif Postgres de la synchro CDR. Entier littéral —
@@ -89,6 +159,7 @@ export type CdrSyncResult = {
     matchedHeuristic: number;
     inserted: number;
     unknownAccount: number;
+    missedNotified: number;
     recordingsFound: number;
     recordingsAttached: number;
     recordingsWithoutUrl: number;
@@ -110,6 +181,7 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
     matchedHeuristic: 0,
     inserted: 0,
     unknownAccount: 0,
+    missedNotified: 0,
     recordingsFound: 0,
     recordingsAttached: 0,
     recordingsWithoutUrl: 0,
@@ -172,11 +244,15 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
         id: users.id,
         sipUsername: users.sipUsername,
         didNumber: users.didNumber,
+        locale: users.locale,
       })
       .from(users);
     const userByAccount = new Map<string, (typeof allUsers)[number]>();
+    const userByDid = new Map<string, (typeof allUsers)[number]>();
     for (const u of allUsers) {
       if (u.sipUsername) userByAccount.set(u.sipUsername, u);
+      const didKey = phoneMatchKey(u.didNumber);
+      if (didKey) userByDid.set(didKey, u);
     }
 
     // ── 3. Appels existants dans la fenêtre (index en mémoire) ──
@@ -207,10 +283,32 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
     }
 
     // ── 4. Réconciliation CDR → calls ──
-    for (const row of collapseCdrLegs(cdrRows)) {
+    const notifyCutoff = Date.now() - MISSED_NOTIFY_WINDOW_MS;
+    const missedToNotify: Array<{
+      user: (typeof allUsers)[number];
+      fromNumber: string | null;
+      client: { id: string; fullName: string } | null;
+    }> = [];
+    const cdrRowsCollapsed = collapseCrossAccountLegs(
+      collapseCdrLegs(cdrRows),
+      new Set(userByAccount.keys()),
+    );
+    for (const row of cdrRowsCollapsed) {
       try {
         if (!row.uniqueid) continue;
-        const user = userByAccount.get(row.account);
+        const calleridKey = phoneMatchKey(row.callerid);
+        const destKey = phoneMatchKey(row.destination);
+
+        // Compte inconnu (patte du compte principal, DID routé ailleurs…) :
+        // si la destination est le DID d'un usager, c'est un entrant pour lui
+        // — auparavant ces lignes étaient écartées et les appels manqués
+        // devenaient invisibles.
+        let user = userByAccount.get(row.account);
+        let forcedInbound = false;
+        if (!user && destKey) {
+          user = userByDid.get(destKey);
+          forcedInbound = user !== undefined;
+        }
         if (!user) {
           counts.unknownAccount += 1;
           continue;
@@ -222,8 +320,6 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
         }
         const seconds = Number.parseInt(row.seconds, 10) || 0;
         const answered = row.disposition?.toUpperCase() === "ANSWERED";
-        const calleridKey = phoneMatchKey(row.callerid);
-        const destKey = phoneMatchKey(row.destination);
 
         // a) Correspondance directe par providerCallId.
         const direct = byProviderId.get(row.uniqueid);
@@ -281,21 +377,22 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
         // c) Aucun appel local : insertion depuis le CDR.
         const didKey = phoneMatchKey(user.didNumber);
         const direction: "inbound" | "outbound" =
-          didKey && destKey && didKey === destKey ? "inbound" : "outbound";
+          forcedInbound || (didKey && destKey && didKey === destKey) ? "inbound" : "outbound";
         const otherRaw = direction === "inbound" ? row.callerid : row.destination;
         const otherKey = phoneMatchKey(otherRaw);
 
-        let clientId: string | null = null;
+        let client: { id: string; fullName: string } | null = null;
         if (otherKey) {
-          const [client] = await tx
-            .select({ id: clients.id })
+          const [match] = await tx
+            .select({ id: clients.id, fullName: clients.fullName })
             .from(clients)
             .where(
               or(like(clients.phone, `%${otherKey}`), like(clients.phoneAlt, `%${otherKey}`)),
             )
             .limit(1);
-          clientId = client?.id ?? null;
+          client = match ?? null;
         }
+        const clientId = client?.id ?? null;
 
         const [insertedRow] = await tx
           .insert(calls)
@@ -314,6 +411,14 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
           })
           .returning({ id: calls.id });
         counts.inserted += 1;
+
+        // Appel manqué découvert par la synchro (fureteur fermé au moment de
+        // l'appel) : notifier le propriétaire de la ligne pour qu'il rappelle.
+        // Les appels rattachés plus haut ont déjà été journalisés — et
+        // notifiés — par le webphone ; pas de doublon possible ici.
+        if (direction === "inbound" && !answered && startedAt.getTime() >= notifyCutoff) {
+          missedToNotify.push({ user, fromNumber: normalizePhone(row.callerid), client });
+        }
 
         const lite: CallRowLite = {
           id: insertedRow.id,
@@ -418,6 +523,21 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
       } catch (err) {
         pushError(`recording: ${err instanceof Error ? err.message : String(err)}`);
       }
+    }
+
+    // ── 6. Notifications d'appels manqués récents ──
+    if (missedToNotify.length > 0) {
+      await tx.insert(notifications).values(
+        missedToNotify.map((m) =>
+          missedCallNotification({
+            userId: m.user.id,
+            locale: m.user.locale === "en" ? "en" : "fr",
+            client: m.client,
+            fromNumber: m.fromNumber,
+          }),
+        ),
+      );
+      counts.missedNotified = missedToNotify.length;
     }
 
     return true;
