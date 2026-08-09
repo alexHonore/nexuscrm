@@ -135,6 +135,13 @@ export function AppShell({
       <Link
         key={item.href}
         href={item.href}
+        // Toutes les entrées du menu sont visibles d'emblée : avec le préchargement
+        // par défaut, CHAQUE affichage de page déclenchait le rendu serveur des 14
+        // routes du menu (toutes dynamiques, toutes interrogeant la base). Elles se
+        // disputaient le pool de connexions et ralentissaient la navigation en
+        // cours. Les squelettes (loading.tsx) rendent la transition immédiate de
+        // toute façon.
+        prefetch={false}
         aria-current={active ? "page" : undefined}
         className={cn(
           "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring",
@@ -229,6 +236,7 @@ export function AppShell({
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch={false}
                 aria-current={active ? "page" : undefined}
                 className={cn(
                   "flex h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",

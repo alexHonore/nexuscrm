@@ -21,7 +21,12 @@ const conn =
     // Supabase/Neon exigent TLS ; les URI n'incluent pas toujours sslmode=require.
     ...(isLocal ? {} : { ssl: "require" as const }),
   });
-if (process.env.NODE_ENV !== "production") globalForDb.pgConn = conn;
+// Cache global AUSSI en production : en dev il évite les fuites de connexions
+// au rechargement à chaud, en production il garantit UN seul client (donc un
+// seul pool, une seule poignée de main TLS) partagé par tous les bundles d'une
+// même instance. Ouvrir une connexion coûte plus d'une seconde — la réutiliser
+// est ce qui compte le plus.
+globalForDb.pgConn = conn;
 
 export const db = drizzle(conn, { schema });
 export * as tables from "./schema";
