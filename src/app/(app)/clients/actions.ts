@@ -26,6 +26,7 @@ import {
   notificationContent,
 } from "@/components/clients/notification-content";
 import { APP_TZ } from "@/components/clients/timezone";
+import { BULK_MAX } from "@/lib/bulk";
 
 export type ActionResult =
   | { ok: true; id?: string }
@@ -377,7 +378,6 @@ export async function deleteClientAction(clientId: string): Promise<ActionResult
 // en masse. Chaque fiche touchée reçoit SA ligne d'audit (marquée `bulk`), afin
 // que « modifiée par qui » et /admin/audit restent exacts fiche par fiche.
 
-const BULK_MAX = 200;
 const bulkIdsSchema = z.array(z.string().uuid()).min(1).max(BULK_MAX);
 
 /** Insertion d'audit groupée — même contrat que logAudit : ne casse jamais l'action. */
@@ -572,11 +572,50 @@ export async function bulkDeleteClientsAction(clientIds: string[]): Promise<Bulk
   if (!ids.success) return INVALID;
 
   const existing = await db.query.clients.findMany({ where: inArray(clients.id, ids.data) });
-  for (const row of existing) {
-    await deleteClientCore(user.id, row, true);
+  if (existing.length === 0) return { ok: true, count: 0 };
+  const found = existing.map((c) => c.id);
+
+  // Annuler les événements Google des RDV planifiés AVANT la cascade, sinon
+  // ils resteraient dans l'agenda du courtier. Une seule requête pour le lot.
+  const scheduled = await db.query.appointments.findMany({
+    where: and(
+      inArray(appointments.clientId, found),
+      eq(appointments.status, "scheduled"),
+      isNotNull(appointments.googleEventId),
+    ),
+    columns: { googleEventId: true },
+  });
+  for (const appt of scheduled) {
+    if (!appt.googleEventId) continue;
+    try {
+      await cancelEvent(appt.googleEventId);
+    } catch (err) {
+      console.error("google event cancellation failed", err);
+    }
   }
 
-  if (existing.length > 0) revalidateClientLists();
+  // Une seule suppression (la cascade emporte appels, RDV, commentaires…) puis
+  // un seul insert d'audit — une fiche à la fois faisait des centaines
+  // d'allers-retours et finissait par expirer sur des lots de cette taille.
+  await db.delete(clients).where(inArray(clients.id, found));
+  await logBulkAudit(
+    existing.map((row) => {
+      const changes = diffFields(row, null, CLIENT_AUDIT_FIELDS);
+      return {
+        userId: user.id,
+        action: "client.delete",
+        entityId: row.id,
+        detail: {
+          fullName: row.fullName,
+          phone: row.phone,
+          bulk: true,
+          ...(changes ? { changes } : {}),
+        },
+      };
+    }),
+  );
+
+  revalidateClientLists();
   return { ok: true, count: existing.length };
 }
 

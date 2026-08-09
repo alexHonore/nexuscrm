@@ -199,7 +199,8 @@
   "errors": {
     "generic": "Something went wrong",
     "forbidden": "Not allowed",
-    "notFound": "Client not found"
+    "notFound": "Client not found",
+    "bulkPartial": "Stopped after {done} of {total} — the rest were not processed. Try again on what's left."
   },
   "views": {
     "cards": "Card view",

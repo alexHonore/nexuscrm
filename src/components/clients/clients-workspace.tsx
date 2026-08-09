@@ -421,7 +421,11 @@ export function ClientsWorkspace({
       const tail = itemsRef.current
         .slice(data.pageSize)
         .filter((item) => !fresh.has(item.id));
-      const merged = [...data.items, ...tail];
+      // Les pages ≥ 2 sont conservées telles quelles : on ne sait pas lesquelles
+      // ont disparu. Le total, lui, fait foi — sans ce plafond, une suppression
+      // en masse laissait les fiches effacées affichées (« 0 client » au-dessus
+      // d'une liste encore pleine) jusqu'au rechargement complet.
+      const merged = [...data.items, ...tail].slice(0, Math.max(data.items.length, data.total));
 
       setFailed(false);
       setTotal(data.total);

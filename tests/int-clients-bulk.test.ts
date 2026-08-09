@@ -11,6 +11,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { SignJWT } from "jose";
 import { closeDb, makeCategory, makeClient, makeUser, resetDb, testDb } from "./helpers/db";
 import { auditLogs, clients } from "@/db/schema";
+import { BULK_MAX } from "@/lib/bulk";
 
 // ── Stubs de contexte Next + réseau externe ─────────────────────────────────
 
@@ -232,6 +233,44 @@ describe("actions en masse", () => {
       const audits = await bulkAuditRows("client.delete");
       expect(audits).toHaveLength(2);
       expect(audits.every((x) => (x.detail as { bulk?: boolean }).bulk === true)).toBe(true);
+    });
+
+    it("supprime un lot plein (BULK_MAX) en une passe, avec un audit par fiche", async () => {
+      const admin = await makeUser({ role: "admin" });
+      await login(admin);
+      // Lot plein : c'est la taille qu'envoie l'UI quand la sélection dépasse
+      // la limite (elle découpe). Autrefois chaque fiche coûtait plusieurs
+      // allers-retours ; la suppression est désormais ensembliste.
+      const made = [];
+      for (let i = 0; i < BULK_MAX; i++) {
+        made.push(await makeClient({ phone: `+1418555${String(1000 + i).padStart(4, "0")}` }));
+      }
+      const keep = await makeClient({ phone: "+15145559999" });
+
+      const res = await actions.bulkDeleteClientsAction(made.map((c) => c.id));
+      expect(res).toEqual({ ok: true, count: BULK_MAX });
+
+      const remaining = await testDb.select().from(clients);
+      expect(remaining.map((r) => r.id)).toEqual([keep.id]);
+      // Traçabilité : une entrée d'audit par fiche, pas une seule pour le lot.
+      expect(await bulkAuditRows("client.delete")).toHaveLength(BULK_MAX);
+    });
+
+    it("au-delà de BULK_MAX, refuse explicitement plutôt que de supprimer à moitié", async () => {
+      const admin = await makeUser({ role: "admin" });
+      await login(admin);
+      const a = await makeClient();
+      const tooMany = [
+        ...Array.from({ length: BULK_MAX }, () => crypto.randomUUID()),
+        a.id,
+      ];
+
+      expect(await actions.bulkDeleteClientsAction(tooMany)).toEqual({
+        ok: false,
+        error: "invalid",
+      });
+      // Rien n'a été supprimé : l'UI doit découper, pas envoyer un lot trop gros.
+      expect(await testDb.select().from(clients).where(eq(clients.id, a.id))).toHaveLength(1);
     });
   });
 

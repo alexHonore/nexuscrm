@@ -199,7 +199,8 @@
   "errors": {
     "generic": "Une erreur est survenue",
     "forbidden": "Action non autorisée",
-    "notFound": "Client introuvable"
+    "notFound": "Client introuvable",
+    "bulkPartial": "Interrompu après {done} fiche(s) sur {total} — les autres n'ont pas été traitées. Réessayez sur la sélection restante."
   },
   "views": {
     "cards": "Vue fiches",

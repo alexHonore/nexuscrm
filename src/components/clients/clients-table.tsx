@@ -66,6 +66,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { APP_TZ } from "@/components/clients/timezone";
+import { BULK_MAX } from "@/lib/bulk";
 import { emitDataChange } from "@/lib/live";
 import { formatPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
@@ -237,21 +238,44 @@ export function ClientsTable({
   const dayTime = (iso: string) =>
     formatInTimeZone(new Date(iso), APP_TZ, "d MMM yyyy, HH:mm", { locale: dfnsLocale });
 
-  /** Exécute une action en masse et rafraîchit les listes en cas de succès. */
+  /**
+   * Exécute une action en masse et rafraîchit les listes en cas de succès.
+   *
+   * La sélection est découpée en lots de BULK_MAX : le serveur refuse au-delà,
+   * et sans ce découpage sélectionner plus de fiches que la limite échouait sur
+   * un « Une erreur est survenue » sans explication. En cas d'échec en cours de
+   * route, on annonce ce qui a réellement été traité.
+   */
   const runBulk = (run: (ids: string[]) => Promise<BulkResult>, successKey: string) => {
     const ids = [...selected];
     if (ids.length === 0) return;
     startTransition(async () => {
-      const res = await run(ids);
-      if (res.ok) {
-        toast.success(t(successKey, { count: res.count }));
-        setDeleteOpen(false);
-        clearSelection();
-        emitDataChange("clients");
-        router.refresh();
-      } else {
-        toast.error(res.error === "forbidden" ? t("errors.forbidden") : t("errors.generic"));
+      let done = 0;
+      for (let i = 0; i < ids.length; i += BULK_MAX) {
+        const res = await run(ids.slice(i, i + BULK_MAX));
+        if (!res.ok) {
+          toast.error(
+            res.error === "forbidden"
+              ? t("errors.forbidden")
+              : done > 0
+                ? t("errors.bulkPartial", { done, total: ids.length })
+                : t("errors.generic"),
+          );
+          setDeleteOpen(false);
+          if (done > 0) {
+            clearSelection();
+            emitDataChange("clients");
+            router.refresh();
+          }
+          return;
+        }
+        done += res.count;
       }
+      toast.success(t(successKey, { count: done }));
+      setDeleteOpen(false);
+      clearSelection();
+      emitDataChange("clients");
+      router.refresh();
     });
   };
 
