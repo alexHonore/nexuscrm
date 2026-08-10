@@ -149,6 +149,12 @@ export type BookingEventInput = {
   /** Nom complet du client — seul le prénom apparaît dans le titre. */
   clientName: string;
   clientEmail?: string | null;
+  /**
+   * Courriel du courtier (réglages de réservation) — invité comme participant.
+   * S'il diffère du compte Google connecté, Google lui envoie une vraie
+   * invitation ; s'il EST l'organisateur, l'évènement est déjà sur son agenda.
+   */
+  brokerEmail?: string | null;
   location?: string | null;
   /** IANA timezone used for the event start/end (booking settings). */
   timezone?: string;
@@ -159,6 +165,18 @@ export type BookingEventResult = {
   meetLink: string | null;
   htmlLink: string | null;
 };
+
+/** Participants de l'évènement : client + courtier, dédoublonnés (insensible à la casse). */
+export function bookingEventAttendees(
+  clientEmail?: string | null,
+  brokerEmail?: string | null,
+): { email: string }[] {
+  const attendees = clientEmail ? [{ email: clientEmail }] : [];
+  if (brokerEmail && brokerEmail.toLowerCase() !== (clientEmail ?? "").toLowerCase()) {
+    attendees.push({ email: brokerEmail });
+  }
+  return attendees;
+}
 
 /**
  * Insert the appointment on the admin's calendar.
@@ -174,13 +192,15 @@ export async function createBookingEvent(input: BookingEventInput): Promise<Book
   const { calendar, calendarId } = await getAuthedCalendar();
   const tz = input.timezone ?? "America/Toronto";
 
+  const attendees = bookingEventAttendees(input.clientEmail, input.brokerEmail);
+
   const requestBody: calendar_v3.Schema$Event = {
     summary: bookingEventTitle(input.clientName),
     colorId: EVENT_COLOR_ID_BY_TYPE[input.type],
     start: { dateTime: input.startsAt.toISOString(), timeZone: tz },
     end: { dateTime: input.endsAt.toISOString(), timeZone: tz },
     reminders: { useDefault: true },
-    ...(input.clientEmail ? { attendees: [{ email: input.clientEmail }] } : {}),
+    ...(attendees.length > 0 ? { attendees } : {}),
     ...(input.type === "meet"
       ? {
           conferenceData: {

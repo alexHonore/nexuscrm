@@ -391,7 +391,10 @@
       "inPersonDuration": "Durée en personne (min)",
       "buffer": "Tampon entre rendez-vous (min)",
       "location": "Lieu par défaut (en personne)",
-      "locationPlaceholder": "Ex. : bureau de Québec, 123 boul. Laurier"
+      "locationPlaceholder": "Ex. : bureau de Québec, 123 boul. Laurier",
+      "brokerEmail": "Courriel du courtier (invité à chaque rendez-vous)",
+      "brokerEmailHint": "Reçoit l'invitation Google de chaque rendez-vous. Si c'est aussi le compte Google connecté, l'évènement apparaît directement sur son agenda (Google n'envoie pas de courriel à l'organisateur). Laisser vide pour n'inviter que le client.",
+      "brokerEmailInvalid": "Adresse courriel invalide — entrez une adresse complète ou laissez le champ vide."
     },
     "telephony": {
       "title": "Téléphonie",

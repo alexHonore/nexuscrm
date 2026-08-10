@@ -249,6 +249,8 @@ describe("createAppointment", () => {
       type: "meet",
       clientName: "Marie Tremblay",
       clientEmail: "nouveau@exemple.ca",
+      // Réglage par défaut : le courtier est invité à chaque rendez-vous.
+      brokerEmail: "info@alexhonore.com",
       timezone: "America/Toronto",
     });
     expect(arg.startsAt.toISOString()).toBe(SLOT);
@@ -857,6 +859,20 @@ describe("réglages de réservation (jours, heures, durées, lieu)", () => {
     expect(slots).not.toContain("2026-08-10T14:00:00.000Z");
     expect(slots).not.toContain("2026-08-10T14:30:00.000Z");
     expect(slots).toContain("2026-08-10T15:00:00.000Z");
+  });
+
+  it("transmet le courriel du courtier configuré à l'évènement Google", async () => {
+    await setSetting("booking", { brokerEmail: "courtier@exemple.ca" });
+    await createAppointment(input());
+    expect(googleMock.createBookingEvent.mock.calls[0][0].brokerEmail).toBe(
+      "courtier@exemple.ca",
+    );
+  });
+
+  it("courriel du courtier vidé → aucun courtier invité (null)", async () => {
+    await setSetting("booking", { brokerEmail: "" });
+    await createAppointment(input());
+    expect(googleMock.createBookingEvent.mock.calls[0][0].brokerEmail).toBeNull();
   });
 
   it("un lieu explicite l'emporte sur le lieu par défaut", async () => {

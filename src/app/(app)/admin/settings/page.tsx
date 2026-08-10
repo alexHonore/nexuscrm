@@ -48,6 +48,7 @@ export default async function AdminSettingsPage() {
           inPersonDurationMin: booking.inPersonDurationMin,
           bufferMin: booking.bufferMin,
           inPersonDefaultLocation: booking.inPersonDefaultLocation,
+          brokerEmail: booking.brokerEmail,
         }}
       />
 

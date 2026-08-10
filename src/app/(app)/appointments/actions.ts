@@ -287,6 +287,7 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
       endsAt,
       clientName: client.fullName,
       clientEmail,
+      brokerEmail: settings.brokerEmail || null,
       location,
       timezone: tz,
     });

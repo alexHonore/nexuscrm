@@ -602,7 +602,14 @@ describe("settings — bookingSettingsSchema", () => {
       bufferMin: 15,
       timezone: "America/Toronto",
       inPersonDefaultLocation: "",
+      brokerEmail: "info@alexhonore.com",
     });
+  });
+
+  it("refuse un courriel de courtier invalide, accepte la chaîne vide", () => {
+    expect(bookingSettingsSchema.safeParse({ brokerEmail: "pas-un-courriel" }).success).toBe(false);
+    expect(bookingSettingsSchema.parse({ brokerEmail: "" }).brokerEmail).toBe("");
+    expect(bookingSettingsSchema.parse({ brokerEmail: "x@y.ca" }).brokerEmail).toBe("x@y.ca");
   });
 
   it("complète un objet partiel sans écraser les valeurs fournies", () => {

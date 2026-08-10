@@ -7,6 +7,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { z } from "zod";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -210,6 +211,7 @@ export type BookingFormValues = {
   inPersonDurationMin: number;
   bufferMin: number;
   inPersonDefaultLocation: string;
+  brokerEmail: string;
 };
 
 /** Lundi → dimanche (valeurs date-fns : 0 = dimanche). */
@@ -219,6 +221,7 @@ export function BookingCard({ initial }: { initial: BookingFormValues }) {
   const t = useTranslations("admin");
   const [form, setForm] = useState(initial);
   const [pending, setPending] = useState(false);
+  const [emailInvalid, setEmailInvalid] = useState(false);
 
   const toggleDay = (day: number, checked: boolean) => {
     setForm((f) => ({
@@ -228,9 +231,20 @@ export function BookingCard({ initial }: { initial: BookingFormValues }) {
   };
 
   const submit = async () => {
+    // Même règle que le serveur (zod, pas la validation HTML — elle accepte
+    // « info@alexhonore » sans domaine complet, que le serveur refuserait).
+    const brokerEmail = form.brokerEmail.trim();
+    if (!z.email().or(z.literal("")).safeParse(brokerEmail).success) {
+      setEmailInvalid(true);
+      toast.error(t("settings.booking.brokerEmailInvalid"));
+      return;
+    }
     setPending(true);
     try {
-      await api("/api/admin/settings/booking", { method: "POST", body: JSON.stringify(form) });
+      await api("/api/admin/settings/booking", {
+        method: "POST",
+        body: JSON.stringify({ ...form, brokerEmail }),
+      });
       toast.success(t("saved"));
     } catch {
       toast.error(t("genericError"));
@@ -342,6 +356,21 @@ export function BookingCard({ initial }: { initial: BookingFormValues }) {
             onChange={(e) => setForm({ ...form, inPersonDefaultLocation: e.target.value })}
             placeholder={t("settings.booking.locationPlaceholder")}
           />
+        </div>
+
+        <div className="max-w-md space-y-1.5">
+          <Label htmlFor="booking-broker-email">{t("settings.booking.brokerEmail")}</Label>
+          <Input
+            id="booking-broker-email"
+            type="email"
+            value={form.brokerEmail}
+            aria-invalid={emailInvalid || undefined}
+            onChange={(e) => {
+              setEmailInvalid(false);
+              setForm({ ...form, brokerEmail: e.target.value });
+            }}
+          />
+          <p className="text-xs text-muted-foreground">{t("settings.booking.brokerEmailHint")}</p>
         </div>
       </CardContent>
       <CardFooter>

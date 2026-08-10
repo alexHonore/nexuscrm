@@ -51,6 +51,8 @@ const categoryTransferRoute = await import("@/app/api/admin/categories/[id]/tran
 const sourceIdRoute = await import("@/app/api/admin/sources/[id]/route");
 const sourceTransferRoute = await import("@/app/api/admin/sources/[id]/transfer/route");
 const didsRoute = await import("@/app/api/admin/voipms/dids/route");
+const bookingSettingsRoute = await import("@/app/api/admin/settings/booking/route");
+const { getSetting, setSetting } = await import("@/lib/settings");
 const { verifyPassword } = await import("@/lib/auth/password");
 
 // ── Session ──────────────────────────────────────────────────────────────────
@@ -995,6 +997,54 @@ describe("opérations d'administration", () => {
       };
       const holders = dids.filter((d) => d.did === "4184761542").map((d) => d.assignedUserId);
       expect(holders).toEqual([samAfter.id]);
+    });
+  });
+
+  // ══ Réglages de réservation ════════════════════════════════════════════════
+
+  describe("POST /api/admin/settings/booking", () => {
+    const url = "http://localhost/api/admin/settings/booking";
+
+    it("RÉGRESSION : une rustine partielle ne réinitialise PAS les clés omises (zod v4 partial + défauts)", async () => {
+      const admin = await makeUser({ role: "admin" });
+      await loginAs(admin);
+      // L'admin a vidé le courriel du courtier et personnalisé son horaire.
+      await setSetting("booking", { brokerEmail: "", startHour: "08:00", bufferMin: 30 });
+
+      const res = await bookingSettingsRoute.POST(jsonRequest(url, "POST", { endHour: "18:00" }));
+      expect(res.status).toBe(200);
+
+      const saved = await getSetting("booking");
+      expect(saved.endHour).toBe("18:00");
+      // Les clés absentes du POST gardent leur valeur enregistrée — le
+      // brokerEmail vidé ne ressuscite pas en « info@alexhonore.com ».
+      expect(saved.brokerEmail).toBe("");
+      expect(saved.startHour).toBe("08:00");
+      expect(saved.bufferMin).toBe(30);
+    });
+
+    it("accepte un courriel de courtier valide et refuse (422) un invalide", async () => {
+      const admin = await makeUser({ role: "admin" });
+      await loginAs(admin);
+
+      const ok = await bookingSettingsRoute.POST(
+        jsonRequest(url, "POST", { brokerEmail: "courtier@exemple.ca" }),
+      );
+      expect(ok.status).toBe(200);
+      expect((await getSetting("booking")).brokerEmail).toBe("courtier@exemple.ca");
+
+      const bad = await bookingSettingsRoute.POST(
+        jsonRequest(url, "POST", { brokerEmail: "pas-un-courriel" }),
+      );
+      expect(bad.status).toBe(422);
+      expect((await getSetting("booking")).brokerEmail).toBe("courtier@exemple.ca");
+    });
+
+    it("refuse (403) un téléphoniste", async () => {
+      const caller = await makeUser({ role: "caller" });
+      await loginAs(caller);
+      const res = await bookingSettingsRoute.POST(jsonRequest(url, "POST", { endHour: "18:00" }));
+      expect(res.status).toBe(403);
     });
   });
 });

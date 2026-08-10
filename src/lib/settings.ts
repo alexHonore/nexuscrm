@@ -16,6 +16,13 @@ export const bookingSettingsSchema = z.object({
   bufferMin: z.number().default(15),
   timezone: z.string().default("America/Toronto"),
   inPersonDefaultLocation: z.string().default(""),
+  /**
+   * Courriel du courtier, invité à chaque rendez-vous. Il reçoit ainsi une
+   * vraie invitation dès que le compte Google connecté n'est pas ce courriel
+   * (l'organisateur, lui, ne reçoit jamais de courriel — l'évènement apparaît
+   * directement sur son agenda). Chaîne vide = personne d'autre n'est invité.
+   */
+  brokerEmail: z.email().or(z.literal("")).default("info@alexhonore.com"),
 });
 export type BookingSettings = z.infer<typeof bookingSettingsSchema>;
 
@@ -53,7 +60,8 @@ export async function getSetting<K extends SettingKey>(key: K): Promise<z.infer<
 
 export async function setSetting<K extends SettingKey>(
   key: K,
-  value: z.infer<(typeof SCHEMAS)[K]>,
+  // z.input : les champs à valeur par défaut restent optionnels — parse() les complète.
+  value: z.input<(typeof SCHEMAS)[K]>,
 ): Promise<void> {
   const validated = SCHEMAS[key].parse(value);
   await db

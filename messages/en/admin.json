@@ -391,7 +391,10 @@
       "inPersonDuration": "In-person length (min)",
       "buffer": "Buffer between appointments (min)",
       "location": "Default location (in person)",
-      "locationPlaceholder": "E.g.: Québec City office, 123 Laurier Blvd"
+      "locationPlaceholder": "E.g.: Québec City office, 123 Laurier Blvd",
+      "brokerEmail": "Broker e-mail (invited to every appointment)",
+      "brokerEmailHint": "Receives the Google invitation for every appointment. If it is also the connected Google account, the event simply appears on that calendar (Google never e-mails the organizer). Leave empty to invite only the client.",
+      "brokerEmailInvalid": "Invalid e-mail address — enter a full address or leave the field empty."
     },
     "telephony": {
       "title": "Telephony",
