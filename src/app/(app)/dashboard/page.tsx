@@ -38,7 +38,18 @@ export default async function DashboardPage() {
   const { start, end } = torontoDayRange(now);
   const missedWindowStart = new Date(now.getTime() - 7 * 24 * 3600_000);
 
-  const [pendingFollowups, todayAppointments, [callStats], bookedToday, missedRows] =
+  // Prochains rendez-vous (14 jours), en cours inclus. Le courtier (admin)
+  // voit TOUTE l'équipe — chaque rencontre prise par un téléphoniste est la
+  // sienne ; un téléphoniste ne voit que les siennes.
+  const upcomingHorizon = new Date(now.getTime() + 14 * 24 * 3600_000);
+  const upcomingWhere = and(
+    ...(user.role === "admin" ? [] : [eq(appointments.userId, user.id)]),
+    eq(appointments.status, "scheduled"),
+    gte(appointments.endsAt, now),
+    lt(appointments.startsAt, upcomingHorizon),
+  );
+
+  const [pendingFollowups, upcomingAppointments, upcomingCount, [callStats], bookedToday, missedRows] =
     await Promise.all([
     db.query.followups.findMany({
       where: and(
@@ -51,15 +62,12 @@ export default async function DashboardPage() {
       limit: 50,
     }),
     db.query.appointments.findMany({
-      where: and(
-        eq(appointments.userId, user.id),
-        eq(appointments.status, "scheduled"),
-        gte(appointments.startsAt, start),
-        lt(appointments.startsAt, end),
-      ),
-      with: { client: true },
+      where: upcomingWhere,
+      with: { client: true, user: { columns: { name: true } } },
       orderBy: [asc(appointments.startsAt)],
+      limit: 8,
     }),
+    db.$count(appointments, upcomingWhere),
     db
       .select({
         count: sql<number>`count(*)::int`,
@@ -183,6 +191,34 @@ export default async function DashboardPage() {
   }
   const missedDisplay = missedGroups.slice(0, 6);
 
+  // Prochains rendez-vous groupés par jour (Aujourd'hui / Demain / date).
+  // « Demain » = prochain minuit de Toronto (`end`), pas maintenant + 24 h —
+  // la nuit du passage à l'heure avancée sauterait un jour civil.
+  const tomorrowKey = formatInTimeZone(end, APP_TZ, "yyyy-MM-dd");
+  type ApptGroup = { key: string; label: string; items: typeof upcomingAppointments };
+  const apptGroups: ApptGroup[] = [];
+  for (const a of upcomingAppointments) {
+    const key = formatInTimeZone(a.startsAt, APP_TZ, "yyyy-MM-dd");
+    const last = apptGroups[apptGroups.length - 1];
+    if (last && last.key === key) {
+      last.items.push(a);
+      continue;
+    }
+    const label =
+      key === todayKey
+        ? t("appointments.today")
+        : key === tomorrowKey
+          ? t("appointments.tomorrow")
+          : formatInTimeZone(
+              a.startsAt,
+              APP_TZ,
+              locale === "en" ? "EEEE, MMMM d" : "EEEE d MMMM",
+              { locale: dfnsLocale },
+            );
+    apptGroups.push({ key, label, items: [a] });
+  }
+
+  const timeFormat = locale === "en" ? "h:mm a" : "HH:mm";
   const firstName = user.name.split(/\s+/)[0] ?? user.name;
   const stats = [
     {
@@ -366,70 +402,94 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Today's appointments */}
+        {/* Prochains rendez-vous — 14 jours (admin : toute l'équipe) */}
         <Card className="shadow-xs">
           <CardHeader className="border-b">
             <CardTitle className="flex items-center gap-2">
               {t("appointments.title")}
               <Badge variant="secondary" className="tabular-nums">
-                {todayAppointments.length}
+                {upcomingCount}
               </Badge>
             </CardTitle>
             <CardAction>
               <Button
                 variant="ghost"
                 className="min-h-11 text-muted-foreground md:min-h-8"
-                render={<Link href="/appointments" />}
+                render={<Link href="/appointments?view=calendar" />}
               >
-                {t("appointments.viewAll")}
+                {t("appointments.calendar")}
                 <ChevronRightIcon />
               </Button>
             </CardAction>
           </CardHeader>
-          <CardContent>
-            {todayAppointments.length === 0 ? (
+          <CardContent className="space-y-4">
+            {upcomingAppointments.length === 0 ? (
               <EmptyState
                 className="py-8"
                 icon={<CalendarDaysIcon />}
                 title={t("appointments.empty")}
               />
             ) : (
-              <ul className="space-y-2">
-                {todayAppointments.map((a) => (
-                  <li
-                    key={a.id}
-                    className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50"
-                  >
-                    <div className="flex shrink-0 flex-col items-center rounded-md bg-muted px-2 py-1 tabular-nums">
-                      <span className="text-sm font-semibold leading-tight">
-                        {formatInTimeZone(a.startsAt, APP_TZ, "HH:mm", { locale: dfnsLocale })}
-                      </span>
-                      <span className="text-[11px] leading-tight text-muted-foreground">
-                        {formatInTimeZone(a.endsAt, APP_TZ, "HH:mm", { locale: dfnsLocale })}
-                      </span>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <Link
-                        href={`/clients/${a.clientId}`}
-                        className="block truncate text-sm font-medium hover:underline"
-                      >
-                        {a.client?.fullName ?? a.title}
-                      </Link>
-                      <p className="truncate text-xs text-muted-foreground">{a.title}</p>
-                    </div>
-                    <Badge variant="secondary" className="shrink-0 gap-1">
-                      {a.type === "meet" ? (
-                        <VideoIcon className="size-3" />
-                      ) : (
-                        <MapPinIcon className="size-3" />
-                      )}
-                      <span className="max-sm:sr-only">
-                        {a.type === "meet" ? t("appointments.meet") : t("appointments.inperson")}
-                      </span>
-                    </Badge>
-                  </li>
+              <>
+                {apptGroups.map((g) => (
+                  <div key={g.key} className="space-y-2">
+                    <p className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                      {g.key === todayKey ? (
+                        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-primary" />
+                      ) : null}
+                      {g.label}
+                    </p>
+                    <ul className="space-y-2">
+                      {g.items.map((a) => (
+                        <li
+                          key={a.id}
+                          className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50"
+                        >
+                          <div className="flex shrink-0 flex-col items-center rounded-md bg-muted px-2 py-1 tabular-nums">
+                            <span className="text-sm font-semibold leading-tight">
+                              {formatInTimeZone(a.startsAt, APP_TZ, timeFormat, { locale: dfnsLocale })}
+                            </span>
+                            <span className="text-[11px] leading-tight text-muted-foreground">
+                              {formatInTimeZone(a.endsAt, APP_TZ, timeFormat, { locale: dfnsLocale })}
+                            </span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <Link
+                              href={`/clients/${a.clientId}`}
+                              className="block truncate text-sm font-medium hover:underline"
+                            >
+                              {a.client?.fullName ?? a.title}
+                            </Link>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {user.role === "admin" && a.user?.name
+                                ? t("appointments.bookedBy", { name: a.user.name })
+                                : a.title}
+                            </p>
+                          </div>
+                          <Badge variant="secondary" className="shrink-0 gap-1">
+                            {a.type === "meet" ? (
+                              <VideoIcon className="size-3" />
+                            ) : (
+                              <MapPinIcon className="size-3" />
+                            )}
+                            <span className="max-sm:sr-only">
+                              {a.type === "meet" ? t("appointments.meet") : t("appointments.inperson")}
+                            </span>
+                          </Badge>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 ))}
-              </ul>
+                {upcomingCount > upcomingAppointments.length ? (
+                  <Link
+                    href="/appointments"
+                    className="flex min-h-11 items-center justify-center text-xs font-medium text-primary underline-offset-4 hover:underline md:min-h-8"
+                  >
+                    {t("appointments.viewAll")}
+                  </Link>
+                ) : null}
+              </>
             )}
           </CardContent>
         </Card>

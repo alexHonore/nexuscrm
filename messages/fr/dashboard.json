@@ -22,11 +22,15 @@
     "done": "Suivi terminé"
   },
   "appointments": {
-    "title": "Rendez-vous d'aujourd'hui",
-    "empty": "Aucun rendez-vous aujourd'hui.",
+    "title": "Prochains rendez-vous",
+    "empty": "Aucun rendez-vous à venir.",
     "viewAll": "Voir tout",
     "meet": "Vidéo (Meet)",
-    "inperson": "En personne"
+    "inperson": "En personne",
+    "calendar": "Calendrier",
+    "today": "Aujourd'hui",
+    "tomorrow": "Demain",
+    "bookedBy": "Réservé par {name}"
   },
   "analyticsLink": "Voir l'analytique",
   "error": "Une erreur est survenue",

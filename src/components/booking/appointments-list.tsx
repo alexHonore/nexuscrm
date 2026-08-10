@@ -72,7 +72,7 @@ function StatusBadge({ status }: { status: AppointmentItem["status"] }) {
   );
 }
 
-function AppointmentCard({
+export function AppointmentCard({
   item,
   showDate = false,
 }: {

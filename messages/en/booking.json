@@ -126,6 +126,18 @@
       "cancelled": "Cancelled",
       "completed": "Completed",
       "noshow": "No-show"
+    },
+    "view": {
+      "label": "View",
+      "list": "List",
+      "calendar": "Calendar"
+    },
+    "calendarView": {
+      "today": "Today",
+      "prevMonth": "Previous month",
+      "nextMonth": "Next month",
+      "more": "+{count}",
+      "dayEmpty": "No appointments on this day."
     }
   }
 }

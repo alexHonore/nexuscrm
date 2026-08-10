@@ -126,6 +126,18 @@
       "cancelled": "Annulé",
       "completed": "Complété",
       "noshow": "Absent"
+    },
+    "view": {
+      "label": "Affichage",
+      "list": "Liste",
+      "calendar": "Calendrier"
+    },
+    "calendarView": {
+      "today": "Aujourd'hui",
+      "prevMonth": "Mois précédent",
+      "nextMonth": "Mois suivant",
+      "more": "+{count}",
+      "dayEmpty": "Aucun rendez-vous ce jour-là."
     }
   }
 }

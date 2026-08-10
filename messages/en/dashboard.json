@@ -22,11 +22,15 @@
     "done": "Follow-up completed"
   },
   "appointments": {
-    "title": "Today's appointments",
-    "empty": "No appointments today.",
+    "title": "Upcoming appointments",
+    "empty": "No upcoming appointments.",
     "viewAll": "View all",
     "meet": "Video (Meet)",
-    "inperson": "In person"
+    "inperson": "In person",
+    "calendar": "Calendar",
+    "today": "Today",
+    "tomorrow": "Tomorrow",
+    "bookedBy": "Booked by {name}"
   },
   "analyticsLink": "View analytics",
   "error": "Something went wrong",
