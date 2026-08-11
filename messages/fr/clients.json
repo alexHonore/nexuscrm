@@ -195,7 +195,8 @@
     "not_interested": "Pas intéressé",
     "dncl": "Ne pas appeler",
     "not_qualified": "Non qualifié",
-    "no_answer": "Sans réponse"
+    "no_answer": "Sans réponse",
+    "deleted": "Statut supprimé"
   },
   "errors": {
     "generic": "Une erreur est survenue",

@@ -58,7 +58,8 @@
     "no_answer": "Sans réponse",
     "not_interested": "Pas intéressé",
     "not_qualified": "Non qualifié",
-    "dncl": "Ne pas appeler (LNNTE)"
+    "dncl": "Ne pas appeler (LNNTE)",
+    "deleted": "Statut supprimé"
   },
   "callsPage": {
     "title": "Journal des appels",

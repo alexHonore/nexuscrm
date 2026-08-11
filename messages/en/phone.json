@@ -67,7 +67,8 @@
       "not_interested": "Not interested",
       "not_qualified": "Not qualified",
       "dncl": "Do not call"
-    }
+    },
+    "deleted": "Deleted status"
   },
   "errors": {
     "mic_denied": "Microphone access denied. Allow the microphone in your browser settings and try again.",

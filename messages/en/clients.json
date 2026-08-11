@@ -195,7 +195,8 @@
     "not_interested": "Not interested",
     "dncl": "Do not call",
     "not_qualified": "Not qualified",
-    "no_answer": "No answer"
+    "no_answer": "No answer",
+    "deleted": "Deleted status"
   },
   "errors": {
     "generic": "Something went wrong",

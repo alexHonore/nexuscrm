@@ -58,7 +58,8 @@
     "no_answer": "No answer",
     "not_interested": "Not interested",
     "not_qualified": "Not qualified",
-    "dncl": "Do not call (DNCL)"
+    "dncl": "Do not call (DNCL)",
+    "deleted": "Deleted status"
   },
   "callsPage": {
     "title": "Call log",

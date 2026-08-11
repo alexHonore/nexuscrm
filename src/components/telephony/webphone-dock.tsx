@@ -52,8 +52,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { Disposition } from "@/db/schema";
-import { DISPOSITION_CONFIG, DISPOSITION_ORDER } from "@/lib/dispositions";
+import {
+  DISPOSITION_CONFIG,
+  DISPOSITION_ORDER,
+  dispositionTextColor,
+  pipelineDispositionOptions,
+  type DispositionOption,
+  type PipelineCategory,
+} from "@/lib/dispositions";
 import { formatPhone, normalizePhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 import {
@@ -97,6 +103,12 @@ export function WebphoneDock() {
   const tel = useTelephony();
   const [panelOpen, setPanelOpen] = useState(false);
   const [otherPanelOpen, setOtherPanelOpen] = useState(false);
+
+  // Préchauffe la liste des statuts : le popup d'après-appel ne doit pas
+  // s'ouvrir sur les 7 anciens boutons puis se réordonner sous les doigts.
+  useEffect(() => {
+    void fetchPipelineCategories();
+  }, []);
 
   const inCall =
     tel.activeCall !== null &&
@@ -751,6 +763,26 @@ function IncomingCallDialog() {
 
 // ── 4. Disposition d'après-appel ────────────────────────────────────────────
 
+/**
+ * Statuts du pipeline pour les boutons d'après-appel — chargés une fois par
+ * session d'onglet (une refonte du pipeline en cours de journée se voit au
+ * prochain rechargement de la page, cas rarissime).
+ */
+let pipelineCategoriesCache: PipelineCategory[] | null = null;
+
+async function fetchPipelineCategories(): Promise<PipelineCategory[] | null> {
+  if (pipelineCategoriesCache) return pipelineCategoriesCache;
+  try {
+    const res = await fetch("/api/categories");
+    if (!res.ok) return null;
+    const data = (await res.json()) as { categories?: PipelineCategory[] };
+    pipelineCategoriesCache = data.categories ?? null;
+    return pipelineCategoriesCache;
+  } catch {
+    return null;
+  }
+}
+
 type CallbackChoice = "in1h" | "tomorrow9" | "in3d" | "custom";
 
 function computeCallbackDate(choice: CallbackChoice, customValue: string): Date | null {
@@ -797,16 +829,46 @@ function DispositionForm({
   const locale = useLocale();
   const router = useRouter();
 
-  const [selected, setSelected] = useState<Disposition | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [callbackChoice, setCallbackChoice] = useState<CallbackChoice>("in1h");
   const [customDate, setCustomDate] = useState("");
   const [confirmClose, setConfirmClose] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [pipelineCats, setPipelineCats] = useState<PipelineCategory[] | null>(
+    pipelineCategoriesCache,
+  );
+
+  useEffect(() => {
+    let active = true;
+    void fetchPipelineCategories().then((cats) => {
+      if (active && cats) setPipelineCats(cats);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Boutons = « Sans réponse » + les statuts du pipeline. Repli sur les 7
+  // anciens boutons si la liste des statuts est injoignable : le popup ne
+  // doit JAMAIS bloquer le classement d'un appel.
+  const options: DispositionOption[] = useMemo(() => {
+    if (pipelineCats) {
+      return pipelineDispositionOptions(pipelineCats, locale, t("disposition.options.no_answer"));
+    }
+    return DISPOSITION_ORDER.map((d) => ({
+      value: d,
+      label: t(`disposition.options.${d}`),
+      color: DISPOSITION_CONFIG[d].color,
+      key: d,
+    }));
+  }, [pipelineCats, locale, t]);
+
+  const selectedOption = options.find((o) => o.value === selected) ?? null;
 
   const dateLocale = locale === "en" ? enLocale : frLocale;
   const withClient = Boolean(pending.clientId);
-  const showCallbackPicker = withClient && selected === "callback";
+  const showCallbackPicker = withClient && selectedOption?.key === "callback";
   const followupDueAt = useMemo(
     () => (showCallbackPicker ? computeCallbackDate(callbackChoice, customDate) : null),
     [showCallbackPicker, callbackChoice, customDate],
@@ -829,17 +891,41 @@ function DispositionForm({
           ...(followupDueAt ? { followupDueAt: followupDueAt.toISOString() } : {}),
         }),
       });
-      if (!res.ok) throw new Error("save_failed");
+      if (!res.ok) {
+        if (res.status === 400) {
+          // Statut supprimé/renommé depuis le chargement de l'onglet : liste
+          // périmée. On la recharge et on efface le choix — l'agent reclasse
+          // aussitôt, sans recharger la page.
+          pipelineCategoriesCache = null;
+          const fresh = await fetchPipelineCategories();
+          if (fresh) {
+            setPipelineCats(fresh);
+            setSelected(null);
+          }
+        }
+        throw new Error("save_failed");
+      }
       toast.success(t("disposition.saved"));
       tel.clearPendingDisposition();
-      if (selected === "booked" && pending.clientId) {
+      if (selectedOption?.key === "booked" && pending.clientId) {
         router.push(`/clients/${pending.clientId}?book=1`);
       }
     } catch {
       toast.error(t("errors.save_failed"));
       setSaving(false);
     }
-  }, [pending, selected, saving, showCallbackPicker, followupDueAt, note, t, tel, router]);
+  }, [
+    pending,
+    selected,
+    selectedOption,
+    saving,
+    showCallbackPicker,
+    followupDueAt,
+    note,
+    t,
+    tel,
+    router,
+  ]);
 
   const title = pending.clientName || formatPhone(pending.number) || t("call.unknownNumber");
 
@@ -864,31 +950,36 @@ function DispositionForm({
         </DialogHeader>
 
         <div className="grid grid-cols-2 gap-2">
-          {DISPOSITION_ORDER.map((d) => {
-            const config = DISPOSITION_CONFIG[d];
-            const active = selected === d;
+          {options.map((o) => {
+            const active = selected === o.value;
             return (
               <button
-                key={d}
+                key={o.value}
                 type="button"
-                onClick={() => setSelected(d)}
+                onClick={() => setSelected(o.value)}
                 aria-pressed={active}
                 className={cn(
                   "flex min-h-12 items-center gap-2.5 rounded-xl border-2 px-3 py-2 text-left text-sm font-semibold transition-all outline-none focus-visible:ring-3 focus-visible:ring-ring/50 active:translate-y-px",
-                  active ? "text-white shadow-md" : "hover:shadow-sm",
+                  active ? "shadow-md" : "hover:shadow-sm",
                 )}
                 style={
                   active
-                    ? { backgroundColor: config.color, borderColor: config.color }
-                    : { borderColor: `${config.color}66`, backgroundColor: `${config.color}14` }
+                    ? {
+                        backgroundColor: o.color,
+                        borderColor: o.color,
+                        // Texte noir/blanc selon la luminosité — les statuts
+                        // Notion peuvent être clairs (jaune, lime).
+                        color: dispositionTextColor(o.color),
+                      }
+                    : { borderColor: `${o.color}66`, backgroundColor: `${o.color}14` }
                 }
               >
                 <span
                   aria-hidden
                   className="size-3 shrink-0 rounded-full"
-                  style={{ backgroundColor: active ? "#fff" : config.color }}
+                  style={{ backgroundColor: active ? dispositionTextColor(o.color) : o.color }}
                 />
-                {t(`disposition.options.${d}`)}
+                {o.label}
               </button>
             );
           })}

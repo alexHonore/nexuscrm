@@ -29,6 +29,9 @@ export type CallData = {
   startedAt: string; // ISO
   durationSec: number;
   disposition: string | null;
+  /** Libellé/couleur du statut du pipeline (préparés côté serveur) — null : repli local. */
+  dispositionLabel: string | null;
+  dispositionColor: string | null;
   note: string | null;
   recordingUrl: string | null;
   userName: string | null;
@@ -66,12 +69,12 @@ export function ClientHistory({
   const fmt = (iso: string, pattern = "d MMM yyyy, HH:mm") =>
     formatInTimeZone(new Date(iso), APP_TZ, pattern, { locale: dfnsLocale });
 
-  const dispositionChip = (d: string | null) => {
+  const dispositionChip = (d: string | null, override?: { label?: string | null; color?: string | null }) => {
     if (!d) return null;
     const config = DISPOSITION_CONFIG[d as Disposition];
     const known = Boolean(config);
-    const label = known ? t(`dispositions.${d as Disposition}`) : d;
-    const color = config?.color ?? "#64748b";
+    const label = override?.label ?? (known ? t(`dispositions.${d as Disposition}`) : d);
+    const color = override?.color ?? config?.color ?? "#64748b";
     return (
       <span
         className="inline-flex h-5 items-center rounded-full border px-2 text-xs font-medium whitespace-nowrap"
@@ -145,7 +148,10 @@ export function ClientHistory({
                             {t("history.missed")}
                           </span>
                         ) : null}
-                        {dispositionChip(c.disposition)}
+                        {dispositionChip(c.disposition, {
+                          label: c.dispositionLabel,
+                          color: c.dispositionColor,
+                        })}
                       </div>
                       <p className="text-xs text-muted-foreground">
                         {c.userName ?? "—"}

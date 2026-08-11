@@ -36,7 +36,8 @@ export function CallsFilters({
   fromStr?: string;
   toStr?: string;
   users: { id: string; name: string }[];
-  dispositions: string[];
+  /** « Sans réponse » + statuts du pipeline — libellés préparés côté serveur. */
+  dispositions: { value: string; label: string }[];
 }) {
   const t = useTranslations("analytics");
   const router = useRouter();
@@ -153,8 +154,8 @@ export function CallsFilters({
           <SelectContent>
             <SelectItem value={ALL}>{t("callsPage.allDispositions")}</SelectItem>
             {dispositions.map((d) => (
-              <SelectItem key={d} value={d}>
-                {t.has(`dispositions.${d}`) ? t(`dispositions.${d}`) : d}
+              <SelectItem key={d.value} value={d.value}>
+                {d.label}
               </SelectItem>
             ))}
           </SelectContent>

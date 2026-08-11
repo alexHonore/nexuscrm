@@ -2,7 +2,7 @@ import type { Locale } from "date-fns";
 import { enCA } from "date-fns/locale/en-CA";
 import { fr } from "date-fns/locale/fr";
 import { formatInTimeZone } from "date-fns-tz";
-import { and, desc, eq, gte, isNull, lt, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lt, sql, type SQL } from "drizzle-orm";
 import {
   CalendarCheckIcon,
   ChevronLeftIcon,
@@ -29,9 +29,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { db } from "@/db";
-import { appointments, calls, clients, DISPOSITIONS } from "@/db/schema";
+import { appointments, calls, categories, clients } from "@/db/schema";
 import { requireUser } from "@/lib/auth/guards";
-import { DISPOSITION_CONFIG } from "@/lib/dispositions";
+import {
+  DISPOSITION_CONFIG,
+  dispositionDisplayMap,
+  pipelineDispositionOptions,
+} from "@/lib/dispositions";
 import { formatPhone } from "@/lib/phone";
 
 export const dynamic = "force-dynamic";
@@ -71,9 +75,11 @@ export default async function MyCallsPage({
   const directionParam = first(sp.direction);
   const direction: CallsDirection | undefined =
     directionParam === "outbound" || directionParam === "inbound" ? directionParam : undefined;
+  // Clé de catégorie, « cat:<id> », « no_answer » ou ancienne valeur — un
+  // filtre inconnu ne renvoie simplement aucune ligne.
   const dispoParam = first(sp.dispo);
   const disposition =
-    dispoParam && (DISPOSITIONS as readonly string[]).includes(dispoParam) ? dispoParam : undefined;
+    dispoParam && /^[a-z0-9_:-]{1,64}$/i.test(dispoParam) ? dispoParam : undefined;
   const missed = first(sp.missed) === "1";
   const pageParam = Number(first(sp.page));
   const page = Number.isInteger(pageParam) && pageParam >= 1 ? pageParam : 1;
@@ -101,7 +107,7 @@ export default async function MyCallsPage({
   if (missed) conds.push(eq(calls.direction, "inbound"), isNull(calls.answeredAt));
   const where = and(...conds);
 
-  const [rows, total, [todayStats], bookedToday] = await Promise.all([
+  const [rows, total, [todayStats], bookedToday, catRows] = await Promise.all([
     db
       .select({
         id: calls.id,
@@ -141,7 +147,28 @@ export default async function MyCallsPage({
         lt(appointments.createdAt, todayEnd),
       ),
     ),
+    db
+      .select({
+        id: categories.id,
+        key: categories.key,
+        nameFr: categories.nameFr,
+        nameEn: categories.nameEn,
+        color: categories.color,
+        sortOrder: categories.sortOrder,
+      })
+      .from(categories)
+      .orderBy(asc(categories.sortOrder)),
   ]);
+
+  // Dispositions = statuts du pipeline : options de filtre et affichage des
+  // pastilles viennent de la table categories (repli i18n pour no_answer et
+  // les vieilles valeurs orphelines).
+  const dispositionOptions = pipelineDispositionOptions(
+    catRows,
+    locale,
+    t("disposition.options.no_answer"),
+  );
+  const dispoDisplay = dispositionDisplayMap(catRows, locale);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -158,6 +185,7 @@ export default async function MyCallsPage({
       row.direction === "outbound"
         ? (row.toNumber ?? row.fromNumber)
         : (row.fromNumber ?? row.toNumber);
+    const display = row.disposition ? dispoDisplay.get(row.disposition) : undefined;
     const config = row.disposition
       ? (DISPOSITION_CONFIG as Record<string, { color: string }>)[row.disposition]
       : undefined;
@@ -181,14 +209,21 @@ export default async function MyCallsPage({
       dialNumber: remoteNumber,
       durationLabel: mmss(row.durationSec),
       dispositionLabel: row.disposition
-        ? t.has(`disposition.options.${row.disposition}`)
-          ? t(`disposition.options.${row.disposition}`)
-          : row.disposition
+        ? (display?.label ??
+          (t.has(`disposition.options.${row.disposition}`)
+            ? t(`disposition.options.${row.disposition}`)
+            : /^cat:\d+$/.test(row.disposition)
+              ? t("disposition.deleted")
+              : row.disposition))
         : rowMissed
           ? t("callsPage.list.missed")
           : null,
       // Rouge « manqué » quand l'appel n'a encore aucun résultat d'après-appel.
-      dispositionColor: row.disposition ? (config?.color ?? "#6b7280") : rowMissed ? "#dc2626" : null,
+      dispositionColor: row.disposition
+        ? (display?.color ?? config?.color ?? "#6b7280")
+        : rowMissed
+          ? "#dc2626"
+          : null,
       note: notePreview,
     };
 
@@ -277,7 +312,13 @@ export default async function MyCallsPage({
         ))}
       </div>
 
-      <CallsFilters period={period} direction={direction} disposition={disposition} missed={missed} />
+      <CallsFilters
+        period={period}
+        direction={direction}
+        disposition={disposition}
+        missed={missed}
+        dispositionOptions={dispositionOptions}
+      />
 
       {total === 0 ? (
         <EmptyState

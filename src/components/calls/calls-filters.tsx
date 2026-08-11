@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useTransition } from "react";
 import { Button } from "@/components/ui/button";
-import { DISPOSITION_CONFIG, DISPOSITION_ORDER } from "@/lib/dispositions";
+import type { DispositionOption } from "@/lib/dispositions";
 import { cn } from "@/lib/utils";
 
 export type CallsPeriod = "today" | "7" | "30";
@@ -21,11 +21,14 @@ export function CallsFilters({
   direction,
   disposition,
   missed,
+  dispositionOptions,
 }: {
   period: CallsPeriod;
   direction?: CallsDirection;
   disposition?: string;
   missed?: boolean;
+  /** « Sans réponse » + statuts du pipeline — préparés côté serveur. */
+  dispositionOptions: DispositionOption[];
 }) {
   const t = useTranslations("phone");
   const router = useRouter();
@@ -159,22 +162,22 @@ export function CallsFilters({
         aria-label={t("callsPage.filters.disposition")}
         className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-0 md:pb-0"
       >
-        {DISPOSITION_ORDER.map((d) => {
-          const active = disposition === d;
+        {dispositionOptions.map((o) => {
+          const active = disposition === o.value;
           return (
             <button
-              key={d}
+              key={o.value}
               type="button"
               aria-pressed={active}
               className={chipClass(active)}
-              onClick={() => apply({ dispo: active ? null : d })}
+              onClick={() => apply({ dispo: active ? null : o.value })}
             >
               <span
                 aria-hidden
                 className="size-2 shrink-0 rounded-full ring-1 ring-foreground/10"
-                style={{ background: DISPOSITION_CONFIG[d].color }}
+                style={{ background: o.color }}
               />
-              {t(`disposition.options.${d}`)}
+              {o.label}
             </button>
           );
         })}

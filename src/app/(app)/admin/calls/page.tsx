@@ -2,7 +2,21 @@ import type { Locale } from "date-fns";
 import { enCA } from "date-fns/locale/en-CA";
 import { fr } from "date-fns/locale/fr";
 import { formatInTimeZone } from "date-fns-tz";
-import { and, desc, eq, gte, ilike, isNotNull, isNull, like, lt, or, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  ilike,
+  isNotNull,
+  isNull,
+  like,
+  lt,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { PhoneCall } from "lucide-react";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
@@ -14,9 +28,9 @@ import { VizTheme } from "@/components/analytics/viz-theme";
 import { PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
 import { db } from "@/db";
-import { calls, clients, users } from "@/db/schema";
+import { calls, categories, clients, users } from "@/db/schema";
 import { requireAdmin } from "@/lib/auth/guards";
-import { DISPOSITION_ORDER } from "@/lib/dispositions";
+import { dispositionDisplayMap, pipelineDispositionOptions } from "@/lib/dispositions";
 import { formatPhone } from "@/lib/phone";
 import { getUserOptions } from "../analytics/queries";
 
@@ -56,7 +70,7 @@ export default async function CallsPage({
     directionParam === "outbound" || directionParam === "inbound"
       ? directionParam
       : undefined;
-  const dispoParam = first(sp.dispo)?.slice(0, 40);
+  const dispoParam = first(sp.dispo)?.slice(0, 64);
   const disposition = dispoParam || undefined;
   const statusParam = first(sp.status);
   const status =
@@ -97,7 +111,7 @@ export default async function CallsPage({
   const where = conds.length > 0 ? and(...conds) : undefined;
 
   // ── Requêtes : page + total (agrégé, jamais toutes les lignes) ──
-  const [rows, [{ total }], userOptions] = await Promise.all([
+  const [rows, [{ total }], userOptions, catRows] = await Promise.all([
     db
       .select({
         id: calls.id,
@@ -128,7 +142,27 @@ export default async function CallsPage({
       .leftJoin(clients, eq(clients.id, calls.clientId))
       .where(where),
     getUserOptions(),
+    db
+      .select({
+        id: categories.id,
+        key: categories.key,
+        nameFr: categories.nameFr,
+        nameEn: categories.nameEn,
+        color: categories.color,
+        sortOrder: categories.sortOrder,
+      })
+      .from(categories)
+      .orderBy(asc(categories.sortOrder)),
   ]);
+
+  // Dispositions = statuts du pipeline (libellés/couleurs de la table
+  // categories ; repli i18n pour no_answer et les vieilles valeurs).
+  const dispositionOptions = pipelineDispositionOptions(
+    catRows,
+    locale,
+    t.has("dispositions.no_answer") ? t("dispositions.no_answer") : "no_answer",
+  );
+  const dispoDisplay = dispositionDisplayMap(catRows, locale);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -151,9 +185,15 @@ export default async function CallsPage({
       durationSec: row.durationSec,
       disposition: row.disposition,
       dispositionLabel: row.disposition
-        ? t.has(`dispositions.${row.disposition}`)
-          ? t(`dispositions.${row.disposition}`)
-          : row.disposition
+        ? (dispoDisplay.get(row.disposition)?.label ??
+          (t.has(`dispositions.${row.disposition}`)
+            ? t(`dispositions.${row.disposition}`)
+            : /^cat:\d+$/.test(row.disposition)
+              ? t("dispositions.deleted")
+              : row.disposition))
+        : null,
+      dispositionColor: row.disposition
+        ? (dispoDisplay.get(row.disposition)?.color ?? null)
         : null,
       note: row.note,
       recordingUrl: row.recordingUrl,
@@ -195,7 +235,7 @@ export default async function CallsPage({
         fromStr={fromStr}
         toStr={toStr}
         users={userOptions}
-        dispositions={[...DISPOSITION_ORDER]}
+        dispositions={dispositionOptions.map((o) => ({ value: o.value, label: o.label }))}
       />
 
       <p className="text-sm tabular-nums text-muted-foreground">

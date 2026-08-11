@@ -40,5 +40,7 @@ export function VizTheme() {
 
 /** Couleur CSS (var) d'une disposition, adaptée clair/sombre dans `.nx-viz`. */
 export function dispositionColorVar(key: Disposition | string): string {
-  return `var(--viz-d-${key}, #6b7280)`;
+  // Seules les 7 anciennes valeurs ont une variable ; une valeur arbitraire
+  // (ex. « cat:12 » orpheline) produirait un nom CSS invalide — gris direct.
+  return /^[a-zA-Z0-9_-]+$/.test(key) ? `var(--viz-d-${key}, #6b7280)` : "#6b7280";
 }

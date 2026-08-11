@@ -222,6 +222,8 @@ export type DispositionDatum = {
   label: string;
   count: number;
   pct: number;
+  /** Couleur explicite (statuts du pipeline) — sinon la variable CSS des 7 anciennes valeurs. */
+  color?: string;
 };
 
 function DonutTooltip({
@@ -284,7 +286,7 @@ export function DispositionsDonut({ data }: { data: DispositionDatum[] }) {
               isAnimationActive={false}
             >
               {data.map((d) => (
-                <Cell key={d.key} fill={dispositionColorVar(d.key)} />
+                <Cell key={d.key} fill={d.color ?? dispositionColorVar(d.key)} />
               ))}
             </Pie>
           </PieChart>
@@ -301,7 +303,7 @@ export function DispositionsDonut({ data }: { data: DispositionDatum[] }) {
             <span
               aria-hidden
               className="size-2.5 shrink-0 rounded-[3px] ring-1 ring-foreground/10"
-              style={{ background: dispositionColorVar(d.key) }}
+              style={{ background: d.color ?? dispositionColorVar(d.key) }}
             />
             <span className="min-w-0 flex-1 truncate">{d.label}</span>
             <span className="font-medium tabular-nums">{d.count}</span>

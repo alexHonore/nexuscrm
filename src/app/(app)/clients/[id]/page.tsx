@@ -7,6 +7,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { db } from "@/db";
 import { auditLogs, categories, sources, users } from "@/db/schema";
 import { requireUser } from "@/lib/auth/guards";
+import { dispositionDisplayMap } from "@/lib/dispositions";
 import { APP_TZ } from "@/components/clients/timezone";
 import { ClientHeader } from "@/components/clients/client-header";
 import { ClientHistory } from "@/components/clients/client-history";
@@ -59,6 +60,9 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
       .orderBy(desc(auditLogs.createdAt))
       .limit(1),
   ]);
+
+  // Libellés/couleurs des dispositions (statuts du pipeline) pour l'historique.
+  const dispoDisplay = dispositionDisplayMap(allCategories, locale);
   const lastEdit = lastEditRows[0] ?? null;
 
   const sourceOptions: FilterOption[] = allSources.map((s) => ({
@@ -176,6 +180,13 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
                 id: c.id,
                 direction: c.direction,
                 missed: c.direction === "inbound" && !c.answeredAt,
+                dispositionLabel: c.disposition
+                  ? (dispoDisplay.get(c.disposition)?.label ??
+                    (/^cat:\d+$/.test(c.disposition) ? t("dispositions.deleted") : null))
+                  : null,
+                dispositionColor: c.disposition
+                  ? (dispoDisplay.get(c.disposition)?.color ?? null)
+                  : null,
                 startedAt: c.startedAt.toISOString(),
                 durationSec: c.durationSec,
                 disposition: c.disposition,

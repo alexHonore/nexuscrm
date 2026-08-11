@@ -67,7 +67,8 @@
       "not_interested": "Pas intéressé",
       "not_qualified": "Non qualifié",
       "dncl": "Ne plus appeler"
-    }
+    },
+    "deleted": "Statut supprimé"
   },
   "errors": {
     "mic_denied": "Accès au microphone refusé. Autorisez le micro dans les réglages du navigateur puis réessayez.",

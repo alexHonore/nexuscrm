@@ -28,7 +28,11 @@ import { UserStatsTable } from "@/components/analytics/user-stats-table";
 import { VizTheme } from "@/components/analytics/viz-theme";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { asc } from "drizzle-orm";
+import { db } from "@/db";
+import { categories } from "@/db/schema";
 import { requireAdmin } from "@/lib/auth/guards";
+import { dispositionDisplayMap } from "@/lib/dispositions";
 import { cn } from "@/lib/utils";
 import {
   getBookingsPerWeek,
@@ -128,13 +132,39 @@ export default async function AnalyticsPage({
     ...DONUT_ORDER.filter((k) => dispoByKey.has(k)),
     ...dispositions.map((d) => d.disposition).filter((k) => !DONUT_ORDER.includes(k)),
   ];
+  // Les dispositions sont désormais des statuts du pipeline : libellé et
+  // couleur viennent de la table categories (repli i18n pour no_answer et les
+  // vieilles valeurs orphelines).
+  const catRows = await db
+    .select({
+      id: categories.id,
+      key: categories.key,
+      nameFr: categories.nameFr,
+      nameEn: categories.nameEn,
+      color: categories.color,
+      sortOrder: categories.sortOrder,
+    })
+    .from(categories)
+    .orderBy(asc(categories.sortOrder));
+  const dispoDisplay = dispositionDisplayMap(catRows, locale);
   const donutData: DispositionDatum[] = orderedKeys.map((key) => {
     const count = dispoByKey.get(key) ?? 0;
+    const display = dispoDisplay.get(key);
     return {
       key,
-      label: t.has(`dispositions.${key}`) ? t(`dispositions.${key}`) : key,
+      label:
+        display?.label ??
+        (t.has(`dispositions.${key}`)
+          ? t(`dispositions.${key}`)
+          : /^cat:\d+$/.test(key)
+            ? t("dispositions.deleted")
+            : key),
       count,
       pct: dispoTotal > 0 ? Math.round((count / dispoTotal) * 100) : 0,
+      // Les 7 anciennes valeurs gardent leurs variables CSS validées (dont
+      // l'ajustement mode sombre de « dncl ») ; les statuts du pipeline
+      // prennent leur couleur de catégorie.
+      ...(display && !DONUT_ORDER.includes(key) ? { color: display.color } : {}),
     };
   });
 

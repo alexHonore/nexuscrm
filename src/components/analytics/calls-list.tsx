@@ -30,6 +30,8 @@ export type CallRow = {
   durationSec: number;
   disposition: string | null;
   dispositionLabel: string | null;
+  /** Couleur du statut du pipeline — null : repli sur la variable CSS des 7 anciennes valeurs. */
+  dispositionColor: string | null;
   note: string | null;
   recordingUrl: string | null;
 };
@@ -75,22 +77,25 @@ function DirectionIcon({
 function DispositionChip({
   disposition,
   label,
+  color,
 }: {
   disposition: string;
   label: string;
+  color?: string | null;
 }) {
+  const swatch = color ?? dispositionColorVar(disposition);
   return (
     <span
       className="inline-flex h-6 items-center gap-1.5 rounded-full px-2 text-xs font-medium ring-1 ring-foreground/10"
       style={{
         // Voile translucide de la couleur de disposition — jamais d'aplat opaque.
-        background: `color-mix(in srgb, ${dispositionColorVar(disposition)} 10%, transparent)`,
+        background: `color-mix(in srgb, ${swatch} 10%, transparent)`,
       }}
     >
       <span
         aria-hidden
         className="size-2 shrink-0 rounded-full ring-1 ring-foreground/10"
-        style={{ background: dispositionColorVar(disposition) }}
+        style={{ background: swatch }}
       />
       {label}
     </span>
@@ -222,6 +227,7 @@ export function CallsList({ rows }: { rows: CallRow[] }) {
                     <DispositionChip
                       disposition={row.disposition}
                       label={row.dispositionLabel}
+                      color={row.dispositionColor}
                     />
                   ) : row.missed ? (
                     <span className="text-xs font-medium text-red-600 dark:text-red-400">
@@ -268,6 +274,7 @@ export function CallsList({ rows }: { rows: CallRow[] }) {
                 <DispositionChip
                   disposition={row.disposition}
                   label={row.dispositionLabel}
+                  color={row.dispositionColor}
                 />
               ) : row.missed ? (
                 <span className="shrink-0 text-xs font-medium text-red-600 dark:text-red-400">

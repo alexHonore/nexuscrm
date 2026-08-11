@@ -523,6 +523,67 @@ describe("pipeline d'appel", () => {
       expect(updated.categoryId).toBe(custom.id);
     });
 
+    it("classe un appel dans un statut Notion (clé de catégorie non système)", async () => {
+      const cats = await seedSystemCategories();
+      const notion = await makeCategory({
+        key: "recent_transaction",
+        nameFr: "Transaction récente",
+        nameEn: "Recent transaction",
+        isSystem: false,
+      });
+      const me = await makeUser();
+      await login(me);
+      const client = await makeClient({ categoryId: cats.new.id });
+      const id = await openCall({ clientId: client.id });
+
+      const res = await PATCH(patchReq(id, { disposition: "recent_transaction" }), patchCtx(id));
+      expect(res.status).toBe(200);
+
+      const updated = await getClient(client.id);
+      expect(updated.categoryId).toBe(notion.id);
+      expect(updated.lastDisposition).toBe("recent_transaction");
+      expect(updated.doNotCall).toBe(false);
+      expect((await getCall(id)).disposition).toBe("recent_transaction");
+    });
+
+    it("classe un appel dans une catégorie SANS clé via « cat:<id> »", async () => {
+      const cats = await seedSystemCategories();
+      const custom = await makeCategory({ key: null, nameFr: "Maison", nameEn: "Custom" });
+      const me = await makeUser();
+      await login(me);
+      const client = await makeClient({ categoryId: cats.new.id });
+      const id = await openCall({ clientId: client.id });
+
+      const res = await PATCH(patchReq(id, { disposition: `cat:${custom.id}` }), patchCtx(id));
+      expect(res.status).toBe(200);
+
+      const updated = await getClient(client.id);
+      expect(updated.categoryId).toBe(custom.id);
+      expect(updated.lastDisposition).toBe(`cat:${custom.id}`);
+    });
+
+    it("refuse (400) une disposition qui ne correspond à aucun statut", async () => {
+      await seedSystemCategories();
+      const me = await makeUser();
+      await login(me);
+      const client = await makeClient();
+      const id = await openCall({ clientId: client.id });
+
+      expect((await PATCH(patchReq(id, { disposition: "peut_etre" }), patchCtx(id))).status).toBe(
+        400,
+      );
+      expect((await PATCH(patchReq(id, { disposition: "cat:99999" }), patchCtx(id))).status).toBe(
+        400,
+      );
+      // Hors plage int4 : 400 propre, pas une erreur Postgres (500).
+      expect(
+        (await PATCH(patchReq(id, { disposition: "cat:2147483648" }), patchCtx(id))).status,
+      ).toBe(400);
+      // « Non contacté » après un appel terminé : refusé côté serveur aussi.
+      expect((await PATCH(patchReq(id, { disposition: "new" }), patchCtx(id))).status).toBe(400);
+      expect((await getCall(id)).disposition).toBeNull();
+    });
+
     it("applique successivement deux dispositions différentes sur le même appel", async () => {
       const cats = await seedSystemCategories();
       const me = await makeUser();
