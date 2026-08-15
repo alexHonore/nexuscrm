@@ -173,9 +173,22 @@ export type VoipMsDid = {
   state: string;
 };
 
+/**
+ * Statuts signifiant « aucun numéro sur le compte » — ce n'est PAS une panne.
+ * La distinction compte : l'achat d'un numéro s'appuie sur cette liste pour
+ * savoir s'il est déjà payé, donc un inventaire vide doit répondre « rien »
+ * pendant qu'une vraie panne doit, elle, interrompre l'achat.
+ */
+const EMPTY_DID_STATUSES = new Set(["no_did", "no_dids"]);
+
 export async function getDids(): Promise<VoipMsDid[]> {
-  const r = await voipms<{ dids: VoipMsDid[] }>("getDIDsInfo");
-  return r.dids ?? [];
+  try {
+    const r = await voipms<{ dids: VoipMsDid[] }>("getDIDsInfo");
+    return r.dids ?? [];
+  } catch (err) {
+    if (err instanceof VoipMsError && EMPTY_DID_STATUSES.has(err.status)) return [];
+    throw err;
+  }
 }
 
 /**
@@ -192,6 +205,121 @@ export function didDigits(did: string): string {
 /** Route un DID vers un sous-compte ("account:username"). */
 export async function routeDidToSubAccount(did: string, subAccount: string) {
   return voipms("setDIDRouting", { did: didDigits(did), routing: `account:${subAccount}` });
+}
+
+// ── Achat de numéros (nouvelles lignes commandées depuis le CRM) ─────────────
+
+export type VoipMsProvince = { province: string; description?: string };
+
+/** Provinces canadiennes où voip.ms vend des numéros. */
+export async function getProvinces(): Promise<VoipMsProvince[]> {
+  const r = await voipms<{ provinces: VoipMsProvince[] }>("getProvinces");
+  return r.provinces ?? [];
+}
+
+export type VoipMsRateCenter = { ratecenter: string; [k: string]: unknown };
+
+/** Centres de tarification (villes) d'une province — paramètre de recherche des numéros. */
+export async function getRateCentersCan(province: string): Promise<VoipMsRateCenter[]> {
+  const r = await voipms<{ ratecenters: VoipMsRateCenter[] }>("getRateCentersCAN", { province });
+  return r.ratecenters ?? [];
+}
+
+/**
+ * Numéro EN VENTE chez voip.ms. Les prix arrivent en chaînes (« 0.85 ») dans
+ * deux barèmes : à la minute (perminute_*) et forfaitaire (flat_*).
+ */
+export type VoipMsAvailableDid = {
+  did: string;
+  ratecenter?: string;
+  province?: string;
+  perminute_monthly?: string | number;
+  perminute_setup?: string | number;
+  perminute_minute?: string | number;
+  flat_monthly?: string | number;
+  flat_setup?: string | number;
+  flat_minute?: string | number;
+  sms?: string | number;
+  [k: string]: unknown;
+};
+
+/** voip.ms signale « rien en vente ici » par un statut, pas par une liste vide. */
+const EMPTY_DID_SEARCH_STATUSES = new Set(["no_dids", "no_did", "dids_not_available"]);
+
+/** Numéros disponibles à l'achat dans une province / un centre de tarification. */
+export async function searchDidsCan(
+  province: string,
+  ratecenter?: string,
+): Promise<VoipMsAvailableDid[]> {
+  try {
+    const r = await voipms<{ dids: VoipMsAvailableDid[] }>("getDIDsCAN", { province, ratecenter });
+    return r.dids ?? [];
+  } catch (err) {
+    if (err instanceof VoipMsError && EMPTY_DID_SEARCH_STATUSES.has(err.status)) return [];
+    throw err;
+  }
+}
+
+/**
+ * Serveur SIP par défaut. Partagé entre le softphone (`/api/telephony/config`)
+ * et le choix du POP à l'achat d'un numéro : deux valeurs différentes feraient
+ * héberger le numéro sur un serveur autre que celui où le poste s'enregistre.
+ */
+export const DEFAULT_SIP_DOMAIN = "montreal1.voip.ms";
+
+/** Domaine SIP configuré, ou le défaut commun. */
+export function sipDomain(): string {
+  return (process.env.VOIPMS_SIP_DOMAIN ?? "").trim() || DEFAULT_SIP_DOMAIN;
+}
+
+export type VoipMsServer = {
+  server_name?: string;
+  server_shortname?: string;
+  server_hostname?: string;
+  server_ip?: string;
+  server_country?: string;
+  server_pop: string | number;
+  server_recommended?: boolean | string | number;
+};
+
+/** Serveurs (POP) voip.ms — la commande d'un DID exige d'en choisir un. */
+export async function getServersInfo(): Promise<VoipMsServer[]> {
+  const r = await voipms<{ servers: VoipMsServer[] }>("getServersInfo");
+  return r.servers ?? [];
+}
+
+/** Solde du compte principal — c'est lui que débite l'achat d'un numéro. */
+export async function getAccountBalance(): Promise<number | null> {
+  const r = await voipms<{ balance?: { current_balance?: string | number } }>("getBalance");
+  const raw = r.balance?.current_balance;
+  const value = raw === undefined || raw === null ? NaN : Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+export type DidBillingType = "perminute" | "flat";
+
+/**
+ * Commande (ACHÈTE) un numéro et le route dès l'achat vers un sous-compte.
+ * Le prix est débité du solde prépayé du compte voip.ms principal — aucun
+ * passage par le portail n'est nécessaire. `pop`, `dialtime`, `cnam` et
+ * `billing_type` sont exigés par l'API dès la commande.
+ */
+export async function orderDid(opts: {
+  did: string;
+  /** Nom COMPLET du sous-compte destinataire (« 551013_alex »). */
+  account: string;
+  pop: string | number;
+  billingType: DidBillingType;
+}) {
+  return voipms("orderDID", {
+    did: didDigits(opts.did),
+    routing: `account:${opts.account}`,
+    pop: opts.pop,
+    dialtime: 60,
+    // Pas de recherche d'identité de l'appelant (service facturé à l'usage).
+    cnam: 0,
+    billing_type: opts.billingType === "flat" ? 2 : 1,
+  });
 }
 
 export type VoipMsCdr = {

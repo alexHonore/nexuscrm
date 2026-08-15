@@ -13,6 +13,7 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
+  ShoppingCart,
   Trash2,
   TriangleAlert,
   UserRound,
@@ -81,6 +82,8 @@ import { formatPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 import { api, ApiError } from "./api";
 import { LoginCredentials, OneTimeSecret } from "./copy-button";
+import { errorMessage, type Tr } from "./errors";
+import { OrderDidDialog, type OrderDidResult } from "./order-did-dialog";
 import type { AdminUserDto, PhoneStatusDto } from "./types";
 
 const TZ = "America/Toronto";
@@ -175,33 +178,6 @@ function useDateFmt() {
   const locale = useLocale();
   return (iso: string | null, pattern = "d MMM yyyy, HH:mm") =>
     iso ? formatInTimeZone(new Date(iso), TZ, pattern, { locale: locale === "fr" ? fr : enCA }) : null;
-}
-
-type Tr = ReturnType<typeof useTranslations>;
-
-function errorMessage(t: Tr, err: unknown): string {
-  // Abandon côté navigateur : voip.ms dépasse parfois le temps qu'on lui laisse.
-  if (err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError")) {
-    return t("users.verify.unreachable");
-  }
-  if (err instanceof ApiError) {
-    const code = err.code;
-    const known = [
-      "email_taken",
-      "cannot_deactivate_self",
-      "cannot_demote_self",
-      "cannot_delete_self",
-      "invalid_did",
-      "has_activity",
-    ];
-    if (known.includes(code)) return t(`users.errors.${code}`);
-    if (code === "voipms") {
-      const msg = typeof err.data.message === "string" ? err.data.message : String(err.data.status ?? "");
-      return `${t("users.voip.apiError")} : ${msg}`;
-    }
-    if (typeof err.data.message === "string") return err.data.message;
-  }
-  return t("genericError");
 }
 
 // ── Champ courriel avec indice de faute de frappe ────────────────────────────
@@ -992,6 +968,7 @@ function UserEditSheet({
   const [createSubOpen, setCreateSubOpen] = useState(false);
   const [provision, setProvision] = useState<ProvisionState>({ state: "idle" });
   const [verifyResult, setVerifyResult] = useState<VerifyResponse | null>(null);
+  const [orderOpen, setOrderOpen] = useState(false);
 
   if (!user) return null;
   const isSelf = user.id === currentUserId;
@@ -1196,6 +1173,23 @@ function UserEditSheet({
       toast.error(errorMessage(t, err), { description: t("users.voip.ipHint") });
     } finally {
       setVoipLoading(null);
+    }
+  };
+
+  /** Num\u00e9ro fra\u00eechement achet\u00e9 : champs, liste et caches se mettent \u00e0 jour d'un coup. */
+  const handleOrdered = (res: OrderDidResult) => {
+    setForm((f) => ({ ...f, didNumber: res.did, sipUsername: res.account }));
+    onUpdated(res.user);
+    announceReleased(res.released);
+    setDids(null); // la vitrine vient de vendre un num\u00e9ro : affectations p\u00e9rim\u00e9es
+    setDidsOpen(false);
+    if (res.provision) {
+      // La ligne SIP a \u00e9t\u00e9 cr\u00e9\u00e9e au passage : mot de passe montr\u00e9 UNE fois.
+      setSecret({
+        title: t("users.voip.sipPasswordCreated"),
+        value: res.provision.password,
+        hint: t("users.voip.sipPasswordSavedHint"),
+      });
     }
   };
 
@@ -1574,17 +1568,31 @@ function UserEditSheet({
                   </div>
                 </div>
               ) : null}
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="min-h-11 md:min-h-8"
-                onClick={() => void routeDid()}
-                disabled={!form.didNumber || !form.sipUsername || voipLoading !== null}
-              >
-                {voipLoading === "route" ? <Loader2 className="size-4 animate-spin" /> : <Phone className="size-4" />}
-                {t("users.voip.routeDid")}
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="min-h-11 md:min-h-8"
+                  onClick={() => void routeDid()}
+                  disabled={!form.didNumber || !form.sipUsername || voipLoading !== null}
+                >
+                  {voipLoading === "route" ? <Loader2 className="size-4 animate-spin" /> : <Phone className="size-4" />}
+                  {t("users.voip.routeDid")}
+                </Button>
+                {/* Achat d'un numéro NEUF, débité du solde voip.ms — sans portail. */}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="min-h-11 md:min-h-8"
+                  onClick={() => setOrderOpen(true)}
+                  disabled={voipLoading !== null}
+                >
+                  <ShoppingCart className="size-4" />
+                  {t("users.voip.order.open")}
+                </Button>
+              </div>
             </div>
           </section>
 
@@ -1671,6 +1679,14 @@ function UserEditSheet({
             </Button>
           </div>
         </div>
+
+        {/* ── Dialog : achat d'un nouveau numéro voip.ms ── */}
+        <OrderDidDialog
+          user={{ id: user.id, name: user.name }}
+          open={orderOpen}
+          onOpenChange={setOrderOpen}
+          onOrdered={handleOrdered}
+        />
 
         {/* ── Dialog : création de sous-compte voip.ms ── */}
         <Dialog open={createSubOpen} onOpenChange={setCreateSubOpen}>

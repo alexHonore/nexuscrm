@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { apiUser } from "@/lib/auth/guards";
 import { decryptSecret } from "@/lib/crypto";
 import { getSetting } from "@/lib/settings";
+import { sipDomain } from "@/lib/voipms";
 
 /**
  * GET /api/telephony/config — configuration téléphonie de l'utilisateur COURANT.
@@ -49,7 +50,7 @@ export async function GET() {
     {
       provider: "voipms" as const,
       wssUrl,
-      sipDomain: process.env.VOIPMS_SIP_DOMAIN || "montreal1.voip.ms",
+      sipDomain: sipDomain(),
       sipUsername: auth.sipUsername ?? null,
       sipPassword,
       callerId: auth.didNumber ?? null,
