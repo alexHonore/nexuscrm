@@ -11,6 +11,7 @@
     "pipeline": "Pipeline",
     "analytics": "Analytics",
     "calls": "Call log",
+    "billing": "Usage & spending",
     "importExport": "Import / Export",
     "webhooks": "Webhooks",
     "settings": "Settings",

@@ -19,6 +19,7 @@ import {
   UserRound,
   Users,
   UsersRound,
+  Wallet,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -70,6 +71,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin/pipeline", labelKey: "pipelineSettings", icon: FileText },
   { href: "/admin/analytics", labelKey: "analytics", icon: BarChart3 },
   { href: "/admin/calls", labelKey: "calls", icon: PhoneCall },
+  { href: "/admin/billing", labelKey: "billing", icon: Wallet },
   { href: "/admin/import-export", labelKey: "importExport", icon: Upload },
   { href: "/admin/webhooks", labelKey: "webhooks", icon: KeyRound },
   { href: "/admin/audit", labelKey: "audit", icon: ShieldCheck },

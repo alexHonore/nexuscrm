@@ -296,6 +296,47 @@ export async function getAccountBalance(): Promise<number | null> {
   return Number.isFinite(value) ? value : null;
 }
 
+export type VoipMsBalance = {
+  currentBalance: number | null;
+  /** Dépense totale rapportée par voip.ms (mode « advanced »). */
+  spentTotal: number | null;
+  callsTotal: number | null;
+  timeTotal: number | null;
+};
+
+const numOrNull = (raw: unknown): number | null => {
+  if (raw === undefined || raw === null || raw === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+};
+
+/** Solde + statistiques de dépense (getBalance en mode « advanced »). */
+export async function getBalanceDetail(): Promise<VoipMsBalance> {
+  const r = await voipms<{
+    balance?: Record<string, string | number | undefined>;
+  }>("getBalance", { advanced: 1 });
+  const b = r.balance ?? {};
+  return {
+    currentBalance: numOrNull(b.current_balance),
+    spentTotal: numOrNull(b.spent_total),
+    callsTotal: numOrNull(b.calls_total),
+    timeTotal: numOrNull(b.time_total),
+  };
+}
+
+/**
+ * RÉSILIE un numéro : voip.ms cesse de le facturer et le numéro est PERDU
+ * (il retourne à l'inventaire public). Irréversible — l'appelant doit donc
+ * exiger une confirmation explicite.
+ */
+export async function cancelDid(did: string, comment?: string) {
+  return voipms("cancelDID", {
+    did: didDigits(did),
+    cancelcomment: comment,
+    portout: 0,
+  });
+}
+
 export type DidBillingType = "perminute" | "flat";
 
 /**
@@ -332,7 +373,35 @@ export type VoipMsCdr = {
   duration: string;
   seconds: string;
   uniqueid: string;
+  /** Tarif appliqué. Présent selon le type d'appel — toujours traité comme optionnel. */
+  rate?: string | number;
+  /** Coût de CET appel, en dollars. Absent sur les appels non facturés. */
+  total?: string | number;
 };
+
+/**
+ * Montant d'un champ voip.ms (« 0.0090 ») en nombre, ou 0.
+ *
+ * Volontairement tolérant : les montants arrivent en chaînes, parfois absents
+ * sur les appels non facturés. Une addition ne doit jamais devenir `NaN` et
+ * transformer une facture en « — ».
+ */
+export function cdrCost(row: Pick<VoipMsCdr, "total">): number {
+  const raw = row.total;
+  if (raw === undefined || raw === null || raw === "") return 0;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * voip.ms a-t-il CHIFFRÉ cet appel ? Distinct de « le coût vaut 0 » : un appel
+ * réellement gratuit est chiffré à 0, alors qu'un champ absent signifie que
+ * l'API n'a rien renvoyé. Confondre les deux ferait afficher « aucun coût
+ * disponible » sur une période dont tous les appels sont gratuits.
+ */
+export function hasCdrCost(row: Pick<VoipMsCdr, "total">): boolean {
+  return row.total !== undefined && row.total !== null && row.total !== "";
+}
 
 /**
  * Décalage UTC (heures entières) de Toronto à la date donnée : -4 en été
@@ -367,6 +436,9 @@ export function utcOffsetSuffix(offsetHours: number): string {
   return `${sign}${String(Math.abs(offsetHours)).padStart(2, "0")}:00`;
 }
 
+/** Statuts signifiant « aucun appel sur la période » — pas une panne. */
+const EMPTY_CDR_STATUSES = new Set(["no_cdr", "no_calls", "no_records"]);
+
 /**
  * CDR du compte principal + sous-comptes. Dates au format YYYY-MM-DD (Toronto).
  * Les horodatages reviennent en heure locale de Toronto (voir
@@ -374,16 +446,23 @@ export function utcOffsetSuffix(offsetHours: number): string {
  * avec le décalage RÉEL de la journée.
  */
 export async function getCdr(dateFrom: string, dateTo: string): Promise<VoipMsCdr[]> {
-  const r = await voipms<{ cdr: VoipMsCdr[] }>("getCDR", {
-    date_from: dateFrom,
-    date_to: dateTo,
-    answered: 1,
-    noanswer: 1,
-    busy: 1,
-    failed: 1,
-    timezone: torontoStandardUtcOffsetHours(),
-  });
-  return r.cdr ?? [];
+  try {
+    const r = await voipms<{ cdr: VoipMsCdr[] }>("getCDR", {
+      date_from: dateFrom,
+      date_to: dateTo,
+      answered: 1,
+      noanswer: 1,
+      busy: 1,
+      failed: 1,
+      timezone: torontoStandardUtcOffsetHours(),
+    });
+    return r.cdr ?? [];
+  } catch (err) {
+    // « Aucun appel sur la période » n'est pas une panne : une journée creuse
+    // doit donner un rapport vide, pas une erreur.
+    if (err instanceof VoipMsError && EMPTY_CDR_STATUSES.has(err.status)) return [];
+    throw err;
+  }
 }
 
 export type VoipMsRecording = {
