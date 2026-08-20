@@ -135,6 +135,10 @@ async function main() {
   }
   console.log("✓ Réglages par défaut");
 
+  // ── Moteur SMS/IA (garde-fous, prompt core, assistants de départ) ──
+  const { seedSms } = await import("@/db/seed-sms");
+  await seedSms();
+
   console.log("Seed terminé.");
   process.exit(0);
 }

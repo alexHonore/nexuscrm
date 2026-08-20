@@ -22,6 +22,13 @@
       "when": 1787239408475,
       "tag": "0002_phase2-jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787242365985,
+      "tag": "0003_phase3-assistants",
+      "breakpoints": true
     }
   ]
 }

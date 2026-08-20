@@ -1,0 +1,66 @@
+{
+  "guardrails": {
+    "title": "Garde-fous",
+    "subtitle": "Règles globales, fixtures de test et noyau du prompt appliqués à tous les assistants IA",
+    "sections": {
+      "rules": {
+        "title": "Règles globales",
+        "desc": "Chaque règle est une rangée modifiable — aucune n'est codée en dur."
+      },
+      "fixtures": {
+        "title": "Fixtures",
+        "desc": "Scénarios de test rejoués contre chaque assistant (lecture seule pour l'instant)."
+      },
+      "core": {
+        "title": "Noyau du prompt (L0)",
+        "desc": "Corps commun injecté dans le prompt compilé de chaque assistant.",
+        "version": "Version {version}",
+        "showBody": "Afficher le texte",
+        "hideBody": "Masquer le texte"
+      }
+    },
+    "columns": {
+      "label": "Nom",
+      "key": "Clé",
+      "kind": "Type",
+      "enabled": "Actif",
+      "severity": "Sévérité"
+    },
+    "kind": {
+      "forbidden_regex": "Motif interdit (regex)",
+      "forbidden_terms": "Termes interdits",
+      "max_chars": "Nombre de caractères max",
+      "max_questions": "Nombre de questions max",
+      "link_policy": "Politique de liens",
+      "required_tool_on_intent": "Outil requis selon l'intention",
+      "llm_judge": "Jugement par IA",
+      "custom_instruction": "Instruction personnalisée"
+    },
+    "severity": {
+      "block": "Bloque l'envoi",
+      "warn": "Avertit seulement",
+      "off": "Inactif"
+    },
+    "modified": "Modifié",
+    "reset": {
+      "action": "Réinitialiser",
+      "confirmTitle": "Réinitialiser cette règle ?",
+      "confirmBody": "« {label} » reviendra à sa configuration par défaut. Cette action est immédiate.",
+      "cancel": "Annuler",
+      "confirm": "Réinitialiser"
+    },
+    "resetAll": {
+      "action": "Tout réinitialiser aux valeurs par défaut",
+      "confirmTitle": "Tout réinitialiser ?",
+      "confirmBody": "Toutes les règles et fixtures par défaut retrouveront leur configuration d'origine, et celles qui ont été supprimées seront recréées. Les règles et fixtures personnalisées ne sont pas touchées.",
+      "cancel": "Annuler",
+      "confirm": "Tout réinitialiser",
+      "done": "{restored} restaurée(s), {recreated} recréée(s)"
+    },
+    "emptyRules": "Aucune règle — exécutez le seed",
+    "emptyFixtures": "Aucune fixture — exécutez le seed",
+    "emptyCore": "Aucun noyau de prompt — exécutez le seed",
+    "saved": "Enregistré",
+    "genericError": "Une erreur est survenue"
+  }
+}

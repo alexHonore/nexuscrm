@@ -14,6 +14,7 @@ import {
   Phone,
   PhoneCall,
   Settings,
+  ShieldAlert,
   ShieldCheck,
   Upload,
   UserRound,
@@ -75,6 +76,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin/import-export", labelKey: "importExport", icon: Upload },
   { href: "/admin/webhooks", labelKey: "webhooks", icon: KeyRound },
   { href: "/admin/audit", labelKey: "audit", icon: ShieldCheck },
+  { href: "/admin/guardrails", labelKey: "guardrails", icon: ShieldAlert },
   { href: "/admin/settings", labelKey: "settings", icon: Settings },
 ];
 

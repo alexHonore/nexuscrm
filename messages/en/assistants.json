@@ -1,0 +1,66 @@
+{
+  "guardrails": {
+    "title": "Guardrails",
+    "subtitle": "Global rules, test fixtures and prompt core applied to every AI assistant",
+    "sections": {
+      "rules": {
+        "title": "Global rules",
+        "desc": "Every rule is an editable row — none of them are hardcoded."
+      },
+      "fixtures": {
+        "title": "Fixtures",
+        "desc": "Test scenarios replayed against every assistant (read-only for now)."
+      },
+      "core": {
+        "title": "Prompt core (L0)",
+        "desc": "Shared body injected into every assistant's compiled prompt.",
+        "version": "Version {version}",
+        "showBody": "Show text",
+        "hideBody": "Hide text"
+      }
+    },
+    "columns": {
+      "label": "Name",
+      "key": "Key",
+      "kind": "Kind",
+      "enabled": "Enabled",
+      "severity": "Severity"
+    },
+    "kind": {
+      "forbidden_regex": "Forbidden pattern (regex)",
+      "forbidden_terms": "Forbidden terms",
+      "max_chars": "Max character count",
+      "max_questions": "Max question count",
+      "link_policy": "Link policy",
+      "required_tool_on_intent": "Required tool on intent",
+      "llm_judge": "AI judge",
+      "custom_instruction": "Custom instruction"
+    },
+    "severity": {
+      "block": "Blocks the send",
+      "warn": "Warns only",
+      "off": "Inactive"
+    },
+    "modified": "Modified",
+    "reset": {
+      "action": "Reset",
+      "confirmTitle": "Reset this rule?",
+      "confirmBody": "“{label}” will revert to its default configuration. This happens immediately.",
+      "cancel": "Cancel",
+      "confirm": "Reset"
+    },
+    "resetAll": {
+      "action": "Reset everything to defaults",
+      "confirmTitle": "Reset everything?",
+      "confirmBody": "Every default rule and fixture will revert to its original configuration, and any that were deleted will be recreated. Custom rules and fixtures are not affected.",
+      "cancel": "Cancel",
+      "confirm": "Reset everything",
+      "done": "{restored} restored, {recreated} recreated"
+    },
+    "emptyRules": "No rules — run the seed",
+    "emptyFixtures": "No fixtures — run the seed",
+    "emptyCore": "No prompt core — run the seed",
+    "saved": "Saved",
+    "genericError": "Something went wrong"
+  }
+}

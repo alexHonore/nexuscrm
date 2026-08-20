@@ -1,9 +1,11 @@
 import { relations, sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   text,
@@ -22,6 +24,7 @@ import { clients, users } from "./schema";
 export const consentChannelEnum = pgEnum("consent_channel", ["sms", "email", "call"]);
 export const consentKindEnum = pgEnum("consent_kind", ["express", "implied_inquiry"]);
 export const smsDirectionEnum = pgEnum("sms_direction", ["in", "out"]);
+export const assistantStatusEnum = pgEnum("assistant_status", ["draft", "active", "archived"]);
 
 // ── Tables ───────────────────────────────────────────────────────────────────
 
@@ -84,8 +87,9 @@ export const conversations = pgTable(
     smsNumberId: uuid("sms_number_id")
       .notNull()
       .references(() => smsNumbers.id),
-    /** FK to assistants added in phase 3 (table does not exist yet). */
-    activeAssistantId: uuid("active_assistant_id"),
+    activeAssistantId: uuid("active_assistant_id").references(() => assistants.id, {
+      onDelete: "set null",
+    }),
     activeAssistantVersion: integer("active_assistant_version"),
     /** [{assistantId, version, from, reason}] — transfer history. */
     assistantHistory: jsonb("assistant_history").notNull().default([]),
@@ -134,8 +138,7 @@ export const messages = pgTable(
      * les entrants et les envois hors file n'en ont pas.
      */
     jobId: uuid("job_id").unique(),
-    /** FK to assistants added in phase 3. */
-    assistantId: uuid("assistant_id"),
+    assistantId: uuid("assistant_id").references(() => assistants.id, { onDelete: "set null" }),
     assistantVersion: integer("assistant_version"),
     model: text("model"),
     /** opener | ladder | agent | human | system — text so the list stays extensible. */
@@ -191,6 +194,199 @@ export const scheduledJobs = pgTable(
   ],
 );
 
+// ── Assistants IA (phase 3) ──────────────────────────────────────────────────
+
+/**
+ * Corps L0 du prompt compilé — global et versionné. Chaque bump de version
+ * marque tous les assistants `needs_recompile` ; la porte d'activation exige
+ * une compilation contre la version courante.
+ */
+export const promptCores = pgTable("prompt_cores", {
+  version: integer("version").primaryKey(),
+  body: text("body").notNull(),
+  notes: text("notes"),
+  createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const assistants = pgTable("assistants", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  description: text("description"),
+  status: assistantStatusEnum("status").notNull().default("draft"),
+  version: integer("version").notNull().default(1),
+  language: text("language").notNull().default("fr-CA"),
+  /** Config structurée — formes zod dans src/lib/assistants/schema.ts. */
+  identity: jsonb("identity").notNull(),
+  goal: jsonb("goal").notNull(),
+  approach: jsonb("approach").notNull(),
+  knowledge: jsonb("knowledge").notNull().default({}),
+  objectionPacks: text("objection_packs")
+    .array()
+    .notNull()
+    .default(sql`'{}'::text[]`),
+  tools: text("tools")
+    .array()
+    .notNull()
+    .default(sql`'{}'::text[]`),
+  model: jsonb("model").notNull(),
+  /** composed = compilé par couches ; raw = system_prompt_override intégral. */
+  promptMode: text("prompt_mode").notNull().default("composed"),
+  systemPromptOverride: text("system_prompt_override"),
+  /** {"L3": {"mode": "replace"|"append", "text": "…"}} */
+  layerOverrides: jsonb("layer_overrides").notNull().default({}),
+  /** Gabarit L7 éditable ; null = gabarit intégré par défaut. */
+  turnInstructions: text("turn_instructions"),
+  includeRuntimeLayer: boolean("include_runtime_layer").notNull().default(true),
+  /** false = la porte d'activation devient consultative (§11.2.3). */
+  requireSuitePass: boolean("require_suite_pass").notNull().default(true),
+  compiledPrompt: text("compiled_prompt"),
+  compiledCoreVersion: integer("compiled_core_version").references(() => promptCores.version),
+  compiledAt: timestamp("compiled_at", { withTimezone: true }),
+  suitePassed: boolean("suite_passed").notNull().default(false),
+  suiteRunId: uuid("suite_run_id"),
+  /** Posé à chaque sauvegarde/bump de core ; effacé par la compilation. */
+  needsRecompile: boolean("needs_recompile").notNull().default(true),
+  createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const assistantVersions = pgTable(
+  "assistant_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    assistantId: uuid("assistant_id")
+      .notNull()
+      .references(() => assistants.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    /** Config complète au moment du gel — la reconstitution exacte d'un envoi. */
+    snapshot: jsonb("snapshot").notNull(),
+    compiledPrompt: text("compiled_prompt").notNull(),
+    coreVersion: integer("core_version").notNull(),
+    suiteResults: jsonb("suite_results"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("assistant_versions_uq").on(t.assistantId, t.version)],
+);
+
+export const objectionPacks = pgTable("objection_packs", {
+  /** Identifiant stable (buyer_fr…) — référencé par assistants.objection_packs. */
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  language: text("language").notNull().default("fr-CA"),
+  /** [{key, triggerHint, acknowledge, reframe, ask}] */
+  items: jsonb("items").notNull(),
+  isBuiltin: boolean("is_builtin").notNull().default(false),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ── Garde-fous — entièrement éditables par l'admin, AUCUNE règle codée en dur ─
+
+export const guardrailRules = pgTable(
+  "guardrail_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** core = tous les assistants ; assistant = un seul. */
+    scope: text("scope").notNull(),
+    assistantId: uuid("assistant_id").references(() => assistants.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    label: text("label").notNull(),
+    description: text("description"),
+    /**
+     * forbidden_regex | forbidden_terms | max_chars | max_questions |
+     * link_policy | required_tool_on_intent | llm_judge | custom_instruction
+     */
+    kind: text("kind").notNull(),
+    config: jsonb("config").notNull().default({}),
+    /** Texte FR injecté dans la couche L6 du prompt compilé. */
+    promptText: text("prompt_text"),
+    /** block = bloque l'envoi et la suite ; warn = journalise ; off = inerte. */
+    severity: text("severity").notNull().default("block"),
+    origin: text("origin").notNull().default("custom"),
+    /** État semé — alimente « Réinitialiser » sur les règles par défaut. */
+    defaultSnapshot: jsonb("default_snapshot"),
+    modifiedFromDefault: boolean("modified_from_default").notNull().default(false),
+    /** Fork assistant d'une règle core portant cette clé — le fork gagne. */
+    overridesKey: text("overrides_key"),
+    enabled: boolean("enabled").notNull().default(true),
+    orderIndex: integer("order_index").notNull().default(0),
+    updatedById: uuid("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Une clé unique par portée : les règles core entre elles, et par assistant.
+    uniqueIndex("guardrail_rules_core_key_uq").on(t.key).where(sql`${t.assistantId} is null`),
+    uniqueIndex("guardrail_rules_assistant_key_uq")
+      .on(t.assistantId, t.key)
+      .where(sql`${t.assistantId} is not null`),
+    check("guardrail_rules_scope_ck", sql`(${t.scope} = 'assistant') = (${t.assistantId} is not null)`),
+  ],
+);
+
+export const guardrailFixtures = pgTable(
+  "guardrail_fixtures",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    scope: text("scope").notNull(),
+    assistantId: uuid("assistant_id").references(() => assistants.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    /** {priorTurns: [["out","…"],["in","…"]], qualification: {}, rung, turnsUsed} */
+    setup: jsonb("setup").notNull().default({}),
+    inbound: text("inbound").notNull(),
+    /** §11.3 : mustCallTool, mustNotCallTool, mustMatch, mustNotMatch, judge, maxChars */
+    expectations: jsonb("expectations").notNull(),
+    severity: text("severity").notNull().default("block"),
+    origin: text("origin").notNull().default("custom"),
+    defaultSnapshot: jsonb("default_snapshot"),
+    modifiedFromDefault: boolean("modified_from_default").notNull().default(false),
+    enabled: boolean("enabled").notNull().default(true),
+    orderIndex: integer("order_index").notNull().default(0),
+    updatedById: uuid("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "guardrail_fixtures_scope_ck",
+      sql`(${t.scope} = 'assistant') = (${t.assistantId} is not null)`,
+    ),
+  ],
+);
+
+export const guardrailRuns = pgTable("guardrail_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  assistantId: uuid("assistant_id")
+    .notNull()
+    .references(() => assistants.id, { onDelete: "cascade" }),
+  assistantVersion: integer("assistant_version").notNull(),
+  coreVersion: integer("core_version").notNull(),
+  model: text("model").notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  passed: boolean("passed"),
+  /** [{fixtureId, label, severity, passed, reason, output, toolsCalled}] */
+  results: jsonb("results"),
+  costUsd: numeric("cost_usd", { precision: 10, scale: 4 }),
+  triggeredById: uuid("triggered_by_id").references(() => users.id, { onDelete: "set null" }),
+});
+
+export const guardrailAudit = pgTable("guardrail_audit", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+  /**
+   * rule_edited | rule_disabled | rule_reset | rule_created | rule_deleted |
+   * fixture_edited | fixture_created | fixture_deleted | core_body_edited |
+   * core_version_bump | reset_all | assistant_imported
+   */
+  action: text("action").notNull(),
+  target: text("target").notNull(),
+  before: jsonb("before"),
+  after: jsonb("after"),
+  reason: text("reason"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // ── Relations ────────────────────────────────────────────────────────────────
 
 export const smsNumbersRelations = relations(smsNumbers, ({ one, many }) => ({
@@ -213,4 +409,39 @@ export const conversationsRelations = relations(conversations, ({ one, many }) =
 export const messagesRelations = relations(messages, ({ one }) => ({
   conversation: one(conversations, { fields: [messages.conversationId], references: [conversations.id] }),
   sentBy: one(users, { fields: [messages.sentById], references: [users.id] }),
+  assistant: one(assistants, { fields: [messages.assistantId], references: [assistants.id] }),
+}));
+
+export const assistantsRelations = relations(assistants, ({ one, many }) => ({
+  compiledCore: one(promptCores, {
+    fields: [assistants.compiledCoreVersion],
+    references: [promptCores.version],
+  }),
+  createdBy: one(users, { fields: [assistants.createdById], references: [users.id] }),
+  versions: many(assistantVersions),
+  guardrailRules: many(guardrailRules),
+  guardrailFixtures: many(guardrailFixtures),
+  guardrailRuns: many(guardrailRuns),
+}));
+
+export const assistantVersionsRelations = relations(assistantVersions, ({ one }) => ({
+  assistant: one(assistants, {
+    fields: [assistantVersions.assistantId],
+    references: [assistants.id],
+  }),
+}));
+
+export const guardrailRulesRelations = relations(guardrailRules, ({ one }) => ({
+  assistant: one(assistants, { fields: [guardrailRules.assistantId], references: [assistants.id] }),
+}));
+
+export const guardrailFixturesRelations = relations(guardrailFixtures, ({ one }) => ({
+  assistant: one(assistants, {
+    fields: [guardrailFixtures.assistantId],
+    references: [assistants.id],
+  }),
+}));
+
+export const guardrailRunsRelations = relations(guardrailRuns, ({ one }) => ({
+  assistant: one(assistants, { fields: [guardrailRuns.assistantId], references: [assistants.id] }),
 }));
