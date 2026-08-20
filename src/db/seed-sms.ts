@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+ 
 /**
  * Seed du moteur SMS/IA — appelé depuis src/db/seed.ts (pnpm db:seed).
  * Idempotent : ne recrée pas ce qui existe déjà.
