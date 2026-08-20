@@ -99,7 +99,7 @@ describe("POST /api/admin/settings/sms", () => {
     await expect(res.json()).resolves.toEqual({ error: "forbidden" });
 
     expect(await smsSettingsRow()).toBeUndefined();
-    expect((await getSetting("sms")).consentValidity).toBe("6m");
+    expect((await getSetting("sms")).consentValidity).toBe("unlimited");
   });
 
   it("enregistre la durée choisie par l'admin (2y)", async () => {
@@ -317,10 +317,10 @@ describe("POST /api/admin/settings/sms", () => {
     expect(logs).toHaveLength(1);
     expect(logs[0].userId).toBe(admin.id);
     expect(logs[0].entity).toBe("settings");
-    // Différentiel avant/après restreint à consentValidity (défaut « 6m »).
+    // Différentiel avant/après restreint à consentValidity (défaut « unlimited »).
     expect(logs[0].detail).toMatchObject({
       consentValidity: "3y",
-      changes: { consentValidity: { from: "6m", to: "3y" } },
+      changes: { consentValidity: { from: "unlimited", to: "3y" } },
     });
   });
 });

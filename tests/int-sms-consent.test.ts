@@ -79,7 +79,7 @@ describe("POST /api/webhooks/leads — consentement SMS", () => {
   beforeEach(resetDb);
   afterAll(closeDb);
 
-  it("un nouveau lead crée exactement un consentement SMS tacite de 6 mois", async () => {
+  it("un nouveau lead crée exactement un consentement SMS tacite (défaut : illimité)", async () => {
     const key = await makeKey(KEY);
 
     const res = await POST(leadRequest(facebookPayload(), { "x-api-key": KEY }));
@@ -94,7 +94,18 @@ describe("POST /api/webhooks/leads — consentement SMS", () => {
     expect(row.kind).toBe("implied_inquiry");
     expect(row.source).toContain(key.name);
     expect(row.revokedAt).toBeNull();
-    // LCAP : expiration 6 mois après grantedAt (tolérance d'une minute).
+    // Défaut « illimité » (choix de l'admin) : aucune échéance estampillée.
+    expect(row.expiresAt).toBeNull();
+  });
+
+  it("respecte le réglage sms.consentValidity : 6 mois (fenêtre LCAP)", async () => {
+    await makeKey(KEY);
+    await setSetting("sms", { consentValidity: "6m" });
+
+    const res = await POST(leadRequest(facebookPayload(), { "x-api-key": KEY }));
+    expect(res.status).toBe(200);
+
+    const [row] = await testDb.select().from(consents);
     expect(row.expiresAt).toBeInstanceOf(Date);
     const expected = addMonths(row.grantedAt, 6).getTime();
     expect(Math.abs(row.expiresAt!.getTime() - expected)).toBeLessThan(60_000);

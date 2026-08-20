@@ -52,7 +52,8 @@ export const smsSettingsSchema = z.object({
   /**
    * Durée de validité estampillée sur les NOUVEAUX consentements du registre
    * (le registre est append-only : les rangées existantes gardent leur
-   * échéance). « 6m » = fenêtre LCAP du consentement implicite après demande.
+   * échéance sauf recalcul explicite). Défaut : illimité (choix de l'admin) ;
+   * « 6m » = fenêtre LCAP du consentement implicite après demande.
    */
   consentValidity: z.enum(CONSENT_VALIDITIES).default(DEFAULT_CONSENT_VALIDITY),
 });
