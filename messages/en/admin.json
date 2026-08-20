@@ -387,7 +387,7 @@
   },
   "settings": {
     "title": "Settings",
-    "subtitle": "Google Calendar, booking hours and telephony provider.",
+    "subtitle": "Google Calendar, booking hours, telephony provider and SMS consents.",
     "google": {
       "title": "Google Calendar",
       "desc": "Appointments booked by callers are created in this calendar (with a Google Meet link).",
@@ -420,6 +420,19 @@
       "brokerEmail": "Broker e-mail (invited to every appointment)",
       "brokerEmailHint": "Receives the Google invitation for every appointment. If it is also the connected Google account, the event simply appears on that calendar (Google never e-mails the organizer). Leave empty to invite only the client.",
       "brokerEmailInvalid": "Invalid e-mail address — enter a full address or leave the field empty."
+    },
+    "sms": {
+      "title": "SMS and consents",
+      "desc": "Consent rules applied to text messages sent by the CRM.",
+      "validityLabel": "Consent validity period",
+      "validity": {
+        "6m": "6 months (implied consent — CASL)",
+        "1y": "1 year",
+        "2y": "2 years",
+        "3y": "3 years",
+        "unlimited": "Unlimited"
+      },
+      "hint": "This period is stamped on NEW consents recorded in the ledger — existing entries keep their expiry. Six months is the CASL / Law 25 implied-consent window after an inquiry; reserve longer periods for express consent."
     },
     "telephony": {
       "title": "Telephony",

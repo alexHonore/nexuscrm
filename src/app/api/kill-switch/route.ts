@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
-import { setSetting } from "@/lib/settings";
+import { getSetting, setSetting } from "@/lib/settings";
 
 const bodySchema = z.object({
   enabled: z.boolean(),
@@ -30,7 +30,12 @@ export async function POST(req: Request) {
   }
   const { enabled, reason } = parsed.data;
 
+  // Fusion avec l'état courant : le réglage `sms` porte aussi d'autres champs
+  // (consentValidity…) que le basculement de l'interrupteur ne doit pas remettre
+  // à leurs défauts.
+  const current = await getSetting("sms");
   await setSetting("sms", {
+    ...current,
     killSwitch: enabled,
     killSwitchReason: enabled ? (reason ?? null) : null,
     killSwitchAt: enabled ? new Date().toISOString() : null,

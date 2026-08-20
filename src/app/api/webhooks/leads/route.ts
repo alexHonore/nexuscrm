@@ -1,4 +1,3 @@
-import { addMonths } from "date-fns";
 import { and, eq, gte, isNull, like, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
@@ -8,6 +7,8 @@ import { notificationContent } from "@/components/clients/notification-content";
 import { logAudit } from "@/lib/audit";
 import { sha256Hex } from "@/lib/crypto";
 import { formatPhone, normalizePhone, phoneMatchKey } from "@/lib/phone";
+import { getSetting } from "@/lib/settings";
+import { consentExpiresAt } from "@/lib/sms/consent";
 
 /**
  * Webhook entrant public (n8n / Facebook Lead Ads / site web).
@@ -231,12 +232,15 @@ export async function POST(req: Request) {
     clientId = inserted.id;
   }
 
-  // ── Consentement SMS (LCAP/CASL) : une demande vaut consentement tacite 6 mois ──
-  // Registre en append seulement : une nouvelle demande ajoute une ligne (jamais
-  // de mise à jour de grantedAt). Un échec ici ne doit JAMAIS faire perdre le
-  // lead — n8n reçoit son 200 quoi qu'il arrive.
+  // ── Consentement SMS (LCAP/CASL) : une demande vaut consentement tacite ──
+  // Durée estampillée selon le réglage admin `sms.consentValidity` (défaut 6
+  // mois = fenêtre LCAP du consentement implicite). Registre en append
+  // seulement : une nouvelle demande ajoute une ligne (jamais de mise à jour
+  // de grantedAt). Un échec ici ne doit JAMAIS faire perdre le lead — n8n
+  // reçoit son 200 quoi qu'il arrive.
   try {
     const now = new Date();
+    const { consentValidity } = await getSetting("sms");
     // Dédoublonnage 24 h : les reprises n8n ne gonflent pas le registre.
     const recent = await db.query.consents.findFirst({
       where: and(
@@ -261,7 +265,7 @@ export async function POST(req: Request) {
           receivedAt: now.toISOString(),
         },
         grantedAt: now,
-        expiresAt: addMonths(now, 6),
+        expiresAt: consentExpiresAt(consentValidity, now),
       });
     }
   } catch (err) {

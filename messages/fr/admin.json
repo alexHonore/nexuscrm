@@ -387,7 +387,7 @@
   },
   "settings": {
     "title": "Réglages",
-    "subtitle": "Google Agenda, plages de réservation et fournisseur de téléphonie.",
+    "subtitle": "Google Agenda, plages de réservation, fournisseur de téléphonie et consentements SMS.",
     "google": {
       "title": "Google Agenda",
       "desc": "Les rendez-vous pris par les téléphonistes sont créés dans ce calendrier (avec lien Google Meet).",
@@ -420,6 +420,19 @@
       "brokerEmail": "Courriel du courtier (invité à chaque rendez-vous)",
       "brokerEmailHint": "Reçoit l'invitation Google de chaque rendez-vous. Si c'est aussi le compte Google connecté, l'évènement apparaît directement sur son agenda (Google n'envoie pas de courriel à l'organisateur). Laisser vide pour n'inviter que le client.",
       "brokerEmailInvalid": "Adresse courriel invalide — entrez une adresse complète ou laissez le champ vide."
+    },
+    "sms": {
+      "title": "SMS et consentements",
+      "desc": "Règles de consentement appliquées aux textos envoyés par le CRM.",
+      "validityLabel": "Durée de validité des consentements",
+      "validity": {
+        "6m": "6 mois (consentement implicite — LCAP)",
+        "1y": "1 an",
+        "2y": "2 ans",
+        "3y": "3 ans",
+        "unlimited": "Illimité"
+      },
+      "hint": "Cette durée est estampillée sur les NOUVEAUX consentements inscrits au registre — les entrées existantes conservent leur échéance. 6 mois correspond à la fenêtre de consentement implicite après une demande (LCAP / Loi 25) ; réservez les durées plus longues aux consentements exprès."
     },
     "telephony": {
       "title": "Téléphonie",

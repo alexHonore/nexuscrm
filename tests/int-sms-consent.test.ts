@@ -7,7 +7,7 @@
  */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { addMonths } from "date-fns";
+import { addMonths, addYears } from "date-fns";
 import { closeDb, makeClient, resetDb, testDb } from "./helpers/db";
 import { webhookKeys } from "@/db/schema";
 import { consents } from "@/db/schema-sms";
@@ -26,6 +26,7 @@ vi.mock("next/headers", () => ({
 
 const { POST } = await import("@/app/api/webhooks/leads/route");
 const { encryptSecret, sha256Hex } = await import("@/lib/crypto");
+const { setSetting } = await import("@/lib/settings");
 
 const URL_LEADS = `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/leads`;
 const KEY = "abcdef0123456789abcdef0123456789";
@@ -97,6 +98,30 @@ describe("POST /api/webhooks/leads — consentement SMS", () => {
     expect(row.expiresAt).toBeInstanceOf(Date);
     const expected = addMonths(row.grantedAt, 6).getTime();
     expect(Math.abs(row.expiresAt!.getTime() - expected)).toBeLessThan(60_000);
+  });
+
+  it("respecte le réglage sms.consentValidity : 2 ans", async () => {
+    await makeKey(KEY);
+    await setSetting("sms", { consentValidity: "2y" });
+
+    const res = await POST(leadRequest(facebookPayload(), { "x-api-key": KEY }));
+    expect(res.status).toBe(200);
+
+    const [row] = await testDb.select().from(consents);
+    expect(row.expiresAt).toBeInstanceOf(Date);
+    const expected = addYears(row.grantedAt, 2).getTime();
+    expect(Math.abs(row.expiresAt!.getTime() - expected)).toBeLessThan(60_000);
+  });
+
+  it("respecte le réglage sms.consentValidity : illimité (expiresAt null)", async () => {
+    await makeKey(KEY);
+    await setSetting("sms", { consentValidity: "unlimited" });
+
+    const res = await POST(leadRequest(facebookPayload(), { "x-api-key": KEY }));
+    expect(res.status).toBe(200);
+
+    const [row] = await testDb.select().from(consents);
+    expect(row.expiresAt).toBeNull();
   });
 
   it("le même numéro reposté immédiatement ne crée pas de doublon (dédoublonnage 24 h)", async () => {

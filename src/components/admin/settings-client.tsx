@@ -2,7 +2,15 @@
 
 import { formatInTimeZone } from "date-fns-tz";
 import { enCA, fr } from "date-fns/locale";
-import { CalendarDays, CheckCircle2, Loader2, PhoneCall, Unplug, XCircle } from "lucide-react";
+import {
+  CalendarDays,
+  CheckCircle2,
+  Loader2,
+  MessageSquareText,
+  PhoneCall,
+  Unplug,
+  XCircle,
+} from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -29,6 +37,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { CONSENT_VALIDITIES, type ConsentValidity } from "@/lib/sms/consent";
 import { api } from "./api";
 
 const TZ = "America/Toronto";
@@ -383,7 +392,90 @@ export function BookingCard({ initial }: { initial: BookingFormValues }) {
   );
 }
 
-// ── c. Téléphonie ────────────────────────────────────────────────────────────
+// ── c. SMS et consentements ──────────────────────────────────────────────────
+
+export function SmsCard({ initialValidity }: { initialValidity: ConsentValidity }) {
+  const t = useTranslations("admin");
+  const router = useRouter();
+  // Valeur enregistrée côté serveur — mise à jour après chaque sauvegarde pour
+  // que « inchangé » redevienne vrai sans attendre le refresh.
+  const [saved, setSaved] = useState(initialValidity);
+  const [validity, setValidity] = useState(initialValidity);
+  const [pending, setPending] = useState(false);
+
+  const submit = async () => {
+    setPending(true);
+    try {
+      await api("/api/admin/settings/sms", {
+        method: "POST",
+        body: JSON.stringify({ consentValidity: validity }),
+      });
+      setSaved(validity);
+      toast.success(t("saved"));
+      router.refresh();
+    } catch {
+      toast.error(t("genericError"));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <Card className="shadow-xs">
+      <CardHeader className="border-b">
+        <div className="flex items-center gap-3">
+          <CardIcon>
+            <MessageSquareText />
+          </CardIcon>
+          <div className="space-y-0.5">
+            <CardTitle>{t("settings.sms.title")}</CardTitle>
+            <CardDescription>{t("settings.sms.desc")}</CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="max-w-sm space-y-1.5">
+          <Label id="sms-consent-validity-label">{t("settings.sms.validityLabel")}</Label>
+          <Select
+            items={CONSENT_VALIDITIES.map((v) => ({
+              value: v,
+              label: t(`settings.sms.validity.${v}`),
+            }))}
+            value={validity}
+            onValueChange={(v) => setValidity(v as ConsentValidity)}
+          >
+            <SelectTrigger
+              aria-labelledby="sms-consent-validity-label"
+              className="min-h-11 w-full md:min-h-8"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CONSENT_VALIDITIES.map((v) => (
+                <SelectItem key={v} value={v}>
+                  {t(`settings.sms.validity.${v}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <p className="max-w-prose text-xs text-muted-foreground">{t("settings.sms.hint")}</p>
+      </CardContent>
+      <CardFooter>
+        <Button
+          onClick={() => void submit()}
+          disabled={pending || validity === saved}
+          className="min-h-11 md:min-h-8"
+        >
+          {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+          {t("save")}
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+
+// ── d. Téléphonie ────────────────────────────────────────────────────────────
 
 function EnvHint({ ok, label }: { ok: boolean; label: string }) {
   return (
