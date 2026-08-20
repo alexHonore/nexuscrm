@@ -142,6 +142,14 @@ function describeTwilioError(status: number, bodyText: string): string {
 }
 
 /**
+ * Délai maximal d'un appel Twilio. Un socket qui pend n'est pas une erreur
+ * visible : sans plafond il mangerait tout le budget du dispatcher
+ * (maxDuration 300 s) et bloquerait la file derrière lui. Un abandon devient
+ * une erreur normale — donc une reprise avec temporisation.
+ */
+const TWILIO_TIMEOUT_MS = 15_000;
+
+/**
  * Transport réel : POST /2010-04-01/Accounts/{sid}/Messages.json authentifié
  * par clé API (Basic keySid:keySecret). `fetchFn` est injectable pour les
  * tests — jamais de vrai réseau hors production.
@@ -153,9 +161,11 @@ export function createTwilioTransport(cfg: {
   messagingServiceSid: string;
   statusCallbackUrl?: string;
   fetchFn?: typeof fetch;
+  timeoutMs?: number;
 }): SmsTransport {
   const { accountSid, keySid, keySecret, messagingServiceSid, statusCallbackUrl } = cfg;
   const fetchFn = cfg.fetchFn ?? fetch;
+  const timeoutMs = cfg.timeoutMs ?? TWILIO_TIMEOUT_MS;
   const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
   const authorization = `Basic ${btoa(`${keySid}:${keySecret}`)}`;
 
@@ -167,14 +177,26 @@ export function createTwilioTransport(cfg: {
     });
     if (statusCallbackUrl) form.set("StatusCallback", statusCallbackUrl);
 
-    const res = await fetchFn(url, {
-      method: "POST",
-      headers: {
-        Authorization: authorization,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: form.toString(),
-    });
+    let res: Response;
+    try {
+      res = await fetchFn(url, {
+        method: "POST",
+        headers: {
+          Authorization: authorization,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: form.toString(),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (err) {
+      // Abandon sur délai : l'appel a probablement échoué AVANT acceptation,
+      // mais rien ne le garantit — la garde anti-double-envoi du handler
+      // (messages.job_id) est ce qui empêche un doublon à la reprise.
+      if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+        throw new Error(`twilio_send_failed: timeout after ${timeoutMs}ms`);
+      }
+      throw err;
+    }
 
     const text = await res.text();
     if (!res.ok) {

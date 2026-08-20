@@ -352,4 +352,38 @@ describe("createTwilioTransport", () => {
       transport({ to: "+15145551234", body: "Salut!", idempotencyKey: "k5" }),
     ).rejects.toThrow("twilio_send_failed: http 200 malformed_response");
   });
+
+  it("arme un signal d'abandon sur chaque appel (plafond de temps)", async () => {
+    const { fetchFn, calls } = makeFetch(201, JSON.stringify({ sid: "SM44" }));
+    const transport = createTwilioTransport({ ...cfg, fetchFn });
+
+    await transport({ to: "+15145551234", body: "Salut!", idempotencyKey: "k6" });
+
+    expect(calls[0].init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("socket qui pend : abandon net au lieu de bloquer la file du dispatcher", async () => {
+    // Un fetch qui ne répond jamais — seul le signal peut le dénouer.
+    const fetchFn: typeof fetch = (_url, init) =>
+      new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener("abort", () => reject(signal.reason as Error));
+      });
+    const transport = createTwilioTransport({ ...cfg, fetchFn, timeoutMs: 20 });
+
+    await expect(
+      transport({ to: "+15145551234", body: "Salut!", idempotencyKey: "k7" }),
+    ).rejects.toThrow("twilio_send_failed: timeout after 20ms");
+  });
+
+  it("une panne réseau ordinaire remonte telle quelle", async () => {
+    const fetchFn: typeof fetch = async () => {
+      throw new Error("ECONNREFUSED");
+    };
+    const transport = createTwilioTransport({ ...cfg, fetchFn });
+
+    await expect(
+      transport({ to: "+15145551234", body: "Salut!", idempotencyKey: "k8" }),
+    ).rejects.toThrow("ECONNREFUSED");
+  });
 });
