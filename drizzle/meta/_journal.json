@@ -15,6 +15,13 @@
       "when": 1787199450621,
       "tag": "0001_phase1-sms",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787239408475,
+      "tag": "0002_phase2-jobs",
+      "breakpoints": true
     }
   ]
 }

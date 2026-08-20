@@ -2,6 +2,7 @@
   "regions": ["pdx1"],
   "crons": [
     { "path": "/api/cron/sync-cdr", "schedule": "0 11 * * *" },
-    { "path": "/api/cron/followup-reminders", "schedule": "30 11 * * *" }
+    { "path": "/api/cron/followup-reminders", "schedule": "30 11 * * *" },
+    { "path": "/api/cron/dispatch", "schedule": "30 12 * * *" }
   ]
 }

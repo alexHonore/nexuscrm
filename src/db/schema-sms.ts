@@ -127,6 +127,13 @@ export const messages = pgTable(
     status: text("status"),
     errorCode: integer("error_code"),
     aiGenerated: boolean("ai_generated").notNull().default(false),
+    /**
+     * Job send_sms qui a produit cette rangée (garde anti-double-envoi : la
+     * rangée-intention est écrite AVANT l'appel Twilio ; un job re-réclamé qui
+     * retrouve sa rangée ne rappelle jamais le transport). Unique, nullable —
+     * les entrants et les envois hors file n'en ont pas.
+     */
+    jobId: uuid("job_id").unique(),
     /** FK to assistants added in phase 3. */
     assistantId: uuid("assistant_id"),
     assistantVersion: integer("assistant_version"),
@@ -144,6 +151,43 @@ export const messages = pgTable(
     index("messages_unprocessed_in_idx")
       .on(t.conversationId)
       .where(sql`${t.processedAt} is null and ${t.direction} = 'in'`),
+  ],
+);
+
+/**
+ * File d'attente durable du moteur SMS (phase 2). Un seul système de jobs pour
+ * tout le moteur : envois, tours d'agent (phase 4), relances (phase 6). Le
+ * dispatcher (/api/cron/dispatch) réclame les jobs dus avec FOR UPDATE SKIP
+ * LOCKED — deux dispatchers concurrents ne peuvent jamais exécuter le même job.
+ */
+export const scheduledJobs = pgTable(
+  "scheduled_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** send_sms | agent_turn (phase 4) | send_ladder (phase 6) … */
+    type: text("type").notNull(),
+    runAt: timestamp("run_at", { withTimezone: true }).notNull(),
+    payload: jsonb("payload").notNull(),
+    /**
+     * Idempotence : un même dedupe_key = un seul job VIVANT (pending/running —
+     * index unique partiel ci-dessous). Un job réglé ou annulé libère sa clé,
+     * sinon l'interrupteur d'arrêt empoisonnerait à jamais les clés stables
+     * (relances de phase 6, débounce de phase 4).
+     */
+    dedupeKey: text("dedupe_key"),
+    /** pending | running | done | skipped | failed | cancelled */
+    status: text("status").notNull().default("pending"),
+    /** Nombre de réclamations (incrémenté au claim, pas à l'échec). */
+    attempts: integer("attempts").notNull().default(0),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("scheduled_jobs_status_run_idx").on(t.status, t.runAt),
+    uniqueIndex("scheduled_jobs_dedupe_live_uq")
+      .on(t.dedupeKey)
+      .where(sql`${t.status} in ('pending', 'running')`),
   ],
 );
 

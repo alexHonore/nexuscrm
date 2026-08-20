@@ -19,7 +19,7 @@ export async function resetDb(): Promise<void> {
     truncate table
       audit_logs, notifications, comments, followups, appointments, calls,
       password_resets, login_throttle, webhook_keys, settings, clients, users, sources, categories,
-      messages, conversations, consents, suppressions, sms_numbers
+      messages, conversations, consents, suppressions, sms_numbers, scheduled_jobs
     restart identity cascade;
   `);
 }

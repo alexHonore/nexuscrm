@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
+import { cancelPendingJobs } from "@/lib/jobs/queue";
 import { getSetting, setSetting } from "@/lib/settings";
 
 const bodySchema = z.object({
@@ -12,12 +13,13 @@ const bodySchema = z.object({
 /**
  * Interrupteur d'arrêt global du moteur SMS — admin seulement.
  *
- * Le réglage `sms.killSwitch` est relu par le fournisseur avant CHAQUE envoi
- * (`settingsSendGate` de `src/lib/sms-server`) : basculer l'interrupteur
- * stoppe donc tous les SMS sortants en au plus un cycle du dispatcher. Les
- * phases suivantes étendront ce point d'entrée pour aussi mettre les
- * campagnes en pause et annuler les envois en attente dès que ces tables
- * existeront.
+ * Deux mécanismes complémentaires : le réglage `sms.killSwitch` est relu par
+ * le fournisseur avant CHAQUE envoi (`settingsSendGate` de
+ * `src/lib/sms-server`) et bloque les nouveaux envois ; activer
+ * l'interrupteur annule EN PLUS tous les jobs `send_sms` encore en attente
+ * dans la file. Ensemble, ils garantissent que l'interrupteur stoppe tout en
+ * au plus un cycle du dispatcher. Désactiver ne ressuscite rien : les jobs
+ * annulés restent annulés.
  */
 export async function POST(req: Request) {
   const auth = await apiAdmin();
@@ -41,12 +43,16 @@ export async function POST(req: Request) {
     killSwitchAt: enabled ? new Date().toISOString() : null,
   });
 
+  // Les jobs déjà réclamés (`running`) sont laissés au dispatcher : leur
+  // handler relit le réglage et refusera l'envoi lui-même.
+  const cancelledJobs = enabled ? await cancelPendingJobs({ types: ["send_sms"] }) : 0;
+
   await logAudit({
     userId: auth.id,
     action: "sms.kill_switch",
     entity: "settings",
-    detail: { enabled, reason: reason ?? null },
+    detail: { enabled, reason: reason ?? null, cancelledJobs },
   });
 
-  return NextResponse.json({ ok: true, enabled });
+  return NextResponse.json({ ok: true, enabled, cancelledJobs });
 }

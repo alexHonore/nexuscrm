@@ -11,6 +11,7 @@ import { eq } from "drizzle-orm";
 import { SignJWT } from "jose";
 import { closeDb, makeUser, resetDb, testDb } from "./helpers/db";
 import { auditLogs, settings } from "@/db/schema";
+import { scheduledJobs } from "@/db/schema-sms";
 
 // ── Stubs d'environnement Next ───────────────────────────────────────────────
 const jar = vi.hoisted(() => new Map<string, string>());
@@ -107,7 +108,7 @@ describe("POST /api/kill-switch", () => {
       killSwitchRequest({ enabled: true, reason: "Plainte d'un destinataire" }),
     );
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual({ ok: true, enabled: true });
+    await expect(res.json()).resolves.toEqual({ ok: true, enabled: true, cancelledJobs: 0 });
 
     const row = await smsSettingsRow();
     expect(row).toBeDefined();
@@ -123,6 +124,58 @@ describe("POST /api/kill-switch", () => {
     const at = new Date(value.killSwitchAt!).getTime();
     expect(at).toBeGreaterThanOrEqual(before - 1000);
     expect(at).toBeLessThanOrEqual(Date.now() + 1000);
+  });
+
+  it("annule les jobs send_sms en attente à l'activation (et eux seuls)", async () => {
+    const admin = await makeUser({ role: "admin" });
+    await loginAs(admin);
+    const past = new Date(Date.now() - 60_000);
+    const seed = async (v: Partial<typeof scheduledJobs.$inferInsert>) => {
+      const [row] = await testDb
+        .insert(scheduledJobs)
+        .values({ type: "send_sms", runAt: past, payload: {}, ...v })
+        .returning();
+      return row;
+    };
+    const pendingA = await seed({});
+    const pendingB = await seed({});
+    const running = await seed({ status: "running", lockedAt: past });
+    const otherType = await seed({ type: "agent_turn" });
+
+    const res = await POST(killSwitchRequest({ enabled: true }));
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ ok: true, enabled: true, cancelledJobs: 2 });
+
+    const byId = async (id: string) =>
+      (await testDb.select().from(scheduledJobs).where(eq(scheduledJobs.id, id)))[0];
+    expect((await byId(pendingA.id)).status).toBe("cancelled");
+    expect((await byId(pendingB.id)).status).toBe("cancelled");
+    // Le job déjà réclamé reste au dispatcher : son handler relit le réglage
+    // et refusera l'envoi lui-même ; les autres types ne sont pas concernés.
+    expect((await byId(running.id)).status).toBe("running");
+    expect((await byId(otherType.id)).status).toBe("pending");
+  });
+
+  it("désactiver n'annule rien et ne ressuscite aucun job annulé", async () => {
+    const admin = await makeUser({ role: "admin" });
+    await loginAs(admin);
+    const [cancelled] = await testDb
+      .insert(scheduledJobs)
+      .values({ type: "send_sms", runAt: new Date(), payload: {}, status: "cancelled" })
+      .returning();
+    const [pending] = await testDb
+      .insert(scheduledJobs)
+      .values({ type: "send_sms", runAt: new Date(), payload: {} })
+      .returning();
+
+    const res = await POST(killSwitchRequest({ enabled: false }));
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ ok: true, enabled: false, cancelledJobs: 0 });
+
+    const byId = async (id: string) =>
+      (await testDb.select().from(scheduledJobs).where(eq(scheduledJobs.id, id)))[0];
+    expect((await byId(cancelled.id)).status).toBe("cancelled");
+    expect((await byId(pending.id)).status).toBe("pending");
   });
 
   it("préserve les autres réglages sms (consentValidity) au basculement", async () => {
@@ -150,7 +203,7 @@ describe("POST /api/kill-switch", () => {
 
     const res = await POST(killSwitchRequest({ enabled: false }));
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual({ ok: true, enabled: false });
+    await expect(res.json()).resolves.toEqual({ ok: true, enabled: false, cancelledJobs: 0 });
 
     const value = (await smsSettingsRow()).value as {
       killSwitch: boolean;
