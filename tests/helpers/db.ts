@@ -5,7 +5,10 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import bcrypt from "bcryptjs";
-import * as schema from "@/db/schema";
+import * as schemaCrm from "@/db/schema";
+import * as schemaSms from "@/db/schema-sms";
+
+const schema = { ...schemaCrm, ...schemaSms };
 
 const conn = postgres(process.env.DATABASE_URL!, { prepare: false, max: 4 });
 export const testDb = drizzle(conn, { schema });
@@ -15,7 +18,8 @@ export async function resetDb(): Promise<void> {
   await conn.unsafe(`
     truncate table
       audit_logs, notifications, comments, followups, appointments, calls,
-      password_resets, login_throttle, webhook_keys, settings, clients, users, sources, categories
+      password_resets, login_throttle, webhook_keys, settings, clients, users, sources, categories,
+      messages, conversations, consents, suppressions, sms_numbers
     restart identity cascade;
   `);
 }
@@ -96,6 +100,32 @@ export async function makeClient(overrides: Partial<typeof schema.clients.$infer
     .values({
       fullName: overrides.fullName ?? "Client Test",
       phone: overrides.phone ?? `+1418555${Math.floor(1000 + Math.random() * 8999)}`,
+      ...overrides,
+    })
+    .returning();
+  return row;
+}
+
+export async function makeSmsNumber(overrides: Partial<typeof schema.smsNumbers.$inferInsert> = {}) {
+  const [row] = await testDb
+    .insert(schema.smsNumbers)
+    .values({
+      e164: overrides.e164 ?? `+1581555${Math.floor(1000 + Math.random() * 8999)}`,
+      label: overrides.label ?? "Ligne test",
+      ...overrides,
+    })
+    .returning();
+  return row;
+}
+
+export async function makeConversation(
+  overrides: Partial<typeof schema.conversations.$inferInsert> &
+    Pick<typeof schema.conversations.$inferInsert, "clientId" | "smsNumberId">,
+) {
+  const [row] = await testDb
+    .insert(schema.conversations)
+    .values({
+      clientPhone: overrides.clientPhone ?? `+1418555${Math.floor(1000 + Math.random() * 8999)}`,
       ...overrides,
     })
     .returning();

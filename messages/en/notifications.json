@@ -25,6 +25,8 @@
     "incomingLeadExistingBody": "Existing client reaching out again — {phone} — via {source}",
     "missedCallTitle": "Missed call",
     "missedCallKnownBody": "{name} — {number}",
-    "missedCallUnknownBody": "{number}"
+    "missedCallUnknownBody": "{number}",
+    "smsInboundTitle": "New text message",
+    "smsInboundBody": "You received a text message from {name}"
   }
 }

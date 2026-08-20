@@ -1,6 +1,9 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import * as schema from "./schema";
+import * as schemaCrm from "./schema";
+import * as schemaSms from "./schema-sms";
+
+const schema = { ...schemaCrm, ...schemaSms };
 
 const globalForDb = globalThis as unknown as { pgConn?: ReturnType<typeof postgres> };
 
@@ -30,3 +33,4 @@ globalForDb.pgConn = conn;
 
 export const db = drizzle(conn, { schema });
 export * as tables from "./schema";
+export * as tablesSms from "./schema-sms";

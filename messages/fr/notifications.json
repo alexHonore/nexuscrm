@@ -25,6 +25,8 @@
     "incomingLeadExistingBody": "Client existant recontacté — {phone} — via {source}",
     "missedCallTitle": "Appel manqué",
     "missedCallKnownBody": "{name} — {number}",
-    "missedCallUnknownBody": "{number}"
+    "missedCallUnknownBody": "{number}",
+    "smsInboundTitle": "Nouveau texto",
+    "smsInboundBody": "Vous avez reçu un texto de {name}"
   }
 }

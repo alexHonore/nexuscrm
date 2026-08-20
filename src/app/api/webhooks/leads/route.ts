@@ -1,7 +1,9 @@
-import { and, eq, like, or, sql } from "drizzle-orm";
+import { addMonths } from "date-fns";
+import { and, eq, gte, isNull, like, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { categories, clients, notifications, sources, users, webhookKeys } from "@/db/schema";
+import { consents } from "@/db/schema-sms";
 import { notificationContent } from "@/components/clients/notification-content";
 import { logAudit } from "@/lib/audit";
 import { sha256Hex } from "@/lib/crypto";
@@ -227,6 +229,43 @@ export async function POST(req: Request) {
       })
       .returning({ id: clients.id });
     clientId = inserted.id;
+  }
+
+  // ── Consentement SMS (LCAP/CASL) : une demande vaut consentement tacite 6 mois ──
+  // Registre en append seulement : une nouvelle demande ajoute une ligne (jamais
+  // de mise à jour de grantedAt). Un échec ici ne doit JAMAIS faire perdre le
+  // lead — n8n reçoit son 200 quoi qu'il arrive.
+  try {
+    const now = new Date();
+    // Dédoublonnage 24 h : les reprises n8n ne gonflent pas le registre.
+    const recent = await db.query.consents.findFirst({
+      where: and(
+        eq(consents.clientId, clientId),
+        eq(consents.channel, "sms"),
+        eq(consents.kind, "implied_inquiry"),
+        isNull(consents.revokedAt),
+        gte(consents.grantedAt, new Date(now.getTime() - 24 * 60 * 60 * 1000)),
+      ),
+      columns: { id: true },
+    });
+    if (!recent) {
+      await db.insert(consents).values({
+        clientId,
+        channel: "sms",
+        kind: "implied_inquiry",
+        source: `webhook:${key.name}`,
+        evidence: {
+          keyId: key.id,
+          keyName: key.name,
+          clientCreated: created,
+          receivedAt: now.toISOString(),
+        },
+        grantedAt: now,
+        expiresAt: addMonths(now, 6),
+      });
+    }
+  } catch (err) {
+    console.error("Échec d'écriture du consentement SMS (lead conservé) :", err);
   }
 
   // ── Notifications : tous les admins actifs + l'assigné (dans LEUR langue) ──

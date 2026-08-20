@@ -40,10 +40,22 @@ export const telephonySettingsSchema = z.object({
 });
 export type TelephonySettings = z.infer<typeof telephonySettingsSchema>;
 
+export const smsSettingsSchema = z.object({
+  /**
+   * Interrupteur d'arrêt global du moteur SMS. À true, AUCUN message ne part,
+   * peu importe le mode (dry_run/sandbox/live) ni le chemin de code.
+   */
+  killSwitch: z.boolean().default(false),
+  killSwitchReason: z.string().nullable().default(null),
+  killSwitchAt: z.string().nullable().default(null),
+});
+export type SmsSettings = z.infer<typeof smsSettingsSchema>;
+
 const SCHEMAS = {
   booking: bookingSettingsSchema,
   google: googleSettingsSchema,
   telephony: telephonySettingsSchema,
+  sms: smsSettingsSchema,
 } as const;
 
 export type SettingKey = keyof typeof SCHEMAS;
