@@ -23,3 +23,23 @@ DATABASE_URL=postgres://nexus:nexus@localhost:5455/nexus_test pnpm db:push
 ```
 
 (Toujours préfixer `DATABASE_URL` — le `.env` du dépôt pointe la prod.)
+
+## Production (Supabase, PostgreSQL 17)
+
+⚠️ **`pnpm db:push` PLANTE contre la prod** (vérifié 2026-08-20) : drizzle-kit
+0.31.10 crashe à l'introspection (`TypeError … reading 'replace'`) parce que
+PostgreSQL 17 catalogue les contraintes NOT NULL dans `pg_constraint` et que
+drizzle-kit les prend pour des CHECK sans définition. Le crash survient AVANT
+tout DDL — rien n'est appliqué. En local (PG 16) tout fonctionne ; la mise à
+niveau de drizzle-kit attendra (package.json gelé).
+
+Chemin sanctionné pour la prod : appliquer le fichier SQL de la phase,
+purement additif et déjà relu, en une seule transaction :
+
+```bash
+set -a; source .env; set +a
+/opt/homebrew/opt/postgresql@16/bin/psql "$DATABASE_URL" -1 -v ON_ERROR_STOP=1 \
+  -f drizzle/0001_phase1-sms.sql
+```
+
+(`-1` = tout-ou-rien : réexécutable sans état partiel.)
