@@ -432,7 +432,16 @@
         "3y": "3 years",
         "unlimited": "Unlimited"
       },
-      "hint": "This period is stamped on NEW consents recorded in the ledger — existing entries keep their expiry. Six months is the CASL / Law 25 implied-consent window after an inquiry; reserve longer periods for express consent."
+      "hint": "This period is stamped on NEW consents recorded in the ledger — existing entries keep their expiry. Six months is the CASL / Law 25 implied-consent window after an inquiry; reserve longer periods for express consent.",
+      "applyExisting": "Also apply to consents already on record",
+      "applyExistingHint": "Recomputes the expiry of every non-revoked SMS consent from its grant date. Revoked consents are never touched.",
+      "confirmTitle": "Update existing consents?",
+      "confirmBody": "{updated, plural, one {# consent will be updated.} other {# consents will be updated.}}",
+      "confirmRevived": "Caution: {revived, plural, one {# expired consent will become valid again} other {# expired consents will become valid again}} — make sure the chosen period reflects consent that was actually obtained.",
+      "confirmLapsed": "{lapsed, plural, one {# currently valid consent will become expired} other {# currently valid consents will become expired}} — no more texts can be sent to those clients.",
+      "confirmCancel": "Cancel",
+      "confirmApply": "Confirm the update",
+      "backfillDone": "{updated, plural, one {# consent updated.} other {# consents updated.}}"
     },
     "telephony": {
       "title": "Telephony",

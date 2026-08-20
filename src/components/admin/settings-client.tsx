@@ -16,6 +16,16 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +36,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -394,6 +405,9 @@ export function BookingCard({ initial }: { initial: BookingFormValues }) {
 
 // ── c. SMS et consentements ──────────────────────────────────────────────────
 
+/** Compte rendu du recalcul du registre (aperçu comme application réelle). */
+type SmsBackfillCounts = { updated: number; revived: number; lapsed: number };
+
 export function SmsCard({ initialValidity }: { initialValidity: ConsentValidity }) {
   const t = useTranslations("admin");
   const router = useRouter();
@@ -401,17 +415,73 @@ export function SmsCard({ initialValidity }: { initialValidity: ConsentValidity 
   // que « inchangé » redevienne vrai sans attendre le refresh.
   const [saved, setSaved] = useState(initialValidity);
   const [validity, setValidity] = useState(initialValidity);
+  const [applyExisting, setApplyExisting] = useState(false);
   const [pending, setPending] = useState(false);
+  // Aperçu du recalcul (dry run) — conservé pendant l'animation de fermeture.
+  // La durée y est FIGÉE au moment de l'aperçu : la confirmation applique
+  // exactement ce que le dialogue a montré, même si le sélecteur bouge entre-temps.
+  const [preview, setPreview] = useState<(SmsBackfillCounts & { validity: ConsentValidity }) | null>(
+    null,
+  );
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const submit = async () => {
+    const chosen = validity;
     setPending(true);
     try {
-      await api("/api/admin/settings/sms", {
+      if (!applyExisting) {
+        await api("/api/admin/settings/sms", {
+          method: "POST",
+          body: JSON.stringify({ consentValidity: chosen }),
+        });
+        setSaved(chosen);
+        toast.success(t("saved"));
+        router.refresh();
+        return;
+      }
+      // Aperçu d'abord (aucune écriture) : on ne touche au registre qu'après
+      // confirmation explicite des conséquences.
+      const { preview: counts } = await api<{ preview: SmsBackfillCounts }>(
+        "/api/admin/settings/sms",
+        {
+          method: "POST",
+          body: JSON.stringify({ consentValidity: chosen, applyToExisting: true, dryRun: true }),
+        },
+      );
+      if (counts.updated === 0) {
+        // Aucune échéance ne changerait — rien à confirmer, sauvegarde directe.
+        await api("/api/admin/settings/sms", {
+          method: "POST",
+          body: JSON.stringify({ consentValidity: chosen, applyToExisting: true }),
+        });
+        setSaved(chosen);
+        setApplyExisting(false);
+        toast.success(t("saved"));
+        router.refresh();
+        return;
+      }
+      setPreview({ ...counts, validity: chosen });
+      setConfirmOpen(true);
+    } catch {
+      toast.error(t("genericError"));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const confirmApply = async () => {
+    if (!preview) return;
+    setPending(true);
+    try {
+      const res = await api<{ backfill: SmsBackfillCounts }>("/api/admin/settings/sms", {
         method: "POST",
-        body: JSON.stringify({ consentValidity: validity }),
+        body: JSON.stringify({ consentValidity: preview.validity, applyToExisting: true }),
       });
-      setSaved(validity);
-      toast.success(t("saved"));
+      setSaved(preview.validity);
+      setValidity(preview.validity);
+      setApplyExisting(false);
+      setConfirmOpen(false);
+      toast.success(t("settings.sms.backfillDone", { updated: res.backfill.updated }));
       router.refresh();
     } catch {
       toast.error(t("genericError"));
@@ -443,6 +513,7 @@ export function SmsCard({ initialValidity }: { initialValidity: ConsentValidity 
             }))}
             value={validity}
             onValueChange={(v) => setValidity(v as ConsentValidity)}
+            disabled={pending}
           >
             <SelectTrigger
               aria-labelledby="sms-consent-validity-label"
@@ -460,17 +531,66 @@ export function SmsCard({ initialValidity }: { initialValidity: ConsentValidity 
           </Select>
         </div>
         <p className="max-w-prose text-xs text-muted-foreground">{t("settings.sms.hint")}</p>
+
+        <div className="space-y-1.5">
+          <label className="flex min-h-11 items-center gap-2 text-sm font-medium md:min-h-0">
+            <Checkbox
+              checked={applyExisting}
+              onCheckedChange={(checked) => setApplyExisting(checked === true)}
+              disabled={pending}
+            />
+            {t("settings.sms.applyExisting")}
+          </label>
+          <p className="max-w-prose text-xs text-muted-foreground">
+            {t("settings.sms.applyExistingHint")}
+          </p>
+        </div>
       </CardContent>
       <CardFooter>
         <Button
           onClick={() => void submit()}
-          disabled={pending || validity === saved}
+          // Coché = recalcul du registre : action légitime même à durée égale.
+          disabled={pending || (!applyExisting && validity === saved)}
           className="min-h-11 md:min-h-8"
         >
           {pending ? <Loader2 className="size-4 animate-spin" /> : null}
           {t("save")}
         </Button>
       </CardFooter>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("settings.sms.confirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("settings.sms.confirmBody", { updated: preview?.updated ?? 0 })}
+            </AlertDialogDescription>
+            {preview && preview.revived > 0 ? (
+              <p className="text-sm font-medium text-balance text-amber-700 dark:text-amber-400">
+                {t("settings.sms.confirmRevived", { revived: preview.revived })}
+              </p>
+            ) : null}
+            {preview && preview.lapsed > 0 ? (
+              <p className="text-sm font-medium text-balance text-destructive">
+                {t("settings.sms.confirmLapsed", { lapsed: preview.lapsed })}
+              </p>
+            ) : null}
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pending} className="min-h-11 md:min-h-8">
+              {t("settings.sms.confirmCancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={pending}
+              onClick={() => void confirmApply()}
+              className="min-h-11 md:min-h-8"
+            >
+              {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+              {t("settings.sms.confirmApply")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

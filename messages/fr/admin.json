@@ -432,7 +432,16 @@
         "3y": "3 ans",
         "unlimited": "Illimité"
       },
-      "hint": "Cette durée est estampillée sur les NOUVEAUX consentements inscrits au registre — les entrées existantes conservent leur échéance. 6 mois correspond à la fenêtre de consentement implicite après une demande (LCAP / Loi 25) ; réservez les durées plus longues aux consentements exprès."
+      "hint": "Cette durée est estampillée sur les NOUVEAUX consentements inscrits au registre — les entrées existantes conservent leur échéance. 6 mois correspond à la fenêtre de consentement implicite après une demande (LCAP / Loi 25) ; réservez les durées plus longues aux consentements exprès.",
+      "applyExisting": "Appliquer aussi aux consentements déjà enregistrés",
+      "applyExistingHint": "Recalcule l'échéance de chaque consentement SMS non révoqué à partir de sa date d'octroi. Les consentements révoqués ne sont jamais touchés.",
+      "confirmTitle": "Mettre à jour les consentements existants ?",
+      "confirmBody": "{updated, plural, one {# consentement sera mis à jour.} other {# consentements seront mis à jour.}}",
+      "confirmRevived": "Attention : {revived, plural, one {# consentement expiré redeviendra valide} other {# consentements expirés redeviendront valides}} — assurez-vous que la durée choisie reflète un consentement réellement obtenu.",
+      "confirmLapsed": "{lapsed, plural, one {# consentement actuellement valide deviendra expiré} other {# consentements actuellement valides deviendront expirés}} — plus aucun texto ne pourra être envoyé à ces clients.",
+      "confirmCancel": "Annuler",
+      "confirmApply": "Confirmer la mise à jour",
+      "backfillDone": "{updated, plural, one {# consentement mis à jour.} other {# consentements mis à jour.}}"
     },
     "telephony": {
       "title": "Téléphonie",
