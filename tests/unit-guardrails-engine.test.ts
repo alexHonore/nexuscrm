@@ -208,6 +208,37 @@ describe("evaluateOutputRules", () => {
     expect(evaluateOutputRules("www.exemple.com", [none])[0].passed).toBe(false);
   });
 
+  it("link_policy : un domaine NU ne passe pas entre les mailles", () => {
+    const none = rule({ key: "no_links", kind: "link_policy", config: { allowedDomains: [] } });
+    // Sans schéma ni www. — la forme la plus naturelle dans un SMS.
+    expect(evaluateOutputRules("voir nos propriétés sur exemple.com", [none])[0].passed).toBe(false);
+    expect(evaluateOutputRules("groupe-nexus.ca/rdv c'est ici", [none])[0].passed).toBe(false);
+    // Pas de faux positif sur une phrase ordinaire ni une décimale.
+    expect(evaluateOutputRules("On se voit jeudi. Ça vous va?", [none])[0].passed).toBe(true);
+    expect(evaluateOutputRules("Environ 2.5 km du centre.", [none])[0].passed).toBe(true);
+
+    const allow = rule({
+      key: "link_policy",
+      kind: "link_policy",
+      config: { allowedDomains: ["groupe-nexus.ca"] },
+    });
+    expect(evaluateOutputRules("groupe-nexus.ca/rdv", [allow])[0].passed).toBe(true);
+  });
+
+  it("refuse une config dont les DRAPEAUX de regex sont invalides", () => {
+    // « gg » ferait lever new RegExp au moment d'évaluer un brouillon : la
+    // règle censée bloquer laisserait tout passer.
+    expect(safeParseRuleConfig("forbidden_regex", { patterns: ["\\$"], flags: "gg" }).success).toBe(
+      false,
+    );
+    expect(safeParseRuleConfig("forbidden_regex", { patterns: ["\\$"], flags: "zz" }).success).toBe(
+      false,
+    );
+    expect(safeParseRuleConfig("forbidden_regex", { patterns: ["\\$"], flags: "giu" }).success).toBe(
+      true,
+    );
+  });
+
   it("required_tool_on_intent : matrice complète", () => {
     const stop = rule({
       key: "respect_stop",
@@ -309,6 +340,14 @@ describe("judgeWithLlm", () => {
 describe("noyau semé", () => {
   it("valide entièrement (configs, setups, attentes)", () => {
     expect(validateKernel()).toEqual({ rules: 6, fixtures: 14, packs: 4 });
+  });
+
+  it("la règle LCAP d'identification est vérifiable (llm_judge, pas simple consigne)", () => {
+    const rule = DEFAULT_GUARDRAIL_RULES.find((r) => r.key === "identify_sender")!;
+    // Une règle `custom_instruction` ne peut JAMAIS échouer : elle serait
+    // affichée « bloquante » tout en étant inerte.
+    expect(rule.kind).toBe("llm_judge");
+    expect((rule.config as { criterion: string }).criterion).toContain("PREMIER");
   });
 
   it("porte les six clés de règles du cahier", () => {

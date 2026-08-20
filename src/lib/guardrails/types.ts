@@ -35,10 +35,30 @@ const compilableRegex = z.string().min(1).superRefine((pattern, ctx) => {
   }
 });
 
-export const forbiddenRegexConfigSchema = z.object({
-  patterns: z.array(compilableRegex).min(1),
-  flags: z.string().default("iu"),
-});
+/** Drapeaux valides et sans doublon — « gg » ferait lever new RegExp. */
+const regexFlags = z
+  .string()
+  .default("iu")
+  .refine((flags) => /^[dgimsuvy]*$/.test(flags) && new Set(flags).size === flags.length, {
+    message: "drapeaux de regex invalides",
+  });
+
+export const forbiddenRegexConfigSchema = z
+  .object({
+    patterns: z.array(compilableRegex).min(1),
+    flags: regexFlags,
+  })
+  // Motifs ET drapeaux doivent compiler ENSEMBLE : une config qui lève à
+  // l'exécution laisserait passer le brouillon qu'elle devait bloquer.
+  .superRefine((config, ctx) => {
+    for (const pattern of config.patterns) {
+      try {
+        new RegExp(pattern, config.flags);
+      } catch {
+        ctx.addIssue({ code: "custom", message: `motif incompatible avec les drapeaux : ${pattern}` });
+      }
+    }
+  });
 export const forbiddenTermsConfigSchema = z.object({
   terms: z.array(z.string().trim().min(1)).min(1),
 });

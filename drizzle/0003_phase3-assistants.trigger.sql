@@ -20,7 +20,9 @@ BEGIN
   IF NEW.status = 'active' AND NOT was_active THEN
     SELECT max(version) INTO max_core FROM prompt_cores;
     IF NEW.compiled_prompt IS NULL
-       OR NEW.compiled_core_version IS DISTINCT FROM max_core THEN
+       OR max_core IS NULL
+       OR NEW.compiled_core_version IS DISTINCT FROM max_core
+       OR NEW.needs_recompile THEN
       RAISE EXCEPTION 'activation_gate: stale_compile';
     END IF;
     IF NEW.require_suite_pass AND NOT NEW.suite_passed THEN

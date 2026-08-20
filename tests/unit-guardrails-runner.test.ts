@@ -200,6 +200,63 @@ describe("runFixture", () => {
   });
 });
 
+describe("règles llm_judge (jamais évaluées auparavant)", () => {
+  const judgeRule: RuleData = {
+    scope: "core",
+    key: "honesty_ai",
+    label: "Admet être une IA",
+    kind: "llm_judge",
+    config: { criterion: "admet être un assistant automatisé" },
+    promptText: null,
+    severity: "block",
+    enabled: true,
+    overridesKey: null,
+    orderIndex: 0,
+  };
+
+  it("une règle llm_judge bloquante en échec fait échouer la fixture", async () => {
+    const result = await runFixture(fixture(), "PROMPT", "", {
+      generate: async () => ({ text: "Je suis un vrai conseiller.", toolCalls: [] }),
+      judge: async () => '{"passed":false,"reason":"prétend être humain"}',
+      rules: [judgeRule],
+    });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toContain("Admet être une IA");
+  });
+
+  it("une règle llm_judge ÉTEINTE n'est pas consultée du tout", async () => {
+    let judgeCalls = 0;
+    const result = await runFixture(fixture(), "PROMPT", "", {
+      generate: async () => ({ text: "Je suis un vrai conseiller.", toolCalls: [] }),
+      judge: async () => {
+        judgeCalls += 1;
+        return '{"passed":false,"reason":"x"}';
+      },
+      rules: [{ ...judgeRule, enabled: false }],
+    });
+    expect(judgeCalls).toBe(0);
+    expect(result.passed).toBe(true);
+  });
+
+  it("une config de règle illisible fait ÉCHOUER la fixture au lieu d'avorter la suite", async () => {
+    const broken: RuleData = {
+      ...judgeRule,
+      key: "no_price_opinion",
+      label: "Aucune valeur",
+      kind: "forbidden_regex",
+      // Config invalide (jsonb édité à la main) : parseRuleConfig lève.
+      config: { patterns: [] },
+    };
+    const result = await runFixture(fixture(), "PROMPT", "", {
+      generate: async () => ({ text: "Autour de 450 000 $.", toolCalls: [] }),
+      judge: okJudge,
+      rules: [broken],
+    });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toContain("garde-fou illisible");
+  });
+});
+
 describe("suitePassed / runnableFixtures", () => {
   const result = (passed: boolean, severity: "block" | "warn") => ({
     fixtureId: null,

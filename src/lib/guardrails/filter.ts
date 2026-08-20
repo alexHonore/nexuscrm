@@ -27,7 +27,13 @@ function fold(input: string): string {
     .toLowerCase();
 }
 
-const URL_RE = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
+/**
+ * Liens : schéma explicite, préfixe www., ET domaine nu (« groupe-nexus.com »).
+ * Sans la troisième forme, « voir nos propriétés sur exemple.com » passait
+ * entre les mailles alors même qu'aucun lien n'est autorisé.
+ */
+const URL_RE =
+  /(https?:\/\/[^\s]+|www\.[^\s]+|\b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9][a-z0-9-]*)*\.(?:com|net|org|ca|qc|io|co|info|biz|app|link|ly|me|shop|site|xyz)\b[^\s]*)/gi;
 
 function hostnameOf(rawUrl: string): string | null {
   const candidate = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;

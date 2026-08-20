@@ -331,6 +331,8 @@ export const guardrailFixtures = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     scope: text("scope").notNull(),
     assistantId: uuid("assistant_id").references(() => assistants.id, { onDelete: "cascade" }),
+    /** Clé stable de la semence — le libellé est renommable, pas elle. */
+    key: text("key"),
     label: text("label").notNull(),
     /** {priorTurns: [["out","…"],["in","…"]], qualification: {}, rung, turnsUsed} */
     setup: jsonb("setup").notNull().default({}),
@@ -351,6 +353,11 @@ export const guardrailFixtures = pgTable(
       "guardrail_fixtures_scope_ck",
       sql`(${t.scope} = 'assistant') = (${t.assistantId} is not null)`,
     ),
+    // Une clé semée n'existe qu'une fois par portée : renommer un libellé ne
+    // doit jamais faire réapparaître un doublon au prochain seed.
+    uniqueIndex("guardrail_fixtures_core_key_uq")
+      .on(t.key)
+      .where(sql`${t.assistantId} is null and ${t.key} is not null`),
   ],
 );
 

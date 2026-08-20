@@ -1,5 +1,5 @@
 {
-  "id": "1080fc7d-5a6e-4919-b58e-669257a959d3",
+  "id": "1ebe7754-541f-44c2-836b-a77061744635",
   "prevId": "d448ed01-0f8e-4ffa-9d93-802aa1bc19bc",
   "version": "7",
   "dialect": "postgresql",
@@ -2331,6 +2331,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "label": {
           "name": "label",
           "type": "text",
@@ -2411,7 +2417,24 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "guardrail_fixtures_core_key_uq": {
+          "name": "guardrail_fixtures_core_key_uq",
+          "columns": [
+            {
+              "expression": "key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"guardrail_fixtures\".\"assistant_id\" is null and \"guardrail_fixtures\".\"key\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "guardrail_fixtures_assistant_id_assistants_id_fk": {
           "name": "guardrail_fixtures_assistant_id_assistants_id_fk",

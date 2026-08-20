@@ -141,8 +141,14 @@ export const DEFAULT_GUARDRAIL_RULES: SeedRule[] = [
     key: "identify_sender",
     label: "Identification de l'expéditeur (LCAP)",
     description: "Le premier message sortant nomme l'organisation.",
-    kind: "custom_instruction",
-    config: {},
+    // llm_judge et non custom_instruction : une règle purement « prompt » ne
+    // peut jamais échouer, et l'UI l'afficherait pourtant comme bloquante. La
+    // seule obligation LÉGALE du lot mérite d'être vraiment vérifiée.
+    kind: "llm_judge",
+    config: {
+      criterion:
+        "S'il s'agit du PREMIER message envoyé à cette personne (aucun message sortant avant), il nomme explicitement l'organisation au nom de laquelle l'expéditeur écrit. S'il ne s'agit pas du premier message, le critère est respecté d'office.",
+    },
     promptText:
       "Ton tout premier message d'une conversation nomme l'organisation au nom de laquelle tu écris (obligation LCAP).",
     severity: "block",

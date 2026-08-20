@@ -166,13 +166,15 @@ export async function seedGuardrailDefaults(): Promise<{
   }
 
   let fixtures = 0;
+  // Dédoublonnage par CLÉ : renommer une fixture par défaut ne doit pas la
+  // faire réapparaître en double au prochain seed.
   const existing = await db
-    .select({ label: guardrailFixtures.label })
+    .select({ key: guardrailFixtures.key })
     .from(guardrailFixtures)
     .where(isNull(guardrailFixtures.assistantId));
-  const known = new Set(existing.map((row) => row.label));
+  const known = new Set(existing.map((row) => row.key).filter((key): key is string => key !== null));
   for (const fixture of DEFAULT_GUARDRAIL_FIXTURES) {
-    if (known.has(fixture.label)) continue;
+    if (known.has(fixture.key)) continue;
     const snapshot = {
       label: fixture.label,
       setup: fixture.setup,
@@ -185,6 +187,7 @@ export async function seedGuardrailDefaults(): Promise<{
     await db.insert(guardrailFixtures).values({
       scope: "core",
       assistantId: null,
+      key: fixture.key,
       label: fixture.label,
       setup: fixture.setup,
       inbound: fixture.inbound,
@@ -275,10 +278,9 @@ export async function resetGuardrailDefaults(): Promise<{ restored: number; recr
     restored += 1;
   }
 
-  // Recrée ce qui a été supprimé.
-  const before = await db.select({ id: guardrailRules.id }).from(guardrailRules);
+  // Recrée ce qui a été supprimé — les compteurs de la semence sont la source
+  // exacte (un diff de table entière compterait aussi les écritures d'autrui).
   const seeded = await seedGuardrailDefaults();
-  const after = await db.select({ id: guardrailRules.id }).from(guardrailRules);
 
-  return { restored, recreated: after.length - before.length + seeded.fixtures };
+  return { restored, recreated: seeded.rules + seeded.fixtures + seeded.packs };
 }

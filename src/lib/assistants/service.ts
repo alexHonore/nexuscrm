@@ -28,6 +28,9 @@ import { assistantRowToConfig, type AssistantConfig } from "./schema";
  * prompt est périmé ou la suite rouge.
  */
 
+/** Marge sous le maxDuration de la route (300 s) pour finir proprement. */
+const SUITE_BUDGET_MS = 240_000;
+
 type AssistantRow = typeof assistants.$inferSelect;
 
 async function loadAssistant(assistantId: string): Promise<AssistantRow> {
@@ -206,8 +209,34 @@ export async function runAssistantSuite(
     })
     .returning({ id: guardrailRuns.id });
 
+  // Une suite qui démarre INVALIDE immédiatement le vert précédent : si le
+  // processus meurt en cours de route (délai Vercel, panne fournisseur),
+  // l'assistant ne doit surtout pas rester activable sur une ancienne suite.
+  await db
+    .update(assistants)
+    .set({ suitePassed: false, suiteRunId: run.id })
+    .where(eq(assistants.id, assistantId));
+
+  // Budget de temps : 14 fixtures × (générateur + juge) peuvent dépasser le
+  // maxDuration de la route. On s'arrête proprement et on consigne l'échec
+  // plutôt que de se faire tuer au milieu.
+  const deadline = Date.now() + SUITE_BUDGET_MS;
+
   const results: FixtureResult[] = [];
+  try {
   for (const fixture of fixtures) {
+    if (Date.now() > deadline) {
+      results.push({
+        fixtureId: fixture.id ?? null,
+        label: fixture.label,
+        severity: fixture.severity,
+        passed: false,
+        reason: "budget de temps de la suite épuisé — non exécutée",
+        output: "",
+        toolsCalled: [],
+      });
+      continue;
+    }
     const result = await runFixture(
       fixture,
       row.compiledPrompt,
@@ -239,6 +268,30 @@ export async function runAssistantSuite(
       },
     );
     results.push(result);
+  }
+  } catch (err) {
+    // Échec inattendu : on consigne l'exécution comme rouge AVANT de remonter.
+    const finishedAt = new Date();
+    await db
+      .update(guardrailRuns)
+      .set({
+        finishedAt,
+        passed: false,
+        results: [
+          ...results,
+          {
+            fixtureId: null,
+            label: "exécution interrompue",
+            severity: "block",
+            passed: false,
+            reason: err instanceof Error ? err.message : String(err),
+            output: "",
+            toolsCalled: [],
+          },
+        ],
+      })
+      .where(eq(guardrailRuns.id, run.id));
+    throw err;
   }
 
   const passed = suitePassed(results);

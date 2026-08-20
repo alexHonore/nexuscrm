@@ -57,6 +57,7 @@ CREATE TABLE "guardrail_fixtures" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"scope" text NOT NULL,
 	"assistant_id" uuid,
+	"key" text,
 	"label" text NOT NULL,
 	"setup" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"inbound" text NOT NULL,
@@ -138,6 +139,7 @@ ALTER TABLE "guardrail_runs" ADD CONSTRAINT "guardrail_runs_assistant_id_assista
 ALTER TABLE "guardrail_runs" ADD CONSTRAINT "guardrail_runs_triggered_by_id_users_id_fk" FOREIGN KEY ("triggered_by_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "prompt_cores" ADD CONSTRAINT "prompt_cores_created_by_id_users_id_fk" FOREIGN KEY ("created_by_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "assistant_versions_uq" ON "assistant_versions" USING btree ("assistant_id","version");--> statement-breakpoint
+CREATE UNIQUE INDEX "guardrail_fixtures_core_key_uq" ON "guardrail_fixtures" USING btree ("key") WHERE "guardrail_fixtures"."assistant_id" is null and "guardrail_fixtures"."key" is not null;--> statement-breakpoint
 CREATE UNIQUE INDEX "guardrail_rules_core_key_uq" ON "guardrail_rules" USING btree ("key") WHERE "guardrail_rules"."assistant_id" is null;--> statement-breakpoint
 CREATE UNIQUE INDEX "guardrail_rules_assistant_key_uq" ON "guardrail_rules" USING btree ("assistant_id","key") WHERE "guardrail_rules"."assistant_id" is not null;--> statement-breakpoint
 ALTER TABLE "conversations" ADD CONSTRAINT "conversations_active_assistant_id_assistants_id_fk" FOREIGN KEY ("active_assistant_id") REFERENCES "public"."assistants"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint

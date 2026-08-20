@@ -47,9 +47,19 @@ export function parseChatResponse(json: unknown, requestedModel: string, latency
     };
   });
 
+  // Certains fournisseurs renvoient `content` en tableau de blocs : le traiter
+  // comme vide effacerait le brouillon ET ferait passer tous les garde-fous.
+  const content = message.content;
+  const text =
+    typeof content === "string"
+      ? content
+      : asArray(content)
+          .map((part) => stringOr(asRecord(part).text, ""))
+          .join("");
+
   const usage = asRecord(root.usage);
   return {
-    text: typeof message.content === "string" ? message.content : "",
+    text,
     toolCalls,
     usage: {
       inputTokens: numberOr(usage.prompt_tokens, 0),

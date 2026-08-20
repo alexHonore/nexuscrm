@@ -1,5 +1,6 @@
 import { judgeWithLlm, type JudgeGenerate } from "./judge";
 import { evaluateOutputRules } from "./filter";
+import { enabledRules } from "./resolve";
 import type { FixtureData, FixtureResult, RuleData } from "./types";
 
 /**
@@ -100,12 +101,38 @@ export async function runFixture(
   // Les règles bloquantes s'appliquent aussi pendant la suite : une fixture
   // dont la sortie viole une règle globale ne peut pas être « verte ».
   if (deps.rules && deps.rules.length > 0) {
-    const verdicts = evaluateOutputRules(output.text, deps.rules, {
-      toolCallNames: output.toolCalls.map((c) => c.name),
-    });
-    for (const verdict of verdicts) {
-      if (!verdict.passed && verdict.severity === "block") {
-        failures.push(`garde-fou « ${verdict.label} » : ${verdict.reason ?? "échec"}`);
+    const active = enabledRules(deps.rules);
+    try {
+      const verdicts = evaluateOutputRules(output.text, active, {
+        toolCallNames: output.toolCalls.map((c) => c.name),
+      });
+      for (const verdict of verdicts) {
+        if (!verdict.passed && verdict.severity === "block") {
+          failures.push(`garde-fou « ${verdict.label} » : ${verdict.reason ?? "échec"}`);
+        }
+      }
+    } catch (err) {
+      // Config de règle illisible (jsonb édité à la main, drapeaux invalides) :
+      // la fixture ÉCHOUE. Laisser l'exception remonter ferait avorter la suite
+      // et laisserait `suite_passed` figé sur un ancien vert.
+      failures.push(
+        `garde-fou illisible : ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    // Les règles `llm_judge` ne sont pas décidables par le filtre déterministe :
+    // sans cette boucle, honesty_ai et no_fabrication n'étaient JAMAIS évaluées
+    // — la porte affichait « bloque » pour des règles inertes.
+    for (const rule of active) {
+      if (rule.kind !== "llm_judge") continue;
+      const criterion = (rule.config as { criterion?: unknown }).criterion;
+      if (typeof criterion !== "string" || criterion.trim() === "") continue;
+      const verdict = await judgeWithLlm(
+        { criterion, output: output.text, context: fixture.inbound },
+        deps.judge,
+      );
+      if (!verdict.passed && rule.severity === "block") {
+        failures.push(`garde-fou « ${rule.label} » : ${verdict.reason}`);
       }
     }
   }
