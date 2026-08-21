@@ -78,20 +78,49 @@ const MOBILE_NAV = MAIN_NAV.filter(
   (i) => i.labelKey !== "notifications" && i.labelKey !== "pipeline",
 );
 
-const ADMIN_NAV: NavItem[] = [
-  { href: "/admin/users", labelKey: "users", icon: Users },
-  { href: "/admin/pipeline", labelKey: "pipelineSettings", icon: FileText },
-  { href: "/admin/analytics", labelKey: "analytics", icon: BarChart3 },
-  { href: "/admin/calls", labelKey: "calls", icon: PhoneCall },
-  { href: "/admin/billing", labelKey: "billing", icon: Wallet },
-  { href: "/admin/import-export", labelKey: "importExport", icon: Upload },
-  { href: "/admin/webhooks", labelKey: "webhooks", icon: KeyRound },
-  { href: "/admin/audit", labelKey: "audit", icon: ShieldCheck },
-  { href: "/admin/assistants", labelKey: "assistants", icon: Bot },
-  { href: "/admin/campaigns", labelKey: "campaigns", icon: Megaphone },
-  { href: "/admin/guardrails", labelKey: "guardrails", icon: ShieldAlert },
-  { href: "/admin/settings", labelKey: "settings", icon: Settings },
+type NavGroup = { labelKey: string; items: NavItem[] };
+
+/**
+ * Navigation d'administration, par famille.
+ *
+ * Les trois écrans de l'IA — assistants, campagnes, garde-fous — forment un
+ * système : un assistant sans garde-fou ne s'active pas, une campagne sans
+ * assistant ne répond pas. Les lister à plat au milieu des utilisateurs et de
+ * la facturation obligeait à reconstruire ce lien de tête à chaque fois.
+ */
+const ADMIN_GROUPS: NavGroup[] = [
+  {
+    labelKey: "groupAi",
+    items: [
+      { href: "/admin/assistants", labelKey: "assistants", icon: Bot },
+      { href: "/admin/campaigns", labelKey: "campaigns", icon: Megaphone },
+      { href: "/admin/guardrails", labelKey: "guardrails", icon: ShieldAlert },
+    ],
+  },
+  {
+    labelKey: "groupData",
+    items: [
+      { href: "/admin/users", labelKey: "users", icon: Users },
+      { href: "/admin/pipeline", labelKey: "pipelineSettings", icon: FileText },
+      { href: "/admin/import-export", labelKey: "importExport", icon: Upload },
+      { href: "/admin/webhooks", labelKey: "webhooks", icon: KeyRound },
+    ],
+  },
+  {
+    labelKey: "groupInsights",
+    items: [
+      { href: "/admin/analytics", labelKey: "analytics", icon: BarChart3 },
+      { href: "/admin/calls", labelKey: "calls", icon: PhoneCall },
+      { href: "/admin/billing", labelKey: "billing", icon: Wallet },
+      { href: "/admin/audit", labelKey: "audit", icon: ShieldCheck },
+    ],
+  },
+  {
+    labelKey: "groupSystem",
+    items: [{ href: "/admin/settings", labelKey: "settings", icon: Settings }],
+  },
 ];
+
 
 /**
  * Cadence de rafraîchissement de la pastille « non lues ».
@@ -198,11 +227,15 @@ export function AppShell({
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-4 pt-4">
           {MAIN_NAV.map(navLink)}
           {user.role === "admin" ? (
-            <div className="mt-4 space-y-1 border-t border-sidebar-border/60 pt-4">
-              <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
-                {t("nav.admin")}
-              </p>
-              {ADMIN_NAV.map(navLink)}
+            <div className="mt-4 space-y-4 border-t border-sidebar-border/60 pt-4">
+              {ADMIN_GROUPS.map((group) => (
+                <div key={group.labelKey} className="space-y-1">
+                  <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
+                    {t(`nav.${group.labelKey}`)}
+                  </p>
+                  {group.items.map(navLink)}
+                </div>
+              ))}
             </div>
           ) : null}
         </nav>
@@ -348,24 +381,28 @@ function UserMenu({
         {compact && user.role === "admin" ? (
           <>
             {/* Liens admin — accessibles ici sur mobile, la sidebar étant cachée sous md. */}
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>{t("nav.admin")}</DropdownMenuLabel>
-              {ADMIN_NAV.map((item) => {
-                const Icon = item.icon;
-                const active =
-                  pathname === item.href || pathname.startsWith(`${item.href}/`);
-                return (
-                  <DropdownMenuItem
-                    key={item.href}
-                    className={cn("h-11", active && "bg-accent text-accent-foreground")}
-                    render={<Link href={item.href} />}
-                  >
-                    <Icon className="size-4" />
-                    {t(`nav.${item.labelKey}`)}
-                  </DropdownMenuItem>
-                );
-              })}
-            </DropdownMenuGroup>
+            {ADMIN_GROUPS.map((group) => (
+              <DropdownMenuGroup key={group.labelKey}>
+                {/* DropdownMenuLabel DOIT rester dans un DropdownMenuGroup :
+                    hors groupe, Base UI démonte l'application (erreur #31). */}
+                <DropdownMenuLabel>{t(`nav.${group.labelKey}`)}</DropdownMenuLabel>
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const active =
+                    pathname === item.href || pathname.startsWith(`${item.href}/`);
+                  return (
+                    <DropdownMenuItem
+                      key={item.href}
+                      className={cn("h-11", active && "bg-accent text-accent-foreground")}
+                      render={<Link href={item.href} />}
+                    >
+                      <Icon className="size-4" />
+                      {t(`nav.${item.labelKey}`)}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuGroup>
+            ))}
             <DropdownMenuSeparator />
           </>
         ) : null}

@@ -79,7 +79,13 @@ export const identitySchema = z.object({
   brokerName: z.string().trim().min(1).max(80).default("Alex-Honoré"),
   /** users.id when mode = named_person — remapped at import (bindings). */
   brokerUserId: z.uuid().nullable().default(null),
-  signature: z.enum(["none", "first_name"]).default("none"),
+  /**
+   * Comment l'assistant signe. « custom » utilise `signatureText` : une équipe
+   * qui signe « — L'équipe Nexus » n'entre dans aucune des formes dérivées.
+   */
+  signature: z.enum(["none", "first_name", "full_name", "org", "custom"]).default("none"),
+  /** Signature libre — n'a d'effet qu'avec `signature: "custom"`. */
+  signatureText: z.string().trim().max(60).nullable().default(null),
   /** upfront = s'annonce IA au premier message ; on_request = si on demande. */
   aiDisclosure: z.enum(["on_request", "upfront"]).default("on_request"),
 });
@@ -127,7 +133,7 @@ export const approachSchema = z.object({
   maxChars: z.number().int().min(120).max(480).default(300),
   proactivity: z.number().int().min(1).max(5).default(3),
   warmth: z.number().int().min(1).max(5).default(3),
-  emoji: z.enum(["none", "rare"]).default("none"),
+  emoji: z.enum(["none", "rare", "moderate"]).default("none"),
   /** Délai humanisé avant l'envoi d'une réponse de l'agent. */
   replySpeed: z.enum(["instant", "natural", "deliberate"]).default("natural"),
   /** Budget total de messages sortants de l'agent — au-delà : handoff (§12.5). */

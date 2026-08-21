@@ -23,7 +23,11 @@
     "logout": "Se déconnecter",
     "profile": "Profil",
     "pipelineSettings": "Catégories",
-    "callsShort": "Appels"
+    "callsShort": "Appels",
+    "groupAi": "Intelligence artificielle",
+    "groupData": "Données et accès",
+    "groupInsights": "Suivi et activité",
+    "groupSystem": "Système"
   },
   "actions": {
     "save": "Enregistrer",

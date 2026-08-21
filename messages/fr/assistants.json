@@ -206,7 +206,12 @@
       "removeFallback": "Retirer",
       "fallbackAt": "Repli {n}",
       "chainNote": "Un refus MOU descend d'un cran. Un refus ferme ne touche jamais la chaîne : la conversation se clôt.",
-      "noFallbacks": "Aucun repli — un report met fin à la relance."
+      "noFallbacks": "Aucun repli — un report met fin à la relance.",
+      "whatToObtain": "Ce que l'assistant cherche à obtenir",
+      "calendarSlot": "Où la rencontre a lieu",
+      "calendarMeet": "En visioconférence (lien Google Meet)",
+      "calendarInperson": "En personne (adresse)",
+      "calendarHint": "Détermine le type de rendez-vous du CRM consulté pour les disponibilités."
     },
     "knowledge": {
       "add": "Ajouter un fait",
@@ -278,7 +283,13 @@
       "suiteNotPassed": "La suite de garde-fous doit être verte avant l'activation."
     },
     "identity": {
-      "namedPersonWarning": "L'assistant écrit au nom d'une personne mais aucun compte n'y est rattaché : les rendez-vous retomberont sur un administrateur."
+      "namedPersonWarning": "L'assistant écrit au nom d'une personne mais aucun compte n'y est rattaché : les rendez-vous retomberont sur un administrateur.",
+      "freeText": "Saisir librement",
+      "freeTextHint": "Aucun compte rattaché : les rendez-vous retomberont sur un administrateur.",
+      "linkedHint": "Le nom suit le compte choisi ; les rendez-vous lui seront assignés.",
+      "signaturePlaceholder": "— L'équipe Nexus",
+      "signaturePreview": "Aperçu de la signature",
+      "noSignature": "Aucune signature"
     }
   },
   "import": {
@@ -322,5 +333,14 @@
     "transfer_assistant": "Transférer vers un autre assistant",
     "close_conversation": "Clore la conversation"
   },
-  "cancel": "Annuler"
+  "cancel": "Annuler",
+  "goalTypeHint": {
+    "video_meeting": "Réserve une visioconférence dans l'agenda.",
+    "in_person_meeting": "Réserve une rencontre au bureau ou chez le client.",
+    "phone_call": "Réserve un créneau d'appel dans l'agenda.",
+    "collect_email": "Ne réserve rien : cherche seulement à obtenir un courriel.",
+    "collect_callback_time": "Ne réserve rien : convient d'un moment pour rappeler.",
+    "qualify_only": "Ne propose JAMAIS de rencontre — recueille seulement de l'information.",
+    "handoff": "Ne réserve rien : vise à faire reprendre la conversation par un humain."
+  }
 }

@@ -18,6 +18,7 @@ import {
   LAYER_IDS,
   type AssistantConfig,
   type GoalStep,
+  type IdentityConfig,
   type GoalType,
   type LayerId,
   type QualificationField,
@@ -103,12 +104,39 @@ function buildIdentityLayer(config: AssistantConfig): string {
     );
   }
 
-  if (identity.signature === "first_name") {
-    const firstName = identity.brokerName.split(/\s+/)[0] ?? identity.brokerName;
-    lines.push(`Termine tes messages en signant de ton prénom : ${firstName}.`);
+  const signature = signatureFor(identity);
+  if (signature !== null) {
+    lines.push(`Termine tes messages par cette signature exacte : ${signature}`);
   }
 
   return lines.join("\n");
+}
+
+/**
+ * La signature effective, ou null quand l'assistant ne signe pas.
+ *
+ * « custom » sans texte revient à ne pas signer : mieux vaut aucune signature
+ * qu'un tiret suivi de rien à la fin de chaque message.
+ */
+export function signatureFor(identity: IdentityConfig): string | null {
+  switch (identity.signature) {
+    case "none":
+      return null;
+    case "first_name": {
+      const firstName = identity.brokerName.split(/\s+/)[0] ?? identity.brokerName;
+      return `— ${firstName}`;
+    }
+    case "full_name":
+      return `— ${identity.brokerName}`;
+    case "org":
+      return `— ${identity.orgName}`;
+    case "custom": {
+      const text = identity.signatureText?.trim() ?? "";
+      return text === "" ? null : text;
+    }
+    default:
+      return null;
+  }
 }
 
 // ── L2 — OBJECTIF ────────────────────────────────────────────────────────────
@@ -199,7 +227,11 @@ function buildApproachLayer(config: AssistantConfig): string {
   lines.push(`Chaleur : ${styleLevelPhrase(approach.warmth)}.`);
   lines.push(`Proactivité : ${styleLevelPhrase(approach.proactivity)}.`);
   lines.push(
-    approach.emoji === "none" ? "Émoji : aucun émoji." : "Émoji : au plus un émoji, rarement.",
+    approach.emoji === "none"
+      ? "Émoji : aucun émoji."
+      : approach.emoji === "rare"
+        ? "Émoji : au plus un émoji, rarement."
+        : "Émoji : au plus un émoji par message, quand le ton s'y prête.",
   );
 
   return lines.join("\n");

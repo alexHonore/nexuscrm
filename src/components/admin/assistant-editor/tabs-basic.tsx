@@ -24,10 +24,17 @@ import {
   type GoalStep,
   type GoalType,
 } from "@/lib/assistants/schema";
+import { Label } from "@/components/ui/label";
+import { signatureFor } from "@/lib/agent/compile";
 import { FieldLabel, useParamDoc } from "./param-help";
 import type { TabProps } from "./types";
 
 const NONE = "__none__";
+/** Valeur du sélecteur « saisir librement » — distincte d'« aucun ». */
+const FREE_TEXT = "__free__";
+
+/** Les objectifs qui RÉSERVENT réellement quelque chose dans l'agenda. */
+const BOOKING_GOALS: GoalType[] = ["video_meeting", "in_person_meeting", "phone_call"];
 
 /** Curseur 1-5 rendu comme un choix : les valeurs ont un sens nommé, pas une amplitude. */
 function ScaleField({
@@ -134,6 +141,11 @@ function NumberField({
   );
 }
 
+/** Aperçu de la signature réellement ajoutée aux messages. */
+function signaturePreview(config: TabProps["config"]): string | null {
+  return signatureFor(config.identity);
+}
+
 // ── Identité ─────────────────────────────────────────────────────────────────
 
 export function IdentityTab({ config, update, data }: TabProps) {
@@ -176,47 +188,86 @@ export function IdentityTab({ config, update, data }: TabProps) {
         />
       </div>
 
-      <div className="space-y-1.5">
+      {/* Le courtier se choisit UNE fois : sélectionner la personne remplit le
+          nom ET rattache le compte. Deux champs séparés — un nom libre d'un
+          côté, un compte de l'autre — laissaient écrire « Alex » et rattacher
+          quelqu'un d'autre sans que rien ne le signale. */}
+      <div className="space-y-1.5 md:col-span-2">
         <FieldLabel path="identity.brokerName" htmlFor="f-broker" />
-        <Input
-          id="f-broker"
-          value={config.identity.brokerName}
-          onChange={(e) => update((d) => void (d.identity.brokerName = e.target.value))}
-          className="min-h-11 md:min-h-9"
-        />
-      </div>
-
-      <div className="space-y-1.5">
-        <FieldLabel path="identity.brokerUserId" />
-        <Select
-          items={[
-            { value: NONE, label: "—" },
-            ...data.users.map((u) => ({ value: u.id, label: u.name })),
-          ]}
-          value={config.identity.brokerUserId ?? NONE}
-          onValueChange={(v) =>
-            update((d) => void (d.identity.brokerUserId = v === NONE ? null : String(v)))
-          }
-        >
-          <SelectTrigger className="min-h-11 w-full md:min-h-9">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={NONE}>—</SelectItem>
-            {data.users.map((u) => (
-              <SelectItem key={u.id} value={u.id}>
-                {u.name} — {u.email}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Select
+            items={[
+              { value: FREE_TEXT, label: t("editor.identity.freeText") },
+              ...data.users.map((u) => ({ value: u.id, label: u.name })),
+            ]}
+            value={config.identity.brokerUserId ?? FREE_TEXT}
+            onValueChange={(v) =>
+              update((d) => {
+                if (v === FREE_TEXT) {
+                  d.identity.brokerUserId = null;
+                  return;
+                }
+                const picked = data.users.find((u) => u.id === String(v));
+                d.identity.brokerUserId = String(v);
+                if (picked) d.identity.brokerName = picked.name;
+              })
+            }
+          >
+            <SelectTrigger className="min-h-11 w-full md:min-h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={FREE_TEXT}>{t("editor.identity.freeText")}</SelectItem>
+              {data.users.map((u) => (
+                <SelectItem key={u.id} value={u.id}>
+                  {u.name} — {u.email}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input
+            id="f-broker"
+            value={config.identity.brokerName}
+            disabled={config.identity.brokerUserId !== null}
+            onChange={(e) => update((d) => void (d.identity.brokerName = e.target.value))}
+            className="min-h-11 md:min-h-9"
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {config.identity.brokerUserId === null
+            ? t("editor.identity.freeTextHint")
+            : t("editor.identity.linkedHint")}
+        </p>
       </div>
 
       <EnumField
         path="identity.signature"
         value={config.identity.signature}
-        onChange={(v) => update((d) => void (d.identity.signature = v as "none" | "first_name"))}
+        onChange={(v) =>
+          update((d) => void (d.identity.signature = v as typeof d.identity.signature))
+        }
       />
+
+      {config.identity.signature === "custom" ? (
+        <div className="space-y-1.5">
+          <FieldLabel path="identity.signatureText" htmlFor="f-signature-text" />
+          <Input
+            id="f-signature-text"
+            maxLength={60}
+            placeholder={t("editor.identity.signaturePlaceholder")}
+            value={config.identity.signatureText ?? ""}
+            onChange={(e) => update((d) => void (d.identity.signatureText = e.target.value || null))}
+            className="min-h-11 md:min-h-9"
+          />
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          <Label>{t("editor.identity.signaturePreview")}</Label>
+          <p className="flex min-h-11 items-center rounded-md border bg-muted/40 px-3 text-sm text-muted-foreground md:min-h-9">
+            {signaturePreview(config) ?? t("editor.identity.noSignature")}
+          </p>
+        </div>
+      )}
       <EnumField
         path="identity.aiDisclosure"
         value={config.identity.aiDisclosure}
@@ -249,14 +300,37 @@ function GoalStepFields({
   data: TabProps["data"];
 }) {
   const t = useTranslations("assistants");
+  // Un objectif qui ne réserve rien n'a pas de rendez-vous à typer : afficher
+  // « type » ET « type de rendez-vous » côte à côte sur « Obtenir le courriel »
+  // était la source de confusion — deux champs presque homonymes dont l'un ne
+  // servait à rien.
+  const books = BOOKING_GOALS.includes(step.type);
+
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <div className="space-y-1.5">
-        <FieldLabel path={`${prefix}.type`} />
+      <div className="space-y-1.5 md:col-span-2">
+        <FieldLabel path={`${prefix}.type`}>{t("editor.goal.whatToObtain")}</FieldLabel>
         <Select
           items={GOAL_TYPES.map((g) => ({ value: g, label: t(`goalType.${g}`) }))}
           value={step.type}
-          onValueChange={(v) => onChange((s) => void (s.type = v as GoalType))}
+          onValueChange={(v) =>
+            onChange((s) => {
+              const next = v as GoalType;
+              s.type = next;
+              // Le type de rendez-vous DÉCOULE du type d'objectif quand il
+              // n'y a rien à choisir : une rencontre vidéo se réserve en
+              // visioconférence, pas ailleurs.
+              s.appointmentType =
+                next === "video_meeting"
+                  ? "meet"
+                  : next === "in_person_meeting"
+                    ? "inperson"
+                    : BOOKING_GOALS.includes(next)
+                      ? s.appointmentType
+                      : null;
+              if (!BOOKING_GOALS.includes(next)) s.durationMin = null;
+            })
+          }
         >
           <SelectTrigger className="min-h-11 w-full md:min-h-9">
             <SelectValue />
@@ -264,54 +338,63 @@ function GoalStepFields({
           <SelectContent>
             {GOAL_TYPES.map((g) => (
               <SelectItem key={g} value={g}>
-                {t(`goalType.${g}`)}
+                <span className="flex flex-col items-start">
+                  <span>{t(`goalType.${g}`)}</span>
+                  {/* La ligne d'explication vit DANS l'option : choisir entre
+                      sept objectifs sur leur seul nom demande de deviner. */}
+                  <span className="text-xs text-muted-foreground">{t(`goalTypeHint.${g}`)}</span>
+                </span>
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
+        <p className="text-xs text-muted-foreground">{t(`goalTypeHint.${step.type}`)}</p>
       </div>
 
-      <div className="space-y-1.5">
-        <FieldLabel path={`${prefix}.durationMin`} htmlFor={`${prefix}-duration`} />
-        <Input
-          id={`${prefix}-duration`}
-          type="number"
-          inputMode="numeric"
-          min={5}
-          max={240}
-          value={step.durationMin ?? ""}
-          onChange={(e) =>
-            onChange((s) => void (s.durationMin = e.target.value ? Number(e.target.value) : null))
-          }
-          className="min-h-11 md:min-h-9"
-        />
-      </div>
+      {books ? (
+        <div className="space-y-1.5">
+          <FieldLabel path={`${prefix}.durationMin`} htmlFor={`${prefix}-duration`} />
+          <Input
+            id={`${prefix}-duration`}
+            type="number"
+            inputMode="numeric"
+            min={5}
+            max={240}
+            value={step.durationMin ?? ""}
+            onChange={(e) =>
+              onChange((s) => void (s.durationMin = e.target.value ? Number(e.target.value) : null))
+            }
+            className="min-h-11 md:min-h-9"
+          />
+        </div>
+      ) : null}
 
-      <div className="space-y-1.5">
-        <FieldLabel path={`${prefix}.appointmentType`} />
-        <Select
-          items={[
-            { value: NONE, label: "—" },
-            { value: "meet", label: t("goalType.video_meeting") },
-            { value: "inperson", label: t("goalType.in_person_meeting") },
-          ]}
-          value={step.appointmentType ?? NONE}
-          onValueChange={(v) =>
-            onChange(
-              (s) => void (s.appointmentType = v === NONE ? null : (String(v) as "meet" | "inperson")),
-            )
-          }
-        >
-          <SelectTrigger className="min-h-11 w-full md:min-h-9">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={NONE}>—</SelectItem>
-            <SelectItem value="meet">{t("goalType.video_meeting")}</SelectItem>
-            <SelectItem value="inperson">{t("goalType.in_person_meeting")}</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      {books ? (
+        <div className="space-y-1.5">
+          <FieldLabel path={`${prefix}.appointmentType`}>
+            {t("editor.goal.calendarSlot")}
+          </FieldLabel>
+          <Select
+            items={[
+              { value: "meet", label: t("editor.goal.calendarMeet") },
+              { value: "inperson", label: t("editor.goal.calendarInperson") },
+            ]}
+            value={step.appointmentType ?? "meet"}
+            onValueChange={(v) =>
+              onChange((s) => void (s.appointmentType = String(v) as "meet" | "inperson"))
+            }
+          >
+            <SelectTrigger className="min-h-11 w-full md:min-h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="meet">{t("editor.goal.calendarMeet")}</SelectItem>
+              <SelectItem value="inperson">{t("editor.goal.calendarInperson")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">{t("editor.goal.calendarHint")}</p>
+        </div>
+      ) : null}
 
       <div className="space-y-1.5">
         <FieldLabel path={`${prefix}.withUserId`} />
@@ -366,6 +449,7 @@ function GoalStepFields({
         </div>
       </div>
 
+      {books ? (
       <div className="space-y-1.5">
         <FieldLabel path={`${prefix}.slotOfferCount`} htmlFor={`${prefix}-slots`} />
         <Input
@@ -379,6 +463,7 @@ function GoalStepFields({
           className="min-h-11 md:min-h-9"
         />
       </div>
+      ) : null}
 
       <div className="space-y-1.5 md:col-span-2">
         <FieldLabel path={`${prefix}.confirmationTemplate`} htmlFor={`${prefix}-confirm`} />

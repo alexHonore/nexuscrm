@@ -27,6 +27,7 @@ const { ApproachTab, KnowledgeTab, ToolsTab } = await import(
   "@/components/admin/assistant-editor/tabs-basic"
 );
 const { PromptTab, TestTab } = await import("@/components/admin/assistant-editor/tabs-advanced");
+const { GoalTab, IdentityTab } = await import("@/components/admin/assistant-editor/tabs-basic");
 
 type IntlMessages = ComponentProps<typeof NextIntlClientProvider>["messages"];
 
@@ -278,6 +279,62 @@ describe("onglets rendus isolément", () => {
     expect(html).toContain("1/2");
   });
 
+  it("Objectif : le type choisi est EXPLIQUÉ sous le sélecteur", () => {
+    // Base UI ne rend les options qu'à l'ouverture : c'est la ligne visible
+    // sous le champ qu'on vérifie ici. Choisir entre sept objectifs sur leur
+    // seul nom demanderait de deviner.
+    const html = renderTab(createElement(GoalTab, tabProps));
+    expect(html).toContain("Réserve une visioconférence");
+
+    const qualify = {
+      ...tabProps,
+      config: {
+        ...CONFIG,
+        goal: { primary: { ...CONFIG.goal.primary, type: "qualify_only" as const }, fallbacks: [] },
+      },
+    };
+    expect(renderTab(createElement(GoalTab, qualify))).toContain("Ne propose JAMAIS");
+  });
+
+  it("Objectif : « où la rencontre a lieu » n'apparaît QUE si l'objectif réserve", () => {
+    const booking = renderTab(createElement(GoalTab, tabProps));
+    expect(booking).toContain("Où la rencontre a lieu");
+
+    // Sans repli : un repli « appel téléphonique » réserve, lui, et ferait
+    // légitimement réapparaître le champ.
+    const noBooking = {
+      ...tabProps,
+      config: {
+        ...CONFIG,
+        goal: { primary: { ...CONFIG.goal.primary, type: "qualify_only" as const }, fallbacks: [] },
+      },
+    };
+    const html = renderTab(createElement(GoalTab, noBooking));
+    // C'était la confusion : « type » et « type de rendez-vous » côte à côte
+    // sur un objectif qui ne réserve rien.
+    expect(html).not.toContain("Où la rencontre a lieu");
+  });
+
+  it("Identité : choisir un compte remplit le nom, et l'aperçu de signature se voit", () => {
+    const html = renderTab(createElement(IdentityTab, tabProps));
+    expect(html).toContain("Saisir librement");
+    expect(html).toContain("Alex-Honoré");
+    // Aperçu de ce qui sera réellement ajouté aux messages.
+    expect(html).toContain("Aperçu de la signature");
+  });
+
+  it("Identité : la signature libre ouvre un champ de texte", () => {
+    const custom = {
+      ...tabProps,
+      config: {
+        ...CONFIG,
+        identity: { ...CONFIG.identity, signature: "custom" as const, signatureText: "— L'équipe" },
+      },
+    };
+    const html = renderTab(createElement(IdentityTab, custom));
+    expect(html).toContain("L&#x27;équipe");
+  });
+
   it("aucun onglet ne laisse fuir une clé i18n", () => {
     for (const html of [
       renderTab(createElement(ApproachTab, tabProps)),
@@ -285,6 +342,8 @@ describe("onglets rendus isolément", () => {
       renderTab(createElement(ToolsTab, tabProps)),
       renderTab(createElement(PromptTab, tabProps)),
       renderTab(createElement(TestTab, { ...tabProps, onRunSuite: () => {}, running: false })),
+      renderTab(createElement(GoalTab, tabProps)),
+      renderTab(createElement(IdentityTab, tabProps)),
     ]) {
       expect(html).not.toContain("MISSING_MESSAGE");
       expect(html).not.toMatch(/editor\.[a-zA-Z]+\./);

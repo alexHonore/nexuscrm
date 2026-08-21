@@ -104,6 +104,9 @@ const identity: ParamDoc[] = [
     allowed: [
       { value: "none", labelFr: "Aucune — le message se termine par la question" },
       { value: "first_name", labelFr: "Prénom — « — Alex »" },
+      { value: "full_name", labelFr: "Nom complet — « — Alex-Honoré »" },
+      { value: "org", labelFr: "Organisation — « — Groupe Nexus »" },
+      { value: "custom", labelFr: "Libre — le texte que vous écrivez" },
     ],
     whatFr: "Ajoute ou non une signature à la fin des messages.",
     whyFr:
@@ -113,6 +116,22 @@ const identity: ParamDoc[] = [
       "Signer chaque message d'une conversation donne un ton de gabarit ; la valeur est surtout au premier contact.",
     related: ["approach.maxChars"],
     example: "none",
+  }),
+  doc({
+    path: "identity.signatureText",
+    section: "identity",
+    labelFr: "Texte de signature",
+    type: "string",
+    required: false,
+    defaultValue: null,
+    whatFr: "La signature exacte, utilisée quand le mode de signature est « Libre ».",
+    whyFr:
+      "Les formes dérivées (prénom, nom complet, organisation) ne couvrent pas tout : « — L'équipe Nexus » ou « — Alex, courtier immobilier » n'entrent dans aucune.",
+    effectFr: "Ajouté tel quel à la fin des messages, sans autre traitement.",
+    pitfallsFr:
+      "Une signature longue est répétée à CHAQUE message et compte dans les 160 caractères d'un segment : « — Alex-Honoré, courtier immobilier résidentiel » coûte 45 caractères par envoi.",
+    related: ["identity.signature", "approach.maxChars"],
+    example: "— Alex",
   }),
   doc({
     path: "identity.aiDisclosure",
@@ -424,8 +443,9 @@ const approach: ParamDoc[] = [
     required: true,
     defaultValue: "none",
     allowed: [
-      { value: "none", labelFr: "Aucun" },
+      { value: "none", labelFr: "Aucun — capacité maximale, coût minimal" },
       { value: "rare", labelFr: "Rare — au plus un, occasionnellement" },
+      { value: "moderate", labelFr: "Modéré — un par message quand le ton s'y prête" },
     ],
     whatFr: "Autorise ou non les émojis.",
     whyFr:

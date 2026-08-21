@@ -23,7 +23,11 @@
     "logout": "Log out",
     "profile": "Profile",
     "pipelineSettings": "Categories",
-    "callsShort": "Calls"
+    "callsShort": "Calls",
+    "groupAi": "Artificial intelligence",
+    "groupData": "Data and access",
+    "groupInsights": "Activity and reporting",
+    "groupSystem": "System"
   },
   "actions": {
     "save": "Save",

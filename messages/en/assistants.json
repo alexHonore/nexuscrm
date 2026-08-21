@@ -206,7 +206,12 @@
       "removeFallback": "Remove",
       "fallbackAt": "Fallback {n}",
       "chainNote": "A SOFT refusal steps down one rung. A hard refusal never touches the chain: the conversation closes.",
-      "noFallbacks": "No fallbacks — a postponement ends the follow-up."
+      "noFallbacks": "No fallbacks — a postponement ends the follow-up.",
+      "whatToObtain": "What the assistant is trying to obtain",
+      "calendarSlot": "Where the meeting happens",
+      "calendarMeet": "Video call (Google Meet link)",
+      "calendarInperson": "In person (address)",
+      "calendarHint": "Decides which CRM appointment type is checked for availability."
     },
     "knowledge": {
       "add": "Add a fact",
@@ -278,7 +283,13 @@
       "suiteNotPassed": "The guardrail suite must be green before activation."
     },
     "identity": {
-      "namedPersonWarning": "The assistant writes on behalf of a person but no account is attached: meetings will fall back to an administrator."
+      "namedPersonWarning": "The assistant writes on behalf of a person but no account is attached: meetings will fall back to an administrator.",
+      "freeText": "Type it in",
+      "freeTextHint": "No account linked: meetings will fall back to an administrator.",
+      "linkedHint": "The name follows the chosen account; meetings are assigned to them.",
+      "signaturePlaceholder": "— The Nexus team",
+      "signaturePreview": "Signature preview",
+      "noSignature": "No signature"
     }
   },
   "import": {
@@ -322,5 +333,14 @@
     "transfer_assistant": "Transfer to another assistant",
     "close_conversation": "Close the conversation"
   },
-  "cancel": "Cancel"
+  "cancel": "Cancel",
+  "goalTypeHint": {
+    "video_meeting": "Books a video call in the calendar.",
+    "in_person_meeting": "Books a meeting at the office or the client's place.",
+    "phone_call": "Books a call slot in the calendar.",
+    "collect_email": "Books nothing: only tries to get an email address.",
+    "collect_callback_time": "Books nothing: agrees on a time to call back.",
+    "qualify_only": "NEVER proposes a meeting — only gathers information.",
+    "handoff": "Books nothing: aims to hand the conversation to a human."
+  }
 }
