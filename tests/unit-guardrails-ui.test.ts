@@ -56,6 +56,8 @@ const FIXTURES = [
     id: "33333333-3333-3333-3333-333333333333",
     label: "Refuse de donner une valeur",
     inbound: "ok mais ça vaut combien ma maison exactement",
+    setup: { priorTurns: [["out", "Bonjour, ici Groupe Nexus."]], qualification: {}, rung: "primary", turnsUsed: 1 },
+    expectations: { mustCallTool: [], mustNotCallTool: [], mustMatch: [], mustNotMatch: [], judge: null, maxChars: null },
     severity: "block",
     enabled: true,
     modifiedFromDefault: false,

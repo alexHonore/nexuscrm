@@ -49,6 +49,8 @@ export default async function AdminGuardrailsPage() {
     id: f.id,
     label: f.label,
     inbound: f.inbound,
+    setup: f.setup,
+    expectations: f.expectations,
     severity: f.severity as GuardrailSeverity,
     enabled: f.enabled,
     modifiedFromDefault: f.modifiedFromDefault,

@@ -43,6 +43,13 @@ import {
   emptyRule,
   type EditableRule,
 } from "./guardrail-rule-dialog";
+import { GuardrailCoreDialog } from "./guardrail-core-dialog";
+import {
+  FixtureFieldHelp,
+  GuardrailFixtureDialog,
+  emptyFixture,
+  type EditableFixture,
+} from "./guardrail-fixture-dialog";
 
 // ── DTO — sérialisés depuis src/app/(app)/admin/guardrails/page.tsx ──────────
 
@@ -66,6 +73,10 @@ export type GuardrailFixtureDto = {
   id: string;
   label: string;
   inbound: string;
+  /** Nécessaires au dialogue : sans eux il s'ouvrirait vide et une
+   *  sauvegarde effacerait le scénario existant. */
+  setup: unknown;
+  expectations: unknown;
   severity: GuardrailSeverity;
   enabled: boolean;
   modifiedFromDefault: boolean;
@@ -501,8 +512,83 @@ function FixtureEnabledSwitch({ fixture }: { fixture: GuardrailFixtureDto }) {
   );
 }
 
+/** DTO → brouillon éditable. */
+function toEditableFixture(f: GuardrailFixtureDto): EditableFixture {
+  const setup = (f.setup ?? {}) as { priorTurns?: [("out" | "in"), string][] };
+  const e = (f.expectations ?? {}) as {
+    mustCallTool?: string[]; mustNotCallTool?: string[];
+    mustMatch?: string[]; mustNotMatch?: string[];
+    judge?: string | null; maxChars?: number | null;
+  };
+  return {
+    id: f.id,
+    label: f.label,
+    inbound: f.inbound,
+    priorTurns: setup.priorTurns ?? [],
+    severity: f.severity,
+    enabled: f.enabled,
+    mustCallTool: e.mustCallTool ?? [],
+    mustNotCallTool: e.mustNotCallTool ?? [],
+    mustMatch: e.mustMatch ?? [],
+    mustNotMatch: e.mustNotMatch ?? [],
+    judge: e.judge ?? null,
+    maxChars: e.maxChars ?? null,
+  };
+}
+
+function FixtureDeleteButton({ fixture }: { fixture: GuardrailFixtureDto }) {
+  const t = useTranslations("assistants");
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+
+  const confirm = async () => {
+    setPending(true);
+    try {
+      await api(`/api/admin/guardrails/fixtures/${fixture.id}`, { method: "DELETE" });
+      toast.success(t("guardrails.fixtures.deleted"));
+      setOpen(false);
+      router.refresh();
+    } catch {
+      toast.error(t("guardrails.genericError"));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogTrigger
+        render={<Button variant="ghost" size="sm" className="min-h-11 text-destructive md:min-h-8" />}
+      >
+        <Trash2 className="size-3.5" />
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {t("guardrails.fixtures.deleteConfirm.title", { label: fixture.label })}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("guardrails.fixtures.deleteConfirm.body")}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={pending} className="min-h-11 md:min-h-8">
+            {t("guardrails.reset.cancel")}
+          </AlertDialogCancel>
+          <AlertDialogAction disabled={pending} onClick={() => void confirm()} className="min-h-11 md:min-h-8">
+            {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+            {t("guardrails.fixtures.deleteConfirm.confirm")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 function FixturesCard({ fixtures }: { fixtures: GuardrailFixtureDto[] }) {
   const t = useTranslations("assistants");
+  const [editing, setEditing] = useState<EditableFixture | null>(null);
 
   return (
     <Card className="shadow-xs">
@@ -516,6 +602,17 @@ function FixturesCard({ fixtures }: { fixtures: GuardrailFixtureDto[] }) {
             <CardDescription>{t("guardrails.sections.fixtures.desc")}</CardDescription>
           </div>
         </div>
+        <CardAction>
+          <Button
+            variant="outline"
+            size="sm"
+            className="min-h-11 md:min-h-8"
+            onClick={() => setEditing(emptyFixture())}
+          >
+            <Plus />
+            {t("guardrails.fixtures.add")}
+          </Button>
+        </CardAction>
       </CardHeader>
       <CardContent className="p-0">
         {fixtures.length === 0 ? (
@@ -531,18 +628,41 @@ function FixturesCard({ fixtures }: { fixtures: GuardrailFixtureDto[] }) {
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="font-medium">{f.label}</span>
                     <SeverityBadge severity={f.severity} />
+                    <FixtureFieldHelp field="inbound" />
                   </div>
                   <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{f.inbound}</p>
                 </div>
-                <label className="flex min-h-11 shrink-0 items-center gap-2 text-sm font-medium md:min-h-0">
-                  <FixtureEnabledSwitch fixture={f} />
-                  {t("guardrails.columns.enabled")}
-                </label>
+                <div className="flex shrink-0 flex-wrap items-center gap-1">
+                  <label className="flex min-h-11 items-center gap-2 text-sm font-medium md:min-h-0">
+                    <FixtureEnabledSwitch fixture={f} />
+                    {t("guardrails.columns.enabled")}
+                  </label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="min-h-11 md:min-h-8"
+                    onClick={() => setEditing(toEditableFixture(f))}
+                  >
+                    <Pencil className="size-3.5" />
+                    {t("guardrails.editRule")}
+                  </Button>
+                  <FixtureDeleteButton fixture={f} />
+                </div>
               </li>
             ))}
           </ul>
         )}
       </CardContent>
+
+      {editing ? (
+        <GuardrailFixtureDialog
+          fixture={editing}
+          open
+          onOpenChange={(next) => {
+            if (!next) setEditing(null);
+          }}
+        />
+      ) : null}
     </Card>
   );
 }
@@ -552,6 +672,7 @@ function FixturesCard({ fixtures }: { fixtures: GuardrailFixtureDto[] }) {
 function CoreCard({ core }: { core: PromptCoreDto }) {
   const t = useTranslations("assistants");
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   return (
     <Card className="shadow-xs">
@@ -565,6 +686,19 @@ function CoreCard({ core }: { core: PromptCoreDto }) {
             <CardDescription>{t("guardrails.sections.core.desc")}</CardDescription>
           </div>
         </div>
+        {core ? (
+          <CardAction>
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-h-11 md:min-h-8"
+              onClick={() => setEditing(true)}
+            >
+              <Pencil />
+              {t("guardrails.core.edit")}
+            </Button>
+          </CardAction>
+        ) : null}
       </CardHeader>
       <CardContent className="space-y-3">
         {core ? (
@@ -593,6 +727,17 @@ function CoreCard({ core }: { core: PromptCoreDto }) {
           <p className="text-sm text-muted-foreground">{t("guardrails.emptyCore")}</p>
         )}
       </CardContent>
+
+      {core && editing ? (
+        <GuardrailCoreDialog
+          version={core.version}
+          body={core.body}
+          open
+          onOpenChange={(next) => {
+            if (!next) setEditing(false);
+          }}
+        />
+      ) : null}
     </Card>
   );
 }

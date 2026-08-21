@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Download,
   Loader2,
+  MessageSquare,
   MoreHorizontal,
   Plus,
   Trash2,
@@ -168,6 +169,17 @@ export function AssistantsListClient({
                   </div>
                 </div>
 
+                {/* « Tester » est un BOUTON, pas une entrée de menu : c'est le
+                    geste qu'on fait le plus souvent en réglant un assistant. */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="min-h-11 shrink-0 md:min-h-8"
+                  render={<Link href={`/admin/assistants/${item.id}?tab=sandbox`} />}
+                >
+                  <MessageSquare /> {t("list.actions.test")}
+                </Button>
+
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={
@@ -181,6 +193,11 @@ export function AssistantsListClient({
                     <DropdownMenuGroup>
                       <DropdownMenuItem render={<Link href={`/admin/assistants/${item.id}`} />}>
                         {t("list.actions.edit")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        render={<Link href={`/admin/assistants/${item.id}?tab=sandbox`} />}
+                      >
+                        <MessageSquare /> {t("list.actions.test")}
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         render={<a href={`/api/assistants/${item.id}/export`} download />}

@@ -10,6 +10,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -65,6 +66,7 @@ type Turn = { role: "assistant" | "user"; content: string; result?: TurnResult }
  */
 export function SandboxTab({ data }: TabProps) {
   const t = useTranslations("assistants");
+  const router = useRouter();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [inbound, setInbound] = useState("");
   const [busy, setBusy] = useState(false);
@@ -73,6 +75,27 @@ export function SandboxTab({ data }: TabProps) {
   const stateRef = useRef({ qualification: {} as Record<string, unknown>, softRefusals: 0 });
 
   const notCompiled = data.compiledPrompt === null;
+  const [compiling, setCompiling] = useState(false);
+
+  /**
+   * Compiler DEPUIS le bac à sable.
+   *
+   * Un assistant fraîchement créé n'a pas de prompt compilé, et l'onglet
+   * disait seulement « compilez d'abord » : une impasse. Le geste manquant
+   * était à un clic, mais dans un autre onglet — et rien ne le disait.
+   */
+  const compileNow = async () => {
+    setCompiling(true);
+    setError(null);
+    try {
+      await api(`/api/assistants/${data.id}/compile`, { method: "POST" });
+      router.refresh();
+    } catch {
+      setError(t("sandbox.compileFailed"));
+    } finally {
+      setCompiling(false);
+    }
+  };
 
   const send = async () => {
     const text = inbound.trim();
@@ -136,7 +159,19 @@ export function SandboxTab({ data }: TabProps) {
       {notCompiled ? (
         <Alert variant="destructive">
           <AlertTriangleIcon />
-          <AlertDescription>{t("sandbox.notCompiled")}</AlertDescription>
+          <AlertDescription className="space-y-2">
+            <p>{t("sandbox.notCompiled")}</p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="min-h-11 md:min-h-8"
+              onClick={() => void compileNow()}
+              disabled={compiling}
+            >
+              {compiling ? <Loader2 className="animate-spin" /> : null}
+              {compiling ? t("sandbox.compiling") : t("sandbox.compileNow")}
+            </Button>
+          </AlertDescription>
         </Alert>
       ) : null}
 

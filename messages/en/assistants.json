@@ -105,7 +105,42 @@
       "keyTaken": "That key already exists.",
       "invalidConfig": "The configuration is invalid for this kind of rule.",
       "customCannotBlock": "A “prompt instruction” analyses nothing: marked blocking, it shows as a hard guardrail while it can refuse nothing. To guarantee behaviour, use “Model judgement”."
-    }
+    },
+    "core": {
+      "editTitle": "Prompt core — version {version}",
+      "editHint": "The shared text injected as L0 into every assistant's prompt.",
+      "publishWarning": "Publishing creates a NEW version: the old one stays intact so history remains readable. Every assistant will need recompiling and re-testing before it can be activated.",
+      "body": "Core body (L0)",
+      "notes": "Version note",
+      "notesPlaceholder": "What this version changes",
+      "publish": "Publish version {version}",
+      "published": "Version {version} published — {count} assistant(s) to recompile",
+      "unchanged": "The text is identical to the current version: publishing would stale every assistant without changing anything.",
+      "edit": "Edit the core"
+    },
+    "fixtures": {
+      "newTitle": "New fixture",
+      "editTitle": "Edit fixture",
+      "hint": "A scenario replayed against the real model: an inbound message, and what the reply must — or must not — do.",
+      "history": "History (out: / in:)",
+      "inbound": "Inbound message",
+      "mustCallTool": "Must call tool",
+      "mustNotCallTool": "Must NOT call",
+      "mustMatch": "Must match",
+      "mustNotMatch": "Must NOT match",
+      "judge": "Model-judged criterion",
+      "maxChars": "Max length",
+      "firstOutboundWarning": "No \"out\" turn: this scenario tests a FIRST outbound message. The CASL identification rule will require naming the organisation in it, and the fixture will fail for a reason unrelated to what it checks.",
+      "add": "Add a fixture",
+      "delete": "Delete",
+      "deleteConfirm": {
+        "title": "Delete “{label}”?",
+        "body": "This scenario will no longer be replayed. “Reset all” will recreate it if it came from the seed.",
+        "confirm": "Delete"
+      },
+      "deleted": "Fixture deleted"
+    },
+    "helpExample": "Example"
   },
   "list": {
     "title": "AI assistants",
@@ -142,7 +177,8 @@
       "export": "Export",
       "duplicate": "Duplicate",
       "delete": "Delete",
-      "archive": "Archive"
+      "archive": "Archive",
+      "test": "Test"
     },
     "deleteConfirm": {
       "title": "Delete “{name}”?",
@@ -369,7 +405,10 @@
       "firstName": "Client first name",
       "city": "Area",
       "projectType": "Project"
-    }
+    },
+    "compileNow": "Compile now",
+    "compiling": "Compiling…",
+    "compileFailed": "Compilation failed."
   },
   "goLive": {
     "title": "Go live",

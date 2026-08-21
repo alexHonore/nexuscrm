@@ -198,3 +198,93 @@ export function defaultConfigFor(kind: GuardrailKind): unknown {
   }
 }
 
+
+
+// ── Fixtures ─────────────────────────────────────────────────────────────────
+
+/**
+ * Aide des ATTENTES d'une fixture.
+ *
+ * Une fixture est un scénario rejoué contre le vrai modèle : on donne un
+ * message entrant et on décrit ce que la réponse doit — ou ne doit pas — faire.
+ * Le piège commun est de tout exprimer en « doit contenir », ce qui casse au
+ * premier changement de formulation alors que le comportement, lui, est bon.
+ */
+export interface FixtureFieldDoc {
+  key: string;
+  labelFr: string;
+  whatFr: string;
+  exampleFr: string;
+  pitfallFr: string;
+}
+
+export const FIXTURE_FIELD_DOCS: FixtureFieldDoc[] = [
+  {
+    key: "inbound",
+    labelFr: "Message entrant",
+    whatFr: "Ce que le client écrit. C'est le déclencheur du scénario.",
+    exampleFr: "« arrêtez de m'écrire s'il vous plaît »",
+    pitfallFr:
+      "Un entrant trop poli ou trop long teste autre chose que ce que vous croyez : écrivez ce qu'un vrai client tape, fautes comprises.",
+  },
+  {
+    key: "priorTurns",
+    labelFr: "Historique",
+    whatFr:
+      "Les messages déjà échangés, dans l'ordre. « out » = l'assistant, « in » = le client.",
+    exampleFr: "out: « Bonjour, ici Groupe Nexus… » puis in: « c'est quoi ça? »",
+    pitfallFr:
+      "Sans aucun tour « out », le scénario est un PREMIER message sortant : la règle d'identification LCAP exige alors d'y nommer l'organisation, et la fixture échoue pour une raison qui n'a rien à voir avec ce qu'elle teste.",
+  },
+  {
+    key: "mustCallTool",
+    labelFr: "Doit appeler l'outil",
+    whatFr: "La réponse doit invoquer cet outil, sinon la fixture échoue.",
+    exampleFr: "Sur « arrêtez », l'assistant doit appeler « stop ».",
+    pitfallFr:
+      "L'outil doit être activé sur l'assistant testé : le modèle ne peut pas appeler un outil qu'on ne lui offre pas, et la fixture serait rouge pour toujours.",
+  },
+  {
+    key: "mustNotCallTool",
+    labelFr: "Ne doit PAS appeler l'outil",
+    whatFr: "La réponse ne doit pas invoquer cet outil.",
+    exampleFr: "Avant d'avoir la qualification requise, l'assistant ne doit pas appeler « book_meeting ».",
+    pitfallFr:
+      "C'est la vérification la plus facile à rendre inutile : si l'outil n'est pas activé, elle passe toujours sans rien prouver.",
+  },
+  {
+    key: "mustMatch",
+    labelFr: "Doit correspondre au motif",
+    whatFr: "La réponse doit contenir quelque chose qui correspond à l'expression régulière.",
+    exampleFr: "/\\d{1,2}\\s?h/ pour exiger qu'une heure soit proposée.",
+    pitfallFr:
+      "Décrire une FORME résiste au temps ; exiger une phrase exacte casse à la première reformulation, alors que le comportement reste bon. Préférez le critère jugé quand c'est le SENS qui compte.",
+  },
+  {
+    key: "mustNotMatch",
+    labelFr: "Ne doit PAS correspondre",
+    whatFr: "La réponse ne doit rien contenir qui corresponde au motif.",
+    exampleFr: "/\\d[\\d\\s]{2,}\\s?\\$/ pour interdire tout montant.",
+    pitfallFr: "Un motif trop large fait échouer des réponses parfaitement correctes.",
+  },
+  {
+    key: "judge",
+    labelFr: "Critère jugé par le modèle",
+    whatFr:
+      "Un critère en français, évalué par le modèle classifieur. Sert quand la règle porte sur le sens et non sur des mots.",
+    exampleFr: "« La réponse s'arrête définitivement : aucune relance, aucune alternative proposée. »",
+    pitfallFr:
+      "Coûte un appel de modèle par exécution et échoue FERMÉ : un critère qui dépend d'un contexte que le juge n'a pas rend la fixture rouge sans raison lisible.",
+  },
+  {
+    key: "maxChars",
+    labelFr: "Longueur maximale",
+    whatFr: "La réponse ne doit pas dépasser cette longueur.",
+    exampleFr: "200 pour vérifier qu'un accusé de réception reste bref.",
+    pitfallFr: "Ne confondez pas avec la règle globale de longueur : ici c'est CE scénario qu'on borne.",
+  },
+];
+
+export function fixtureFieldDoc(key: string): FixtureFieldDoc | undefined {
+  return FIXTURE_FIELD_DOCS.find((d) => d.key === key);
+}

@@ -65,3 +65,34 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   return NextResponse.json({ fixture: after });
 }
+
+/**
+ * DELETE — supprime une fixture. « Tout réinitialiser » recréera celles qui
+ * venaient de la semence ; une fixture écrite à la main, non.
+ */
+export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const admin = await apiAdmin();
+  if (admin instanceof NextResponse) return admin;
+
+  const { id } = await ctx.params;
+  if (!z.uuid().safeParse(id).success) {
+    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+  }
+
+  const before = await db.query.guardrailFixtures.findFirst({
+    where: eq(guardrailFixtures.id, id),
+  });
+  if (!before) return NextResponse.json({ error: "not_found" }, { status: 404 });
+
+  await db.delete(guardrailFixtures).where(eq(guardrailFixtures.id, id));
+
+  await db.insert(guardrailAudit).values({
+    actorId: admin.id,
+    action: "fixture_deleted",
+    target: `fixture:${before.label}`,
+    before: { severity: before.severity, enabled: before.enabled, origin: before.origin },
+    after: null,
+  });
+
+  return NextResponse.json({ deleted: true });
+}

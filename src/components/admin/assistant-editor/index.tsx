@@ -57,9 +57,12 @@ type ChangeSummary = { changed: string[]; immediate: string[]; pending: string[]
 export function AssistantEditor({
   data,
   docs,
+  initialTab,
 }: {
   data: AssistantEditorData;
   docs: Record<string, ParamDocView>;
+  /** Onglet ouvert au chargement — permet un lien direct « Tester ». */
+  initialTab?: string;
 }) {
   const t = useTranslations("assistants");
   const router = useRouter();
@@ -226,7 +229,13 @@ export function AssistantEditor({
           </Alert>
         ) : null}
 
-        <Tabs defaultValue="identity">
+        <Tabs
+          defaultValue={
+            initialTab && (TAB_IDS as readonly string[]).includes(initialTab)
+              ? initialTab
+              : "identity"
+          }
+        >
           {/* Onze onglets : la liste défile horizontalement sur téléphone
               plutôt que de se replier en menu, pour rester repérable. */}
           <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">

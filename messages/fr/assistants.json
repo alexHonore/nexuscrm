@@ -105,7 +105,42 @@
       "keyTaken": "Cette clé existe déjà.",
       "invalidConfig": "La configuration est invalide pour ce type de règle.",
       "customCannotBlock": "Une « consigne de prompt » n'analyse rien : marquée bloquante, elle s'affiche comme un garde-fou dur alors qu'elle ne peut rien refuser. Pour garantir le comportement, utilisez « Jugement par le modèle »."
-    }
+    },
+    "core": {
+      "editTitle": "Noyau du prompt — version {version}",
+      "editHint": "Le texte commun injecté en L0 dans le prompt de chaque assistant.",
+      "publishWarning": "Publier crée une NOUVELLE version : l'ancienne reste intacte pour que l'historique demeure lisible. Tous les assistants devront être recompilés et re-testés avant de pouvoir être activés.",
+      "body": "Corps du noyau (L0)",
+      "notes": "Note de version",
+      "notesPlaceholder": "Ce que change cette version",
+      "publish": "Publier la version {version}",
+      "published": "Version {version} publiée — {count} assistant(s) à recompiler",
+      "unchanged": "Le texte est identique à la version courante : publier périmerait tous les assistants sans rien changer.",
+      "edit": "Modifier le noyau"
+    },
+    "fixtures": {
+      "newTitle": "Nouvelle fixture",
+      "editTitle": "Modifier la fixture",
+      "hint": "Un scénario rejoué contre le vrai modèle : un message entrant, et ce que la réponse doit — ou ne doit pas — faire.",
+      "history": "Historique (out: / in:)",
+      "inbound": "Message entrant",
+      "mustCallTool": "Doit appeler l'outil",
+      "mustNotCallTool": "Ne doit PAS appeler",
+      "mustMatch": "Doit correspondre",
+      "mustNotMatch": "Ne doit PAS correspondre",
+      "judge": "Critère jugé par le modèle",
+      "maxChars": "Longueur max",
+      "firstOutboundWarning": "Aucun tour « out » : ce scénario teste un PREMIER message sortant. La règle d'identification LCAP exigera d'y nommer l'organisation, et la fixture échouera pour une raison qui n'a rien à voir avec ce qu'elle vérifie.",
+      "add": "Ajouter une fixture",
+      "delete": "Supprimer",
+      "deleteConfirm": {
+        "title": "Supprimer « {label} » ?",
+        "body": "Ce scénario ne sera plus rejoué. « Tout réinitialiser » le recréera s'il venait de la semence.",
+        "confirm": "Supprimer"
+      },
+      "deleted": "Fixture supprimée"
+    },
+    "helpExample": "Exemple"
   },
   "list": {
     "title": "Assistants IA",
@@ -142,7 +177,8 @@
       "export": "Exporter",
       "duplicate": "Dupliquer",
       "delete": "Supprimer",
-      "archive": "Archiver"
+      "archive": "Archiver",
+      "test": "Tester"
     },
     "deleteConfirm": {
       "title": "Supprimer « {name} » ?",
@@ -369,7 +405,10 @@
       "firstName": "Prénom du client",
       "city": "Secteur",
       "projectType": "Projet"
-    }
+    },
+    "compileNow": "Compiler maintenant",
+    "compiling": "Compilation…",
+    "compileFailed": "La compilation a échoué."
   },
   "goLive": {
     "title": "Mise en service",

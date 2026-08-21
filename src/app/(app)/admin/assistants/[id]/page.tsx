@@ -13,11 +13,14 @@ import type { GuardrailKind, GuardrailSeverity } from "@/lib/guardrails/types";
 
 export default async function AssistantEditorPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
   await requireAdmin();
   const { id } = await params;
+  const { tab } = await searchParams;
 
   const row = await db.query.assistants.findFirst({ where: eq(assistants.id, id) });
   if (!row) notFound();
@@ -106,7 +109,7 @@ export default async function AssistantEditorPage({
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 p-4 md:p-6">
-      <AssistantEditor data={data} docs={docsByPath} />
+      <AssistantEditor data={data} docs={docsByPath} initialTab={tab} />
     </div>
   );
 }
