@@ -2,6 +2,7 @@
 
 import {
   AlertTriangleIcon,
+  BellRingIcon,
   CheckCircle2,
   Loader2,
   RotateCcw,
@@ -39,40 +40,115 @@ type Verdict = {
   reason?: string;
 };
 
+/** Miroir de `SandboxTurnResult` (lib/agent/sandbox.ts). */
+type TurnOutcome = "sent" | "blocked" | "stopped" | "handoff" | "error";
+type TurnReason =
+  | "optout"
+  | "hard_refusal"
+  | "client_wants_human"
+  | "goal_chain_exhausted"
+  | "max_turns"
+  | "tool_stop"
+  | "tool_handoff"
+  | "blocked_after_regeneration"
+  | "guardrail_unavailable"
+  | "booking_failed"
+  | "no_text"
+  | "llm_error";
+
 type TurnResult = {
   draft: string;
+  outcome: TurnOutcome;
+  reason: TurnReason | null;
   blocked: boolean;
   verdicts: Verdict[];
-  toolCalls: { name: string; args: unknown }[];
+  toolCalls: { name: string; args: unknown; ok: boolean; result: string }[];
   classification: {
     optOut: boolean;
     refusal: "none" | "soft" | "hard";
     wantsHuman: boolean;
     qualification: Record<string, unknown>;
   };
+  classifierError: string | null;
   rung: string;
   requiredFields: string[];
   runtimeBlock: string;
+  instruction: string | null;
   softRefusals: number;
   qualification: Record<string, unknown>;
+  turnsUsed: number;
+  regenerations: number;
+  droppedParagraphs: number;
+  fullText: string;
+  usage: {
+    calls: number;
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number | null;
+    latencyMs: number;
+    modelServed: string | null;
+  } | null;
   error: string | null;
 };
 
-type Turn = { role: "assistant" | "user"; content: string; result?: TurnResult };
+/**
+ * Une bulle. `content` est ce qui PARTIRAIT réellement : vide quand la
+ * production n'enverrait rien. Le texte écrit mais non envoyé vit dans
+ * `result.fullText`. `seeded` marque l'ouverture collée par l'admin (la
+ * campagne l'a envoyée avant que l'assistant ne parle).
+ */
+type Turn = {
+  role: "assistant" | "user";
+  content: string;
+  result?: TurnResult;
+  seeded?: boolean;
+  /** Tour de RELANCE (le contact s'était tu) — compte pour le barreau suivant. */
+  followUp?: boolean;
+};
+
+/** Relances déjà parties — la prochaine est la n+1, comme le barreau suivant. */
+function followUpsSent(turns: Turn[]): number {
+  return turns.filter((x) => x.followUp === true && wasSent(x)).length;
+}
 
 const TRIGGERS = ["inbound", "lead_created", "category_changed"] as const;
+const SUGGESTIONS = ["buy", "later", "stop", "value"] as const;
+/** Verdicts rendus AVANT tout appel au générateur (mêmes portes qu'en production). */
+const GATE_REASONS: ReadonlySet<string> = new Set([
+  "optout",
+  "hard_refusal",
+  "client_wants_human",
+  "goal_chain_exhausted",
+  "max_turns",
+]);
+
+/** Ce tour a-t-il produit un message que la production aurait envoyé? */
+function wasSent(turn: Turn): boolean {
+  return turn.role === "user" || turn.seeded === true || turn.result?.outcome === "sent";
+}
+
+/** Après ces verdicts, la production désactive l'IA sur la conversation. */
+function closesConversation(result: TurnResult | undefined): boolean {
+  return result?.outcome === "stopped" || result?.outcome === "handoff";
+}
 
 /**
  * Bac à sable — parler à l'assistant comme si on était le client.
  *
  * Ce qui distingue cet écran d'un simple aperçu de prompt : chaque réponse est
- * accompagnée de ce que les garde-fous en ont dit, du cran d'objectif courant
- * et des outils que le modèle a VOULU appeler. Régler une persistance ou un ton
- * sans voir ces trois choses revient à changer un chiffre et espérer.
+ * accompagnée de ce que la PRODUCTION en ferait (envoyé, bloqué, arrêt,
+ * escalade), de ce que les garde-fous en ont dit, du cran d'objectif courant
+ * et des outils que le modèle a VOULU appeler. Régler une persistance ou un
+ * ton sans voir ces choses revient à changer un chiffre et espérer.
  *
  * Rien n'est envoyé, rien n'est écrit, rien n'est réservé. Les appels d'outils
- * sont rapportés, jamais exécutés : un essai qui bloquerait une vraie plage
+ * sont simulés, jamais exécutés : un essai qui bloquerait une vraie plage
  * d'agenda serait un piège.
+ *
+ * L'historique renvoyé au modèle ne contient que ce qui serait réellement
+ * parti : un brouillon bloqué ou vide n'entre pas dans le fil, exactement
+ * comme en production — sinon le modèle lirait une conversation qui n'a pas
+ * existé, et certains fournisseurs refusent un message d'assistant vide.
  */
 export function SandboxTab({ data }: TabProps) {
   const t = useTranslations("assistants");
@@ -87,13 +163,19 @@ export function SandboxTab({ data }: TabProps) {
    *
    * « Le client écrit » n'est qu'un cas sur trois : un assistant part aussi sur
    * un nouveau lead ou un changement d'étape, et c'est LUI qui écrit le premier
-   * message. L'essai attendait le client dans tous les cas — un comportement
-   * que la production n'a pas.
+   * message — puis relance si le contact se tait.
    */
   const [trigger, setTrigger] = useState<"inbound" | "lead_created" | "category_changed">(
     "inbound",
   );
-  const stateRef = useRef({ qualification: {} as Record<string, unknown>, softRefusals: 0 });
+  /** L'ouverture déjà envoyée par la campagne, quand le client répond à un message. */
+  const [opener, setOpener] = useState("");
+  /** Le contexte de campagne que la production donnerait au modèle. */
+  const [campaign, setCampaign] = useState({ name: "", description: "", followUps: 2 });
+  const stateRef = useRef({
+    qualification: {} as Record<string, unknown>,
+    softRefusals: 0,
+  });
 
   const notCompiled = data.compiledPrompt === null;
   const [compiling, setCompiling] = useState(false);
@@ -118,13 +200,27 @@ export function SandboxTab({ data }: TabProps) {
     }
   };
 
-  /** Un tour. `text` vide = l'assistant ouvre la conversation. */
-  const runTurn = async (text: string) => {
+  /**
+   * Un tour. `text` vide = l'assistant écrit (ouverture ou relance).
+   * `followUp` = le contact n'a pas répondu : on rejoue le barreau suivant.
+   */
+  const runTurn = async (text: string, options: { followUp?: boolean } = {}) => {
     if (busy) return;
     setBusy(true);
     setError(null);
-    const history = turns.map((x) => ({ role: x.role, content: x.content }));
-    if (text !== "") setTurns((current) => [...current, { role: "user", content: text }]);
+
+    // L'ouverture collée par l'admin entre dans le fil AVANT le premier
+    // message du client : c'est un vrai message sortant, il compte.
+    const seed: Turn[] =
+      turns.length === 0 && trigger === "inbound" && opener.trim() !== ""
+        ? [{ role: "assistant", content: opener.trim(), seeded: true }]
+        : [];
+    const visible = [...seed, ...turns];
+    const history = visible.filter(wasSent).map((x) => ({ role: x.role, content: x.content }));
+    const startedByAssistant = visible.length > 0 && visible[0].role === "assistant";
+    const step = options.followUp ? followUpsSent(visible) + 1 : 0;
+
+    if (text !== "") setTurns([...visible, { role: "user", content: text }]);
     setInbound("");
 
     try {
@@ -135,9 +231,20 @@ export function SandboxTab({ data }: TabProps) {
           inbound: text,
           lead,
           trigger: text === "" ? trigger : "inbound",
-          // Une ouverture EST le premier message sortant : la règle
-          // d'identification doit s'appliquer.
-          openerSent: text !== "",
+          // L'ouverture est soit DANS le fil (collée ou écrite par l'assistant),
+          // soit inexistante : la production ne connaît pas d'ouverture
+          // invisible. Sans ouverture, la réponse est un PREMIER message
+          // sortant et la règle d'identification s'applique — c'est juste.
+          openerSent: startedByAssistant,
+          outreach:
+            text === ""
+              ? {
+                  step,
+                  campaignName: campaign.name.trim() || undefined,
+                  campaignDescription: campaign.description.trim() || undefined,
+                  ladderLength: campaign.followUps + 1,
+                }
+              : undefined,
           qualification: stateRef.current.qualification,
           softRefusals: stateRef.current.softRefusals,
         }),
@@ -150,16 +257,27 @@ export function SandboxTab({ data }: TabProps) {
 
       setTurns((current) => [
         ...current,
-        { role: "assistant", content: result.draft, result },
+        {
+          role: "assistant",
+          content: result.outcome === "sent" ? result.draft : "",
+          result,
+          followUp: options.followUp === true,
+        },
       ]);
       if (result.error) setError(result.error);
     } catch (err) {
       const code = err instanceof ApiError ? err.code : "";
-      setError(code === "not_compiled" ? t("sandbox.notCompiled") : t("sandbox.failed"));
+      setError(
+        code === "not_compiled"
+          ? t("sandbox.notCompiled")
+          : code === "rate_limited"
+            ? t("sandbox.rateLimited")
+            : t("sandbox.failed"),
+      );
       // Le tour n'a pas eu lieu : on retire la bulle du client pour que
       // l'historique reste le reflet exact de ce que le modèle a reçu.
       if (text !== "") {
-        setTurns((current) => current.slice(0, -1));
+        setTurns(turns);
         setInbound(text);
       }
     } finally {
@@ -176,6 +294,11 @@ export function SandboxTab({ data }: TabProps) {
   };
 
   const last = [...turns].reverse().find((x) => x.result)?.result;
+  const lastSent = [...turns].reverse().find(wasSent);
+  const nextFollowUp = followUpsSent(turns) + 1;
+  // Relancer a un sens quand le dernier message PARTI est celui de l'assistant
+  // (un jet bloqué entre-temps ne change rien : le contact se tait toujours).
+  const canFollowUp = lastSent?.role === "assistant" && !closesConversation(last);
 
   return (
     <div className="space-y-4">
@@ -258,23 +381,75 @@ export function SandboxTab({ data }: TabProps) {
             <p className="text-xs text-muted-foreground">{t(`sandbox.triggerHint.${trigger}`)}</p>
           </div>
 
+          {/* Le contexte de campagne : la production le glisse dans la consigne
+              d'ouverture et de relance (« à ne pas citer »). Sans lui, le
+              modèle ne sait pas POURQUOI il écrit. */}
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="sb-campaign-name">{t("sandbox.campaign.name")}</Label>
+              <Input
+                id="sb-campaign-name"
+                className="min-h-11 md:min-h-9"
+                value={campaign.name}
+                placeholder={t("sandbox.campaign.namePlaceholder")}
+                onChange={(e) => setCampaign({ ...campaign, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="sb-campaign-desc">{t("sandbox.campaign.description")}</Label>
+              <Input
+                id="sb-campaign-desc"
+                className="min-h-11 md:min-h-9"
+                value={campaign.description}
+                onChange={(e) => setCampaign({ ...campaign, description: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="sb-campaign-followups">{t("sandbox.campaign.followUps")}</Label>
+              <Input
+                id="sb-campaign-followups"
+                type="number"
+                min={0}
+                max={10}
+                className="min-h-11 md:min-h-9"
+                value={campaign.followUps}
+                onChange={(e) =>
+                  setCampaign({
+                    ...campaign,
+                    followUps: Math.max(0, Math.min(10, Number(e.target.value) || 0)),
+                  })
+                }
+              />
+            </div>
+            <p className="text-xs text-muted-foreground sm:col-span-3">{t("sandbox.campaign.hint")}</p>
+          </div>
+
           {trigger === "inbound" ? (
-            <div className="space-y-2">
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="sb-opener">{t("sandbox.opener.label")}</Label>
+                <Textarea
+                  id="sb-opener"
+                  rows={2}
+                  value={opener}
+                  placeholder={t("sandbox.opener.placeholder")}
+                  onChange={(e) => setOpener(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">{t("sandbox.opener.hint")}</p>
+              </div>
               <p className="text-sm text-muted-foreground">{t("sandbox.start")}</p>
               <div className="flex flex-wrap gap-2">
-                {["Oui, je cherche à acheter", "Pas cette semaine", "STOP", "Ça vaut combien ma maison?"].map(
-                  (suggestion) => (
-                    <Button
-                      key={suggestion}
-                      variant="outline"
-                      size="sm"
-                      className="min-h-11 md:min-h-8"
-                      onClick={() => setInbound(suggestion)}
-                    >
-                      {suggestion}
-                    </Button>
-                  ),
-                )}
+                {SUGGESTIONS.map((key) => (
+                  <Button
+                    key={key}
+                    variant="outline"
+                    size="sm"
+                    className="min-h-11 md:min-h-8"
+                    onClick={() => setInbound(t(`sandbox.suggestions.${key}`))}
+                  >
+                    {t(`sandbox.suggestions.${key}`)}
+                  </Button>
+                ))}
               </div>
             </div>
           ) : (
@@ -297,6 +472,17 @@ export function SandboxTab({ data }: TabProps) {
           ))}
         </div>
       )}
+
+      {closesConversation(last) && last ? (
+        <Alert>
+          <AlertTriangleIcon />
+          <AlertDescription>
+            {t("sandbox.closed", {
+              reason: last.reason ? t(`sandbox.reason.${last.reason}`) : t(`sandbox.outcome.${last.outcome}`),
+            })}
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {error ? (
         <Alert variant="destructive">
@@ -329,15 +515,32 @@ export function SandboxTab({ data }: TabProps) {
           >
             <RotateCcw /> {t("sandbox.reset")}
           </Button>
-          <Button
-            size="sm"
-            className="min-h-11 md:min-h-8"
-            onClick={() => void send()}
-            disabled={busy || notCompiled || inbound.trim() === ""}
-          >
-            {busy ? <Loader2 className="animate-spin" /> : <SendIcon />}
-            {busy ? t("sandbox.thinking") : t("sandbox.send")}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {canFollowUp ? (
+              /* Le contact se tait : on rejoue le barreau suivant, comme la
+                 campagne le ferait — c'est le seul moyen de voir une relance. */
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-h-11 md:min-h-8"
+                title={t("sandbox.followUpHint")}
+                onClick={() => void runTurn("", { followUp: true })}
+                disabled={busy || notCompiled}
+              >
+                <BellRingIcon />
+                {t("sandbox.followUp", { step: nextFollowUp })}
+              </Button>
+            ) : null}
+            <Button
+              size="sm"
+              className="min-h-11 md:min-h-8"
+              onClick={() => void send()}
+              disabled={busy || notCompiled || inbound.trim() === ""}
+            >
+              {busy ? <Loader2 className="animate-spin" /> : <SendIcon />}
+              {busy ? t("sandbox.thinking") : t("sandbox.send")}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -350,7 +553,19 @@ function TurnBubble({ turn }: { turn: Turn }) {
   const t = useTranslations("assistants");
   const outbound = turn.role === "assistant";
   const result = turn.result;
-  const analysis = analyzeSms(turn.content);
+  const sent = wasSent(turn);
+  // Ce qu'on montre dans la bulle : le message qui part, sinon ce que le
+  // modèle a écrit sans que ça parte (bloqué, escaladé), sinon rien.
+  const shown = sent ? turn.content : result?.draft || result?.fullText || "";
+  const analysis = analyzeSms(shown);
+  const full = result?.fullText.trim() ?? "";
+  const dropped =
+    result && result.droppedParagraphs > 0 && full.startsWith(result.draft)
+      ? full.slice(result.draft.length).trim()
+      : "";
+  // La production s'est arrêtée AVANT d'appeler le modèle : rien à montrer, et
+  // ce n'est pas une panne.
+  const gatedBeforeModel = result ? GATE_REASONS.has(result.reason ?? "") : false;
 
   return (
     <div className={cn("flex flex-col gap-1", outbound ? "items-start" : "items-end")}>
@@ -360,34 +575,83 @@ function TurnBubble({ turn }: { turn: Turn }) {
           outbound
             ? result?.blocked
               ? "bg-destructive/10 ring-1 ring-destructive/40"
-              : "bg-muted"
+              : sent
+                ? "bg-muted"
+                : "bg-muted/60 ring-1 ring-dashed ring-border text-muted-foreground"
             : "bg-primary text-primary-foreground",
         )}
       >
-        {turn.content === "" ? (
-          <span className="italic text-muted-foreground">{t("sandbox.emptyDraft")}</span>
+        {shown === "" ? (
+          <span className="italic text-muted-foreground">
+            {gatedBeforeModel ? t("sandbox.noMessage") : t("sandbox.emptyDraft")}
+          </span>
         ) : (
-          turn.content
+          shown
         )}
+        {dropped !== "" ? (
+          <p className="mt-2 border-t border-dashed pt-2 text-xs italic text-muted-foreground line-through">
+            {dropped}
+          </p>
+        ) : null}
       </div>
 
       {outbound ? (
         <p className="flex flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
-          {result?.blocked ? (
-            <span className="font-medium text-destructive">{t("sandbox.blocked")}</span>
+          {result ? <OutcomeBadge result={result} /> : null}
+          {turn.seeded ? <span>{t("sandbox.opener.seeded")}</span> : null}
+          {shown !== "" ? (
+            <span>
+              {t("sandbox.segments", { chars: analysis.units, segments: analysis.segments })}
+            </span>
           ) : null}
-          <span>
-            {t("sandbox.segments", { chars: analysis.units, segments: analysis.segments })}
-          </span>
+          {result && result.droppedParagraphs > 0 ? (
+            <span>{t("sandbox.dropped", { count: result.droppedParagraphs })}</span>
+          ) : null}
+          {result && result.regenerations > 0 ? <span>{t("sandbox.regenerated")}</span> : null}
           {result?.toolCalls.length ? (
             <span className="flex items-center gap-1">
               <WrenchIcon className="size-3" />
-              {result.toolCalls.map((c) => c.name).join(", ")}
+              {result.toolCalls.map((c, i) => (
+                <span key={`${c.name}-${i}`} title={c.result} className={c.ok ? "" : "line-through"}>
+                  {c.name}
+                  {i < result.toolCalls.length - 1 ? "," : ""}
+                </span>
+              ))}
+            </span>
+          ) : null}
+          {result?.usage && result.usage.calls > 0 ? (
+            <span title={result.usage.modelServed ?? undefined}>
+              {t("sandbox.usage", {
+                calls: result.usage.calls,
+                tokensIn: result.usage.inputTokens,
+                tokensOut: result.usage.outputTokens,
+                latency: result.usage.latencyMs,
+              })}
+              {result.usage.costUsd !== null
+                ? ` · ${t("sandbox.usageCost", { cost: result.usage.costUsd.toFixed(4) })}`
+                : ""}
             </span>
           ) : null}
         </p>
       ) : null}
     </div>
+  );
+}
+
+/** Ce que la PRODUCTION ferait de ce tour — la seule étiquette qui compte. */
+function OutcomeBadge({ result }: { result: TurnResult }) {
+  const t = useTranslations("assistants");
+  const tone =
+    result.outcome === "sent"
+      ? "text-emerald-700 dark:text-emerald-400"
+      : result.outcome === "blocked" || result.outcome === "error"
+        ? "text-destructive"
+        : "text-amber-700 dark:text-amber-400";
+  return (
+    <span className={cn("font-medium", tone)}>
+      {t(`sandbox.outcome.${result.outcome}`)}
+      {result.reason ? ` — ${t(`sandbox.reason.${result.reason}`)}` : ""}
+    </span>
   );
 }
 
@@ -411,11 +675,19 @@ function TurnInsight({ result }: { result: TurnResult }) {
         {result.classification.wantsHuman ? (
           <Badge variant="outline">{t("sandbox.wantsHuman")}</Badge>
         ) : null}
+        {result.classifierError ? (
+          <Badge variant="destructive" title={result.classifierError}>
+            {t("sandbox.classifierError")}
+          </Badge>
+        ) : null}
         {result.softRefusals > 0 ? (
           <span className="text-xs text-muted-foreground">
             {t("sandbox.softRefusals", { count: result.softRefusals })}
           </span>
         ) : null}
+        <span className="text-xs text-muted-foreground">
+          {t("sandbox.turnsUsed", { count: result.turnsUsed })}
+        </span>
       </div>
 
       {Object.keys(result.qualification).length > 0 ? (
@@ -443,6 +715,46 @@ function TurnInsight({ result }: { result: TurnResult }) {
             </li>
           ))}
         </ul>
+      ) : null}
+
+      {result.toolCalls.length > 0 ? (
+        <ul className="space-y-1">
+          {result.toolCalls.map((c, i) => (
+            <li key={`${c.name}-${i}`} className="flex items-start gap-1.5 font-mono text-xs">
+              {c.ok ? (
+                <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+              ) : (
+                <XCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+              )}
+              <span className="font-medium">{c.name}</span>
+              {c.result ? <span className="text-muted-foreground">→ {c.result}</span> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {/* Ce que le modèle a LU : la consigne de tour et la couche L7. Sans
+          cela, « pourquoi a-t-il écrit ça? » reste une devinette. */}
+      {result.instruction || result.runtimeBlock ? (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-muted-foreground">{t("sandbox.modelRead")}</summary>
+          {result.instruction ? (
+            <div className="mt-2 space-y-1">
+              <p className="font-medium">{t("sandbox.instructionLabel")}</p>
+              <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono">
+                {result.instruction}
+              </pre>
+            </div>
+          ) : null}
+          {result.runtimeBlock ? (
+            <div className="mt-2 space-y-1">
+              <p className="font-medium">{t("sandbox.runtimeLabel")}</p>
+              <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono">
+                {result.runtimeBlock}
+              </pre>
+            </div>
+          ) : null}
+        </details>
       ) : null}
     </section>
   );

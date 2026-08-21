@@ -8,48 +8,66 @@ import { resolvedRulesFor } from "@/lib/assistants/service";
 import { blockingFailures, evaluateOutputRules } from "@/lib/guardrails/filter";
 import { judgeWithLlm } from "@/lib/guardrails/judge";
 import { enabledRules } from "@/lib/guardrails/resolve";
-import type { RuleVerdict } from "@/lib/guardrails/types";
-import type { LLMMessage } from "@/lib/llm/types";
+import type { RuleData, RuleVerdict } from "@/lib/guardrails/types";
+import type { LLMMessage, LLMResult } from "@/lib/llm/types";
 import { getLlmProvider } from "@/lib/llm-server";
 import { APP_TZ } from "@/components/clients/timezone";
 import { DEFAULT_QUIET_HOURS } from "@/lib/sms/quiet-hours";
 import { classifyInbound } from "./classify";
-import { applyRefusal, requiredFieldsFor, resolveRung } from "./goal";
+import { applyRefusal, requiredFieldsFor, rungNeedsSlots } from "./goal";
+import { outreachInstructionText } from "./opening";
 import { renderTemplate } from "./render";
 import { DEFAULT_TURN_INSTRUCTIONS } from "./templates";
-import { isTerminalTool, simulatedToolResult } from "./tool-simulation";
+import { simulateToolCall, simulatedSlotsText } from "./tool-simulation";
 import { toolDefsFor } from "./tools";
 
 /**
  * Bac à sable — parler à un assistant comme si on était le client.
  *
- * Il exerce les MÊMES pièces que la production : le prompt compilé, la couche
- * d'exécution rendue par le même gabarit, le même classifieur, les mêmes outils
- * offerts au modèle, le même filtre de garde-fous et les mêmes juges. C'est ce
- * qui rend l'aperçu utile : voir « à peu près » ce que dirait l'assistant
- * n'aiderait personne à régler une persistance ou un ton.
+ * Il exerce les MÊMES pièces que la production (`runtime.ts`), dans le MÊME
+ * ordre : le prompt compilé, la couche d'exécution rendue par le même gabarit,
+ * le même classifieur, les mêmes portes AVANT le générateur (désabonnement,
+ * refus ferme, budget de tours, chaîne épuisée, demande d'humain), la même
+ * consigne d'ouverture, les mêmes outils offerts au modèle, le même aller-
+ * retour d'outils, la même coupe au premier paragraphe, le même filtre de
+ * garde-fous avec la même régénération unique, et le même verdict final.
+ * C'est ce qui rend l'aperçu utile : voir « à peu près » ce que dirait
+ * l'assistant n'aiderait personne à régler une persistance ou un ton — et un
+ * aperçu qui montre « envoyé » là où la production se tairait est pire
+ * qu'aucun aperçu.
  *
  * Ce qu'il ne fait PAS, délibérément : il n'écrit rien, n'envoie rien, ne
- * réserve rien. Les appels d'outils sont RAPPORTÉS, jamais exécutés — un aperçu
- * qui bloquerait une vraie plage d'agenda serait un piège. C'est aussi pourquoi
- * il ne touche ni aux conversations ni aux clients : un essai ne doit pas
- * apparaître dans la boîte de réception de l'équipe.
+ * réserve rien. Les appels d'outils sont SIMULÉS (`tool-simulation.ts`),
+ * jamais exécutés — un aperçu qui bloquerait une vraie plage d'agenda serait un
+ * piège. C'est aussi pourquoi il ne touche ni aux conversations ni aux
+ * clients : un essai ne doit pas apparaître dans la boîte de réception.
+ *
+ * Et surtout : RIEN de ce que lit le modèle ne dit qu'il est à l'essai. Une
+ * version antérieure écrivait « bac à sable » dans la couche L7 ; le modèle
+ * savait qu'il testait, contredisait ses propres disponibilités et se
+ * comportait autrement qu'en production. L'avertissement s'adresse à l'humain,
+ * à l'écran.
  */
 
 export interface SandboxTurnInput {
   assistantId: string;
-  /** L'historique déjà échangé dans le bac à sable. */
+  /** L'historique déjà échangé dans le bac à sable — seulement ce qui serait réellement parti. */
   history: { role: "assistant" | "user"; content: string }[];
   /**
-   * Ce que le client écrit. VIDE = c'est l'assistant qui ouvre.
+   * Ce que le client écrit. VIDE = c'est l'assistant qui ouvre (ou relance).
    *
-   * Un assistant ne répond pas seulement : il est aussi déclenché par un
-   * nouveau lead ou un changement de catégorie, et doit alors écrire le
-   * PREMIER message. Sans ce cas, l'essai attendait éternellement que le
-   * client parle — un comportement que la production n'a pas.
+   * Un assistant ne répond pas seulement : il est aussi déclenché par une
+   * campagne et doit alors écrire le PREMIER message, ou relancer un contact
+   * silencieux. Sans ce cas, l'essai attendait éternellement que le client
+   * parle — un comportement que la production n'a pas.
    */
   inbound: string;
-  /** Ce qui a déclenché le tour — nourrit la couche d'exécution. */
+  /**
+   * Ce qui a déclenché le tour. Conservé pour les appelants existants ; la
+   * consigne d'ouverture ne dépend plus de lui (la production ne distingue pas
+   * un nouveau lead d'un changement d'étape : les deux passent par la même
+   * consigne, avec le contexte de la campagne).
+   */
   trigger?: "inbound" | "lead_created" | "category_changed" | "manual";
   /** Contexte du faux client — ce que la couche d'exécution recevrait. */
   lead?: { firstName?: string; city?: string; budget?: string; projectType?: string };
@@ -57,46 +75,141 @@ export interface SandboxTurnInput {
   qualification?: Record<string, unknown>;
   softRefusals?: number;
   /**
-   * Une ouverture a-t-elle déjà été envoyée à ce client?
+   * Une ouverture a-t-elle déjà été envoyée à ce client, HORS de l'historique
+   * fourni?
    *
-   * Par défaut OUI, parce que c'est la situation réelle : l'assistant reprend
-   * une conversation ouverte par une campagne. Sans cette hypothèse, le premier
-   * essai part comme un PREMIER message sortant, la règle LCAP exige d'y nommer
-   * l'organisation, et tout est bloqué — un essai trompeur qui ferait chercher
-   * un bogue là où il n'y en a pas.
+   * Par défaut OUI, parce que c'est la situation la plus courante : l'assistant
+   * reprend une conversation ouverte par une campagne. Sans cette hypothèse, le
+   * premier essai part comme un PREMIER message sortant et la règle LCAP exige
+   * d'y nommer l'organisation — ce qui est juste, mais surprend quand on veut
+   * tester le milieu d'une conversation. Ignoré quand l'assistant ouvre
+   * lui-même (`inbound` vide) : c'est alors l'historique qui fait foi.
    */
   openerSent?: boolean;
+  /**
+   * Tour PROACTIF : le barreau de campagne que l'assistant rédige lui-même.
+   * `step` 0 = ouverture, n > 0 = n-ième relance. Absent avec un `inbound`
+   * vide = ouverture sans contexte de campagne.
+   */
+  outreach?: {
+    step: number;
+    campaignName?: string;
+    campaignDescription?: string;
+    /** Longueur de l'échelle (ouverture comprise) — pour « relance n sur N ». */
+    ladderLength?: number;
+  };
 }
 
 /**
- * Ce que la PRODUCTION ferait de ce tour. Un brouillon vide n'est pas un bogue
- * d'aperçu : c'est un tour qui, en vrai, part en escalade — le dire évite de
- * chercher une panne là où il y a un comportement.
+ * Ce que la PRODUCTION ferait de ce tour — mêmes valeurs que `TurnOutcome`
+ * dans `runtime.ts`, restreintes à ce qu'un essai peut produire. Un brouillon
+ * vide n'est pas un bogue d'aperçu : c'est un tour qui, en vrai, part en
+ * escalade (`handoff` / `no_text`) — le dire évite de chercher une panne là
+ * où il y a un comportement.
  */
-export type SandboxOutcome = "sent" | "blocked" | "stopped" | "handoff" | "no_text" | "error";
+export type SandboxOutcome = "sent" | "blocked" | "stopped" | "handoff" | "error";
+
+/** Le détail du verdict — mêmes libellés que `reason` / `attentionReason` en production. */
+export type SandboxReason =
+  | "optout"
+  | "hard_refusal"
+  | "client_wants_human"
+  | "goal_chain_exhausted"
+  | "max_turns"
+  | "tool_stop"
+  | "tool_handoff"
+  | "blocked_after_regeneration"
+  | "guardrail_unavailable"
+  | "booking_failed"
+  | "no_text"
+  | "llm_error";
+
+export interface SandboxToolCall {
+  name: string;
+  args: unknown;
+  /** Faux quand les arguments n'ont pas passé zod — l'appel ne compte pas. */
+  ok: boolean;
+  /** Ce que le modèle a lu en retour (vide pour stop / handoff). */
+  result: string;
+}
+
+export interface SandboxUsage {
+  /** Nombre d'appels modèle du tour : classifieur + générateur(s) + juges. */
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** Somme des coûts rapportés par le fournisseur — null s'il n'en rapporte pas. */
+  costUsd: number | null;
+  latencyMs: number;
+  /** Le modèle qui a RÉELLEMENT répondu au dernier appel générateur. */
+  modelServed: string | null;
+}
 
 export interface SandboxTurnResult {
-  /** Le message que l'assistant enverrait, ou "" s'il a été bloqué. */
+  /** Le message que l'assistant enverrait, ou "" si rien ne partirait. */
   draft: string;
   outcome: SandboxOutcome;
+  reason: SandboxReason | null;
   blocked: boolean;
   /** Verdicts de TOUTES les règles évaluées — c'est ce qu'on vient régler. */
   verdicts: RuleVerdict[];
-  toolCalls: { name: string; args: unknown }[];
+  toolCalls: SandboxToolCall[];
   classification: {
     optOut: boolean;
     refusal: "none" | "soft" | "hard";
     wantsHuman: boolean;
     qualification: Record<string, unknown>;
   };
+  /**
+   * Le classifieur a bafouillé ou était injoignable : la classification est
+   * NEUTRE, pas absente. Le dire, sinon l'admin conclut que « pas cette
+   * semaine » n'est pas un refus mou alors que personne n'a tranché.
+   */
+  classifierError: string | null;
   /** Cran d'objectif courant après application d'un éventuel refus mou. */
   rung: string;
   requiredFields: string[];
   /** Le bloc L7 réellement envoyé — pour comprendre ce que le modèle a lu. */
   runtimeBlock: string;
+  /** La consigne donnée à la place d'un entrant quand l'assistant ouvre ou relance. */
+  instruction: string | null;
   softRefusals: number;
   qualification: Record<string, unknown>;
+  /** Messages de l'agent comptés AVANT ce tour — ce que lit « Messages utilisés ». */
+  turnsUsed: number;
+  /** 1 si un garde-fou a exigé une réécriture (la production en accorde une seule). */
+  regenerations: number;
+  /** Paragraphes que la production aurait COUPÉS : un seul message part. */
+  droppedParagraphs: number;
+  /** Le texte complet du modèle, avant la coupe — pour voir ce qui est tombé. */
+  fullText: string;
+  usage: SandboxUsage | null;
   error: string | null;
+}
+
+/** Accumule les appels modèle du tour — l'essai coûte, autant le dire. */
+function usageTracker() {
+  const usage: SandboxUsage = {
+    calls: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    costUsd: null,
+    latencyMs: 0,
+    modelServed: null,
+  };
+  return {
+    usage,
+    add(result: LLMResult, generator: boolean) {
+      usage.calls += 1;
+      usage.inputTokens += result.usage.inputTokens;
+      usage.outputTokens += result.usage.outputTokens;
+      if (typeof result.usage.costUsd === "number") {
+        usage.costUsd = (usage.costUsd ?? 0) + result.usage.costUsd;
+      }
+      usage.latencyMs += result.latencyMs;
+      if (generator) usage.modelServed = result.modelServed;
+    },
+  };
 }
 
 export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurnResult> {
@@ -107,6 +220,7 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
   const config = assistantRowToConfig(row);
   const rules = await resolvedRulesFor(input.assistantId);
 
+  const tracker = usageTracker();
   const generator = getLlmProvider(config.model.provider);
   const classifierProvider = getLlmProvider(config.model.classifier.provider);
   const classifierCall = async (p: { system: string; user: string }) => {
@@ -117,24 +231,39 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
       maxTokens: 300,
       temperature: 0,
     });
+    tracker.add(out, false);
     return out.text;
   };
+
+  // La production n'a jamais de message vide dans un fil : un brouillon bloqué
+  // ou vide n'est pas stocké. On les écarte ici aussi, sinon le modèle lit un
+  // fil qui n'a pas existé — et certains fournisseurs refusent un message
+  // d'assistant vide.
+  const history = input.history.filter((m) => m.content.trim() !== "");
+  const opening = input.inbound.trim() === "";
+  const inbound = input.inbound.trim();
 
   const empty: Omit<SandboxTurnResult, "error"> = {
     draft: "",
     outcome: "error",
+    reason: null,
     blocked: false,
     verdicts: [],
     toolCalls: [],
     classification: { optOut: false, refusal: "none", wantsHuman: false, qualification: {} },
+    classifierError: null,
     rung: "primary",
     requiredFields: [],
     runtimeBlock: "",
+    instruction: null,
     softRefusals: input.softRefusals ?? 0,
     qualification: input.qualification ?? {},
+    turnsUsed: 0,
+    regenerations: 0,
+    droppedParagraphs: 0,
+    fullText: "",
+    usage: tracker.usage,
   };
-
-  const opening = input.inbound.trim() === "";
 
   // Rien à classer quand personne n'a écrit : classer une chaîne vide
   // renverrait un refus ou un désabonnement imaginaire.
@@ -149,10 +278,11 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
         unintelligible: false,
       },
       modelUsed: false,
+      error: undefined,
     };
   } else {
     try {
-      classified = await classifyInbound(input.inbound, classifierCall);
+      classified = await classifyInbound(inbound, classifierCall);
     } catch (err) {
       return { ...empty, error: err instanceof Error ? err.message : "classifier_failed" };
     }
@@ -163,16 +293,62 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
     wantsHuman: classified.classification.wantsHuman,
     qualification: classified.classification.qualification as Record<string, unknown>,
   };
+  const classifierError = classified.error ?? null;
 
   const softBefore = input.softRefusals ?? 0;
   const downgrade = applyRefusal(config.goal, softBefore, classification.refusal);
-  const rung = downgrade.exhausted ? resolveRung(config.goal, softBefore) : downgrade.rung;
-
+  const rung = downgrade.rung;
   const qualification = { ...(input.qualification ?? {}), ...classification.qualification };
 
+  /**
+   * Budget de tours : la production compte les messages de l'AGENT déjà
+   * partis. Ici, l'historique fourni, plus une ouverture supposée envoyée hors
+   * historique — jamais quand c'est l'assistant qui ouvre : l'historique fait
+   * alors foi, sinon on compterait un message qui n'existe pas.
+   */
+  const turnsUsed =
+    history.filter((m) => m.role === "assistant").length +
+    (!opening && input.openerSent !== false ? 1 : 0);
+
+  const gated: Omit<SandboxTurnResult, "error" | "outcome" | "reason"> = {
+    ...empty,
+    classification,
+    classifierError,
+    rung: rung.key,
+    requiredFields: requiredFieldsFor(rung),
+    softRefusals: downgrade.softRefusals,
+    qualification,
+    turnsUsed,
+  };
+
+  // ═══ Les portes AVANT le générateur — même ordre qu'en production ═══════
+  // Désabonnement : suppression, arrêt, AUCUN message — le modèle n'est pas appelé.
+  if (classification.optOut) {
+    return { ...gated, outcome: "stopped", reason: "optout", error: null };
+  }
+  // Refus ferme : la chaîne n'est PAS touchée — on ne propose pas de repli à
+  // quelqu'un qui vient de dire non.
+  if (classification.refusal === "hard") {
+    return { ...gated, outcome: "stopped", reason: "hard_refusal", error: null };
+  }
+  if (turnsUsed >= config.approach.maxTurns || downgrade.exhausted || classification.wantsHuman) {
+    const reason: SandboxReason = classification.wantsHuman
+      ? "client_wants_human"
+      : downgrade.exhausted
+        ? "goal_chain_exhausted"
+        : "max_turns";
+    return { ...gated, outcome: "handoff", reason, error: null };
+  }
+
   // Aucune disponibilité réelle n'est consultée : un aperçu ne doit pas donner
-  // au modèle des heures qu'il proposerait à quelqu'un.
-  const slotsText = "(bac à sable — aucune disponibilité réelle)";
+  // au modèle des heures qu'il proposerait à quelqu'un. L'agenda SIMULÉ répond
+  // à la place — les mêmes libellés que `get_slots` renverra, pour que le
+  // modèle ne lise pas deux vérités — et « aucune » exactement quand la
+  // production dirait « aucune » (cran sans rendez-vous).
+  const slotsText =
+    rungNeedsSlots(rung) && rung.goal.appointmentType
+      ? simulatedSlotsText(rung.goal.slotOfferCount)
+      : "aucune";
 
   const runtimeBlock = row.includeRuntimeLayer
     ? renderTemplate(row.turnInstructions ?? DEFAULT_TURN_INSTRUCTIONS, {
@@ -189,9 +365,7 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
         "goal.rung": rung.key,
         "goal.required_fields": requiredFieldsFor(rung).join(", ") || "aucune",
         slots: slotsText,
-        turns_used:
-          input.history.filter((m) => m.role === "assistant").length +
-          (input.openerSent === false ? 0 : 1),
+        turns_used: turnsUsed,
         max_turns: config.approach.maxTurns,
         soft_refusals: downgrade.softRefusals,
         now_local: formatInTimeZone(new Date(), APP_TZ, "EEEE HH'h'mm"),
@@ -204,92 +378,210 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
   const system =
     runtimeBlock === "" ? row.compiledPrompt : `${row.compiledPrompt}\n\n${runtimeBlock}`;
 
-  /**
-   * À l'ouverture, il n'y a pas de message entrant. On donne au modèle une
-   * consigne de tour explicite plutôt qu'un tour vide : les fournisseurs
-   * exigent au moins un message, et « écris l'ouverture » est exactement ce
-   * que la production demande quand un barreau de campagne n'a pas de texte.
-   */
-  const openingInstruction =
-    input.trigger === "category_changed"
-      ? "Ce contact vient de changer d'étape dans le pipeline. Écris le PREMIER message de la conversation."
-      : "Ce contact vient d'arriver comme nouveau lead. Écris le PREMIER message de la conversation.";
+  // À l'ouverture (ou en relance), il n'y a pas de message entrant : la MÊME
+  // consigne qu'en production tient lieu de tour — voir `opening.ts`.
+  const instruction = opening
+    ? outreachInstructionText({
+        step: input.outreach?.step ?? 0,
+        historyLength: history.length,
+        campaignName: input.outreach?.campaignName,
+        campaignDescription: input.outreach?.campaignDescription,
+        ladderLength: input.outreach?.ladderLength,
+      })
+    : null;
+  const userTurn = instruction ?? inbound;
 
-  const turnMessages: LLMMessage[] = [
-    ...input.history,
-    { role: "user", content: opening ? openingInstruction : input.inbound },
-  ];
+  const messageArray: LLMMessage[] = [...history, { role: "user", content: userTurn }];
   const tools = toolDefsFor(config.tools);
-  const toolCalls: { name: string; args: unknown }[] = [];
+  const toolCalls: SandboxToolCall[] = [];
   const sideEffectsDone = new Set<string>();
 
-  let out;
-  // MÊME aller-retour qu'en production. Sans lui, un modèle qui appelle un
-  // outil renvoie un texte VIDE : l'aperçu montrerait des réponses vides là où
-  // la production répond normalement. C'est la leçon de la phase 4, et la
-  // démonstration l'a reproduite ici avant que ce code n'existe.
-  for (let round = 0; round < 2; round += 1) {
-    try {
-      out = await generator.generate({
-        system,
-        messages: turnMessages,
-        model: config.model.model,
-        maxTokens: config.model.maxTokens,
-        temperature: config.model.temperature,
-        routing: config.model.routing as unknown as Record<string, unknown>,
-        ...(config.model.reasoningEffort === "none"
-          ? {}
-          : { reasoningEffort: config.model.reasoningEffort }),
-        // Les outils DOIVENT être offerts : sans eux, le modèle ne peut jamais
-        // en appeler un et l'aperçu ne montrerait pas le comportement réel.
-        tools,
-      });
-    } catch (err) {
-      return {
-        ...empty,
-        classification,
-        rung: rung.key,
-        runtimeBlock,
-        qualification,
-        softRefusals: downgrade.softRefusals,
-        error: err instanceof Error ? err.message : "model_failed",
-      };
+  let result: LLMResult | null = null;
+  let draft = "";
+  let fullText = "";
+  let verdicts: RuleVerdict[] = [];
+  let regenerations = 0;
+  let droppedParagraphs = 0;
+  let llmError: string | null = null;
+  let terminatedByTool: "stop" | "handoff" | null = null;
+  let bookingFailed = false;
+
+  // MÊME boucle qu'en production : une régénération au plus sur un brouillon
+  // bloqué, avec la même consigne de correction ; et dans chaque tentative, un
+  // aller-retour d'outils au maximum. Sans l'aller-retour, un modèle qui
+  // appelle un outil renvoie un texte VIDE là où la production répond.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const correction =
+      attempt === 0
+        ? ""
+        : `\n\nCONSIGNE DE CORRECTION : ta réponse précédente a été refusée par un garde-fou (${blockingFailures(
+            verdicts,
+          )
+            .map((v) => v.label)
+            .join(" · ")}). Réécris-la en respectant strictement cette règle.`;
+
+    const turnMessages: LLMMessage[] = [...messageArray];
+
+    for (let round = 0; round < 2; round += 1) {
+      try {
+        result = await generator.generate({
+          system: system + correction,
+          messages: turnMessages,
+          // Les outils DOIVENT être offerts : sans eux, le modèle ne peut jamais
+          // en appeler un et l'aperçu ne montrerait pas le comportement réel.
+          tools,
+          model: config.model.model,
+          maxTokens: config.model.maxTokens,
+          temperature: config.model.temperature,
+          routing: config.model.routing as unknown as Record<string, unknown>,
+          ...(config.model.reasoningEffort === "none"
+            ? {}
+            : { reasoningEffort: config.model.reasoningEffort }),
+        });
+        tracker.add(result, true);
+      } catch (err) {
+        llmError = err instanceof Error ? err.message : String(err);
+        break;
+      }
+
+      if (result.toolCalls.length === 0) break;
+
+      // Résultats SIMULÉS, avec les règles de la production (zod, champs
+      // requis, créneau offert, effets de bord joués une seule fois), dans
+      // l'ordre des appels — un outil terminal arrête les suivants.
+      const simulated: { id: string; name: string; content: string }[] = [];
+      for (const call of result.toolCalls) {
+        const outcome = simulateToolCall(call.name, sideEffectsDone, {
+          args: call.arguments,
+          appointmentType: rung.goal.appointmentType,
+          requiredFields: requiredFieldsFor(rung),
+          qualification,
+        });
+        simulated.push({ id: call.id, name: call.name, content: outcome.content });
+        toolCalls.push({ name: call.name, args: call.arguments, ok: outcome.ok, result: outcome.content });
+        if (outcome.bookingFailed) bookingFailed = true;
+        if (outcome.terminated) {
+          terminatedByTool = outcome.terminated;
+          break;
+        }
+      }
+      // « stop » et « handoff » terminent le tour : rappeler le modèle après
+      // coup ne changerait rien et ferait un appel de plus.
+      if (terminatedByTool) break;
+      if (round === 1) break;
+
+      // Vrai protocole d'outils : l'assistant DÉCLARE ses appels, puis chaque
+      // résultat revient rattaché à son identifiant. Maquillé en message
+      // `user`, le modèle ne relie pas le résultat à sa demande et la réémet.
+      turnMessages.push({ role: "assistant", content: result.text, toolCalls: result.toolCalls });
+      for (const r of simulated) {
+        turnMessages.push({ role: "tool", toolCallId: r.id, name: r.name, content: r.content });
+      }
     }
 
-    toolCalls.push(...out.toolCalls.map((c) => ({ name: c.name, args: c.arguments })));
-    // « stop » et « handoff » terminent le tour en production : rappeler le
-    // modèle après coup ne changerait rien et ferait un appel de plus.
-    if (out.toolCalls.some((c) => isTerminalTool(c.name))) break;
-    if (out.toolCalls.length === 0 || round === 1) break;
+    if (llmError !== null || terminatedByTool !== null || result === null) break;
 
-    // Résultats SIMULÉS : aucun outil n'est exécuté. On répond au modèle de
-    // façon plausible pour qu'il rédige, en disant clairement que les
-    // disponibilités ne sont pas réelles.
-    // Vrai protocole d'outils : l'assistant DÉCLARE ses appels, puis chaque
-    // résultat revient rattaché à son identifiant. Maquillé en message `user`,
-    // le modèle ne relie pas le résultat à sa demande et la réémet.
-    turnMessages.push({ role: "assistant", content: out.text, toolCalls: out.toolCalls });
-    for (const call of out.toolCalls) {
-      turnMessages.push({
-        role: "tool",
-        toolCallId: call.id,
-        name: call.name,
-        content: simulatedToolResult(call.name, sideEffectsDone),
-      });
-    }
+    // UN SEUL message par tour : le premier paragraphe part, le reste tombe —
+    // et les garde-fous jugent CE qui part, pas le texte entier.
+    fullText = result.text;
+    const paragraphs = result.text
+      .split(/\n{2,}/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    draft = paragraphs[0] ?? "";
+    droppedParagraphs = Math.max(0, paragraphs.length - 1);
+
+    verdicts = await evaluateAllRules(
+      draft,
+      rules,
+      {
+        toolCallNames: toolCalls.filter((c) => c.ok).map((c) => c.name),
+        inbound: opening ? "(ouverture — aucun message entrant)" : inbound,
+        // Aucun message de l'agent avant celui-ci = premier contact.
+        isFirstOutbound: turnsUsed === 0,
+      },
+      classifierCall,
+    );
+    if (blockingFailures(verdicts).length === 0) break;
+    regenerations = attempt + 1;
   }
 
-  const draft = (out?.text ?? "").trim();
+  // Le texte que le modèle a écrit À CÔTÉ d'un stop/handoff ne part jamais en
+  // production, mais l'admin veut le voir : on le garde dans `fullText`.
+  if (terminatedByTool !== null && result) fullText = result.text;
 
-  // Mêmes règles, même filtre, mêmes juges qu'en production.
+  const base: Omit<SandboxTurnResult, "outcome" | "reason" | "error"> = {
+    ...gated,
+    draft,
+    blocked: false,
+    verdicts,
+    toolCalls,
+    runtimeBlock,
+    instruction,
+    regenerations,
+    droppedParagraphs,
+    fullText,
+    usage: tracker.usage,
+  };
+
+  // ═══ Le verdict — même ordre qu'en production ═══════════════════════════
+  if (terminatedByTool !== null) {
+    return {
+      ...base,
+      draft: "",
+      outcome: terminatedByTool === "stop" ? "stopped" : "handoff",
+      reason: terminatedByTool === "stop" ? "tool_stop" : "tool_handoff",
+      error: null,
+    };
+  }
+  if (llmError !== null || result === null) {
+    return { ...base, draft: "", outcome: "error", reason: "llm_error", error: llmError ?? "no_result" };
+  }
+  if (blockingFailures(verdicts).length > 0) {
+    // Un juge injoignable bloque tout (fermeture par défaut, voulue) — mais
+    // l'admin doit distinguer « l'assistant a mal écrit » d'une panne de notre
+    // côté, sinon il cherche au mauvais endroit.
+    const allJudgeErrors = blockingFailures(verdicts).every(
+      (v) => v.reason === "judge_error" || v.reason === "judge_unparseable",
+    );
+    return {
+      ...base,
+      blocked: true,
+      outcome: "blocked",
+      reason: allJudgeErrors ? "guardrail_unavailable" : "blocked_after_regeneration",
+      error: null,
+    };
+  }
+  // Une réservation a ÉCHOUÉ : le brouillon peut annoncer un rendez-vous qui
+  // n'existe pas. La production n'envoie rien et passe la main.
+  if (bookingFailed) {
+    return { ...base, draft: "", outcome: "handoff", reason: "booking_failed", error: null };
+  }
+  if (draft === "") {
+    return { ...base, outcome: "handoff", reason: "no_text", error: null };
+  }
+  return { ...base, outcome: "sent", reason: null, error: null };
+}
+
+/**
+ * Mêmes règles, même filtre, mêmes juges qu'en production : les règles
+ * déterministes d'abord, et les juges seulement si aucune n'a déjà bloqué —
+ * inutile de payer des appels pour confirmer un refus.
+ */
+async function evaluateAllRules(
+  draft: string,
+  rules: RuleData[],
+  ctx: { toolCallNames: string[]; inbound: string; isFirstOutbound: boolean },
+  judge: (p: { system: string; user: string }) => Promise<string>,
+): Promise<RuleVerdict[]> {
   const active = enabledRules(rules);
-  let verdicts: RuleVerdict[] = [];
+  let verdicts: RuleVerdict[];
   try {
-    verdicts = evaluateOutputRules(draft, active, {
-      toolCallNames: toolCalls.map((c) => c.name),
-    });
+    verdicts = evaluateOutputRules(draft, active, { toolCallNames: ctx.toolCallNames });
   } catch (err) {
-    verdicts = [
+    // Config de règle illisible : on le DIT plutôt que de laisser l'exception
+    // faire passer l'essai pour une panne du modèle.
+    return [
       {
         key: "config",
         label: "garde-fou illisible",
@@ -299,61 +591,31 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
       },
     ];
   }
+  if (blockingFailures(verdicts).length > 0) return verdicts;
 
-  if (blockingFailures(verdicts).length === 0) {
-    for (const rule of active) {
-      if (rule.kind !== "llm_judge") continue;
-      const criterion = (rule.config as { criterion?: unknown }).criterion;
-      if (typeof criterion !== "string" || criterion.trim() === "") continue;
-      const verdict = await judgeWithLlm(
-        {
-          criterion,
-          output: draft,
-          context: opening ? "(ouverture — aucun message entrant)" : input.inbound,
-          // Une ouverture supposée envoyée compte comme un sortant : sinon la
-          // règle LCAP exige de nommer l'organisation à chaque essai.
-          // Une ouverture EST le premier sortant : la règle LCAP doit
-          // s'appliquer, c'est justement le message qui doit nommer l'organisation.
-          isFirstOutbound:
-            opening || (input.openerSent === false && input.history.every((m) => m.role !== "assistant")),
-        },
-        classifierCall,
-      );
-      verdicts.push({
-        key: rule.key,
-        label: rule.label,
-        severity: rule.severity,
-        passed: verdict.passed,
-        reason: verdict.passed ? undefined : verdict.reason,
-      });
-    }
+  for (const rule of active) {
+    if (rule.kind !== "llm_judge") continue;
+    const criterion = (rule.config as { criterion?: unknown }).criterion;
+    if (typeof criterion !== "string" || criterion.trim() === "") continue;
+    const verdict = await judgeWithLlm(
+      {
+        criterion,
+        output: draft,
+        context: ctx.inbound,
+        // La position dans la conversation VOYAGE avec le critère : plusieurs
+        // critères distinguent le premier message des suivants, et un juge qui
+        // ne peut pas trancher échoue fermé — donc bloque tout.
+        isFirstOutbound: ctx.isFirstOutbound,
+      },
+      judge,
+    );
+    verdicts.push({
+      key: rule.key,
+      label: rule.label,
+      severity: rule.severity,
+      passed: verdict.passed,
+      reason: verdict.passed ? undefined : verdict.reason,
+    });
   }
-
-  const blocked = blockingFailures(verdicts).length > 0;
-  const calledStop = toolCalls.some((c) => c.name === "stop");
-  const calledHandoff = toolCalls.some((c) => c.name === "handoff");
-  const outcome: SandboxOutcome = calledStop
-    ? "stopped"
-    : calledHandoff
-      ? "handoff"
-      : blocked
-        ? "blocked"
-        : draft === ""
-          ? "no_text"
-          : "sent";
-
-  return {
-    draft,
-    outcome,
-    blocked,
-    verdicts,
-    toolCalls,
-    classification,
-    rung: rung.key,
-    requiredFields: requiredFieldsFor(rung),
-    runtimeBlock,
-    softRefusals: downgrade.softRefusals,
-    qualification,
-    error: null,
-  };
+  return verdicts;
 }
