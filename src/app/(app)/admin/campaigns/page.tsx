@@ -1,39 +1,19 @@
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Megaphone } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { CampaignsListClient, type CampaignListItem } from "@/components/admin/campaigns-list-client";
 import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/db";
-import { campaignEnrollments, campaigns } from "@/db/schema-sms";
+import { campaigns } from "@/db/schema-sms";
 import { requireAdmin } from "@/lib/auth/guards";
 import type { TriggerKind } from "@/lib/campaigns/schema";
+import { listCampaignsWithCounts } from "@/lib/campaigns-server/list";
 
 export default async function AdminCampaignsPage() {
   await requireAdmin();
   const t = await getTranslations("campaigns");
 
-  const countFor = (status: string) =>
-    sql<number>`(select count(*)::int from ${campaignEnrollments}
-      where ${campaignEnrollments.campaignId} = ${campaigns.id}
-        and ${campaignEnrollments.status} = ${status})`;
-
-  const rows = await db
-    .select({
-      id: campaigns.id,
-      name: campaigns.name,
-      description: campaigns.description,
-      status: campaigns.status,
-      trigger: campaigns.trigger,
-      updatedAt: campaigns.updatedAt,
-      enrolled: sql<number>`(select count(*)::int from ${campaignEnrollments}
-        where ${campaignEnrollments.campaignId} = ${campaigns.id})`,
-      active: countFor("active"),
-      replied: countFor("replied"),
-      stopped: countFor("stopped"),
-    })
-    .from(campaigns)
-    .where(sql`${campaigns.status} <> 'archived'`)
-    .orderBy(desc(campaigns.updatedAt), asc(campaigns.name));
+  const rows = await listCampaignsWithCounts();
 
   const [archived] = await db
     .select({ n: sql<number>`count(*)::int` })

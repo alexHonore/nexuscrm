@@ -1,28 +1,17 @@
 import { NextResponse } from "next/server";
-import { asc, desc, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { campaignEnrollments, campaigns } from "@/db/schema-sms";
+import { campaigns } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { campaignConfigSchema } from "@/lib/campaigns/schema";
+import { listCampaignsWithCounts } from "@/lib/campaigns-server/list";
 
 /** GET /api/campaigns — liste avec le décompte des inscriptions par état. */
 export async function GET() {
   const admin = await apiAdmin();
   if (admin instanceof NextResponse) return admin;
 
-  const rows = await db
-    .select({
-      id: campaigns.id,
-      name: campaigns.name,
-      status: campaigns.status,
-      trigger: campaigns.trigger,
-      updatedAt: campaigns.updatedAt,
-      enrolled: sql<number>`(select count(*)::int from ${campaignEnrollments}
-        where ${campaignEnrollments.campaignId} = ${campaigns.id})`,
-    })
-    .from(campaigns)
-    .orderBy(desc(campaigns.updatedAt), asc(campaigns.name));
+  const rows = await listCampaignsWithCounts();
 
   return NextResponse.json({ campaigns: rows });
 }
