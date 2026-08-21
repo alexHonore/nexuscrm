@@ -370,5 +370,84 @@
       "city": "Secteur",
       "projectType": "Projet"
     }
+  },
+  "goLive": {
+    "title": "Mise en service",
+    "subtitle": "Ce qui doit être vrai pour qu'un vrai SMS parte vers un vrai numéro.",
+    "ready": {
+      "title": "Prêt à envoyer",
+      "body": "Toutes les conditions bloquantes sont remplies. Les messages partiront réellement."
+    },
+    "notReady": {
+      "title": "{count} blocage(s)",
+      "body": "Tant qu'un blocage subsiste, aucun message ne part — quel que soit l'écran qui dit le contraire."
+    },
+    "blockers": "Blocages",
+    "warnings": "Avertissements",
+    "passed": "Vérifié",
+    "info": "Pour information",
+    "recheck": "Revérifier",
+    "check": {
+      "mode": {
+        "label": "Mode d'envoi",
+        "fix": "Le moteur est en simulation. Mettez SMS_MODE=live pour envoyer réellement."
+      },
+      "live_confirmed": {
+        "label": "Confirmation du mode réel",
+        "fix": "SMS_MODE=live ne suffit pas : ajoutez SMS_LIVE_CONFIRMED=true. Deux drapeaux, pour qu'un déploiement qui hérite d'une variable ne se mette pas à écrire."
+      },
+      "kill_switch": {
+        "label": "Interrupteur d'arrêt",
+        "fix": "L'interrupteur est baissé : aucun message ne part, quel que soit le mode. Relevez-le dans les réglages SMS."
+      },
+      "twilio_credentials": {
+        "label": "Identifiants Twilio",
+        "fix": "TWILIO_ACCOUNT_SID et un jeton (TWILIO_AUTH_TOKEN ou TWILIO_API_KEY_SECRET) sont requis."
+      },
+      "webhook_signature": {
+        "label": "Signature des webhooks",
+        "fix": "Sans TWILIO_AUTH_TOKEN, un message entrant peut être forgé par n'importe qui."
+      },
+      "sms_number": {
+        "label": "Numéro expéditeur actif",
+        "fix": "Aucun numéro SMS actif : rien n'a d'où partir. Ajoutez-en un dans les réglages."
+      },
+      "messaging_service": {
+        "label": "Service de messagerie (A2P)",
+        "fix": "Des numéros actifs n'ont pas de Messaging Service : l'envoi fonctionne mais perd le regroupement A2P, ce qui fait classer un numéro comme indésirable."
+      },
+      "consent_policy": {
+        "label": "Validité des consentements",
+        "fix": ""
+      },
+      "consented_clients": {
+        "label": "Clients avec consentement SMS valide",
+        "fix": "Aucun consentement valide : une campagne n'inscrira personne. Vérifiez que le webhook de leads enregistre bien le registre."
+      },
+      "quiet_hours": {
+        "label": "Heures de politesse",
+        "fix": ""
+      },
+      "assistant_active": {
+        "label": "Assistant actif",
+        "fix": "Aucun assistant actif : personne ne répondra. Compilez-en un, faites passer la suite, puis activez-le."
+      },
+      "assistant_suite": {
+        "label": "Suite de garde-fous des assistants actifs",
+        "fix": "Un assistant actif a une suite rouge : il a été activé en contournant l'exigence. Relancez sa suite."
+      },
+      "campaign_active": {
+        "label": "Campagne active",
+        "fix": "Aucune campagne active : personne ne sera inscrit. Ce n'est pas bloquant si vous écrivez à la main."
+      },
+      "dispatcher": {
+        "label": "Répartiteur",
+        "fix": "Le répartiteur n'a pas battu depuis plus de 15 minutes : les messages s'accumulent en file sans partir. Vérifiez le cron n8n vers /api/cron/dispatch."
+      },
+      "llm_provider": {
+        "label": "Fournisseur de modèle",
+        "fix": "Aucune clé de modèle configurée : l'assistant ne peut rien rédiger."
+      }
+    }
   }
 }

@@ -27,7 +27,8 @@
     "groupAi": "Intelligence artificielle",
     "groupData": "Données et accès",
     "groupInsights": "Suivi et activité",
-    "groupSystem": "Système"
+    "groupSystem": "Système",
+    "goLive": "Mise en service"
   },
   "actions": {
     "save": "Enregistrer",

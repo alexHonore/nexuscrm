@@ -56,6 +56,15 @@ export const smsSettingsSchema = z.object({
    * « 6m » = fenêtre LCAP du consentement implicite après demande.
    */
   consentValidity: z.enum(CONSENT_VALIDITIES).default(DEFAULT_CONSENT_VALIDITY),
+  /**
+   * Battement du répartiteur — ISO, écrit à chaque cycle.
+   *
+   * C'est le SEUL signal fiable qu'il tourne encore : se fier au dernier job
+   * réclamé dirait « arrêté » chaque fois que la file est simplement vide, et
+   * un répartiteur arrêté est la panne la plus silencieuse du moteur (rien
+   * n'échoue, rien ne part).
+   */
+  lastDispatchAt: z.string().nullable().default(null),
 });
 export type SmsSettings = z.infer<typeof smsSettingsSchema>;
 

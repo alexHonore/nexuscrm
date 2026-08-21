@@ -370,5 +370,84 @@
       "city": "Area",
       "projectType": "Project"
     }
+  },
+  "goLive": {
+    "title": "Go live",
+    "subtitle": "What has to be true for a real SMS to reach a real number.",
+    "ready": {
+      "title": "Ready to send",
+      "body": "Every blocking condition is met. Messages will really go out."
+    },
+    "notReady": {
+      "title": "{count} blocker(s)",
+      "body": "While a blocker remains, nothing sends — whatever any other screen says."
+    },
+    "blockers": "Blockers",
+    "warnings": "Warnings",
+    "passed": "Verified",
+    "info": "For information",
+    "recheck": "Re-check",
+    "check": {
+      "mode": {
+        "label": "Send mode",
+        "fix": "The engine is in dry run. Set SMS_MODE=live to send for real."
+      },
+      "live_confirmed": {
+        "label": "Live mode confirmation",
+        "fix": "SMS_MODE=live is not enough: add SMS_LIVE_CONFIRMED=true. Two flags, so a deployment inheriting a variable does not start writing."
+      },
+      "kill_switch": {
+        "label": "Kill switch",
+        "fix": "The kill switch is down: nothing sends, whatever the mode. Lift it in the SMS settings."
+      },
+      "twilio_credentials": {
+        "label": "Twilio credentials",
+        "fix": "TWILIO_ACCOUNT_SID and a token (TWILIO_AUTH_TOKEN or TWILIO_API_KEY_SECRET) are required."
+      },
+      "webhook_signature": {
+        "label": "Webhook signature",
+        "fix": "Without TWILIO_AUTH_TOKEN, an inbound message can be forged by anyone."
+      },
+      "sms_number": {
+        "label": "Active sending number",
+        "fix": "No active SMS number: there is nowhere to send from. Add one in the settings."
+      },
+      "messaging_service": {
+        "label": "Messaging service (A2P)",
+        "fix": "Active numbers have no Messaging Service: sending works but loses A2P grouping, which is what gets a number flagged."
+      },
+      "consent_policy": {
+        "label": "Consent validity",
+        "fix": ""
+      },
+      "consented_clients": {
+        "label": "Clients with valid SMS consent",
+        "fix": "No valid consent: a campaign will enroll nobody. Check that the lead webhook records the ledger."
+      },
+      "quiet_hours": {
+        "label": "Quiet hours",
+        "fix": ""
+      },
+      "assistant_active": {
+        "label": "Active assistant",
+        "fix": "No active assistant: nobody will reply. Compile one, get the suite green, then activate it."
+      },
+      "assistant_suite": {
+        "label": "Guardrail suite of active assistants",
+        "fix": "An active assistant has a red suite: it was activated bypassing the requirement. Re-run its suite."
+      },
+      "campaign_active": {
+        "label": "Active campaign",
+        "fix": "No active campaign: nobody will be enrolled. Not blocking if you write by hand."
+      },
+      "dispatcher": {
+        "label": "Dispatcher",
+        "fix": "The dispatcher has not beaten for over 15 minutes: messages pile up in the queue without leaving. Check the n8n cron to /api/cron/dispatch."
+      },
+      "llm_provider": {
+        "label": "Model provider",
+        "fix": "No model key configured: the assistant cannot write anything."
+      }
+    }
   }
 }

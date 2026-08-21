@@ -27,7 +27,8 @@
     "groupAi": "Artificial intelligence",
     "groupData": "Data and access",
     "groupInsights": "Activity and reporting",
-    "groupSystem": "System"
+    "groupSystem": "System",
+    "goLive": "Go live"
   },
   "actions": {
     "save": "Save",

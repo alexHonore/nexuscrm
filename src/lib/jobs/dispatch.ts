@@ -1,4 +1,4 @@
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { agentTurnTraces, scheduledJobs } from "@/db/schema-sms";
 import { handleAgentTurn } from "./handlers/agent-turn";
@@ -82,6 +82,28 @@ async function pruneTraces(now: Date): Promise<void> {
   }
 }
 
+/**
+ * Battement du répartiteur.
+ *
+ * Écrit par `jsonb_set` sur la SEULE clé concernée, et non par une lecture
+ * suivie d'une écriture : un cycle par minute qui réécrirait tout l'objet
+ * pourrait ressusciter un interrupteur d'arrêt qu'un administrateur vient de
+ * relever. C'est le contrôle de sécurité le plus important du moteur ; il ne
+ * doit pas dépendre d'une course.
+ */
+async function recordHeartbeat(now: Date): Promise<void> {
+  try {
+    await db.execute(sql`
+      insert into settings (key, value)
+      values ('sms', jsonb_build_object('lastDispatchAt', ${now.toISOString()}::text))
+      on conflict (key) do update
+        set value = jsonb_set(settings.value, '{lastDispatchAt}', to_jsonb(${now.toISOString()}::text))
+    `);
+  } catch {
+    // Un battement manqué ne doit jamais empêcher un cycle de tourner.
+  }
+}
+
 export async function runDispatchCycle(
   opts: { limit?: number; now?: () => Date } = {},
 ): Promise<DispatchCounts> {
@@ -102,6 +124,7 @@ export async function runDispatchCycle(
     requeued: 0,
   };
 
+  await recordHeartbeat(now());
   counts.requeued = await requeueStaleJobs(undefined, now());
   await pruneTraces(now());
   // Les barreaux dus deviennent des jobs AVANT la réclamation : ils entrent

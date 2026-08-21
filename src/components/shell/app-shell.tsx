@@ -12,6 +12,7 @@ import {
   KeyRound,
   Megaphone,
   MessageCircle,
+  Rocket,
   LayoutDashboard,
   LogOut,
   Phone,
@@ -95,6 +96,7 @@ const ADMIN_GROUPS: NavGroup[] = [
       { href: "/admin/assistants", labelKey: "assistants", icon: Bot },
       { href: "/admin/campaigns", labelKey: "campaigns", icon: Megaphone },
       { href: "/admin/guardrails", labelKey: "guardrails", icon: ShieldAlert },
+      { href: "/admin/go-live", labelKey: "goLive", icon: Rocket },
     ],
   },
   {
