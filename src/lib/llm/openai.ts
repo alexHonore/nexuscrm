@@ -1,5 +1,6 @@
 import { DEFAULT_LLM_TIMEOUT_MS, asArray, asRecord, callJson, stringOr } from "./http";
 import { chatCompletion } from "./openai-compatible";
+import { reasoningBudgetTokens } from "./reasoning";
 import type { GenerateInput, LLMProvider, LLMResult, ModelDescriptor } from "./types";
 
 /**
@@ -18,6 +19,17 @@ export interface OpenAiOptions {
   timeoutMs?: number;
 }
 
+/**
+ * Modèle de raisonnement OpenAI (séries o, gpt-5 et suivantes) : il REFUSE
+ * `max_tokens` (il veut `max_completion_tokens`) et toute température autre
+ * que la valeur par défaut, et c'est à lui seul que `reasoning_effort` s'adresse
+ * — l'envoyer à un modèle classique fait rejeter la requête. Les variantes
+ * « -chat » de gpt-5 sont des modèles classiques.
+ */
+export function isOpenAiReasoningModel(modelId: string): boolean {
+  return /^(o\d|gpt-[5-9])/.test(modelId) && !modelId.includes("-chat");
+}
+
 export function createOpenAiProvider(options: OpenAiOptions): LLMProvider {
   const baseUrl = (options.baseUrl ?? API_BASE).replace(/\/$/, "");
   const fetchFn = options.fetchFn ?? fetch;
@@ -28,12 +40,25 @@ export function createOpenAiProvider(options: OpenAiOptions): LLMProvider {
     id: "openai",
 
     async generate(input: GenerateInput): Promise<LLMResult> {
+      const reasoning = isOpenAiReasoningModel(input.model);
+      const effort = input.reasoningEffort;
+      const extraBody = reasoning && effort ? { reasoning_effort: effort } : undefined;
       return chatCompletion(input, {
         url: `${baseUrl}/chat/completions`,
         headers,
         provider: "openai",
         fetchFn,
         timeoutMs,
+        bodyOptions: {
+          // Accepté par tous les modèles OpenAI, exigé par ceux qui raisonnent.
+          maxTokensField: "max_completion_tokens",
+          includeTemperature: !reasoning,
+          // Un modèle de raisonnement réfléchit même sans consigne (effort
+          // « medium » par défaut chez OpenAI) et le compte sur le même
+          // plafond : sans marge, 300 jetons rendent une réponse vide.
+          extraOutputTokens: reasoning ? reasoningBudgetTokens(effort ?? "medium") : 0,
+        },
+        ...(extraBody ? { extraBody } : {}),
       });
     },
 
@@ -53,7 +78,8 @@ export function createOpenAiProvider(options: OpenAiOptions): LLMProvider {
           id,
           label: id,
           contextTokens: DEFAULT_CONTEXT_TOKENS,
-          supportsTools: id.startsWith("gpt-") || id.startsWith("o"),
+          supportsTools: /^(gpt-|o\d)/.test(id),
+          supportsReasoning: isOpenAiReasoningModel(id),
         };
       });
     },

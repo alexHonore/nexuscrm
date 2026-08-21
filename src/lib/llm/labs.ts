@@ -11,6 +11,11 @@
  * chaque maison. Pas de fichier distant, pas de dépendance nouvelle, et aucune
  * imitation approximative d'un logo déposé : la reconnaissance vient de la
  * couleur et du nom, qui suffisent.
+ *
+ * Aucune phrase d'interface ici : la note d'un laboratoire (« ce qu'il vaut
+ * pour notre usage ») vit dans `messages/<locale>/assistants.json` sous
+ * `model.labNote.<noteKey>` — sinon un administrateur anglophone lisait des
+ * notes en français.
  */
 
 export interface LabBrand {
@@ -18,123 +23,45 @@ export interface LabBrand {
   name: string;
   /** Couleur de la maison — sert au fond de la tuile et à l'accent. */
   color: string;
-  /** Ce que ce laboratoire vaut pour NOTRE usage, en une phrase. */
-  noteFr: string;
+  /** Clé i18n de la note, sous `assistants.model.labNote.*`. */
+  noteKey: string;
   /** Glyphe géométrique, tracé dans une boîte 24×24. */
   glyph: "burst" | "orbit" | "quad" | "loop" | "bars" | "wave" | "cross" | "spark" | "hex";
 }
 
 /** Laboratoires reconnus, par préfixe d'identifiant OpenRouter. */
 export const LABS: Record<string, LabBrand> = {
-  anthropic: {
-    id: "anthropic",
-    name: "Anthropic",
-    color: "#CC785C",
-    noteFr: "Suit les consignes longues avec constance — le meilleur choix quand les garde-fous comptent.",
-    glyph: "burst",
-  },
-  openai: {
-    id: "openai",
-    name: "OpenAI",
-    color: "#10A37F",
-    noteFr: "Très large gamme, du plus économique au plus capable.",
-    glyph: "orbit",
-  },
-  google: {
-    id: "google",
-    name: "Google",
-    color: "#4285F4",
-    noteFr: "Rapide et peu coûteux — souvent le bon choix pour le classifieur.",
-    glyph: "quad",
-  },
-  "meta-llama": {
-    id: "meta-llama",
-    name: "Meta",
-    color: "#0866FF",
-    noteFr: "Modèles ouverts, hébergés par plusieurs fournisseurs.",
-    glyph: "loop",
-  },
-  mistralai: {
-    id: "mistralai",
-    name: "Mistral",
-    color: "#FA520F",
-    noteFr: "Maison française, bon en français — à essayer pour le ton québécois.",
-    glyph: "bars",
-  },
-  deepseek: {
-    id: "deepseek",
-    name: "DeepSeek",
-    color: "#4D6BFE",
-    noteFr: "Très bon rapport qualité-prix sur le raisonnement.",
-    glyph: "wave",
-  },
-  "x-ai": {
-    id: "x-ai",
-    name: "xAI",
-    color: "#111111",
-    noteFr: "Modèles Grok.",
-    glyph: "cross",
-  },
-  qwen: {
-    id: "qwen",
-    name: "Qwen",
-    color: "#615CED",
-    noteFr: "Gamme ouverte très fournie, souvent économique.",
-    glyph: "hex",
-  },
-  moonshotai: {
-    id: "moonshotai",
-    name: "Moonshot",
-    color: "#16B364",
-    noteFr: "Modèles Kimi, longues fenêtres de contexte.",
-    glyph: "spark",
-  },
-  "z-ai": { id: "z-ai", name: "Z.ai", color: "#3859FF", noteFr: "Modèles GLM.", glyph: "hex" },
-  amazon: { id: "amazon", name: "Amazon", color: "#FF9900", noteFr: "Modèles Nova.", glyph: "spark" },
-  nvidia: { id: "nvidia", name: "NVIDIA", color: "#76B900", noteFr: "Modèles Nemotron.", glyph: "quad" },
-  minimax: { id: "minimax", name: "MiniMax", color: "#FF4D4F", noteFr: "Modèles MiniMax.", glyph: "spark" },
+  anthropic: { id: "anthropic", name: "Anthropic", color: "#CC785C", noteKey: "anthropic", glyph: "burst" },
+  openai: { id: "openai", name: "OpenAI", color: "#10A37F", noteKey: "openai", glyph: "orbit" },
+  google: { id: "google", name: "Google", color: "#4285F4", noteKey: "google", glyph: "quad" },
+  "meta-llama": { id: "meta-llama", name: "Meta", color: "#0866FF", noteKey: "meta-llama", glyph: "loop" },
+  mistralai: { id: "mistralai", name: "Mistral", color: "#FA520F", noteKey: "mistralai", glyph: "bars" },
+  deepseek: { id: "deepseek", name: "DeepSeek", color: "#4D6BFE", noteKey: "deepseek", glyph: "wave" },
+  "x-ai": { id: "x-ai", name: "xAI", color: "#111111", noteKey: "x-ai", glyph: "cross" },
+  qwen: { id: "qwen", name: "Qwen", color: "#615CED", noteKey: "qwen", glyph: "hex" },
+  moonshotai: { id: "moonshotai", name: "Moonshot", color: "#16B364", noteKey: "moonshotai", glyph: "spark" },
+  "z-ai": { id: "z-ai", name: "Z.ai", color: "#3859FF", noteKey: "z-ai", glyph: "hex" },
+  amazon: { id: "amazon", name: "Amazon", color: "#FF9900", noteKey: "amazon", glyph: "spark" },
+  nvidia: { id: "nvidia", name: "NVIDIA", color: "#76B900", noteKey: "nvidia", glyph: "quad" },
+  minimax: { id: "minimax", name: "MiniMax", color: "#FF4D4F", noteKey: "minimax", glyph: "spark" },
   "bytedance-seed": {
     id: "bytedance-seed",
     name: "ByteDance",
     color: "#325AB4",
-    noteFr: "Modèles Seed.",
+    noteKey: "bytedance-seed",
     glyph: "hex",
   },
-  perplexity: {
-    id: "perplexity",
-    name: "Perplexity",
-    color: "#20808D",
-    noteFr: "Modèles Sonar, branchés sur une recherche web — inutile ici, et la latence s'en ressent.",
-    glyph: "orbit",
-  },
-  cohere: {
-    id: "cohere",
-    name: "Cohere",
-    color: "#39594D",
-    noteFr: "Modèles Command.",
-    glyph: "bars",
-  },
-  tencent: {
-    id: "tencent",
-    name: "Tencent",
-    color: "#0052D9",
-    noteFr: "Modèles Hunyuan.",
-    glyph: "loop",
-  },
+  perplexity: { id: "perplexity", name: "Perplexity", color: "#20808D", noteKey: "perplexity", glyph: "orbit" },
+  cohere: { id: "cohere", name: "Cohere", color: "#39594D", noteKey: "cohere", glyph: "bars" },
+  tencent: { id: "tencent", name: "Tencent", color: "#0052D9", noteKey: "tencent", glyph: "loop" },
   nousresearch: {
     id: "nousresearch",
     name: "Nous Research",
     color: "#8B5CF6",
-    noteFr: "Modèles Hermes, réglages ouverts.",
+    noteKey: "nousresearch",
     glyph: "spark",
   },
-  openrouter: {
-    id: "openrouter",
-    name: "OpenRouter",
-    color: "#6467F2",
-    noteFr: "Routeurs automatiques — le modèle réel change d'un appel à l'autre, à éviter pour un assistant réglé.",
-    glyph: "cross",
-  },
+  openrouter: { id: "openrouter", name: "OpenRouter", color: "#6467F2", noteKey: "openrouter", glyph: "cross" },
 };
 
 /**
@@ -157,7 +84,7 @@ export const UNKNOWN_LAB: LabBrand = {
   id: "autre",
   name: "Autre",
   color: "#64748B",
-  noteFr: "Laboratoire non répertorié.",
+  noteKey: "autre",
   glyph: "hex",
 };
 

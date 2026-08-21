@@ -6,12 +6,15 @@ import {
   parseToolArguments,
   stringOr,
 } from "./http";
-import type { GenerateInput, LLMResult, ToolCall, ToolDef } from "./types";
+import { finishFields } from "./reasoning";
+import type { FinishReason, GenerateInput, LLMResult, ToolCall, ToolDef } from "./types";
 
 /**
  * Corps commun OpenAI / OpenRouter : même forme de requête (`chat/completions`)
  * et de réponse (`choices[].message`). OpenRouter y ajoute son objet `provider`
- * et deux en-têtes ; c'est la seule divergence, passée en paramètre.
+ * et deux en-têtes ; OpenAI nomme autrement son plafond et refuse la
+ * température sur ses modèles de raisonnement. Ces divergences passent en
+ * options — le reste est partagé.
  */
 
 export function toOpenAiTools(tools: ToolDef[] | undefined) {
@@ -53,17 +56,56 @@ function toOpenAiMessage(message: GenerateInput["messages"][number]): Record<str
   return { role: message.role, content: message.content };
 }
 
-export function buildChatBody(input: GenerateInput): Record<string, unknown> {
+export interface ChatBodyOptions {
+  /**
+   * Nom du plafond de sortie : `max_completion_tokens` chez OpenAI (le seul
+   * que ses modèles de raisonnement acceptent), `max_tokens` chez OpenRouter.
+   */
+  maxTokensField?: "max_tokens" | "max_completion_tokens";
+  /**
+   * Faux pour un modèle de raisonnement OpenAI : toute température autre que
+   * la valeur par défaut fait rejeter la requête entière.
+   */
+  includeTemperature?: boolean;
+  /** Marge ajoutée au plafond pour la réflexion (voir reasoning.ts). */
+  extraOutputTokens?: number;
+}
+
+export function buildChatBody(
+  input: GenerateInput,
+  options: ChatBodyOptions = {},
+): Record<string, unknown> {
+  const maxTokensField = options.maxTokensField ?? "max_tokens";
   return {
     model: input.model,
-    max_tokens: input.maxTokens,
-    temperature: input.temperature,
+    [maxTokensField]: input.maxTokens + (options.extraOutputTokens ?? 0),
+    ...(options.includeTemperature === false ? {} : { temperature: input.temperature }),
     messages: [
       { role: "system", content: input.system },
       ...input.messages.map(toOpenAiMessage),
     ],
     tools: toOpenAiTools(input.tools),
   };
+}
+
+/** `finish_reason` OpenAI / OpenRouter → vocabulaire commun. */
+function chatFinishReason(raw: unknown): FinishReason | undefined {
+  switch (raw) {
+    case "stop":
+      return "stop";
+    case "length":
+      return "length";
+    case "tool_calls":
+    case "function_call":
+      return "tool_calls";
+    case "content_filter":
+      return "content_filter";
+    case undefined:
+    case null:
+      return undefined;
+    default:
+      return "other";
+  }
 }
 
 export function parseChatResponse(json: unknown, requestedModel: string, latencyMs: number): LLMResult {
@@ -103,6 +145,7 @@ export function parseChatResponse(json: unknown, requestedModel: string, latency
     latencyMs,
     modelServed: stringOr(root.model, requestedModel),
     ...(typeof root.provider === "string" ? { upstreamProvider: root.provider } : {}),
+    ...finishFields(chatFinishReason(choice.finish_reason)),
     raw: json,
   };
 }
@@ -113,6 +156,7 @@ export interface ChatCallOptions {
   provider: "openrouter" | "openai";
   fetchFn: typeof fetch;
   timeoutMs: number;
+  bodyOptions?: ChatBodyOptions;
   extraBody?: Record<string, unknown>;
 }
 
@@ -123,7 +167,7 @@ export async function chatCompletion(
   const { json, latencyMs } = await callJson({
     url: options.url,
     headers: options.headers,
-    body: { ...buildChatBody(input), ...(options.extraBody ?? {}) },
+    body: { ...buildChatBody(input, options.bodyOptions), ...(options.extraBody ?? {}) },
     provider: options.provider,
     fetchFn: options.fetchFn,
     timeoutMs: options.timeoutMs,
