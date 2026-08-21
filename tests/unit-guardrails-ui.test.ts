@@ -26,6 +26,7 @@ const RULES = [
     label: "Aucune valeur ni prix de propriété",
     description: "Aucun montant, évaluation ou fourchette de prix.",
     kind: "forbidden_regex",
+    config: { patterns: ["\\d[\\d\\s]{2,}\\s?\\$"], flags: "iu" },
     severity: "block",
     enabled: true,
     modifiedFromDefault: false,
@@ -39,6 +40,7 @@ const RULES = [
     label: "Aucun terme de commission",
     description: null,
     kind: "forbidden_terms",
+    config: { terms: ["commission"] },
     severity: "warn",
     enabled: false,
     // Une valeur par défaut qui a divergé doit se voir d'un coup d'œil.

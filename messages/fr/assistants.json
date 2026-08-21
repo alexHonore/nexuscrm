@@ -61,7 +61,51 @@
     "emptyFixtures": "Aucune fixture — exécutez le seed",
     "emptyCore": "Aucun noyau de prompt — exécutez le seed",
     "saved": "Enregistré",
-    "genericError": "Une erreur est survenue"
+    "genericError": "Une erreur est survenue",
+    "help": "Aide",
+    "helpWhen": "Quand l'utiliser",
+    "helpConfig": "À remplir",
+    "helpPasses": "Passe",
+    "helpCaught": "Attrapé",
+    "helpPitfall": "Attention",
+    "helpCost": "Coûte un appel au modèle à chaque brouillon.",
+    "newRule": "Nouvelle règle",
+    "editRule": "Modifier la règle",
+    "addRule": "Ajouter une règle",
+    "deleteRule": "Supprimer",
+    "ruleDialogHint": "Le type décide de ce qui est analysé ; la sévérité décide de ce qui arrive quand la règle échoue.",
+    "keyImmutable": "La clé ne change pas : elle identifie la règle dans les traces et les surcharges.",
+    "kindImmutable": "Le type ne change pas après création — la forme de la configuration en dépend.",
+    "promptText": "Texte injecté dans le prompt",
+    "promptTextPlaceholder": "Ce que l'assistant doit lire dans son prompt (facultatif)",
+    "promptTextHint": "Ajouté à la couche de garde-fous du prompt compilé. Vide = règle purement d'exécution.",
+    "save": "Enregistrer",
+    "deleteConfirm": {
+      "title": "Supprimer « {label} » ?",
+      "body": "Cette règle ne sera plus appliquée. « Tout réinitialiser » la recréera si elle venait de la semence — une règle écrite à la main, non.",
+      "confirm": "Supprimer"
+    },
+    "deleted": "Règle supprimée",
+    "config": {
+      "terms": "Termes interdits",
+      "termsPlaceholder": "commission\nrabais\ngarantie",
+      "onePerLine": "Un par ligne.",
+      "patterns": "Motifs (expressions régulières)",
+      "flags": "Drapeaux",
+      "max": "Maximum",
+      "allowedDomains": "Domaines autorisés",
+      "emptyMeansNoLinks": "Liste vide = aucun lien permis.",
+      "intent": "Intention",
+      "tool": "Outil attendu",
+      "criterion": "Critère",
+      "criterionPlaceholder": "La réponse n'affirme aucun fait qui ne soit pas dans les faits autorisés.",
+      "nothingToConfigure": "Rien à configurer : cette règle ajoute seulement son texte au prompt."
+    },
+    "errors": {
+      "keyTaken": "Cette clé existe déjà.",
+      "invalidConfig": "La configuration est invalide pour ce type de règle.",
+      "customCannotBlock": "Une « consigne de prompt » n'analyse rien : marquée bloquante, elle s'affiche comme un garde-fou dur alors qu'elle ne peut rien refuser. Pour garantir le comportement, utilisez « Jugement par le modèle »."
+    }
   },
   "list": {
     "title": "Assistants IA",

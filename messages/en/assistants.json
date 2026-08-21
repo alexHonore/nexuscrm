@@ -61,7 +61,51 @@
     "emptyFixtures": "No fixtures — run the seed",
     "emptyCore": "No prompt core — run the seed",
     "saved": "Saved",
-    "genericError": "Something went wrong"
+    "genericError": "Something went wrong",
+    "help": "Help",
+    "helpWhen": "When to use it",
+    "helpConfig": "What to fill in",
+    "helpPasses": "Passes",
+    "helpCaught": "Caught",
+    "helpPitfall": "Watch out",
+    "helpCost": "Costs one model call per draft.",
+    "newRule": "New rule",
+    "editRule": "Edit rule",
+    "addRule": "Add a rule",
+    "deleteRule": "Delete",
+    "ruleDialogHint": "The kind decides what is analysed; the severity decides what happens when the rule fails.",
+    "keyImmutable": "The key does not change: it identifies the rule in traces and overrides.",
+    "kindImmutable": "The kind cannot change after creation — the config shape depends on it.",
+    "promptText": "Text injected into the prompt",
+    "promptTextPlaceholder": "What the assistant should read in its prompt (optional)",
+    "promptTextHint": "Added to the guardrail layer of the compiled prompt. Empty = runtime-only rule.",
+    "save": "Save",
+    "deleteConfirm": {
+      "title": "Delete “{label}”?",
+      "body": "This rule will no longer apply. “Reset all” will recreate it if it came from the seed — a hand-written rule, no.",
+      "confirm": "Delete"
+    },
+    "deleted": "Rule deleted",
+    "config": {
+      "terms": "Forbidden terms",
+      "termsPlaceholder": "commission\ndiscount\nguarantee",
+      "onePerLine": "One per line.",
+      "patterns": "Patterns (regular expressions)",
+      "flags": "Flags",
+      "max": "Maximum",
+      "allowedDomains": "Allowed domains",
+      "emptyMeansNoLinks": "Empty list = no links allowed.",
+      "intent": "Intent",
+      "tool": "Expected tool",
+      "criterion": "Criterion",
+      "criterionPlaceholder": "The reply states no fact that is not in the allowed claims.",
+      "nothingToConfigure": "Nothing to configure: this rule only adds its text to the prompt."
+    },
+    "errors": {
+      "keyTaken": "That key already exists.",
+      "invalidConfig": "The configuration is invalid for this kind of rule.",
+      "customCannotBlock": "A “prompt instruction” analyses nothing: marked blocking, it shows as a hard guardrail while it can refuse nothing. To guarantee behaviour, use “Model judgement”."
+    }
   },
   "list": {
     "title": "AI assistants",

@@ -1,6 +1,6 @@
 "use client";
 
-import { FlaskConical, ListChecks, Loader2, RotateCcw, ScrollText } from "lucide-react";
+import { FlaskConical, ListChecks, Loader2, Pencil, Plus, RotateCcw, ScrollText, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -37,6 +37,12 @@ import {
 } from "@/components/ui/table";
 import { GUARDRAIL_SEVERITIES, type GuardrailKind, type GuardrailSeverity } from "@/lib/guardrails/types";
 import { api } from "./api";
+import {
+  GuardrailRuleDialog,
+  KindHelp,
+  emptyRule,
+  type EditableRule,
+} from "./guardrail-rule-dialog";
 
 // ── DTO — sérialisés depuis src/app/(app)/admin/guardrails/page.tsx ──────────
 
@@ -44,7 +50,12 @@ export type GuardrailRuleDto = {
   id: string;
   key: string;
   label: string;
+  /** Nécessaires au dialogue d'édition : sans eux il s'ouvrirait vide et une
+   *  sauvegarde effacerait la configuration existante. */
+  description: string | null;
   kind: GuardrailKind;
+  config: unknown;
+  promptText: string | null;
   severity: GuardrailSeverity;
   enabled: boolean;
   modifiedFromDefault: boolean;
@@ -245,10 +256,91 @@ function RuleResetButton({ rule }: { rule: GuardrailRuleDto }) {
   );
 }
 
+/** Ouvre le dialogue d'édition prérempli avec la règle. */
+function RuleEditButton({ rule, onEdit }: { rule: GuardrailRuleDto; onEdit: (r: EditableRule) => void }) {
+  const t = useTranslations("assistants");
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="min-h-11 md:min-h-8"
+      onClick={() =>
+        onEdit({
+          id: rule.id,
+          key: rule.key,
+          label: rule.label,
+          description: rule.description,
+          kind: rule.kind,
+          config: rule.config,
+          promptText: rule.promptText,
+          severity: rule.severity,
+          enabled: rule.enabled,
+        })
+      }
+    >
+      <Pencil className="size-3.5" />
+      {t("guardrails.editRule")}
+    </Button>
+  );
+}
+
+function RuleDeleteButton({ rule }: { rule: GuardrailRuleDto }) {
+  const t = useTranslations("assistants");
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+
+  const confirm = async () => {
+    setPending(true);
+    try {
+      await api(`/api/admin/guardrails/rules/${rule.id}`, { method: "DELETE" });
+      toast.success(t("guardrails.deleted"));
+      setOpen(false);
+      router.refresh();
+    } catch {
+      toast.error(t("guardrails.genericError"));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogTrigger
+        render={<Button variant="ghost" size="sm" className="min-h-11 text-destructive md:min-h-8" />}
+      >
+        <Trash2 className="size-3.5" />
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {t("guardrails.deleteConfirm.title", { label: rule.label })}
+          </AlertDialogTitle>
+          <AlertDialogDescription>{t("guardrails.deleteConfirm.body")}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={pending} className="min-h-11 md:min-h-8">
+            {t("guardrails.reset.cancel")}
+          </AlertDialogCancel>
+          <AlertDialogAction
+            disabled={pending}
+            onClick={() => void confirm()}
+            className="min-h-11 md:min-h-8"
+          >
+            {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+            {t("guardrails.deleteConfirm.confirm")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 // ── Section : règles globales ────────────────────────────────────────────────
 
 function RulesCard({ rules }: { rules: GuardrailRuleDto[] }) {
   const t = useTranslations("assistants");
+  const [editing, setEditing] = useState<EditableRule | null>(null);
 
   return (
     <Card className="shadow-xs">
@@ -262,6 +354,17 @@ function RulesCard({ rules }: { rules: GuardrailRuleDto[] }) {
             <CardDescription>{t("guardrails.sections.rules.desc")}</CardDescription>
           </div>
         </div>
+        <CardAction>
+          <Button
+            variant="outline"
+            size="sm"
+            className="min-h-11 md:min-h-8"
+            onClick={() => setEditing(emptyRule())}
+          >
+            <Plus />
+            {t("guardrails.addRule")}
+          </Button>
+        </CardAction>
       </CardHeader>
       <CardContent className="p-0">
         {rules.length === 0 ? (
@@ -292,7 +395,10 @@ function RulesCard({ rules }: { rules: GuardrailRuleDto[] }) {
                       </TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">{r.key}</TableCell>
                       <TableCell>
-                        <KindBadge kind={r.kind} />
+                        <span className="flex items-center gap-0.5">
+                          <KindBadge kind={r.kind} />
+                          <KindHelp kind={r.kind} />
+                        </span>
                       </TableCell>
                       <TableCell>
                         <RuleEnabledSwitch rule={r} />
@@ -301,7 +407,11 @@ function RulesCard({ rules }: { rules: GuardrailRuleDto[] }) {
                         <RuleSeveritySelect rule={r} />
                       </TableCell>
                       <TableCell className="text-right">
-                        <RuleResetButton rule={r} />
+                        <span className="flex items-center justify-end">
+                          <RuleEditButton rule={r} onEdit={setEditing} />
+                          <RuleResetButton rule={r} />
+                          <RuleDeleteButton rule={r} />
+                        </span>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -332,8 +442,11 @@ function RulesCard({ rules }: { rules: GuardrailRuleDto[] }) {
                     </label>
                     <RuleSeveritySelect rule={r} />
                   </div>
-                  <div className="mt-2 flex justify-end">
+                  <div className="mt-2 flex flex-wrap items-center justify-end gap-1">
+                    <KindHelp kind={r.kind} />
+                    <RuleEditButton rule={r} onEdit={setEditing} />
                     <RuleResetButton rule={r} />
+                    <RuleDeleteButton rule={r} />
                   </div>
                 </div>
               ))}
@@ -341,6 +454,16 @@ function RulesCard({ rules }: { rules: GuardrailRuleDto[] }) {
           </>
         )}
       </CardContent>
+
+      {editing ? (
+        <GuardrailRuleDialog
+          rule={editing}
+          open
+          onOpenChange={(open) => {
+            if (!open) setEditing(null);
+          }}
+        />
+      ) : null}
     </Card>
   );
 }
