@@ -16,6 +16,7 @@ import { classifyInbound } from "./classify";
 import { applyRefusal, requiredFieldsFor, resolveRung } from "./goal";
 import { renderTemplate } from "./render";
 import { DEFAULT_TURN_INSTRUCTIONS } from "./templates";
+import { isTerminalTool, simulatedToolResults } from "./tool-simulation";
 import { toolDefsFor } from "./tools";
 
 /**
@@ -85,39 +86,6 @@ export interface SandboxTurnResult {
   softRefusals: number;
   qualification: Record<string, unknown>;
   error: string | null;
-}
-
-/**
- * Réponses d'outils pour l'aperçu.
- *
- * Volontairement NEUTRES : on ne dit pas au modèle qu'il est dans un bac à
- * sable. Une première version annonçait « exemples non réservables » et le
- * modèle rappelait l'outil en boucle au lieu de rédiger — un comportement que
- * la production n'aurait jamais eu. L'avertissement « ce n'est pas réel »
- * s'adresse à l'humain, à l'écran, pas au modèle dans son contexte.
- */
-function simulatedToolResults(calls: { name: string }[], done: Set<string>): string {
-  const lines = calls.map((call) => {
-    // MÊME garde qu'en production : un outil ne s'exécute qu'une fois par tour,
-    // et le modèle l'apprend. Sans ce retour, il rappelle le même outil au
-    // second aller-retour et ne rédige jamais — trois tours sur cinq
-    // ressortaient vides avant cette ligne.
-    if (done.has(call.name)) return `${call.name} : déjà exécuté à ce tour`;
-    done.add(call.name);
-    switch (call.name) {
-      case "get_slots":
-        return `${call.name} : jeudi 14 h, vendredi 10 h`;
-      case "book_meeting":
-        return `${call.name} : confirmé`;
-      case "update_qualification":
-        return `${call.name} : enregistré`;
-      case "schedule_followup":
-        return `${call.name} : relance programmée`;
-      default:
-        return `${call.name} : ok`;
-    }
-  });
-  return lines.join("\n") || "(aucun résultat)";
 }
 
 export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurnResult> {
@@ -249,7 +217,7 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
     toolCalls.push(...out.toolCalls.map((c) => ({ name: c.name, args: c.arguments })));
     // « stop » et « handoff » terminent le tour en production : rappeler le
     // modèle après coup ne changerait rien et ferait un appel de plus.
-    if (out.toolCalls.some((c) => c.name === "stop" || c.name === "handoff")) break;
+    if (out.toolCalls.some((c) => isTerminalTool(c.name))) break;
     if (out.toolCalls.length === 0 || round === 1) break;
 
     // Résultats SIMULÉS : aucun outil n'est exécuté. On répond au modèle de

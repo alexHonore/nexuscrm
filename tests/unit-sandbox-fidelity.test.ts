@@ -12,6 +12,12 @@ import { join } from "path";
 import { describe, expect, it } from "vitest";
 
 const source = readFileSync(join(process.cwd(), "src", "lib", "agent", "sandbox.ts"), "utf8");
+/** Simulation d'outils PARTAGÉE par le bac à sable et la suite. */
+const shared = readFileSync(
+  join(process.cwd(), "src", "lib", "agent", "tool-simulation.ts"),
+  "utf8",
+);
+const runner = readFileSync(join(process.cwd(), "src", "lib", "guardrails", "runner.ts"), "utf8");
 
 describe("fidélité du bac à sable", () => {
   it("offre les outils de l'assistant au modèle", () => {
@@ -79,19 +85,16 @@ describe("fidélité du bac à sable", () => {
   it("dédoublonne les outils dans un tour et le DIT au modèle", () => {
     // Sans ce retour, le modèle rappelle le même outil au second aller-retour
     // et ne rédige jamais. Production fait exactement pareil.
-    expect(source).toContain("déjà exécuté à ce tour");
+    expect(shared).toContain("déjà exécuté à ce tour");
     expect(source).toContain("sideEffectsDone");
   });
 
-  it("ne dit PAS au modèle qu'il est dans un bac à sable", () => {
-    // Une première version annonçait « exemples non réservables » dans le
-    // contexte : le modèle rappelait l'outil en boucle, un comportement que la
-    // production n'a jamais. L'avertissement s'adresse à l'humain, à l'écran.
-    const results = source.slice(
-      source.indexOf("function simulatedToolResults"),
-      source.indexOf("export async function simulateTurn"),
-    );
-    expect(results).not.toMatch(/bac à sable|simulé|non réservable/i);
+  it("la simulation d'outils est PARTAGÉE avec la suite de garde-fous", () => {
+    // Deux copies dériveraient, et un assistant vert à la suite se
+    // comporterait autrement à l'essai — un écart invisible jusqu'à ce que
+    // quelqu'un compare les deux à la main.
+    expect(source).toContain('from "./tool-simulation"');
+    expect(runner).toContain("@/lib/agent/tool-simulation");
   });
 
   it("nomme ce que la PRODUCTION ferait du tour", () => {
@@ -102,7 +105,8 @@ describe("fidélité du bac à sable", () => {
   });
 
   it("un outil terminal arrête le tour", () => {
-    expect(source).toContain('c.name === "stop" || c.name === "handoff"');
+    expect(source).toContain("isTerminalTool(c.name)");
+    expect(shared).toContain('name === "stop" || name === "handoff"');
   });
 
   it("n'exécute AUCUN outil : il les rapporte", () => {

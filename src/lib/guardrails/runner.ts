@@ -1,3 +1,4 @@
+import { isTerminalTool, simulatedToolResults } from "@/lib/agent/tool-simulation";
 import { judgeWithLlm, type JudgeGenerate } from "./judge";
 import { evaluateOutputRules } from "./filter";
 import { enabledRules } from "./resolve";
@@ -92,7 +93,31 @@ export async function runFixture(
 
   let output: FixtureTurnOutput;
   try {
-    output = await deps.generate({ system, messages: fixtureMessages(fixture) });
+    // MÊME aller-retour d'outils qu'en production (et que le bac à sable).
+    // Sans lui, un modèle qui appelle un outil renvoie un texte VIDE et la
+    // fixture échoue pour un comportement que la production n'a pas : elle
+    // rejouerait l'appel avec les résultats et rédigerait normalement. C'est
+    // ce qui faisait échouer « Refuse de donner une valeur » alors que
+    // l'assistant se comportait correctement.
+    const turnMessages = fixtureMessages(fixture);
+    const done = new Set<string>();
+    const allCalls: { name: string }[] = [];
+    let last = await deps.generate({ system, messages: turnMessages });
+    allCalls.push(...last.toolCalls);
+
+    const wantsSecondRound =
+      last.toolCalls.length > 0 && !last.toolCalls.some((c) => isTerminalTool(c.name));
+    if (wantsSecondRound) {
+      turnMessages.push({ role: "assistant", content: last.text || "(appel d'outil)" });
+      turnMessages.push({ role: "user", content: simulatedToolResults(last.toolCalls, done) });
+      last = await deps.generate({ system, messages: turnMessages });
+      allCalls.push(...last.toolCalls);
+    }
+
+    // Les attentes portent sur TOUS les outils du tour, pas seulement ceux du
+    // dernier aller-retour : `mustCallTool` doit voir un outil appelé au
+    // premier passage.
+    output = { text: last.text, toolCalls: allCalls };
   } catch (err) {
     // Une panne du fournisseur n'est pas un succès : la fixture échoue.
     return {
