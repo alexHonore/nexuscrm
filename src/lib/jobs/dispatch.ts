@@ -104,10 +104,21 @@ async function recordHeartbeat(now: Date): Promise<void> {
   }
 }
 
+/**
+ * Budget de temps d'un cycle. La fonction Vercel meurt à 300 s ; cinquante
+ * tours d'agent avec un modèle lent dépassent ça et laissaient des jobs
+ * « running » jusqu'au requeue des dix minutes. On réclame par petits lots et
+ * on s'arrête AVANT la limite — le cron de la minute suivante continue.
+ */
+const CYCLE_BUDGET_MS = Number(process.env.DISPATCH_BUDGET_MS ?? 240_000);
+const CLAIM_BATCH = 10;
+
 export async function runDispatchCycle(
   opts: { limit?: number; now?: () => Date } = {},
 ): Promise<DispatchCounts> {
   const now = opts.now ?? (() => new Date());
+  const startedAt = Date.now();
+  const overBudget = () => Date.now() - startedAt > CYCLE_BUDGET_MS;
   // The registry binds the cycle's clock so handlers stay injectable.
   const registry: Record<string, JobHandler> = {
     send_sms: (job) => handleSendSms(job, now),
@@ -124,7 +135,6 @@ export async function runDispatchCycle(
     requeued: 0,
   };
 
-  await recordHeartbeat(now());
   counts.requeued = await requeueStaleJobs(undefined, now());
   await pruneTraces(now());
   // Les barreaux dus deviennent des jobs AVANT la réclamation : ils entrent
@@ -134,10 +144,26 @@ export async function runDispatchCycle(
   await sweepDueCampaigns(now()).catch(() => []);
   await queueDueTouches(200, now()).catch(() => 0);
 
-  const jobs = await claimDueJobs(opts.limit ?? 50, now());
+  const limit = opts.limit ?? 50;
+  const jobs: ScheduledJob[] = [];
+  // Réclamer par lots : un lot réclamé est un lot qu'on TRAITERA dans le
+  // budget ; réclamer cinquante jobs d'un coup puis mourir à mi-chemin les
+  // laissait « running » dix minutes.
+  while (jobs.length < limit && !overBudget()) {
+    const batch = await claimDueJobs(Math.min(CLAIM_BATCH, limit - jobs.length), now());
+    if (batch.length === 0) break;
+    jobs.push(...batch);
+    for (const job of batch) await runOne(job);
+    if (batch.length < CLAIM_BATCH) break;
+  }
   counts.claimed = jobs.length;
+  // Le battement est écrit APRÈS le travail : un cycle qui plante à la
+  // réclamation (base injoignable) ne doit pas afficher « répartiteur en
+  // forme » sur la page de mise en service.
+  await recordHeartbeat(now());
+  return counts;
 
-  for (const job of jobs) {
+  async function runOne(job: ScheduledJob): Promise<void> {
     const startedMs = Date.now();
     const handler = registry[job.type];
     if (handler === undefined) {
@@ -145,7 +171,7 @@ export async function runDispatchCycle(
       await failPermanently(job.id, `unknown_job_type: ${job.type}`);
       counts.failed += 1;
       logExecuted(job, "failed_permanent", Date.now() - startedMs);
-      continue;
+      return;
     }
 
     let outcomeLabel: string;
@@ -179,6 +205,4 @@ export async function runDispatchCycle(
     }
     logExecuted(job, outcomeLabel, Date.now() - startedMs);
   }
-
-  return counts;
 }

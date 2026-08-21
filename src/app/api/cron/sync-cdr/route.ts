@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { shiftDateStr, todayStr } from "@/components/analytics/period";
 import { logAudit } from "@/lib/audit";
 import { syncCdrRange } from "@/lib/cdr-sync";
+import { isCronAuthorized } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 // L'API voip.ms peut mettre plus de 90 s à répondre — laisser de la marge.
@@ -14,9 +15,7 @@ export const maxDuration = 300;
  * la demande : POST /api/admin/calls/sync).
  */
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  const header = req.headers.get("authorization");
-  if (!secret || header !== `Bearer ${secret}`) {
+  if (!isCronAuthorized(req.headers.get("authorization"), process.env.CRON_SECRET)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 

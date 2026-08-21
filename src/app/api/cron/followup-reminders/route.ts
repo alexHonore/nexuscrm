@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { db } from "@/db";
 import { followups, notifications } from "@/db/schema";
 import { notificationContent } from "@/components/clients/notification-content";
+import { isCronAuthorized } from "@/lib/cron-auth";
 
 /**
  * GET /api/cron/followup-reminders
@@ -13,9 +14,7 @@ import { notificationContent } from "@/components/clients/notification-content";
  * unless an UNREAD one with the same (userId, type, link) already exists.
  */
 export async function GET(request: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  const header = request.headers.get("authorization");
-  if (!secret || header !== `Bearer ${secret}`) {
+  if (!isCronAuthorized(request.headers.get("authorization"), process.env.CRON_SECRET)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 

@@ -27,6 +27,16 @@
     "missedCallKnownBody": "{name} — {number}",
     "missedCallUnknownBody": "{number}",
     "smsInboundTitle": "New text message",
-    "smsInboundBody": "You received a text message from {name}"
+    "smsInboundBody": "You received a text message from {name}",
+    "smsHandoffTitle": "Handed over to a human",
+    "smsHandoffBody": "{name}: the assistant is handing over to you ({reason}).",
+    "smsBlockedTitle": "Assistant reply blocked",
+    "smsBlockedBody": "{name}: a guardrail blocked the reply — the thread is waiting for a human.",
+    "smsErrorTitle": "Assistant failure",
+    "smsErrorBody": "{name}: the model did not answer ({reason}) — the thread is waiting for a human.",
+    "smsStoppedTitle": "Conversation stopped",
+    "smsStoppedBody": "{name}: the conversation was stopped ({reason}).",
+    "smsClosedTitle": "Conversation closed by the assistant",
+    "smsClosedBody": "{name}: {reason}."
   }
 }

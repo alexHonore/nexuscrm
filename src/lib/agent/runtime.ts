@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { formatInTimeZone } from "date-fns-tz";
 import { db } from "@/db";
-import { clients } from "@/db/schema";
+import { clients, followups, users } from "@/db/schema";
 import {
   agentEvents,
   agentTurnTraces,
@@ -21,10 +21,11 @@ import { judgeWithLlm } from "@/lib/guardrails/judge";
 import { enabledRules } from "@/lib/guardrails/resolve";
 import type { RuleData, RuleVerdict } from "@/lib/guardrails/types";
 import { enqueueJob } from "@/lib/jobs/queue";
-import { getLlmProvider } from "@/lib/llm-server";
+import { LlmUnconfiguredError, getLlmProvider } from "@/lib/llm-server";
 import type { LLMMessage } from "@/lib/llm/types";
 import type { LLMResult, ToolCall } from "@/lib/llm/types";
 import { suppressPhone } from "@/lib/sms-server";
+import { notifyHumans } from "@/lib/sms-server/notify";
 import { detectOptOut } from "@/lib/sms/optout";
 import { DEFAULT_QUIET_HOURS } from "@/lib/sms/quiet-hours";
 import { classifyInbound, type Classification } from "./classify";
@@ -96,6 +97,13 @@ export interface OutreachContext {
 
 export interface TurnOptions {
   outreach?: OutreachContext;
+  /**
+   * Dernière tentative de la file : une panne du modèle consomme alors les
+   * entrants et passe la main. Avant, on laisse les entrants NON traités pour
+   * que la reprise avec temporisation ait quelque chose à reprendre — sinon la
+   * reprise ne trouvait rien et la panne devenait définitive au premier essai.
+   */
+  finalAttempt?: boolean;
 }
 
 /**
@@ -171,6 +179,12 @@ interface ToolRunResult {
   terminated: "stop" | "handoff" | null;
   /** Vrai si une réservation a ÉCHOUÉ — le brouillon ne peut alors rien confirmer. */
   bookingFailed: boolean;
+  /** Une réservation a RÉUSSI : l'inscription de campagne devient « booked ». */
+  booked: boolean;
+  /** close_conversation : le fil se ferme avec ce résultat après l'envoi. */
+  closedOutcome: "goal_reached" | "disqualified" | "not_interested" | null;
+  /** transfer_assistant : le prochain tour est à cet assistant. */
+  transferTo: string | null;
 }
 
 /**
@@ -184,7 +198,9 @@ async function executeTools(input: {
   calls: ToolCall[];
   rung: Rung;
   clientId: string;
+  clientAssignedToId: string | null;
   conversationId: string;
+  currentAssistantId: string;
   qualification: Record<string, unknown>;
   effects: ToolEffect[];
   sideEffectsDone: Set<string>;
@@ -192,6 +208,9 @@ async function executeTools(input: {
   const perCall: { id: string; name: string; content: string }[] = [];
   let terminated: "stop" | "handoff" | null = null;
   let bookingFailed = false;
+  let booked = false;
+  let closedOutcome: ToolRunResult["closedOutcome"] = null;
+  let transferTo: string | null = null;
 
   for (const call of input.calls) {
     /** Consigne le résultat de CET appel, rattaché à son identifiant. */
@@ -248,7 +267,7 @@ async function executeTools(input: {
           bookingFailed = true;
           break;
         }
-        const booked = await getInternalBookingProvider().book({
+        const bookedResult = await getInternalBookingProvider().book({
           clientId: input.clientId,
           conversationId: input.conversationId,
           type: input.rung.goal.appointmentType,
@@ -256,11 +275,12 @@ async function executeTools(input: {
           ...(args.email ? { email: args.email } : {}),
         });
         input.sideEffectsDone.add(name);
-        if (booked.ok) {
+        if (bookedResult.ok) {
+          booked = true;
           record(`book_meeting : confirmé pour ${args.slotIso}`);
         } else {
           record(
-            `book_meeting : ÉCHEC (${booked.error}) — ne confirme RIEN, propose autre chose.`,
+            `book_meeting : ÉCHEC (${bookedResult.error}) — ne confirme RIEN, propose autre chose.`,
           );
           bookingFailed = true;
         }
@@ -277,9 +297,84 @@ async function executeTools(input: {
         terminated = "handoff";
         break;
 
+      // Les quatre outils ci-dessous étaient « pris en compte » sans rien
+      // faire : le modèle croyait avoir enregistré, planifié, transféré ou
+      // clos, et rien n'existait derrière. Ils agissent maintenant ; leur effet
+      // est validé au même moment que le message, dans la transaction du tour.
+      case "update_qualification": {
+        const { fields } = parsed.args as { fields: Record<string, string> };
+        const entries = Object.entries(fields).filter(([, v]) => typeof v === "string" && v.trim() !== "");
+        for (const [k, v] of entries) input.qualification[k] = v.trim();
+        record(
+          entries.length > 0
+            ? `update_qualification : enregistré (${entries.map(([k]) => k).join(", ")})`
+            : "update_qualification : rien à enregistrer",
+        );
+        break;
+      }
+      case "schedule_followup": {
+        const args = parsed.args as { whenIso: string; note?: string };
+        const when = new Date(args.whenIso);
+        if (Number.isNaN(when.getTime()) || when.getTime() < Date.now()) {
+          input.effects.push({ name, ok: false, detail: "invalid_when" });
+          record("schedule_followup : date invalide ou passée — demande une date précise à venir.");
+          continue;
+        }
+        // Un rappel a toujours un destinataire : l'assigné de la fiche, sinon
+        // un administrateur — un rappel que personne ne voit n'en est pas un.
+        let assigneeId = input.clientAssignedToId;
+        if (!assigneeId) {
+          const admin = await db.query.users.findFirst({
+            where: and(eq(users.role, "admin"), eq(users.isActive, true)),
+            columns: { id: true },
+          });
+          assigneeId = admin?.id ?? null;
+        }
+        if (!assigneeId) {
+          input.effects.push({ name, ok: false, detail: "no_assignee" });
+          record("schedule_followup : aucun destinataire pour le rappel — propose un autre moyen.");
+          continue;
+        }
+        input.sideEffectsDone.add(name);
+        await db.insert(followups).values({
+          clientId: input.clientId,
+          assignedToId: assigneeId,
+          dueAt: when,
+          note: args.note ?? "Rappel demandé par SMS (assistant)",
+          createdById: null,
+        });
+        record(`schedule_followup : rappel posé pour ${args.whenIso}`);
+        break;
+      }
+      case "transfer_assistant": {
+        const args = parsed.args as { assistantId: string; reason?: string };
+        const target = await db.query.assistants.findFirst({
+          where: eq(assistants.id, args.assistantId),
+          columns: { id: true, status: true, compiledPrompt: true, name: true },
+        });
+        if (!target || target.status !== "active" || !target.compiledPrompt) {
+          input.effects.push({ name, ok: false, detail: "target_unavailable" });
+          record("transfer_assistant : assistant cible introuvable ou inactif — continue toi-même.");
+          continue;
+        }
+        if (target.id === input.currentAssistantId) {
+          record("transfer_assistant : c'est déjà toi — continue.");
+          break;
+        }
+        transferTo = target.id;
+        record(`transfer_assistant : le prochain tour sera pris par « ${target.name} ».`);
+        break;
+      }
+      case "close_conversation": {
+        const args = parsed.args as {
+          outcome: "goal_reached" | "disqualified" | "not_interested";
+          note?: string;
+        };
+        closedOutcome = args.outcome;
+        record(`close_conversation : fil clos (${args.outcome}) après ce message.`);
+        break;
+      }
       default:
-        // update_qualification, schedule_followup, transfer_assistant,
-        // close_conversation : notés ici, effets complets en phase 6.
         record(`${name} : pris en compte`);
         if (SIDE_EFFECT_TOOLS.has(name)) input.sideEffectsDone.add(name);
         break;
@@ -294,6 +389,9 @@ async function executeTools(input: {
     results: perCall,
     terminated,
     bookingFailed,
+    booked,
+    closedOutcome,
+    transferTo,
   };
 }
 
@@ -302,10 +400,13 @@ async function executeTools(input: {
 async function evaluateAllRules(
   draft: string,
   rules: RuleData[],
-  ctx: { toolCallNames: string[]; inbound: string; isFirstOutbound: boolean },
+  ctx: { toolCallNames: string[]; inbound: string; isFirstOutbound: boolean; intents: string[] },
   judge: (p: { system: string; user: string }) => Promise<string>,
 ): Promise<RuleVerdict[]> {
-  const verdicts = evaluateOutputRules(draft, rules, { toolCallNames: ctx.toolCallNames });
+  const verdicts = evaluateOutputRules(draft, rules, {
+    toolCallNames: ctx.toolCallNames,
+    intents: ctx.intents,
+  });
   // Une règle déterministe a déjà tranché : inutile de payer des appels juge
   // pour confirmer un refus. On économise la latence ET le coût.
   if (blockingFailures(verdicts).length > 0) return verdicts;
@@ -377,6 +478,12 @@ export async function runTurn(
   if (!assistantRow?.compiledPrompt) {
     return { outcome: "skipped_no_assistant", conversationId, reason: "assistant_not_compiled" };
   }
+  // Seul un assistant ACTIF parle. Un brouillon ou un assistant archivé qui
+  // reste « actif » sur d'anciens fils contournerait la porte d'activation —
+  // suite rouge, prompt périmé — exactement ce qu'elle empêche.
+  if (assistantRow.status !== "active") {
+    return { outcome: "skipped_no_assistant", conversationId, reason: "assistant_inactive" };
+  }
 
   const config = assistantRowToConfig(assistantRow);
   const client = await db.query.clients.findFirst({ where: eq(clients.id, conversation.clientId) });
@@ -391,24 +498,44 @@ export async function runTurn(
           .where(eq(messages.conversationId, conversationId))
       )[0]?.n ?? 0)
     : 0;
+  // Un MMS sans texte donne un corps vide ; Anthropic et Google refusent un
+  // message utilisateur vide et le tour partait en panne. On dit au modèle ce
+  // qui est arrivé plutôt que rien.
+  const joinedInbound = inbound.map((m) => m.body).join("\n").trim();
   const userTurn = proactive
     ? await outreachInstruction(outreach as OutreachContext, historyCount)
-    : inbound.map((m) => m.body).join("\n");
+    : joinedInbound === ""
+      ? "(message sans texte — pièce jointe ou MMS vide)"
+      : joinedInbound;
   const inboundBatch = inbound.map((m) => ({
     id: m.id,
     body: m.body,
     receivedAt: m.createdAt.toISOString(),
   }));
 
-  const generator = getLlmProvider(config.model.provider);
-  const classifierProvider = getLlmProvider(config.model.classifier.provider);
+  // Une clé manquante lançait AVANT tout filet : pas de trace, pas de pastille,
+  // entrants laissés en l'air. On la traite comme une panne de modèle, plus bas.
+  let providerInitError: string | null = null;
+  let generator: ReturnType<typeof getLlmProvider> | null = null;
+  let classifierProvider: ReturnType<typeof getLlmProvider> | null = null;
+  try {
+    generator = getLlmProvider(config.model.provider);
+    classifierProvider = getLlmProvider(config.model.classifier.provider);
+  } catch (err) {
+    providerInitError =
+      err instanceof LlmUnconfiguredError ? "llm_unconfigured" : err instanceof Error ? err.message : "llm_init_failed";
+  }
   const classifierCall = async ({ system, user }: { system: string; user: string }) => {
+    if (!classifierProvider) throw new Error(providerInitError ?? "llm_unconfigured");
     const out = await classifierProvider.generate({
       system,
       messages: [{ role: "user", content: user }],
       model: config.model.classifier.model,
       maxTokens: 300,
       temperature: 0,
+      // Mêmes exigences de confidentialité que le générateur : le classifieur
+      // et les juges lisent les mêmes messages du client.
+      routing: config.model.routing as unknown as Record<string, unknown>,
     });
     return out.text;
   };
@@ -436,7 +563,17 @@ export async function runTurn(
     send?: { body: string; delayMs: number };
     qualification?: Record<string, unknown>;
     reason?: string;
+    /**
+     * Faux = les entrants restent NON traités (panne passagère du modèle : la
+     * file réessaie avec temporisation et doit retrouver de quoi reprendre).
+     */
+    consume?: boolean;
+    /** Sort des inscriptions de campagne de ce fil (réservation, clôture). */
+    enrollmentOutcome?: { status: "booked" | "completed" | "stopped"; endReason: string };
+    /** Prévenir les humains, et pourquoi (texte lisible). */
+    alert?: { kind: "handoff" | "blocked" | "error" | "stopped" | "closed"; reason: string };
   }): Promise<TurnResult> => {
+    const consume = input.consume !== false;
     const traceId = await db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${conversationId}))`);
 
@@ -463,10 +600,29 @@ export async function runTurn(
       // On ne marque QUE les entrants que ce tour a réellement lus. Un message
       // arrivé pendant la réflexion n'a pas été vu par le modèle : le consommer
       // ici le ferait disparaître sans réponse.
-      await tx
-        .update(messages)
-        .set({ processedAt: now })
-        .where(and(eq(messages.conversationId, conversationId), inArray(messages.id, inboundIds)));
+      if (consume && inboundIds.length > 0) {
+        await tx
+          .update(messages)
+          .set({ processedAt: now })
+          .where(and(eq(messages.conversationId, conversationId), inArray(messages.id, inboundIds)));
+      }
+      if (input.enrollmentOutcome) {
+        await tx
+          .update(campaignEnrollments)
+          .set({
+            status: input.enrollmentOutcome.status,
+            endReason: input.enrollmentOutcome.endReason,
+            endedAt: now,
+            nextTouchAt: null,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(campaignEnrollments.conversationId, conversationId),
+              inArray(campaignEnrollments.status, ["pending", "active", "replied"]),
+            ),
+          );
+      }
 
       if (input.conversationPatch || input.qualification) {
         await tx
@@ -514,6 +670,17 @@ export async function runTurn(
       return trace.id;
     });
 
+    if (traceId !== null && input.alert) {
+      // Hors transaction : une notification qui échoue ne doit pas annuler le
+      // tour, et rien ne dépend d'elle.
+      await notifyHumans({
+        conversationId,
+        clientId: conversation.clientId,
+        kind: input.alert.kind,
+        reason: input.alert.reason,
+      }).catch(() => 0);
+    }
+
     if (traceId === null) {
       // Ouverture effacée par un entrant : on s'assure qu'un tour de RÉPONSE
       // existe. Le webhook en a normalement posé un ; la clé absorbe le doublon.
@@ -530,8 +697,10 @@ export async function runTurn(
 
     // Un message arrivé PENDANT le tour n'a pas été consommé : la clé de
     // dédoublonnage l'aurait absorbé dans le job en cours et il resterait sans
-    // réponse. On reprogramme donc explicitement.
-    if (input.outcome !== "stopped") {
+    // réponse. On reprogramme donc explicitement — sauf quand ce tour a LAISSÉ
+    // les entrants exprès (panne passagère) : c'est la reprise de la file qui
+    // les reprendra, un second job ferait deux réponses.
+    if (input.outcome !== "stopped" && consume) {
       const leftover = await db
         .select({ id: messages.id })
         .from(messages)
@@ -544,17 +713,41 @@ export async function runTurn(
         )
         .limit(1);
       if (leftover.length > 0) {
+        // Clé DISTINCTE de celle du webhook : `turn:<conv>` désigne encore le
+        // job EN COURS (le nôtre) et absorberait cette mise en file — le
+        // message arrivé pendant la réflexion n'aurait alors jamais de tour.
         await enqueueJob({
           type: "agent_turn",
           runAt: new Date(Date.now() + 5_000),
           payload: { conversationId },
-          dedupeKey: `turn:${conversationId}`,
+          dedupeKey: `turn:${conversationId}:next`,
         });
       }
     }
 
     return { outcome: input.outcome, conversationId, traceId, reason: input.reason };
   };
+
+  // Clé de modèle absente : même contrat qu'une panne du modèle, avant même de
+  // réfléchir. Tant qu'il reste des tentatives, les entrants restent à traiter.
+  if (providerInitError !== null || generator === null) {
+    const reason = providerInitError ?? "llm_unconfigured";
+    const final = options.finalAttempt === true;
+    return commit({
+      outcome: "error",
+      reason,
+      trace: { runtimeBlock: "", rawResponse: { error: reason } },
+      consume: final,
+      ...(final
+        ? {
+            conversationPatch: { needsAttention: true, attentionReason: "llm_error" },
+            alert: { kind: "error" as const, reason },
+          }
+        : {}),
+      events: [{ type: "llm_error", payload: { stage: "init", error: reason } }],
+    });
+  }
+  const generatorProvider = generator;
 
   // ═══ 2. RÉFLEXION (hors transaction, hors verrou) ════════════════════════
 
@@ -590,6 +783,8 @@ export async function runTurn(
       trace: { runtimeBlock: "", rawResponse: {} },
       conversationPatch: { aiEnabled: false, needsAttention: true, attentionReason: "optout" },
       events: [{ type: "stop", payload: { source: burstOptOut ? "keyword" : "classifier" } }],
+      enrollmentOutcome: { status: "stopped", endReason: "opted_out" },
+      alert: { kind: "stopped", reason: "désabonnement" },
     });
   }
 
@@ -609,6 +804,8 @@ export async function runTurn(
         attentionReason: "hard_refusal",
       },
       events: [{ type: "hard_refusal" }],
+      enrollmentOutcome: { status: "stopped", endReason: "hard_refusal" },
+      alert: { kind: "stopped", reason: "refus clair du contact" },
     });
   }
 
@@ -638,6 +835,7 @@ export async function runTurn(
       trace: { runtimeBlock: "", rawResponse: {} },
       conversationPatch: { aiEnabled: false, needsAttention: true, attentionReason: reason },
       events: [{ type: "escalation", payload: { reason } }],
+      alert: { kind: "handoff", reason },
     });
   }
 
@@ -719,7 +917,34 @@ export async function runTurn(
   let llmError: string | null = null;
   let terminatedByTool: "stop" | "handoff" | null = null;
   let bookingFailed = false;
+  let bookedNow = false;
+  let closedOutcome: ToolRunResult["closedOutcome"] = null;
+  let transferTo: string | null = null;
+  let fallbackUsed = false;
   let extraParagraphs = 0;
+  const intents = [
+    ...(classification.wantsHuman ? ["handoff"] : []),
+    ...(classification.unintelligible ? ["unintelligible"] : []),
+  ];
+
+  /**
+   * Un appel au générateur, avec repli configuré. Le repli n'était jamais
+   * utilisé : le modèle principal en panne, le tour finissait en erreur alors
+   * qu'un second fournisseur était réglé exactement pour ça.
+   */
+  const generateWithFallback = async (
+    input: Omit<Parameters<typeof generatorProvider.generate>[0], "model">,
+  ): Promise<LLMResult> => {
+    try {
+      return await generatorProvider.generate({ ...input, model: config.model.model });
+    } catch (primaryErr) {
+      const fallback = config.model.fallback;
+      if (!fallback) throw primaryErr;
+      const out = await getLlmProvider(fallback.provider).generate({ ...input, model: fallback.model });
+      fallbackUsed = true;
+      return out;
+    }
+  };
   /** Refus successifs — journalises meme quand la regeneration finit par passer. */
   const blockedAttempts: string[][] = [];
 
@@ -735,15 +960,18 @@ export async function runTurn(
 
     const turnMessages: LLMMessage[] = [...messageArray];
 
-    // Un aller-retour d'outils au maximum : assez pour « je consulte l'agenda
-    // puis je propose », borné pour ne pas laisser un modèle boucler.
-    for (let round = 0; round < 2; round += 1) {
+    // Deux allers-retours d'outils au maximum : assez pour « je consulte
+    // l'agenda puis je propose », borné pour ne pas laisser un modèle boucler.
+    // Le TROISIÈME passage n'offre plus d'outils : un modèle qui appelait
+    // encore un outil au deuxième tour produisait un brouillon vide, et le fil
+    // passait à l'humain alors que l'assistant avait fait son travail.
+    for (let round = 0; round < 3; round += 1) {
+      const offerTools = round < 2;
       try {
-        result = await generator.generate({
+        result = await generateWithFallback({
           system: system + correction,
           messages: turnMessages,
-          tools,
-          model: config.model.model,
+          tools: offerTools ? tools : [],
           maxTokens: config.model.maxTokens,
           temperature: config.model.temperature,
           routing: config.model.routing as unknown as Record<string, unknown>,
@@ -756,23 +984,27 @@ export async function runTurn(
         break;
       }
 
-      if (result.toolCalls.length === 0) break;
+      if (result.toolCalls.length === 0 || !offerTools) break;
 
       const ran = await executeTools({
         calls: result.toolCalls,
         rung,
         clientId: conversation.clientId,
+        clientAssignedToId: client?.assignedToId ?? null,
         conversationId,
+        currentAssistantId: assistantRow.id,
         qualification,
         effects,
         sideEffectsDone,
       });
       if (ran.bookingFailed) bookingFailed = true;
+      if (ran.booked) bookedNow = true;
+      if (ran.closedOutcome) closedOutcome = ran.closedOutcome;
+      if (ran.transferTo) transferTo = ran.transferTo;
       if (ran.terminated) {
         terminatedByTool = ran.terminated;
         break;
       }
-      if (round === 1) break;
       // VRAI protocole d'outils : l'assistant déclare ses appels, puis chaque
       // résultat lui revient rattaché à son identifiant. Maquillé en message
       // `user`, le modèle ne reliait pas le résultat à sa demande : il la
@@ -806,6 +1038,7 @@ export async function runTurn(
         inbound: proactive ? "(ouverture — aucun message entrant)" : userTurn,
         // Aucun message de l'agent avant celui-ci = premier contact.
         isFirstOutbound: turnsUsed === 0,
+        intents,
       },
       classifierCall,
     );
@@ -830,6 +1063,9 @@ export async function runTurn(
       ...(effect.detail ? { error: effect.detail } : {}),
     },
   })));
+  if (fallbackUsed) {
+    events.push({ type: "fallback_used", payload: { model: config.model.fallback?.model ?? null } });
+  }
   if (proactive && outreach) {
     events.push({
       type: "outreach",
@@ -890,19 +1126,33 @@ export async function runTurn(
       },
       events,
       qualification,
+      ...(terminatedByTool === "stop"
+        ? { enrollmentOutcome: { status: "stopped" as const, endReason: "opted_out" } }
+        : {}),
+      alert:
+        terminatedByTool === "stop"
+          ? { kind: "stopped", reason: "arrêt demandé par l'assistant" }
+          : { kind: "handoff", reason: "l'assistant passe la main" },
     });
   }
 
-  // Panne du fournisseur : trace + escalade, jamais d'envoi.
+  // Panne du fournisseur : trace, jamais d'envoi. Tant qu'il reste des
+  // tentatives, les entrants restent NON traités pour que la reprise les
+  // retrouve ; à la dernière, on passe la main et on prévient.
   if (llmError !== null || result === null) {
     events.push({ type: "llm_error", payload: { error: llmError } });
+    const final = options.finalAttempt === true;
     return commit({
       outcome: "error",
       reason: llmError ?? "no_result",
       trace: { ...traceCommon, rawResponse: { error: llmError } },
-      conversationPatch: { ...baseState, needsAttention: true, attentionReason: "llm_error" },
+      consume: final,
+      conversationPatch: final
+        ? { ...baseState, needsAttention: true, attentionReason: "llm_error" }
+        : baseState,
       events,
       qualification,
+      ...(final ? { alert: { kind: "error" as const, reason: llmError ?? "no_result" } } : {}),
     });
   }
 
@@ -933,6 +1183,12 @@ export async function runTurn(
       },
       events,
       qualification,
+      alert: {
+        kind: "blocked",
+        reason: allJudgeErrors
+          ? "juge indisponible"
+          : blockingFailures(verdicts).map((v) => v.label).join(", "),
+      },
     });
   }
 
@@ -952,6 +1208,7 @@ export async function runTurn(
       },
       events,
       qualification,
+      alert: { kind: "handoff", reason: "réservation échouée" },
     });
   }
 
@@ -964,15 +1221,53 @@ export async function runTurn(
       conversationPatch: { ...baseState, needsAttention: true, attentionReason: "no_text" },
       events,
       qualification,
+      alert: { kind: "handoff", reason: "l'assistant n'a rien écrit" },
     });
   }
+
+  if (bookedNow) events.push({ type: "booked" });
+  if (closedOutcome) events.push({ type: "closed", payload: { outcome: closedOutcome } });
+  if (transferTo) events.push({ type: "transfer", payload: { to: transferTo } });
+
+  // La réponse part : la pastille « nouveau message » tombe d'elle-même —
+  // sinon l'inbox « à traiter » se remplissait de fils que l'assistant avait
+  // déjà traités. Une raison plus grave (passage humain, blocage) n'est jamais
+  // effacée ici : l'IA serait en pause et ce tour n'aurait pas lieu.
+  const clearInbound =
+    conversation.needsAttention &&
+    (conversation.attentionReason === "inbound" || conversation.attentionReason === null);
+  const closedReason =
+    closedOutcome === "goal_reached"
+      ? "objectif atteint"
+      : closedOutcome === "disqualified"
+        ? "contact non qualifié"
+        : closedOutcome === "not_interested"
+          ? "contact pas intéressé"
+          : null;
 
   return commit({
     outcome: "sent",
     trace: { ...traceCommon, guardrailResults: guardrailJson, ...modelFacts },
-    conversationPatch: baseState,
+    conversationPatch: {
+      ...baseState,
+      ...(clearInbound ? { needsAttention: false, attentionReason: null } : {}),
+      ...(transferTo ? { activeAssistantId: transferTo } : {}),
+      // Fil clos par l'assistant : l'IA se tait après ce message et un humain
+      // voit le résultat dans l'inbox.
+      ...(closedOutcome
+        ? { aiEnabled: false, needsAttention: true, attentionReason: `closed_${closedOutcome}` }
+        : {}),
+    },
     events,
     qualification,
     send: { body: draft, delayMs: replyDelayMs(config.approach.replySpeed) },
+    ...(bookedNow
+      ? { enrollmentOutcome: { status: "booked" as const, endReason: "booked" } }
+      : closedOutcome === "goal_reached"
+        ? { enrollmentOutcome: { status: "completed" as const, endReason: "goal_reached" } }
+        : closedOutcome
+          ? { enrollmentOutcome: { status: "stopped" as const, endReason: closedOutcome } }
+          : {}),
+    ...(closedReason ? { alert: { kind: "closed" as const, reason: closedReason } } : {}),
   });
 }

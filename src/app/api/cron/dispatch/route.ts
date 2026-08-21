@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { runDispatchCycle } from "@/lib/jobs/dispatch";
+import { isCronAuthorized } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 // Un lot de 50 jobs (défaut) doit pouvoir s'exécuter au complet.
@@ -14,9 +15,7 @@ export const maxDuration = 300;
  * le même job.
  */
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  const header = req.headers.get("authorization");
-  if (!secret || header !== `Bearer ${secret}`) {
+  if (!isCronAuthorized(req.headers.get("authorization"), process.env.CRON_SECRET)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 

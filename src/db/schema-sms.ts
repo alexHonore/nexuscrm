@@ -57,9 +57,17 @@ export const smsNumbers = pgTable("sms_numbers", {
   messagingServiceSid: text("messaging_service_sid").notNull().default(""),
   assignedToId: uuid("assigned_to_id").references(() => users.id, { onDelete: "set null" }),
   label: text("label"),
-  /** Max outbound messages per Toronto day — campaign enrollment guard. */
+  /** Max outbound messages per Toronto day — enforced by the send handler. */
   dailyCap: integer("daily_cap").notNull().default(200),
   active: boolean("active").notNull().default(true),
+  /**
+   * Assistant qui prend un fil ENTRANT sans assistant (quelqu'un écrit à ce
+   * numéro sans campagne). Null = un humain répond. Sans ce réglage, seul un
+   * barreau de campagne pouvait confier un fil à un assistant.
+   */
+  defaultAssistantId: uuid("default_assistant_id").references(() => assistants.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -162,6 +170,12 @@ export const messages = pgTable(
     /** Twilio delivery status: queued | sent | delivered | undelivered | failed … */
     status: text("status"),
     errorCode: integer("error_code"),
+    /**
+     * Pourquoi un sortant N'EST PAS parti (kill_switch, sandbox_not_allowlisted,
+     * suppressed, daily_cap, transport_timeout…). Avant, la rangée était
+     * supprimée et le message disparaissait du fil sans explication.
+     */
+    skipReason: text("skip_reason"),
     aiGenerated: boolean("ai_generated").notNull().default(false),
     /**
      * Job send_sms qui a produit cette rangée (garde anti-double-envoi : la

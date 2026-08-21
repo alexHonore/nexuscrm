@@ -310,7 +310,7 @@ describe("dispatcher de la file (runDispatchCycle + /api/cron/dispatch)", () => 
 
   // ── Suppressions ───────────────────────────────────────────────────────────
 
-  it("numéro supprimé : skipped suppressed, aucune rangée messages", async () => {
+  it("numéro supprimé : skipped suppressed, rangée visible avec la raison", async () => {
     freezeAt(IN_WINDOW);
     const { client, conversation } = await seedThread();
     await testDb.insert(suppressions).values({ phoneE164: client.phone, reason: "sms_stop" });
@@ -322,7 +322,12 @@ describe("dispatcher de la file (runDispatchCycle + /api/cron/dispatch)", () => 
     const job = await getJob(id);
     expect(job.status).toBe("skipped");
     expect(job.lastError).toBe("suppressed");
-    expect(await testDb.select().from(messages)).toHaveLength(0);
+    // La rangée RESTE, avec la raison : un sortant qui ne part pas doit se
+    // voir dans le fil (« Message mis en file » puis plus rien était pire).
+    const rows = await testDb.select().from(messages);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("skipped");
+    expect(rows[0].skipReason).toBe("suppressed");
   });
 
   // ── Chemins d'échec ────────────────────────────────────────────────────────

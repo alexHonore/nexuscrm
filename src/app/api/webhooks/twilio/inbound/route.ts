@@ -1,10 +1,9 @@
 import { and, eq, isNull, like, or } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { notificationContent } from "@/components/clients/notification-content";
 import { db } from "@/db";
-import { clients, notifications, users } from "@/db/schema";
-import { consents, conversations, messages, smsNumbers, suppressions } from "@/db/schema-sms";
+import { clients } from "@/db/schema";
+import { assistants, consents, conversations, messages, smsNumbers, suppressions } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
 import { normalizePhone, phoneMatchKey } from "@/lib/phone";
 import { markEnrollmentsReplied, markEnrollmentsStopped } from "@/lib/campaigns-server/inbound";
@@ -12,6 +11,7 @@ import { detectOptOut } from "@/lib/sms/optout";
 import { analyzeSms } from "@/lib/sms/segments";
 import { isValidTwilioSignature, publicWebhookUrl } from "@/lib/sms-server/twilio-signature";
 import { enqueueJob } from "@/lib/jobs/queue";
+import { notifyHumans } from "@/lib/sms-server/notify";
 import { kickDispatch } from "@/lib/jobs/kick";
 
 /**
@@ -62,6 +62,17 @@ export async function POST(req: NextRequest) {
     isProduction: process.env.NODE_ENV === "production",
   });
   if (!valid) {
+    // Une signature invalide est le plus souvent une URL mal configurée chez
+    // Twilio (NEXT_PUBLIC_APP_URL ≠ l'URL appelée) : chaque STOP, chaque
+    // réponse serait rejetée en silence. On le journalise pour que la page de
+    // mise en service et l'audit le montrent.
+    await logAudit({
+      userId: null,
+      action: "sms.webhook_invalid_signature",
+      entity: "message",
+      detail: { path: "/api/webhooks/twilio/inbound", hasToken: Boolean(process.env.TWILIO_AUTH_TOKEN) },
+    });
+    console.log(JSON.stringify({ ts: new Date().toISOString(), level: "warn", msg: "sms.webhook_invalid_signature" }));
     return NextResponse.json({ error: "invalid_signature" }, { status: 403 });
   }
 
@@ -164,10 +175,33 @@ export async function POST(req: NextRequest) {
     .insert(conversations)
     .values({ clientId: client.id, clientPhone: from, smsNumberId: smsNumber.id })
     .onConflictDoNothing();
-  const conversation = await db.query.conversations.findFirst({
+  let conversation = await db.query.conversations.findFirst({
     where: and(eq(conversations.clientPhone, from), eq(conversations.smsNumberId, smsNumber.id)),
   });
   if (!conversation) throw new Error(`conversations upsert failed for ${MessageSid}`);
+
+  // Fil sans assistant : le numéro peut en désigner un par défaut. Sans ça,
+  // quelqu'un qui écrit au numéro de lui-même n'avait jamais de réponse IA —
+  // seul un barreau de campagne savait confier un fil.
+  if (conversation.activeAssistantId === null && !optOut.optOut) {
+    const numberRow = await db.query.smsNumbers.findFirst({
+      where: eq(smsNumbers.id, smsNumber.id),
+      columns: { defaultAssistantId: true },
+    });
+    if (numberRow?.defaultAssistantId) {
+      const candidate = await db.query.assistants.findFirst({
+        where: eq(assistants.id, numberRow.defaultAssistantId),
+        columns: { id: true, status: true, compiledPrompt: true, version: true },
+      });
+      if (candidate && candidate.status === "active" && candidate.compiledPrompt) {
+        await db
+          .update(conversations)
+          .set({ activeAssistantId: candidate.id, activeAssistantVersion: candidate.version })
+          .where(and(eq(conversations.id, conversation.id), isNull(conversations.activeAssistantId)));
+        conversation = { ...conversation, activeAssistantId: candidate.id };
+      }
+    }
+  }
 
   // ── Rangée du message — idempotente sur MessageSid : une relivraison Twilio
   // produit exactement UNE rangée (et aucune seconde notification). ──
@@ -197,6 +231,9 @@ export async function POST(req: NextRequest) {
         lastInboundAt: now,
         needsAttention: true,
         attentionReason: optOut.optOut ? "optout" : "inbound",
+        // Un STOP met aussi l'IA en pause sur ce fil : aucun tour ne doit
+        // plus s'y déclencher, et le fil le dit.
+        ...(optOut.optOut ? { aiEnabled: false, pauseReason: "optout" } : {}),
       })
       .where(eq(conversations.id, conversation.id));
 
@@ -212,36 +249,20 @@ export async function POST(req: NextRequest) {
       await markEnrollmentsReplied(conversation.id, now);
     }
 
-    // Destinataires : l'assigné de la conversation, sinon celui de la fiche,
-    // sinon tous les admins actifs — chacun dans SA langue.
-    const assigneeId = conversation.assignedToId ?? client.assignedToId;
-    let recipients: { id: string; locale: string }[] = [];
-    if (assigneeId) {
-      const assignee = await db.query.users.findFirst({
-        where: and(eq(users.id, assigneeId), eq(users.isActive, true)),
-        columns: { id: true, locale: true },
+    // Les humains sont prévenus quand c'est À EUX de répondre : pas
+    // d'assistant, IA en pause, ou désabonnement. Quand l'assistant va
+    // répondre, c'est lui qui prévient en cas de passage à l'humain, de
+    // blocage ou de panne — sinon chaque texto réveillait tout le monde pour
+    // rien et l'inbox ne voulait plus rien dire.
+    const aiWillHandle =
+      !optOut.optOut && conversation.aiEnabled && conversation.activeAssistantId !== null;
+    if (!aiWillHandle) {
+      await notifyHumans({
+        conversationId: conversation.id,
+        clientId: client.id,
+        kind: optOut.optOut ? "stopped" : "inbound",
+        reason: optOut.optOut ? "désabonnement" : "",
       });
-      if (assignee) recipients = [assignee];
-    }
-    if (recipients.length === 0) {
-      recipients = await db.query.users.findMany({
-        where: and(eq(users.role, "admin"), eq(users.isActive, true)),
-        columns: { id: true, locale: true },
-      });
-    }
-    if (recipients.length > 0) {
-      await db.insert(notifications).values(
-        recipients.map((recipient) => {
-          const locale = recipient.locale === "en" ? ("en" as const) : ("fr" as const);
-          return {
-            userId: recipient.id,
-            type: "sms_inbound",
-            title: notificationContent(locale, "smsInboundTitle"),
-            body: notificationContent(locale, "smsInboundBody", { name: client.fullName }),
-            link: `/clients/${client.id}`,
-          };
-        }),
-      );
     }
 
     // -- Tour d'agent, debounce --------------------------------------------

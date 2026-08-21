@@ -1,38 +1,43 @@
-import { eq } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { db } from "@/db";
-import { conversations, messages } from "@/db/schema-sms";
+import { conversations, messages, smsNumbers } from "@/db/schema-sms";
 import { sendSmsPayloadSchema, type JobOutcome, type ScheduledJob } from "@/lib/jobs/types";
 import { DEFAULT_QUIET_HOURS, isWithinSendWindow, nextSendTime } from "@/lib/sms/quiet-hours";
 import { analyzeSms } from "@/lib/sms/segments";
 import type { SendResult } from "@/lib/sms/types";
 import { getSmsProvider } from "@/lib/sms-server";
+import { notifyHumans } from "@/lib/sms-server/notify";
 
 /**
- * send_sms job handler — the one path every outbound SMS of the engine takes
- * (opener, ladder, agent, human, system). Guard order matters:
+ * Job `send_sms` — UN message sortant, idempotent.
  *
- * 1. payload shape — malformed payloads never retry (failed_permanent);
- * 2. anti-double-send guard — if THIS job's intent row already exists, a
- *    previous claim may have reached Twilio before dying: the transport is
- *    NEVER called again. Assumed direction: better one lost send than one
- *    duplicate (compliance ledger + recipient trust);
- * 3. conversation + AI pause — `automated` sends exit when a human paused the
- *    thread (conversations.aiEnabled = false); human sends do not;
- * 4. quiet hours — AUTOMATED sends outside the window are deferred to the next
- *    opening (reschedule: no send, no attempt burned). A human reply in an
- *    open conversation is not solicitation and is exempt. DEFAULT_QUIET_HOURS
- *    is the floor; campaign-specific windows arrive in phase 6;
- * 5. intent row BEFORE the transport (messages.jobId unique), then the send —
- *    the provider enforces kill switch and suppressions internally;
- * 6. after Twilio accepted (or dry_run), failures in the remaining writes
- *    settle the job `done` with a note — NEVER a retry that would resend.
+ * Ordre des gardes, volontairement :
+ *  1. charge déjà enregistrée pour ce job (reprise) → terminé, rien à refaire ;
+ *  2. conversation introuvable → échec définitif ;
+ *  3. automatisé + IA en pause → sauté ;
+ *  4. automatisé + hors heures de politesse → reporté ;
+ *  5. plafond du jour du NUMÉRO atteint → reporté au lendemain matin ;
+ *  6. rangée d'intention écrite (messages.job_id unique = garde anti-doublon) ;
+ *  7. envoi via le fournisseur ;
+ *  8. après acceptation (ou dry_run), les échecs des écritures restantes ne
+ *     relancent PAS l'envoi.
  *
- * A dry-run send IS recorded as a messages row (status "dry_run") — the thread
- * must show what would have gone out. A transport THROW deletes the intent row
- * and propagates so the dispatcher's backoff can retry: a thrown fetch almost
- * always failed before acceptance (the ambiguous accepted-then-disconnected
- * window is accepted as residual risk, Twilio has no idempotency key).
+ * Ce qui a changé avec la revue : un envoi SAUTÉ ou en ÉCHEC laisse maintenant
+ * une rangée visible dans le fil (status + skip_reason) au lieu d'être effacé
+ * — « Message mis en file » puis plus rien était la pire réponse possible pour
+ * un téléphoniste. Et une exception du transport (délai, réseau) ne supprime
+ * plus la rangée : Twilio a peut-être accepté, et la reprise renverrait un
+ * doublon. On marque « unknown », on prévient, on n'insiste pas.
  */
+
+const TORONTO = "America/Toronto";
+const startOfTorontoDay = (now: Date): Date =>
+  fromZonedTime(`${formatInTimeZone(now, TORONTO, "yyyy-MM-dd")}T00:00:00`, TORONTO);
+
+/** Statuts qui comptent dans le plafond du jour : tout ce qui a quitté la maison. */
+const COUNTED = ["queued", "sending", "sent", "delivered", "accepted", "undelivered", "failed", "unknown"];
+
 export async function handleSendSms(
   job: ScheduledJob,
   now: () => Date = () => new Date(),
@@ -43,7 +48,7 @@ export async function handleSendSms(
 
   const already = await db.query.messages.findFirst({
     where: eq(messages.jobId, job.id),
-    columns: { id: true },
+    columns: { id: true, status: true },
   });
   if (already) return { outcome: "done", note: "already_recorded" };
 
@@ -51,12 +56,40 @@ export async function handleSendSms(
     where: eq(conversations.id, payload.conversationId),
   });
   if (!conversation) return { outcome: "failed_permanent", error: "conversation_not_found" };
+
   if (payload.automated && !conversation.aiEnabled) {
     return { outcome: "skipped", reason: "ai_paused" };
   }
-
   if (payload.automated && !isWithinSendWindow(now(), DEFAULT_QUIET_HOURS)) {
     return { outcome: "reschedule", runAt: nextSendTime(now(), DEFAULT_QUIET_HOURS) };
+  }
+
+  // ── Plafond du jour du numéro expéditeur ────────────────────────────────
+  // « Max par jour de Toronto » était écrit sur la colonne et lu nulle part.
+  // Un numéro qui dépasse son quota se fait classer indésirable : on reporte
+  // au prochain matin permis, et on ne l'applique qu'aux envois automatisés —
+  // un humain qui tape un message à la main a décidé, lui.
+  const number = await db.query.smsNumbers.findFirst({
+    where: eq(smsNumbers.id, conversation.smsNumberId),
+    columns: { id: true, dailyCap: true },
+  });
+  if (payload.automated && number) {
+    const [row] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(messages)
+      .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+      .where(
+        and(
+          eq(conversations.smsNumberId, number.id),
+          eq(messages.direction, "out"),
+          gte(messages.createdAt, startOfTorontoDay(now())),
+          inArray(messages.status, COUNTED),
+        ),
+      );
+    if ((row?.n ?? 0) >= number.dailyCap) {
+      const tomorrow = new Date(startOfTorontoDay(now()).getTime() + 24 * 60 * 60 * 1000);
+      return { outcome: "reschedule", runAt: nextSendTime(tomorrow, DEFAULT_QUIET_HOURS) };
+    }
   }
 
   const analysis = analyzeSms(payload.body);
@@ -85,14 +118,47 @@ export async function handleSendSms(
       idempotencyKey: job.dedupeKey ?? job.id,
     });
   } catch (err) {
-    await db.delete(messages).where(eq(messages.id, intent.id));
-    throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    // Trois cas, trois réponses :
+    //  · 5xx de Twilio : rien n'est parti, la reprise avec temporisation est
+    //    sûre — la rangée s'efface et la file réessaie ;
+    //  · 4xx de Twilio (numéro invalide, ligne fixe…) : refus DÉFINITIF, on le
+    //    dit dans le fil et on prévient ;
+    //  · délai ou réseau : Twilio a PEUT-ÊTRE accepté — renvoyer ferait un
+    //    doublon. On marque « unknown », on prévient, on n'insiste pas.
+    if (/twilio_send_failed: http 5\d\d/.test(message)) {
+      await db.delete(messages).where(eq(messages.id, intent.id));
+      throw err;
+    }
+    const synchronousRejection = /twilio_send_failed: http 4\d\d/.test(message);
+    const reason = synchronousRejection ? "provider_rejected" : "transport_error";
+    await db
+      .update(messages)
+      .set({
+        status: synchronousRejection ? "failed" : "unknown",
+        skipReason: `${reason}: ${message.slice(0, 200)}`,
+      })
+      .where(eq(messages.id, intent.id));
+    await db
+      .update(conversations)
+      .set({ needsAttention: true, attentionReason: "send_failed" })
+      .where(eq(conversations.id, payload.conversationId));
+    await notifyHumans({
+      conversationId: payload.conversationId,
+      clientId: conversation.clientId,
+      kind: "error",
+      reason: synchronousRejection ? "envoi refusé par Twilio" : "envoi incertain (délai réseau)",
+    }).catch(() => 0);
+    return { outcome: "failed_permanent", error: message };
   }
 
-  // Blocked send (suppressed | kill_switch | sandbox_not_allowlisted |
-  // invalid_to): the intent row is removed — nothing went out, nothing to show.
   if (!result.sent && result.skippedReason !== "dry_run") {
-    await db.delete(messages).where(eq(messages.id, intent.id));
+    // La rangée RESTE, avec la raison : le téléphoniste voit « non envoyé —
+    // interrupteur d'arrêt » au lieu d'un message qui s'évapore.
+    await db
+      .update(messages)
+      .set({ status: "skipped", skipReason: result.skippedReason ?? "not_sent" })
+      .where(eq(messages.id, intent.id));
     return { outcome: "skipped", reason: result.skippedReason ?? "not_sent" };
   }
 
@@ -111,10 +177,7 @@ export async function handleSendSms(
       .set({ lastOutboundAt: now() })
       .where(eq(conversations.id, payload.conversationId));
   } catch {
-    // Twilio a déjà accepté : on règle `done` quand même — la rangée-intention
-    // (statut "sending") reste la trace visible du trou d'écriture.
     return { outcome: "done", note: "post_send_write_failed" };
   }
-
   return { outcome: "done" };
 }

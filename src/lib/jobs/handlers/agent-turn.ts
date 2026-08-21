@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { JobOutcome, ScheduledJob } from "@/lib/jobs/types";
+import { MAX_ATTEMPTS, type JobOutcome, type ScheduledJob } from "@/lib/jobs/types";
 import { runTurn, type TurnOutcome } from "@/lib/agent/runtime";
 import { markTouchOutcome } from "@/lib/campaigns-server/touch";
 
@@ -55,7 +55,12 @@ export async function handleAgentTurn(job: ScheduledJob): Promise<JobOutcome> {
   const parsed = agentTurnPayloadSchema.safeParse(job.payload);
   if (!parsed.success) return { outcome: "failed_permanent", error: "invalid_payload" };
 
-  const result = await runTurn(parsed.data.conversationId, { outreach: parsed.data.outreach });
+  // La file compte les tentatives : à la dernière, une panne du modèle doit
+  // consommer les entrants et passer la main au lieu de réessayer dans le vide.
+  const result = await runTurn(parsed.data.conversationId, {
+    outreach: parsed.data.outreach,
+    finalAttempt: job.attempts + 1 >= MAX_ATTEMPTS,
+  });
 
   if (parsed.data.outreach) {
     await markTouchOutcome(

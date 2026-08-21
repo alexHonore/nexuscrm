@@ -27,6 +27,16 @@
     "missedCallKnownBody": "{name} — {number}",
     "missedCallUnknownBody": "{number}",
     "smsInboundTitle": "Nouveau texto",
-    "smsInboundBody": "Vous avez reçu un texto de {name}"
+    "smsInboundBody": "Vous avez reçu un texto de {name}",
+    "smsHandoffTitle": "Passage à un humain",
+    "smsHandoffBody": "{name} : l'assistant vous passe la main ({reason}).",
+    "smsBlockedTitle": "Réponse de l'assistant bloquée",
+    "smsBlockedBody": "{name} : un garde-fou a bloqué la réponse — le fil attend un humain.",
+    "smsErrorTitle": "Assistant en panne",
+    "smsErrorBody": "{name} : le modèle n'a pas répondu ({reason}) — le fil attend un humain.",
+    "smsStoppedTitle": "Conversation arrêtée",
+    "smsStoppedBody": "{name} : la conversation est arrêtée ({reason}).",
+    "smsClosedTitle": "Conversation close par l'assistant",
+    "smsClosedBody": "{name} : {reason}."
   }
 }

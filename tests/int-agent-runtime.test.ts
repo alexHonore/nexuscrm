@@ -17,6 +17,7 @@ import {
   makeClient,
   makeConversation,
   makeSmsNumber,
+  makeUser,
   resetDb,
   testDb,
 } from "./helpers/db";
@@ -32,7 +33,7 @@ import {
   scheduledJobs,
   suppressions,
 } from "@/db/schema-sms";
-import { clients } from "@/db/schema";
+import { clients, followups, notifications } from "@/db/schema";
 import { assistantConfigSchema } from "@/lib/assistants/schema";
 import type { LLMResult } from "@/lib/llm/types";
 
@@ -119,6 +120,9 @@ const { compileAssistant } = await import("@/lib/assistants/service");
 
 async function scene(overrides: { aiEnabled?: boolean; goalRung?: string } = {}) {
   await seedGuardrailDefaults();
+  // Un administrateur actif : destinataire des alertes et des rappels quand la
+  // fiche n'a pas d'assigné — comme en production.
+  await makeUser({ role: "admin", email: `admin-${Math.random().toString(16).slice(2)}@x.test` });
   const config = assistantConfigSchema.parse({
     name: "Acheteur FB (test)",
     identity: {},
@@ -155,9 +159,13 @@ async function scene(overrides: { aiEnabled?: boolean; goalRung?: string } = {})
       tools: config.tools,
       model: config.model,
       status: "draft",
+      // La porte d'activation est consultative ici : le tour exige un
+      // assistant ACTIF, et la suite n'est pas le sujet de ces tests.
+      requireSuitePass: false,
     })
     .returning();
   await compileAssistant(assistant.id, null);
+  await testDb.update(assistants).set({ status: "active" }).where(eq(assistants.id, assistant.id));
 
   const client = await makeClient({ fullName: "Marie Tremblay", phone: "+15145550142" });
   const number = await makeSmsNumber();
@@ -732,3 +740,191 @@ describe("tour proactif (barreau sans texte)", () => {
 
 // La connexion se ferme APRÈS le dernier bloc — pas à la fin du premier.
 afterAll(closeDb);
+
+// ── Corrections de la revue : statut, outils réels, pannes, alertes ──────────
+
+describe("statut, outils et pannes (revue)", () => {
+  beforeEach(async () => {
+    await resetDb();
+    llm.generatorText = "Parfait! Préférez-vous jeudi 14 h ou vendredi 18 h 30?";
+    llm.generatorToolCalls = [];
+    llm.generatorSequence = [];
+    llm.onGenerate = null;
+    llm.generatorError = null;
+    llm.classifierJson = '{"refusal":"none","qualification":{}}';
+    llm.judgeJson = '{"passed":true,"reason":"conforme"}';
+    llm.calls = [];
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  it("un assistant qui n'est PAS actif ne parle pas — brouillon ou archivé", async () => {
+    // La porte d'activation serait contournée par un fil ancien qui garde un
+    // assistant remis en brouillon.
+    const { conversation, assistant } = await scene();
+    await testDb.update(assistants).set({ status: "draft" }).where(eq(assistants.id, assistant.id));
+    await inbound(conversation.id, "Allo?");
+    const result = await runTurn(conversation.id);
+    expect(result.outcome).toBe("skipped_no_assistant");
+    expect(result.reason).toBe("assistant_inactive");
+    expect(await jobsFor(conversation.id)).toHaveLength(0);
+  });
+
+  it("update_qualification ENREGISTRE les champs ; schedule_followup POSE un rappel", async () => {
+    const { conversation, client } = await scene();
+    await inbound(conversation.id, "Je cherche un condo à Lévis, rappelez-moi lundi");
+    const monday = new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString();
+    llm.generatorToolCalls = [
+      { id: "c1", name: "update_qualification", arguments: { fields: { project_type: "condo", sector: "Lévis" } } },
+      { id: "c2", name: "schedule_followup", arguments: { whenIso: monday, note: "rappel demandé" } },
+    ];
+    // Deuxième appel (après les résultats d'outils) : plus d'appels, un texte.
+    llm.generatorSequence = ["", "Parfait, je note un rappel lundi. Bonne journée!"];
+    let calls = 0;
+    llm.onGenerate = async () => {
+      calls += 1;
+      if (calls >= 2) llm.generatorToolCalls = [];
+    };
+
+    const result = await runTurn(conversation.id);
+    expect(result.outcome).toBe("sent");
+    const conv = await testDb.query.conversations.findFirst({ where: eq(conversations.id, conversation.id) });
+    expect(conv!.qualification).toMatchObject({ project_type: "condo", sector: "Lévis" });
+    const rows = await testDb.select().from(followups).where(eq(followups.clientId, client.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].note).toBe("rappel demandé");
+    expect(rows[0].assignedToId).not.toBeNull();
+  });
+
+  it("close_conversation FERME le fil après l'envoi et clôt l'inscription", async () => {
+    const { conversation, enrollment } = await outreachScene();
+    await inbound(conversation.id, "Non merci, j'ai déjà acheté");
+    llm.generatorToolCalls = [
+      { id: "c1", name: "close_conversation", arguments: { outcome: "not_interested" } },
+    ];
+    let calls = 0;
+    llm.generatorSequence = ["", "Merci pour votre réponse, bonne continuation!"];
+    llm.onGenerate = async () => {
+      calls += 1;
+      if (calls >= 2) llm.generatorToolCalls = [];
+    };
+    const result = await runTurn(conversation.id);
+    expect(result.outcome).toBe("sent");
+    const conv = await testDb.query.conversations.findFirst({ where: eq(conversations.id, conversation.id) });
+    expect(conv!.aiEnabled).toBe(false);
+    expect(conv!.attentionReason).toBe("closed_not_interested");
+    const enr = await testDb.query.campaignEnrollments.findFirst({ where: eq(campaignEnrollments.id, enrollment.id) });
+    expect(enr!.status).toBe("stopped");
+    expect(enr!.endReason).toBe("not_interested");
+    // Un humain est prévenu.
+    const notes = await testDb.select().from(notifications);
+    expect(notes.some((n) => n.type === "sms_closed")).toBe(true);
+  });
+
+  it("panne passagère du modèle : les entrants restent À TRAITER pour la reprise, pas d'alerte", async () => {
+    const { conversation } = await scene();
+    await inbound(conversation.id, "Allo?");
+    llm.generatorError = "upstream 502";
+    const result = await runTurn(conversation.id);
+    expect(result.outcome).toBe("error");
+    const [row] = await testDb.select().from(messages).where(eq(messages.direction, "in"));
+    expect(row.processedAt).toBeNull();
+    const conv = await testDb.query.conversations.findFirst({ where: eq(conversations.id, conversation.id) });
+    expect(conv!.needsAttention).toBe(false);
+    expect(await testDb.select().from(notifications)).toHaveLength(0);
+    // Une trace existe quand même.
+    expect(await testDb.select().from(agentTurnTraces)).toHaveLength(1);
+  });
+
+  it("dernière tentative : la panne consomme, passe la main et PRÉVIENT", async () => {
+    const { conversation } = await scene();
+    await inbound(conversation.id, "Allo?");
+    llm.generatorError = "upstream 502";
+    const result = await runTurn(conversation.id, { finalAttempt: true });
+    expect(result.outcome).toBe("error");
+    const [row] = await testDb.select().from(messages).where(eq(messages.direction, "in"));
+    expect(row.processedAt).not.toBeNull();
+    const conv = await testDb.query.conversations.findFirst({ where: eq(conversations.id, conversation.id) });
+    expect(conv!.needsAttention).toBe(true);
+    expect(conv!.attentionReason).toBe("llm_error");
+    const notes = await testDb.select().from(notifications);
+    expect(notes.some((n) => n.type === "sms_error")).toBe(true);
+  });
+
+  it("le modèle de REPLI est utilisé quand le principal tombe", async () => {
+    const { conversation, assistant } = await scene();
+    await testDb
+      .update(assistants)
+      .set({ model: { ...(assistant.model as object), fallback: { provider: "openrouter", model: "fallback-model" } } })
+      .where(eq(assistants.id, assistant.id));
+    await inbound(conversation.id, "Allo?");
+    // Le générateur principal échoue, le repli (autre identifiant) répond.
+    llm.onGenerate = async () => {
+      const last = llm.calls[llm.calls.length - 1];
+      if (last?.model === "generator-model") throw new Error("primary down");
+    };
+    const result = await runTurn(conversation.id);
+    expect(result.outcome).toBe("sent");
+    expect(llm.calls.some((c) => c.model === "fallback-model")).toBe(true);
+    expect(await eventsOf(conversation.id)).toContain("fallback_used");
+  });
+
+  it("une réponse envoyée EFFACE la pastille « nouveau message »", async () => {
+    const { conversation } = await scene();
+    await testDb
+      .update(conversations)
+      .set({ needsAttention: true, attentionReason: "inbound" })
+      .where(eq(conversations.id, conversation.id));
+    await inbound(conversation.id, "Allo?");
+    expect((await runTurn(conversation.id)).outcome).toBe("sent");
+    const conv = await testDb.query.conversations.findFirst({ where: eq(conversations.id, conversation.id) });
+    expect(conv!.needsAttention).toBe(false);
+    expect(conv!.attentionReason).toBeNull();
+  });
+
+  it("un passage à l'humain PRÉVIENT quelqu'un", async () => {
+    const { conversation } = await scene();
+    await inbound(conversation.id, "Je veux parler à quelqu'un");
+    llm.classifierJson = '{"refusal":"none","qualification":{},"wantsHuman":true}';
+    expect((await runTurn(conversation.id)).outcome).toBe("handoff");
+    const notes = await testDb.select().from(notifications);
+    expect(notes.some((n) => n.type === "sms_handoff")).toBe(true);
+  });
+
+  it("un corps vide (MMS sans texte) ne part pas tel quel au modèle", async () => {
+    const { conversation } = await scene();
+    await inbound(conversation.id, "   ");
+    expect((await runTurn(conversation.id)).outcome).toBe("sent");
+    const generatorCall = llm.calls.find((c) => c.model === "generator-model");
+    const msgs = generatorCall?.messages as { role: string; content: string }[];
+    expect(msgs[msgs.length - 1].content).toContain("message sans texte");
+  });
+
+  it("un message arrivé PENDANT le tour obtient son propre tour, sous une clé que le job en cours n'absorbe pas", async () => {
+    const { conversation } = await scene();
+    await inbound(conversation.id, "Allo?");
+    llm.onGenerate = async () => {
+      await inbound(conversation.id, "Et aussi : vendredi ça irait");
+    };
+    expect((await runTurn(conversation.id)).outcome).toBe("sent");
+    const jobs = await jobsFor(conversation.id);
+    const next = jobs.filter((j) => j.type === "agent_turn");
+    expect(next).toHaveLength(1);
+    expect(next[0].dedupeKey).toBe(`turn:${conversation.id}:next`);
+  });
+
+  it("encore des appels d'outils au deuxième tour : un TROISIÈME passage sans outils produit le texte", async () => {
+    const { conversation } = await scene();
+    await inbound(conversation.id, "Quand êtes-vous disponible?");
+    llm.generatorToolCalls = [{ id: "c1", name: "get_slots", arguments: { count: 2 } }];
+    llm.generatorSequence = ["", "", "Je vous propose jeudi 14 h ou vendredi 18 h 30."];
+    let calls = 0;
+    llm.onGenerate = async () => {
+      calls += 1;
+      // Le troisième appel n'offre plus d'outils : le modèle n'en appelle plus.
+      if (calls >= 3) llm.generatorToolCalls = [];
+    };
+    const result = await runTurn(conversation.id);
+    expect(result.outcome).toBe("sent");
+    expect(llm.calls.filter((c) => c.model === "generator-model")).toHaveLength(3);
+  });
+});
