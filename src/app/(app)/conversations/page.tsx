@@ -4,9 +4,10 @@ import { getTranslations } from "next-intl/server";
 import { ConversationsInbox, type InboxRow } from "@/components/conversations/conversations-inbox";
 import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/db";
-import { clients, settings, users } from "@/db/schema";
+import { clients, users } from "@/db/schema";
 import { conversations, messages, scheduledJobs, suppressions } from "@/db/schema-sms";
 import { requireUser } from "@/lib/auth/guards";
+import { settingsSendGate } from "@/lib/sms-server";
 import { resolveSmsMode } from "@/lib/sms/provider";
 import { DEFAULT_QUIET_HOURS, isWithinSendWindow } from "@/lib/sms/quiet-hours";
 
@@ -60,8 +61,12 @@ export default async function ConversationsPage() {
     .limit(200);
 
   // ── Bande d'état ─────────────────────────────────────────────────────────
-  const [smsSettings, queueCounts, suppressedCount] = await Promise.all([
-    db.query.settings.findFirst({ where: eq(settings.key, "sms") }),
+  const [sendingAllowed, queueCounts, suppressedCount] = await Promise.all([
+    // On réutilise la PORTE d'envoi plutôt que de relire la rangée ici : elle
+    // échoue fermé sur un réglage illisible, et réécrire cette règle à côté la
+    // condamnerait à diverger — l'écran dirait « actif » pendant que le moteur
+    // refuse d'envoyer.
+    settingsSendGate.isSendingAllowed(),
     db
       .select({
         pending: sql<number>`(count(*) filter (where ${scheduledJobs.status} = 'pending'))::int`,
@@ -70,15 +75,6 @@ export default async function ConversationsPage() {
       .from(scheduledJobs),
     db.select({ n: sql<number>`count(*)::int` }).from(suppressions),
   ]);
-
-  // Même lecture « fermée » que la porte d'envoi : une rangée illisible veut
-  // dire suspendu, pas « tout va bien ».
-  const killSwitch = (() => {
-    if (!smsSettings) return false;
-    const value = smsSettings.value as { killSwitch?: unknown } | null;
-    if (value === null || typeof value !== "object") return true;
-    return value.killSwitch === true;
-  })();
 
   const items: InboxRow[] = rows.map((r) => ({
     id: r.id,
@@ -105,7 +101,7 @@ export default async function ConversationsPage() {
         rows={items}
         currentUserId={user.id}
         health={{
-          killSwitch,
+          killSwitch: !sendingAllowed,
           mode: resolveSmsMode(process.env),
           sendWindowOpen: isWithinSendWindow(new Date(), DEFAULT_QUIET_HOURS),
           queued: queueCounts[0]?.pending ?? 0,

@@ -47,7 +47,15 @@ export type SmsThreadData = {
 
 /** Préfixe d'un message optimiste, pas encore confirmé par le serveur. */
 const DRAFT_PREFIX = "draft:";
-const POLL_MS = 20_000;
+/**
+ * Sondage du fil. La fiche client est la requête la PLUS lourde de
+ * l'application (client + appels + rendez-vous + commentaires + relances + fil)
+ * et `router.refresh()` la rejoue en entier. On ne sonde donc que lorsqu'un fil
+ * existe vraiment : sans conversation, rien ne peut changer sans une action de
+ * l'utilisateur, et payer ce rafraîchissement serait gratuit dans le mauvais
+ * sens du terme.
+ */
+const POLL_MS = 30_000;
 
 /**
  * Le fil SMS d'un client.
@@ -89,7 +97,7 @@ export function SmsThreadCard({
 
   // Un entrant peut arriver d'un webhook, sans aucune action dans cet onglet.
   useDataChange(["sms"], () => router.refresh());
-  useVisiblePolling(POLL_MS, () => router.refresh());
+  useVisiblePolling(thread.conversationId ? POLL_MS : 0, () => router.refresh());
 
   useEffect(() => {
     const el = scrollRef.current;
