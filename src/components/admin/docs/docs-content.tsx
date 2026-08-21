@@ -61,7 +61,12 @@ export interface DocsLabels {
     modes: { title: string; p: string };
     segments: { title: string; p: string };
   };
-  operator: { title: string; p1: string; actions: string[] };
+  operator: {
+    title: string;
+    p1: string;
+    actions: string[];
+    admin: { title: string; numbers: string; killSwitch: string; consentPolicy: string };
+  };
   json: {
     title: string;
     p1: string;
@@ -337,6 +342,13 @@ export function DocsContent({ labels: L, data }: { labels: DocsLabels; data: Doc
               <li key={i}>{a}</li>
             ))}
           </ul>
+          <Sub title={L.operator.admin.title}>
+            <ul className="list-disc space-y-1.5 pl-5">
+              <li>{L.operator.admin.numbers}</li>
+              <li>{L.operator.admin.killSwitch}</li>
+              <li>{L.operator.admin.consentPolicy}</li>
+            </ul>
+          </Sub>
         </Section>
 
         {/* ── 9. JSON ─────────────────────────────────────────────────── */}

@@ -108,6 +108,10 @@ describe("page de documentation", () => {
     expect(html).toContain("nexus.campaign/v1");
     expect(html).toContain("STOPALL");
     expect(html).toContain("dispatcher");
+    // Les réglages nouvellement documentés sont bien rendus.
+    expect(html).toContain("Numéros SMS");
+    expect(html).toContain("Interrupteur d&#x27;arrêt");
+    expect(html).toContain("ASSISTANT PAR DÉFAUT");
   });
 
   it("rend aussi en anglais, sans clé manquante ni fuite de chemin", () => {

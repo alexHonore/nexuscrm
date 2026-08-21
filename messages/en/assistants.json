@@ -842,7 +842,7 @@
       "title": "Sending rules",
       "consent": {
         "title": "Consent (Canada's anti-spam law)",
-        "p": "By default a campaign only writes to contacts with a valid SMS consent on file. A lead received by webhook gets an implied inquiry consent; the validity period is set in SMS settings (6 months, 1, 2, 3 years, unlimited) with an audited retroactive backfill. A STOP revokes consent and suppresses the number."
+        "p": "By default a campaign only writes to contacts with a valid SMS consent on file. A lead received by webhook gets an implied inquiry consent; the validity period is set in SMS settings (6 months, 1, 2, 3 years, unlimited) with an audited retroactive backfill. A STOP revokes consent and suppresses the number. A caller who gets the yes by phone records it directly on the client's SMS thread (express or implied, how it was obtained, a note); revoking dates the entries without deleting anything. A hand-typed send is refused without consent, unless the person wrote first."
       },
       "optout": {
         "title": "Opt-out",
@@ -869,12 +869,20 @@
       "title": "For callers: the inbox and the thread",
       "p1": "The \"Conversations\" inbox lists threads needing attention (reply received, handoff, blocked message, opt-out) with the reason. On the client page, the SMS thread is a box distinct from internal notes: the recipient is always shown, so a note isn't sent to a client by mistake.",
       "actions": [
-        "Write by hand: leaves right away, even while the AI is paused and outside quiet hours; clears the \"needs attention\" flag.",
-        "Pause / resume the AI: while paused, no automated turn speaks on this thread, and campaign rungs are held.",
-        "Cancel a queued message: possible as long as the dispatcher hasn't picked it up.",
+        "Write by hand: leaves right away, even while the AI is paused and outside quiet hours; clears the \"needs attention\" flag. Requires a consent on file, unless the person wrote first.",
+        "Record a consent: on the thread, when you have just obtained it by phone or in person. That is what allows a campaign to write to this person.",
+        "Hand the thread to an assistant (or take it back): a contact who wrote on their own has no assistant until you give them one — or a number designates a default.",
+        "Pause / resume the AI: while paused, no automated turn speaks on this thread, campaign rungs are held, and whatever the AI had already queued is cancelled. The reason is asked for and shown.",
+        "Cancel a queued send: as long as the dispatcher hasn't taken it. After that, an SMS handed to the operator cannot be recalled.",
         "Mark as handled: clears the flag without sending anything.",
         "Assign the thread to a colleague: they get notified of the next replies."
-      ]
+      ],
+      "admin": {
+        "title": "What the settings control",
+        "numbers": "SMS numbers: the line that sends and receives. Label, daily send cap (applied to automated sends — going over is pushed to the next morning), active or not, and the DEFAULT ASSISTANT that takes an inbound thread with no assistant. A number can be added by hand or synced from the Twilio Messaging Service (new ones arrive inactive). A number with threads is not deleted: it is deactivated.",
+        "killSwitch": "Kill switch: stops EVERY send whatever the mode, cancels already-queued sends, and keeps assistant turns from paying for a model call on a message that would be discarded. It is lifted by hand.",
+        "consentPolicy": "Consent validity: stamped on new consents, with an audited retroactive backfill if you apply it to existing ones."
+      }
     },
     "json": {
       "title": "JSON files — export, share, import",

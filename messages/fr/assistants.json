@@ -842,7 +842,7 @@
       "title": "Règles d'envoi",
       "consent": {
         "title": "Consentement (Loi canadienne anti-pourriel)",
-        "p": "Par défaut, une campagne n'écrit qu'aux contacts qui ont un consentement SMS valide au dossier. Un lead reçu par webhook reçoit un consentement implicite d'enquête ; la durée de validité se règle dans les réglages SMS (6 mois, 1 an, 2 ans, 3 ans, illimité) avec rattrapage rétroactif journalisé. Un STOP révoque le consentement et met le numéro sous suppression."
+        "p": "Par défaut, une campagne n'écrit qu'aux contacts qui ont un consentement SMS valide au dossier. Un lead reçu par webhook reçoit un consentement implicite d'enquête ; la durée de validité se règle dans les réglages SMS (6 mois, 1 an, 2 ans, 3 ans, illimité) avec rattrapage rétroactif journalisé. Un STOP révoque le consentement et met le numéro sous suppression. Un téléphoniste qui obtient le oui au téléphone l'enregistre directement sur le fil SMS de la fiche (type exprès ou implicite, comment il a été obtenu, note) ; révoquer date les entrées sans rien effacer. Un envoi à la main est refusé sans consentement, sauf si la personne a écrit la première."
       },
       "optout": {
         "title": "Désabonnement",
@@ -869,12 +869,20 @@
       "title": "Côté téléphonistes : l'inbox et le fil",
       "p1": "L'inbox « Conversations » liste les fils qui demandent une attention (réponse reçue, passage humain, message bloqué, désabonnement) avec la raison. Sur la fiche client, le fil SMS est un encadré distinct des notes internes : le destinataire y est toujours affiché, pour ne pas envoyer une note à un client par erreur.",
       "actions": [
-        "Écrire à la main : part tout de suite, même pendant une pause de l'IA et hors des heures de politesse ; efface la pastille « à traiter ».",
-        "Mettre l'IA en pause / la reprendre : en pause, aucun tour automatisé ne parle sur ce fil, et les barreaux de campagne sont retenus.",
-        "Annuler un message en file : possible tant que le répartiteur ne l'a pas pris.",
+        "Écrire à la main : part tout de suite, même pendant une pause de l'IA et hors des heures de politesse ; efface la pastille « à traiter ». Exige un consentement au dossier, sauf si la personne a écrit la première.",
+        "Enregistrer un consentement : sur le fil, quand vous venez de l'obtenir au téléphone ou en personne. C'est ce qui autorise une campagne à écrire à cette personne.",
+        "Confier le fil à un assistant (ou le lui retirer) : un contact qui a écrit de lui-même n'a pas d'assistant tant qu'on ne lui en donne pas un — ou qu'un numéro n'en désigne un par défaut.",
+        "Mettre l'IA en pause / la reprendre : en pause, aucun tour automatisé ne parle sur ce fil, les barreaux de campagne sont retenus, et ce que l'IA avait déjà mis en file est annulé. La raison est demandée et affichée.",
+        "Annuler un envoi en file : tant que le répartiteur ne l'a pas pris. Après, un SMS remis à l'opérateur ne se rappelle pas.",
         "Marquer comme traité : retire la pastille sans rien envoyer.",
         "Assigner le fil à un collègue : c'est lui qui sera notifié des prochaines réponses."
-      ]
+      ],
+      "admin": {
+        "title": "Ce qui se règle dans les réglages",
+        "numbers": "Numéros SMS : la ligne qui envoie et reçoit. Libellé, plafond d'envois par jour (appliqué aux envois automatisés — un dépassement est reporté au lendemain matin), actif ou non, et l'ASSISTANT PAR DÉFAUT qui prend un fil entrant sans assistant. Un numéro peut être ajouté à la main ou synchronisé depuis le Messaging Service Twilio (les nouveaux arrivent inactifs). Un numéro qui a des fils ne se supprime pas : on le désactive.",
+        "killSwitch": "Interrupteur d'arrêt : coupe TOUT envoi, quel que soit le mode, annule les envois déjà en file, et empêche les tours d'assistant de coûter un appel au modèle pour un message qui serait jeté. Il se relève à la main.",
+        "consentPolicy": "Durée de validité des consentements : estampillée sur les nouveaux consentements, avec un rattrapage rétroactif journalisé si vous l'appliquez aux existants."
+      }
     },
     "json": {
       "title": "Fichiers JSON — exporter, partager, importer",
