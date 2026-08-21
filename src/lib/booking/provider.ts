@@ -18,16 +18,61 @@ export interface BookingSlot {
   label: string;
 }
 
+/**
+ * Contrainte exprimée par la personne — « je peux juste la fin de semaine »,
+ * « seulement le matin ».
+ *
+ * Sans elle, `getSlots` rendait toujours les MÊMES premiers créneaux libres :
+ * quelqu'un qui demandait la fin de semaine s'entendait répondre « aucun
+ * créneau la fin de semaine » alors que le samedi était grand ouvert — il
+ * arrivait simplement après les deux premiers créneaux de semaine.
+ */
+export const SLOT_PREFERENCES = [
+  "any",
+  "weekend",
+  "weekday",
+  "morning",
+  "afternoon",
+  "evening",
+] as const;
+export type SlotPreference = (typeof SLOT_PREFERENCES)[number];
+
+/** Un jour de la semaine (0 = dimanche) satisfait-il la contrainte? */
+export function dayMatchesPreference(weekday: number, preference: SlotPreference): boolean {
+  if (preference === "weekend") return weekday === 0 || weekday === 6;
+  if (preference === "weekday") return weekday >= 1 && weekday <= 5;
+  return true;
+}
+
+/**
+ * Une heure locale satisfait-elle la contrainte? Bornes volontairement
+ * larges : « le matin » veut dire avant midi, « le soir » à partir de 17 h.
+ */
+export function hourMatchesPreference(hour: number, preference: SlotPreference): boolean {
+  if (preference === "morning") return hour < 12;
+  if (preference === "afternoon") return hour >= 12 && hour < 17;
+  if (preference === "evening") return hour >= 17;
+  return true;
+}
+
 export interface GetSlotsInput {
   type: BookingAppointmentType;
   /** Nombre de créneaux souhaités (le brief : 2 ou 3 en pratique). */
   count: number;
   /** Point de départ ISO de la recherche ; par défaut, maintenant. */
   fromIso?: string;
+  /** Contrainte de la personne ; « any » par défaut. */
+  preference?: SlotPreference;
 }
 
 export interface GetSlotsResult {
   slots: BookingSlot[];
+  /**
+   * Vrai quand une contrainte était demandée et qu'AUCUN créneau n'y répond
+   * dans la fenêtre explorée. L'appelant peut alors le dire honnêtement — et
+   * proposer autre chose — au lieu de laisser croire que l'agenda est vide.
+   */
+  preferenceUnavailable?: boolean;
   /**
    * Faux quand le compte Google Agenda du courtier n'est PAS connecté. Dans
    * ce cas `slots` est TOUJOURS vide (voir la garantie documentée sur

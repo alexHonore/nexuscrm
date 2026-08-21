@@ -30,7 +30,9 @@ import { bookingEventTitle, createBookingEvent, GoogleNotConnectedError } from "
 import { getSetting } from "@/lib/settings";
 import { notifyCategoryChanged } from "@/lib/campaigns-server/match";
 import {
+  dayMatchesPreference,
   formatSlotLabel,
+  hourMatchesPreference,
   type BookInput,
   type BookResult,
   type BookingProvider,
@@ -78,23 +80,44 @@ async function getSlots(input: GetSlotsInput): Promise<GetSlotsResult> {
   // changement d'heure.
   const anchorDateStr = formatInTimeZone(anchorInstant, tz, "yyyy-MM-dd");
   const anchorMidnightUtc = new Date(`${anchorDateStr}T00:00:00Z`);
+  const preference = input.preference ?? "any";
 
-  const slots: BookingSlot[] = [];
-  for (let i = 0; i < MAX_LOOKAHEAD_DAYS && slots.length < input.count; i++) {
+  // Deux listes en un seul balayage : ce qui répond à la contrainte, et ce qui
+  // est simplement libre. Si la contrainte ne donne rien sur quatorze jours,
+  // on rend le repli EN LE DISANT — mieux vaut « rien la fin de semaine d'ici
+  // deux semaines, mais jeudi 14 h » qu'un « aucune disponibilité » faux.
+  const matching: BookingSlot[] = [];
+  const fallback: BookingSlot[] = [];
+  for (let i = 0; i < MAX_LOOKAHEAD_DAYS && matching.length < input.count; i++) {
     const dateStr = new Date(anchorMidnightUtc.getTime() + i * 86_400_000).toISOString().slice(0, 10);
-    const availability = await computeAvailability(dateStr, input.type);
+    // Le jour de la semaine d'une date calendaire ne dépend pas du fuseau.
+    const weekday = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+    const dayMatches = dayMatchesPreference(weekday, preference);
+    // Un jour hors contrainte ne sert qu'au repli : inutile d'interroger
+    // l'agenda si on a déjà de quoi replier.
+    if (!dayMatches && fallback.length >= input.count) continue;
 
+    const availability = await computeAvailability(dateStr, input.type);
     if (!availability.googleConnected) {
       return { slots: [], googleConnected: false };
     }
 
     for (const iso of availability.slots) {
-      if (slots.length >= input.count) break;
-      slots.push({ iso, label: formatSlotLabel(new Date(iso), tz) });
+      const slot = { iso, label: formatSlotLabel(new Date(iso), tz) };
+      const hour = Number(formatInTimeZone(new Date(iso), tz, "H"));
+      if (dayMatches && hourMatchesPreference(hour, preference)) {
+        if (matching.length < input.count) matching.push(slot);
+      } else if (fallback.length < input.count) {
+        fallback.push(slot);
+      }
+      if (matching.length >= input.count) break;
     }
   }
 
-  return { slots, googleConnected: true };
+  if (matching.length > 0 || preference === "any") {
+    return { slots: matching.length > 0 ? matching : fallback, googleConnected: true };
+  }
+  return { slots: fallback, googleConnected: true, preferenceUnavailable: true };
 }
 
 /** Même erreur de contrôle de concurrence que `createAppointment`. */

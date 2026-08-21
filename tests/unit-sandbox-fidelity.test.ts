@@ -109,7 +109,12 @@ describe("fidélité du bac à sable", () => {
     expect(code).not.toMatch(/"[^"\n]*simulation[^"\n]*"/i);
     // Les disponibilités de la couche L7 et de get_slots viennent de la MÊME
     // source, et « aucune » exactement quand la production dirait « aucune ».
-    expect(source).toContain("simulatedSlotsText(rung.goal.slotOfferCount)");
+    // Les disponibilités suivent les JOURS RÉSERVABLES configurés : un essai
+    // « juste la fin de semaine » doit refléter la production, pas un agenda
+    // figé qui n'ouvre jamais le samedi.
+    expect(source).toContain("simulatedSlotsText(rung.goal.slotOfferCount, undefined, { days: bookableDays })");
+    expect(source).toContain('getSetting("booking")');
+    expect(source).toContain("bookableDays,");
     expect(source).toContain('rungNeedsSlots(rung) && rung.goal.appointmentType');
     expect(source).toContain(': "aucune"');
   });

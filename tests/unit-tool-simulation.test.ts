@@ -28,22 +28,49 @@ const booking = {
 };
 
 describe("simulatedSlots", () => {
-  it("propose jeudi 14 h, vendredi 18 h 30 et lundi 10 h, toujours dans le futur", () => {
+  it("propose les prochaines heures ouvrables, toujours dans le futur", () => {
+    // Mercredi 11 h à Toronto → le lendemain (jeudi) dès 10 h.
     const slots = simulatedSlots(NOW);
-    expect(slots.map((s) => s.label)).toEqual(["jeudi 14 h", "vendredi 18 h 30", "lundi 10 h"]);
+    expect(slots.map((s) => s.label)).toEqual(["jeudi 10 h", "jeudi 14 h", "jeudi 18 h 30"]);
     for (const slot of slots) {
       expect(new Date(slot.iso).getTime()).toBeGreaterThan(NOW.getTime());
       // Le libellé est celui que la production fabrique pour cet instant.
       expect(formatSlotLabel(new Date(slot.iso), "America/Toronto")).toBe(slot.label);
     }
-    // jeudi 14 h Toronto (EDT) = 18 h UTC, le lendemain du mercredi 19.
-    expect(slots[0].iso).toBe("2026-08-20T18:00:00.000Z");
+    expect(slots[0].iso).toBe("2026-08-20T14:00:00.000Z");
+  });
+
+  it("les JOURS RÉSERVABLES des réglages sont respectés", () => {
+    // Une installation qui n'ouvre que le samedi et le dimanche.
+    const slots = simulatedSlots(NOW, { days: [0, 6] });
+    expect(slots.every((s) => /samedi|dimanche/.test(s.label))).toBe(true);
+    expect(slots.length).toBeGreaterThan(0);
+  });
+
+  it("« fin de semaine » ne rend QUE des samedis et dimanches", () => {
+    // Le bogue signalé : l'agenda simulé était figé sur jeudi/vendredi/lundi,
+    // donc un essai « je peux juste la fin de semaine » s'entendait toujours
+    // répondre qu'il n'y a rien — quels que soient les réglages.
+    const weekend = simulatedSlots(NOW, { preference: "weekend" });
+    expect(weekend.length).toBeGreaterThan(0);
+    expect(weekend.every((s) => /samedi|dimanche/.test(s.label))).toBe(true);
+    const weekday = simulatedSlots(NOW, { preference: "weekday" });
+    expect(weekday.every((s) => !/samedi|dimanche/.test(s.label))).toBe(true);
+  });
+
+  it("les moments de la journée sont respectés", () => {
+    expect(simulatedSlots(NOW, { preference: "morning" }).every((s) => /10 h/.test(s.label))).toBe(true);
+    expect(simulatedSlots(NOW, { preference: "evening" }).every((s) => /18 h 30/.test(s.label))).toBe(true);
+  });
+
+  it("une contrainte impossible ne rend rien plutôt que d'inventer", () => {
+    // Ouvert seulement en semaine, contrainte « fin de semaine ».
+    expect(simulatedSlots(NOW, { days: [1, 2, 3, 4, 5], preference: "weekend" })).toEqual([]);
   });
 
   it("le texte respecte le nombre demandé et ne mentionne jamais l'essai", () => {
-    expect(simulatedSlotsText(2, NOW)).toBe("jeudi 14 h, vendredi 18 h 30");
-    expect(simulatedSlotsText(3, NOW)).toBe("jeudi 14 h, vendredi 18 h 30, lundi 10 h");
-    expect(simulatedSlotsText(1, NOW)).toBe("jeudi 14 h");
+    expect(simulatedSlotsText(2, NOW)).toBe("jeudi 10 h, jeudi 14 h");
+    expect(simulatedSlotsText(1, NOW)).toBe("jeudi 10 h");
     expect(simulatedSlotsText(2, NOW)).not.toMatch(/bac à sable|sandbox|simul/i);
   });
 });
@@ -62,13 +89,34 @@ describe("simulateToolCall", () => {
     expect(out.content).toContain("unknown_tool");
   });
 
-  it("get_slots répond avec les mêmes libellés que la couche L7, autant de fois qu'on l'appelle", () => {
+  it("get_slots rend le libellé ET l'ISO, autant de fois qu'on l'appelle", () => {
     const done = new Set<string>();
     const first = simulateToolCall("get_slots", done, { ...booking, args: { count: 2 } });
+    expect(first.content).toContain("jeudi 10 h (2026-08-20T14:00:00.000Z)");
+    expect(first.content).toContain("jeudi 14 h");
+    // Appelable sans limite : ce n'est pas un effet de bord.
     const second = simulateToolCall("get_slots", done, { ...booking, args: { count: 3 } });
-    expect(first.content).toBe("get_slots : jeudi 14 h, vendredi 18 h 30");
-    expect(second.content).toBe("get_slots : jeudi 14 h, vendredi 18 h 30, lundi 10 h");
+    expect(second.content).toContain("jeudi 10 h");
     expect(SIDE_EFFECT_TOOLS.has("get_slots")).toBe(false);
+  });
+
+  it("get_slots honore « fin de semaine » — et le DIT quand rien n'y répond", () => {
+    const weekend = simulateToolCall("get_slots", new Set(), {
+      ...booking,
+      args: { count: 2, preference: "weekend" },
+    });
+    expect(weekend.content).toMatch(/samedi|dimanche/);
+    expect(weekend.content).not.toContain("RIEN ne correspond");
+
+    // Installation ouverte du lundi au vendredi seulement : le repli est
+    // proposé, mais annoncé comme tel.
+    const impossible = simulateToolCall("get_slots", new Set(), {
+      ...booking,
+      bookableDays: [1, 2, 3, 4, 5],
+      args: { count: 2, preference: "weekend" },
+    });
+    expect(impossible.content).toContain("RIEN ne correspond à « weekend »");
+    expect(impossible.content).toMatch(/jeudi|vendredi|lundi/);
   });
 
   it("get_slots sur un cran qui ne réserve pas : même phrase qu'en production", () => {
@@ -111,14 +159,14 @@ describe("simulateToolCall", () => {
 
   it("book_meeting confirme un créneau offert, puis refuse de rejouer (effet de bord)", () => {
     const done = new Set<string>();
-    const iso = simulatedSlots(NOW)[1].iso;
+    const iso = simulatedSlots(NOW)[2].iso;
     const ok = simulateToolCall("book_meeting", done, { ...booking, args: { slotIso: iso } });
     expect(ok.bookingFailed).toBe(false);
     expect(ok.content).toBe(`book_meeting : confirmé pour ${iso}`);
     // Même instant, autre écriture ISO : l'agenda compare des instants.
     const again = simulateToolCall("book_meeting", new Set(), {
       ...booking,
-      args: { slotIso: "2026-08-21T18:30:00-04:00" },
+      args: { slotIso: "2026-08-20T18:30:00-04:00" },
     });
     expect(again.bookingFailed).toBe(false);
 

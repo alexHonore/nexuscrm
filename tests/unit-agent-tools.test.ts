@@ -83,13 +83,13 @@ describe("parseToolArgs — arguments valides", () => {
   it("get_slots : {} applique le défaut count = 2", () => {
     const result = parseToolArgs("get_slots", {});
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.args).toEqual({ count: 2 });
+    if (result.ok) expect(result.args).toEqual({ count: 2, preference: "any" });
   });
 
   it("get_slots : count explicite valide (3) est conservé", () => {
     const result = parseToolArgs("get_slots", { count: 3 });
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.args).toEqual({ count: 3 });
+    if (result.ok) expect(result.args).toEqual({ count: 3, preference: "any" });
   });
 
   it("book_meeting : slotIso seul suffit (email optionnel)", () => {

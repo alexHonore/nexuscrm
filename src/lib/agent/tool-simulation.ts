@@ -27,7 +27,13 @@
  * Ce module n'exécute RIEN : aucun agenda consulté, aucun rendez-vous créé.
  */
 import { fromZonedTime } from "date-fns-tz";
-import { formatSlotLabel, type BookingSlot } from "@/lib/booking/provider";
+import {
+  dayMatchesPreference,
+  formatSlotLabel,
+  hourMatchesPreference,
+  type BookingSlot,
+  type SlotPreference,
+} from "@/lib/booking/provider";
 import { missingFieldsError, parseToolArgs } from "./tools";
 
 /** Fuseau des libellés — celui de l'app (voir AGENTS.md). */
@@ -52,42 +58,62 @@ export function isTerminalTool(name: string): boolean {
 
 // ── Disponibilités simulées ─────────────────────────────────────────────────
 
-/** Créneaux offerts par l'agenda simulé : jour de semaine + heure locale. */
-const SIMULATED_SLOT_PATTERN: readonly { weekday: number; hour: number; minute: number }[] = [
-  { weekday: 4, hour: 14, minute: 0 }, // jeudi 14 h
-  { weekday: 5, hour: 18, minute: 30 }, // vendredi 18 h 30
-  { weekday: 1, hour: 10, minute: 0 }, // lundi 10 h
+/**
+ * Heures offertes par l'agenda simulé, dans l'ordre de la journée. Elles
+ * couvrent matin, après-midi et soirée pour qu'une contrainte de moment
+ * puisse être satisfaite comme en production.
+ */
+const SIMULATED_HOURS: readonly { hour: number; minute: number }[] = [
+  { hour: 10, minute: 0 },
+  { hour: 14, minute: 0 },
+  { hour: 18, minute: 30 },
 ];
 
+export interface SimulatedSlotOptions {
+  /** Jours réservables (0 = dimanche), venus des RÉGLAGES de réservation. */
+  days?: readonly number[];
+  /** Contrainte demandée par la personne. */
+  preference?: SlotPreference;
+}
+
 /**
- * Les disponibilités que l'agenda simulé « trouve » — les prochaines
- * occurrences de jeudi 14 h, vendredi 18 h 30 et lundi 10 h (heure de
- * Toronto), TOUJOURS dans le futur par rapport à `now`.
+ * Les disponibilités que l'agenda simulé « trouve ».
  *
- * Les libellés passent par `formatSlotLabel`, exactement comme en production :
- * le modèle lit « jeudi 14 h », pas « jeudi 14h » ni une variante inventée ici.
+ * Elles suivent les JOURS RÉSERVABLES configurés et la contrainte demandée,
+ * exactement comme la vraie recherche. Avant, trois créneaux étaient codés en
+ * dur — jeudi, vendredi, lundi : un essai « je peux juste la fin de semaine »
+ * s'entendait TOUJOURS répondre qu'il n'y a rien la fin de semaine, quels que
+ * soient les réglages et l'agenda réel. L'essai mentait sur la production.
+ *
+ * Les libellés passent par `formatSlotLabel`, exactement comme en production.
  * Les instants ISO servent à valider `book_meeting` comme le ferait l'agenda
- * réel (un créneau non offert est refusé) — ils ne sont PAS montrés au modèle,
- * parce que la production ne les montre pas non plus.
+ * réel (un créneau non offert est refusé).
  */
-export function simulatedSlots(now: Date = new Date()): BookingSlot[] {
+export function simulatedSlots(now: Date = new Date(), options: SimulatedSlotOptions = {}): BookingSlot[] {
+  const days = options.days ?? [0, 1, 2, 3, 4, 5, 6];
+  const preference = options.preference ?? "any";
   const slots: BookingSlot[] = [];
-  for (const pattern of SIMULATED_SLOT_PATTERN) {
-    // On avance jour par jour dans le calendrier de Toronto (chaîne de date,
-    // jamais une arithmétique d'instants) pour ne pas glisser d'un jour autour
-    // d'un changement d'heure.
-    for (let offset = 1; offset <= 8; offset += 1) {
-      const probe = new Date(now.getTime() + offset * 86_400_000);
-      const y = probe.getUTCFullYear();
-      const m = String(probe.getUTCMonth() + 1).padStart(2, "0");
-      const d = String(probe.getUTCDate()).padStart(2, "0");
-      const hh = String(pattern.hour).padStart(2, "0");
-      const mm = String(pattern.minute).padStart(2, "0");
+
+  // On avance jour par jour dans le calendrier de Toronto (chaîne de date,
+  // jamais une arithmétique d'instants) pour ne pas glisser d'un jour autour
+  // d'un changement d'heure.
+  for (let offset = 1; offset <= 14 && slots.length < 3; offset += 1) {
+    const probe = new Date(now.getTime() + offset * 86_400_000);
+    const y = probe.getUTCFullYear();
+    const m = String(probe.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(probe.getUTCDate()).padStart(2, "0");
+
+    for (const { hour, minute } of SIMULATED_HOURS) {
+      if (slots.length >= 3) break;
+      const hh = String(hour).padStart(2, "0");
+      const mm = String(minute).padStart(2, "0");
       const local = fromZonedTime(`${y}-${m}-${d}T${hh}:${mm}:00`, SLOT_TZ);
       if (local.getTime() <= now.getTime()) continue;
-      if (localWeekday(local) !== pattern.weekday) continue;
+      const weekday = localWeekday(local);
+      if (!days.includes(weekday)) continue;
+      if (!dayMatchesPreference(weekday, preference)) continue;
+      if (!hourMatchesPreference(hour, preference)) continue;
       slots.push({ iso: local.toISOString(), label: formatSlotLabel(local, SLOT_TZ) });
-      break;
     }
   }
   return slots;
@@ -102,8 +128,12 @@ function localWeekday(date: Date): number {
 }
 
 /** « jeudi 14 h, vendredi 18 h 30 » — ce que la couche L7 et get_slots montrent. */
-export function simulatedSlotsText(count = 2, now: Date = new Date()): string {
-  return simulatedSlots(now)
+export function simulatedSlotsText(
+  count = 2,
+  now: Date = new Date(),
+  options: SimulatedSlotOptions = {},
+): string {
+  return simulatedSlots(now, options)
     .slice(0, Math.max(1, Math.min(3, count)))
     .map((s) => s.label)
     .join(", ");
@@ -122,6 +152,8 @@ export interface ToolSimulationContext {
   qualification: Record<string, unknown>;
   /** Horloge injectable — les tests fixent les créneaux. */
   now?: Date;
+  /** Jours réservables configurés, pour que l'essai suive les réglages. */
+  bookableDays?: readonly number[];
 }
 
 export interface SimulatedToolOutcome {
@@ -156,11 +188,29 @@ export function simulateToolCall(
 
   switch (parsed.name) {
     case "get_slots": {
-      const { count } = parsed.args as { count: number };
+      const { count, preference } = parsed.args as { count: number; preference: SlotPreference };
       if (!ctx.appointmentType) {
         return { ...base, ok: true, content: "get_slots : ce cran d'objectif ne réserve pas de rencontre" };
       }
-      return { ...base, ok: true, content: `get_slots : ${simulatedSlotsText(count, ctx.now)}` };
+      // Même contrat qu'en production : la contrainte est honorée, et quand
+      // rien n'y répond on le DIT au lieu de laisser croire à un agenda vide.
+      const matching = simulatedSlots(ctx.now, { days: ctx.bookableDays, preference });
+      if (matching.length > 0) {
+        const offered = matching.slice(0, count).map((s) => `${s.label} (${s.iso})`).join(", ");
+        return { ...base, ok: true, content: `get_slots : ${offered}` };
+      }
+      const fallback = simulatedSlots(ctx.now, { days: ctx.bookableDays })
+        .slice(0, count)
+        .map((s) => `${s.label} (${s.iso})`)
+        .join(", ");
+      return {
+        ...base,
+        ok: true,
+        content:
+          fallback === ""
+            ? "get_slots : aucune disponibilité confirmée — ne propose AUCUNE heure précise."
+            : `get_slots : RIEN ne correspond à « ${preference} » dans les 14 prochains jours. Dis-le honnêtement, puis propose ces autres heures : ${fallback}`,
+      };
     }
 
     case "book_meeting": {
@@ -192,7 +242,9 @@ export function simulateToolCall(
           content: "book_meeting : ÉCHEC (invalid_slot) — ne confirme RIEN, propose autre chose.",
         };
       }
-      const offered = simulatedSlots(ctx.now).some((s) => s.iso === startsAt.toISOString());
+      const offered = simulatedSlots(ctx.now, { days: ctx.bookableDays }).some(
+        (s) => s.iso === startsAt.toISOString(),
+      );
       if (!offered) {
         return {
           ...base,

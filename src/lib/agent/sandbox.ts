@@ -18,6 +18,7 @@ import { applyRefusal, requiredFieldsFor, rungNeedsSlots } from "./goal";
 import { outreachInstructionText } from "./opening";
 import { renderTemplate } from "./render";
 import { DEFAULT_TURN_INSTRUCTIONS } from "./templates";
+import { getSetting } from "@/lib/settings";
 import { simulateToolCall, simulatedSlotsText } from "./tool-simulation";
 import { toolDefsFor } from "./tools";
 
@@ -345,9 +346,14 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
   // à la place — les mêmes libellés que `get_slots` renverra, pour que le
   // modèle ne lise pas deux vérités — et « aucune » exactement quand la
   // production dirait « aucune » (cran sans rendez-vous).
+  // Les JOURS RÉSERVABLES viennent des vrais réglages : un essai « juste la
+  // fin de semaine » doit refléter ce que la production ferait, pas un agenda
+  // inventé qui n'ouvre jamais le samedi.
+  const bookingSettings = await getSetting("booking").catch(() => null);
+  const bookableDays = bookingSettings?.days;
   const slotsText =
     rungNeedsSlots(rung) && rung.goal.appointmentType
-      ? simulatedSlotsText(rung.goal.slotOfferCount)
+      ? simulatedSlotsText(rung.goal.slotOfferCount, undefined, { days: bookableDays })
       : "aucune";
 
   const runtimeBlock = row.includeRuntimeLayer
@@ -456,6 +462,7 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
           appointmentType: rung.goal.appointmentType,
           requiredFields: requiredFieldsFor(rung),
           qualification,
+          bookableDays,
         });
         simulated.push({ id: call.id, name: call.name, content: outcome.content });
         toolCalls.push({ name: call.name, args: call.arguments, ok: outcome.ok, result: outcome.content });

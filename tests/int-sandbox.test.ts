@@ -154,12 +154,17 @@ describe("simulateTurn", () => {
     const [first, second] = generatorCalls();
     expect(first.system).not.toMatch(NEVER_TELL);
     expect(result.runtimeBlock).toContain(`Disponibilités : ${simulatedSlotsText(2)}`);
-    // Le résultat d'outil renvoyé au modèle porte les MÊMES libellés.
+    // Le résultat d'outil porte les MÊMES libellés que la couche L7 — et
+    // l'instant ISO en plus, comme en production : `book_meeting` exige le
+    // créneau « exactement tel que retourné par get_slots ».
     const toolMessage = second.messages.find((m) => m.role === "tool");
-    expect(toolMessage?.content).toBe(`get_slots : ${simulatedSlotsText(2)}`);
+    for (const label of simulatedSlotsText(2).split(", ")) {
+      expect(toolMessage?.content).toContain(label);
+    }
+    expect(toolMessage?.content).toMatch(/\(20\d{2}-\d{2}-\d{2}T/);
     expect(toolMessage?.content).not.toMatch(NEVER_TELL);
     expect(result.toolCalls).toEqual([
-      { name: "get_slots", args: { count: 2 }, ok: true, result: `get_slots : ${simulatedSlotsText(2)}` },
+      { name: "get_slots", args: { count: 2 }, ok: true, result: toolMessage?.content },
     ]);
     // Le coût est rapporté : classifieur + 2 générateurs + les juges du noyau.
     expect(generatorCalls()).toHaveLength(2);

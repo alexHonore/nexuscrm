@@ -80,6 +80,7 @@ type Ids = {
 let ids: Ids;
 
 const booking = getInternalBookingProvider();
+const { getSetting, setSetting } = await import("@/lib/settings");
 
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -137,6 +138,50 @@ describe("BookingProvider interne — getSlots", () => {
     // à 10:00 Toronto (14:00Z).
     expect(slots[0].iso).toBe("2026-08-10T14:00:00.000Z");
     expect(slots[0].label).toBe("lundi 10 h");
+  });
+
+  it("« fin de semaine » rend des créneaux de fin de semaine, pas les premiers libres", async () => {
+    // Le bogue signalé : get_slots rendait toujours les MÊMES premiers
+    // créneaux, donc « je peux juste la fin de semaine » s'entendait répondre
+    // qu'il n'y a rien la fin de semaine — alors que le samedi était ouvert.
+    const { slots, preferenceUnavailable } = await booking.getSlots({
+      type: "meet",
+      count: 2,
+      preference: "weekend",
+    });
+    expect(preferenceUnavailable).toBeUndefined();
+    expect(slots.length).toBeGreaterThan(0);
+    for (const slot of slots) {
+      expect(slot.label).toMatch(/samedi|dimanche/);
+    }
+  });
+
+  it("« le matin » ne rend que des heures avant midi", async () => {
+    const { slots } = await booking.getSlots({ type: "meet", count: 3, preference: "morning" });
+    expect(slots.length).toBeGreaterThan(0);
+    for (const slot of slots) {
+      const hour = Number(
+        new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Toronto",
+          hour: "numeric",
+          hour12: false,
+        }).format(new Date(slot.iso)),
+      );
+      expect(hour).toBeLessThan(12);
+    }
+  });
+
+  it("une contrainte impossible est ANNONCÉE, avec un repli — jamais un agenda faussement vide", async () => {
+    // Installation ouverte du lundi au vendredi seulement.
+    await setSetting("booking", { ...(await getSetting("booking")), days: [1, 2, 3, 4, 5] });
+    const { slots, preferenceUnavailable } = await booking.getSlots({
+      type: "meet",
+      count: 2,
+      preference: "weekend",
+    });
+    expect(preferenceUnavailable).toBe(true);
+    expect(slots.length).toBeGreaterThan(0);
+    for (const slot of slots) expect(slot.label).not.toMatch(/samedi|dimanche/);
   });
 
   it("Google Agenda déconnecté : ne propose AUCUNE heure (jamais à l'aveugle)", async () => {

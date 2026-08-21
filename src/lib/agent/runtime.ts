@@ -16,6 +16,7 @@ import { assistantRowToConfig, type AssistantConfig } from "@/lib/assistants/sch
 import { resolvedRulesFor } from "@/lib/assistants/service";
 import { campaignRowToConfig } from "@/lib/campaigns/schema";
 import { getInternalBookingProvider } from "@/lib/booking/internal";
+import type { SlotPreference } from "@/lib/booking/provider";
 import { blockingFailures, evaluateOutputRules } from "@/lib/guardrails/filter";
 import { judgeWithLlm } from "@/lib/guardrails/judge";
 import { enabledRules } from "@/lib/guardrails/resolve";
@@ -227,23 +228,30 @@ async function executeTools(input: {
 
     switch (name) {
       case "get_slots": {
-        const { count } = parsed.args as { count: number };
+        const { count, preference } = parsed.args as { count: number; preference: SlotPreference };
         if (!input.rung.goal.appointmentType) {
           record("get_slots : ce cran d'objectif ne réserve pas de rencontre");
           break;
         }
         try {
-          const { slots, googleConnected } = await getInternalBookingProvider().getSlots({
+          const { slots, googleConnected, preferenceUnavailable } = await getInternalBookingProvider().getSlots({
             type: input.rung.goal.appointmentType,
             count,
+            preference,
           });
           // Le libellé ET l'ISO : book_meeting exige le créneau « exactement tel
           // que retourné par get_slots », et le modèle ne voyait que le libellé —
           // chaque réservation partait avec une heure reformulée, refusée.
+          const offered = slots.map((s) => `${s.label} (${s.iso})`).join(", ");
           record(
-            googleConnected && slots.length > 0
-              ? `get_slots : ${slots.map((s) => `${s.label} (${s.iso})`).join(", ")}`
-              : "get_slots : aucune disponibilité confirmée — ne propose AUCUNE heure précise.",
+            !googleConnected || slots.length === 0
+              ? "get_slots : aucune disponibilité confirmée — ne propose AUCUNE heure précise."
+              : preferenceUnavailable
+                ? // Le repli est NOMMÉ comme tel : le modèle doit dire que la
+                  // contrainte n'a rien donné, pas offrir ces heures comme si
+                  // elles y répondaient.
+                  `get_slots : RIEN ne correspond à « ${preference} » dans les 14 prochains jours. Dis-le honnêtement, puis propose ces autres heures : ${offered}`
+                : `get_slots : ${offered}`,
           );
         } catch {
           record("get_slots : agenda injoignable — ne propose aucune heure.");

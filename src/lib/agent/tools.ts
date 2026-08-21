@@ -19,11 +19,14 @@ import { z } from "zod";
 
 import { ASSISTANT_TOOLS, QUALIFICATION_FIELDS, type AssistantTool } from "@/lib/assistants/schema";
 import type { ToolDef } from "@/lib/llm/types";
+import { SLOT_PREFERENCES } from "@/lib/booking/provider";
 
 // ── Schémas d'arguments (validation modèle → handler) ───────────────────────
 
 const getSlotsArgsSchema = z.object({
   count: z.number().int().min(1).max(3).default(2),
+  /** Contrainte exprimée par la personne — « juste la fin de semaine ». */
+  preference: z.enum(SLOT_PREFERENCES).default("any"),
 });
 
 const bookMeetingArgsSchema = z.object({
@@ -93,7 +96,7 @@ export const TOOL_DEFS: Record<AssistantTool, ToolDef> = {
   get_slots: {
     name: "get_slots",
     description:
-      "Retourne 2 ou 3 disponibilités RÉELLES du courtier. Appelle cet outil AVANT de proposer un moment de rendez-vous — ne propose jamais une heure que tu n'as pas obtenue ici. Les créneaux retournés sont les SEULES heures que tu peux offrir à la personne.",
+      "Retourne 2 ou 3 disponibilités RÉELLES du courtier. Appelle cet outil AVANT de proposer un moment de rendez-vous — ne propose jamais une heure que tu n'as pas obtenue ici. Les créneaux retournés sont les SEULES heures que tu peux offrir à la personne. Si la personne exprime une contrainte (« juste la fin de semaine », « seulement le matin », « en soirée »), RAPPELLE cet outil avec « preference » : les premiers créneaux libres ne sont pas forcément ceux qui lui conviennent.",
     parameters: {
       type: "object",
       properties: {
@@ -103,6 +106,13 @@ export const TOOL_DEFS: Record<AssistantTool, ToolDef> = {
           maximum: 3,
           default: 2,
           description: "Nombre de disponibilités à retourner (2 par défaut, 3 au maximum).",
+        },
+        preference: {
+          type: "string",
+          enum: [...SLOT_PREFERENCES],
+          default: "any",
+          description:
+            "Contrainte de la personne : « weekend » (samedi/dimanche), « weekday » (lundi-vendredi), « morning » (avant midi), « afternoon » (midi-17 h), « evening » (17 h et plus), « any » sans contrainte.",
         },
       },
       required: [],
