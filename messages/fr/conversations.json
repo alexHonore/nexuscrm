@@ -1,0 +1,107 @@
+{
+  "nav": {
+    "title": "Conversations",
+    "subtitle": "Les fils SMS qui attendent une réponse humaine."
+  },
+  "thread": {
+    "title": "Conversation SMS",
+    "empty": "Aucun message échangé.",
+    "start": "Écrivez le premier message.",
+    "placeholder": "Votre message…",
+    "send": "Envoyer",
+    "sending": "Envoi…",
+    "hint": "Cmd/Ctrl + Entrée pour envoyer",
+    "segments": "{chars} caractères · {segments} segment(s)",
+    "you": "Vous",
+    "assistant": "Assistant",
+    "system": "Système",
+    "source": {
+      "opener": "Ouverture de campagne",
+      "ladder": "Relance de campagne",
+      "agent": "Assistant",
+      "human": "Envoyé à la main",
+      "system": "Système"
+    },
+    "status": {
+      "queued": "En file",
+      "sent": "Envoyé",
+      "delivered": "Livré",
+      "failed": "Échec",
+      "undelivered": "Non livré",
+      "received": "Reçu"
+    },
+    "failedHint": "Ce message n'est pas parti. Code {code}.",
+    "noNumber": "Aucun numéro SMS actif n'est configuré.",
+    "suppressed": "Ce numéro s'est désabonné : plus aucun message ne peut lui être envoyé.",
+    "sent": "Message mis en file",
+    "error": "L'envoi a échoué"
+  },
+  "ai": {
+    "on": "IA active",
+    "off": "IA en pause",
+    "pause": "Prendre le contrôle",
+    "resume": "Rendre la main à l'IA",
+    "paused": "IA mise en pause",
+    "resumed": "IA réactivée",
+    "banner": "Vous avez le contrôle de cette conversation. L'assistant ne répondra pas tant que vous ne lui aurez pas rendu la main.",
+    "bannerBy": "Mis en pause par {name} · {when}",
+    "reason": "Raison (facultatif)",
+    "confirmPause": "Prendre le contrôle"
+  },
+  "inbox": {
+    "title": "Conversations",
+    "subtitle": "Les fils qui attendent une réponse humaine.",
+    "empty": {
+      "title": "Rien à traiter",
+      "desc": "Aucune conversation n'attend de réponse."
+    },
+    "filters": {
+      "attention": "À traiter",
+      "mine": "Les miennes",
+      "paused": "IA en pause",
+      "all": "Toutes"
+    },
+    "reason": {
+      "inbound": "Nouveau message",
+      "optout": "Désabonnement",
+      "handoff": "Passé à un humain",
+      "guardrail": "Garde-fou déclenché",
+      "booking_failed": "Réservation impossible",
+      "max_turns": "Budget de messages atteint",
+      "no_assistant": "Aucun assistant"
+    },
+    "columns": {
+      "client": "Client",
+      "last": "Dernier message",
+      "reason": "Motif",
+      "assigned": "Assigné"
+    },
+    "unassigned": "Personne",
+    "assignToMe": "Me l'attribuer",
+    "markHandled": "Marquer traité",
+    "handled": "Conversation traitée",
+    "open": "Ouvrir la fiche",
+    "count": "{count} en attente"
+  },
+  "health": {
+    "title": "État du moteur",
+    "killSwitch": {
+      "on": "Envois SUSPENDUS",
+      "off": "Envois actifs"
+    },
+    "mode": {
+      "live": "Mode réel",
+      "sandbox": "Bac à sable",
+      "dry_run": "Simulation"
+    },
+    "quiet": {
+      "open": "Fenêtre d'envoi ouverte",
+      "closed": "Hors heures de politesse"
+    },
+    "queue": "{count} en file",
+    "failed": "{count} en échec",
+    "suppressed": "{count} désabonnés",
+    "attention": "{count} à traiter"
+  },
+  "error": "Une erreur est survenue"
+}

@@ -1,0 +1,107 @@
+{
+  "nav": {
+    "title": "Conversations",
+    "subtitle": "SMS threads waiting on a human."
+  },
+  "thread": {
+    "title": "SMS conversation",
+    "empty": "No messages yet.",
+    "start": "Write the first message.",
+    "placeholder": "Your message…",
+    "send": "Send",
+    "sending": "Sending…",
+    "hint": "Cmd/Ctrl + Enter to send",
+    "segments": "{chars} characters · {segments} segment(s)",
+    "you": "You",
+    "assistant": "Assistant",
+    "system": "System",
+    "source": {
+      "opener": "Campaign opener",
+      "ladder": "Campaign follow-up",
+      "agent": "Assistant",
+      "human": "Sent by hand",
+      "system": "System"
+    },
+    "status": {
+      "queued": "Queued",
+      "sent": "Sent",
+      "delivered": "Delivered",
+      "failed": "Failed",
+      "undelivered": "Undelivered",
+      "received": "Received"
+    },
+    "failedHint": "This message did not go out. Code {code}.",
+    "noNumber": "No active SMS number is configured.",
+    "suppressed": "This number unsubscribed: nothing more can be sent to it.",
+    "sent": "Message queued",
+    "error": "Sending failed"
+  },
+  "ai": {
+    "on": "AI on",
+    "off": "AI paused",
+    "pause": "Take control",
+    "resume": "Hand back to AI",
+    "paused": "AI paused",
+    "resumed": "AI resumed",
+    "banner": "You have control of this conversation. The assistant will not reply until you hand it back.",
+    "bannerBy": "Paused by {name} · {when}",
+    "reason": "Reason (optional)",
+    "confirmPause": "Take control"
+  },
+  "inbox": {
+    "title": "Conversations",
+    "subtitle": "Threads waiting on a human.",
+    "empty": {
+      "title": "Nothing to handle",
+      "desc": "No conversation is waiting for a reply."
+    },
+    "filters": {
+      "attention": "To handle",
+      "mine": "Mine",
+      "paused": "AI paused",
+      "all": "All"
+    },
+    "reason": {
+      "inbound": "New message",
+      "optout": "Unsubscribe",
+      "handoff": "Handed to a human",
+      "guardrail": "Guardrail triggered",
+      "booking_failed": "Booking failed",
+      "max_turns": "Message budget reached",
+      "no_assistant": "No assistant"
+    },
+    "columns": {
+      "client": "Client",
+      "last": "Last message",
+      "reason": "Reason",
+      "assigned": "Assigned"
+    },
+    "unassigned": "Nobody",
+    "assignToMe": "Assign to me",
+    "markHandled": "Mark handled",
+    "handled": "Conversation handled",
+    "open": "Open the client",
+    "count": "{count} waiting"
+  },
+  "health": {
+    "title": "Engine health",
+    "killSwitch": {
+      "on": "Sending SUSPENDED",
+      "off": "Sending active"
+    },
+    "mode": {
+      "live": "Live mode",
+      "sandbox": "Sandbox",
+      "dry_run": "Dry run"
+    },
+    "quiet": {
+      "open": "Send window open",
+      "closed": "Outside quiet hours"
+    },
+    "queue": "{count} queued",
+    "failed": "{count} failed",
+    "suppressed": "{count} unsubscribed",
+    "attention": "{count} to handle"
+  },
+  "error": "Something went wrong"
+}

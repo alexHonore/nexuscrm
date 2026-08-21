@@ -6,6 +6,7 @@ import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 import { db } from "@/db";
 import { auditLogs, categories, sources, users } from "@/db/schema";
+import { messages, smsNumbers } from "@/db/schema-sms";
 import { requireUser } from "@/lib/auth/guards";
 import { dispositionDisplayMap } from "@/lib/dispositions";
 import { APP_TZ } from "@/components/clients/timezone";
@@ -16,6 +17,7 @@ import { ClientSwitcher } from "@/components/clients/client-switcher";
 import { CommentsTimeline } from "@/components/clients/comments-timeline";
 import { DeleteClientButton } from "@/components/clients/delete-client-button";
 import { FollowupsCard } from "@/components/clients/followups-card";
+import { SmsThreadCard, type SmsThreadData } from "@/components/clients/sms-thread-card";
 import type { FilterOption } from "@/components/clients/clients-filters";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -38,6 +40,68 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
     },
   });
   if (!client) notFound();
+
+  // ── Fil SMS ────────────────────────────────────────────────────────────────
+  // Chargé à part de la requête relationnelle du client : `conversations` est
+  // liée par (téléphone, numéro) et non par une clé étrangère simple, et le fil
+  // doit exister même quand aucune conversation n'a encore été créée.
+  const thread = client.phone
+    ? await db.query.conversations.findFirst({
+        where: (c, { eq: eqOp }) => eqOp(c.clientId, client.id),
+        with: { pausedBy: { columns: { name: true } } },
+      })
+    : undefined;
+
+  const [threadMessages, suppressedRow, activeNumber] = await Promise.all([
+    thread
+      ? db
+          .select({
+            id: messages.id,
+            direction: messages.direction,
+            body: messages.body,
+            createdAt: messages.createdAt,
+            status: messages.status,
+            errorCode: messages.errorCode,
+            source: messages.source,
+            aiGenerated: messages.aiGenerated,
+            sentByName: users.name,
+          })
+          .from(messages)
+          .leftJoin(users, eq(users.id, messages.sentById))
+          .where(eq(messages.conversationId, thread.id))
+          .orderBy(asc(messages.createdAt))
+          .limit(200)
+      : Promise.resolve([]),
+    client.phone
+      ? db.query.suppressions.findFirst({
+          where: (sup, { eq: eqOp }) => eqOp(sup.phoneE164, client.phone),
+        })
+      : Promise.resolve(undefined),
+    db.query.smsNumbers.findFirst({ where: eq(smsNumbers.active, true) }),
+  ]);
+
+  const smsThread: SmsThreadData = {
+    conversationId: thread?.id ?? null,
+    aiEnabled: thread?.aiEnabled ?? true,
+    pausedByName: thread?.pausedBy?.name ?? null,
+    pausedAt: thread?.pausedAt?.toISOString() ?? null,
+    pauseReason: thread?.pauseReason ?? null,
+    needsAttention: thread?.needsAttention ?? false,
+    attentionReason: thread?.attentionReason ?? null,
+    suppressed: suppressedRow !== undefined,
+    hasActiveNumber: activeNumber !== undefined,
+    messages: threadMessages.map((m) => ({
+      id: m.id,
+      direction: m.direction,
+      body: m.body,
+      createdAt: m.createdAt.toISOString(),
+      status: m.status,
+      errorCode: m.errorCode,
+      source: m.source,
+      aiGenerated: m.aiGenerated,
+      sentByName: m.sentByName,
+    })),
+  };
 
   const [allCategories, allSources, activeUsers, lastEditRows] = await Promise.all([
     db.query.categories.findMany({ orderBy: [asc(categories.sortOrder), asc(categories.id)] }),
@@ -151,6 +215,9 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
                 author: { id: c.userId, name: c.user?.name ?? "—" },
               }))}
             />
+            {/* Sous les commentaires : le fil SMS fait partie de l'espace de
+                travail du téléphoniste, au même titre que ses relances. */}
+            <SmsThreadCard clientId={client.id} thread={smsThread} />
           </div>
 
           <div className="order-2 space-y-4 @3xl:order-1 @3xl:col-span-2 md:space-y-5">

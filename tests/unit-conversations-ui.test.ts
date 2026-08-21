@@ -1,0 +1,293 @@
+/**
+ * Unitaire — rendu du fil SMS et de la boîte de réception.
+ *
+ * Ce que ces écrans DOIVENT dire sans qu'on clique : qui parle, ce qui n'est
+ * pas parti, qui a la main, et si le moteur envoie vraiment. Le typage ne voit
+ * rien de tout ça.
+ */
+import { createElement, type ComponentProps } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { NextIntlClientProvider } from "next-intl";
+import { describe, expect, it, vi } from "vitest";
+import conversationsFr from "../messages/fr/conversations.json";
+import commonFr from "../messages/fr/common.json";
+import type { SmsThreadData } from "@/components/clients/sms-thread-card";
+import type { EngineHealth, InboxRow } from "@/components/conversations/conversations-inbox";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
+// Les composants importent les actions serveur ; les simuler évite d'entraîner
+// toute la couche base dans un test de rendu.
+vi.mock("@/app/(app)/conversations/actions", () => ({
+  sendManualSmsAction: vi.fn(),
+  setConversationAiAction: vi.fn(),
+  markConversationHandledAction: vi.fn(),
+  assignConversationAction: vi.fn(),
+}));
+
+const { SmsThreadCard } = await import("@/components/clients/sms-thread-card");
+const { ConversationsInbox } = await import("@/components/conversations/conversations-inbox");
+
+type IntlMessages = ComponentProps<typeof NextIntlClientProvider>["messages"];
+
+function wrap(element: React.ReactElement): string {
+  return renderToStaticMarkup(
+    // eslint-disable-next-line react/no-children-prop
+    createElement(NextIntlClientProvider, {
+      locale: "fr",
+      messages: { conversations: conversationsFr, common: commonFr } as unknown as IntlMessages,
+      children: element,
+    }),
+  );
+}
+
+const THREAD: SmsThreadData = {
+  conversationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  aiEnabled: true,
+  pausedByName: null,
+  pausedAt: null,
+  pauseReason: null,
+  needsAttention: false,
+  attentionReason: null,
+  suppressed: false,
+  hasActiveNumber: true,
+  messages: [
+    {
+      id: "m1",
+      direction: "out",
+      body: "Bonjour, ici Groupe Nexus. Toujours un projet?",
+      createdAt: "2026-08-21T14:00:00.000Z",
+      status: "delivered",
+      errorCode: null,
+      source: "opener",
+      aiGenerated: false,
+      sentByName: null,
+    },
+    {
+      id: "m2",
+      direction: "in",
+      body: "Oui, mais pas avant l'automne",
+      createdAt: "2026-08-21T14:20:00.000Z",
+      status: "received",
+      errorCode: null,
+      source: "human",
+      aiGenerated: false,
+      sentByName: null,
+    },
+    {
+      id: "m3",
+      direction: "out",
+      body: "Parfait, je vous relance en septembre.",
+      createdAt: "2026-08-21T14:22:00.000Z",
+      status: "failed",
+      errorCode: 30007,
+      source: "agent",
+      aiGenerated: true,
+      sentByName: null,
+    },
+    {
+      id: "m4",
+      direction: "out",
+      body: "Je prends la suite, ici Alex.",
+      createdAt: "2026-08-21T15:00:00.000Z",
+      status: "sent",
+      errorCode: null,
+      source: "human",
+      aiGenerated: false,
+      sentByName: "Alex-Honoré",
+    },
+  ],
+};
+
+const HEALTH: EngineHealth = {
+  killSwitch: false,
+  mode: "live",
+  sendWindowOpen: true,
+  queued: 3,
+  failed: 0,
+  suppressed: 12,
+};
+
+const ROWS: InboxRow[] = [
+  {
+    id: "c1",
+    clientId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    clientName: "Marie Tremblay",
+    clientPhone: "+14185551234",
+    needsAttention: true,
+    attentionReason: "handoff",
+    aiEnabled: false,
+    assignedToId: null,
+    assignedToName: null,
+    lastBody: "Je préfère parler à quelqu'un",
+    lastAt: "2026-08-21T15:00:00.000Z",
+  },
+  {
+    id: "c2",
+    clientId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    clientName: "Jean Roy",
+    clientPhone: "+14185555678",
+    needsAttention: false,
+    attentionReason: null,
+    aiEnabled: true,
+    assignedToId: "me",
+    assignedToName: "Moi",
+    lastBody: "Merci!",
+    lastAt: "2026-08-21T12:00:00.000Z",
+  },
+];
+
+describe("fil SMS", () => {
+  it("dit QUI parle pour chaque message", () => {
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    // Une ouverture de campagne, une réponse d'assistant et un message tapé par
+    // un collègue se ressemblent : les confondre fait répondre par-dessus une
+    // machine, ou croire qu'un humain a déjà traité le fil.
+    expect(html).toContain("Ouverture de campagne");
+    expect(html).toContain("Assistant");
+    expect(html).toContain("Alex-Honoré");
+  });
+
+  it("un envoi en ÉCHEC se voit, avec son code", () => {
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    expect(html).toContain("Échec");
+    expect(html).toContain("30007");
+  });
+
+  it("un fil en pause affiche la bannière de prise de contrôle", () => {
+    const paused = {
+      ...THREAD,
+      aiEnabled: false,
+      pausedByName: "Alex-Honoré",
+      pausedAt: "2026-08-21T15:05:00.000Z",
+    };
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: paused }));
+    expect(html).toContain("Vous avez le contr");
+    expect(html).toContain("Alex-Honor");
+    // Et le bouton propose de rendre la main, pas de reprendre le contrôle.
+    expect(html).toContain("Rendre la main");
+  });
+
+  it("un numéro désabonné bloque la rédaction et le dit", () => {
+    const html = wrap(
+      createElement(SmsThreadCard, { clientId: "x", thread: { ...THREAD, suppressed: true } }),
+    );
+    expect(html).toContain("désabonn");
+    expect(html).toContain("disabled");
+  });
+
+  it("sans numéro actif, l'écran l'explique au lieu d'un fil vide", () => {
+    const html = wrap(
+      createElement(SmsThreadCard, {
+        clientId: "x",
+        thread: { ...THREAD, messages: [], hasActiveNumber: false },
+      }),
+    );
+    expect(html).toContain("Aucun num");
+  });
+
+  it("un fil « à traiter » propose de le marquer traité", () => {
+    const html = wrap(
+      createElement(SmsThreadCard, {
+        clientId: "x",
+        thread: { ...THREAD, needsAttention: true, attentionReason: "inbound" },
+      }),
+    );
+    expect(html).toContain("Nouveau message");
+    expect(html).toContain("Marquer trait");
+  });
+
+  it("aucune clé i18n non résolue", () => {
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    expect(html).not.toContain("MISSING_MESSAGE");
+    expect(html).not.toMatch(/thread\.[a-zA-Z]+\./);
+  });
+});
+
+describe("boîte de réception", () => {
+  it("montre le motif et l'état de l'IA de chaque fil", () => {
+    const html = wrap(
+      createElement(ConversationsInbox, { rows: ROWS, currentUserId: "me", health: HEALTH }),
+    );
+    expect(html).toContain("Marie Tremblay");
+    expect(html).toContain("Passé à un humain");
+    expect(html).toContain("IA en pause");
+  });
+
+  it("l'interrupteur coupé est une ALERTE, pas une pastille", () => {
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: ROWS,
+        currentUserId: "me",
+        health: { ...HEALTH, killSwitch: true },
+      }),
+    );
+    // Découvrir après avoir tapé trois réponses que rien ne part est la pire
+    // manière de l'apprendre.
+    expect(html).toContain("SUSPENDUS");
+    expect(html).toContain('role="alert"');
+  });
+
+  it("un mode qui n'est pas « réel » est affiché", () => {
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: ROWS,
+        currentUserId: "me",
+        health: { ...HEALTH, mode: "dry_run" },
+      }),
+    );
+    expect(html).toContain("Simulation");
+  });
+
+  it("hors heures de politesse, la bande le dit", () => {
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: ROWS,
+        currentUserId: "me",
+        health: { ...HEALTH, sendWindowOpen: false },
+      }),
+    );
+    expect(html).toContain("Hors heures");
+  });
+
+  it("les échecs en file ne sont montrés que s'il y en a", () => {
+    const clean = wrap(
+      createElement(ConversationsInbox, { rows: ROWS, currentUserId: "me", health: HEALTH }),
+    );
+    expect(clean).not.toContain("en échec");
+
+    const broken = wrap(
+      createElement(ConversationsInbox, {
+        rows: ROWS,
+        currentUserId: "me",
+        health: { ...HEALTH, failed: 4 },
+      }),
+    );
+    expect(broken).toContain("en échec");
+  });
+
+  it("le filtre par défaut est « à traiter »", () => {
+    const html = wrap(
+      createElement(ConversationsInbox, { rows: ROWS, currentUserId: "me", health: HEALTH }),
+    );
+    // Marie est à traiter, Jean non : seul Marie doit apparaître au départ.
+    expect(html).toContain("Marie Tremblay");
+    expect(html).not.toContain("Jean Roy");
+  });
+
+  it("un état vide reste lisible", () => {
+    const html = wrap(
+      createElement(ConversationsInbox, { rows: [], currentUserId: "me", health: HEALTH }),
+    );
+    expect(html).toContain("Rien à traiter");
+    expect(html).not.toContain("MISSING_MESSAGE");
+  });
+
+  it("aucune clé i18n non résolue", () => {
+    const html = wrap(
+      createElement(ConversationsInbox, { rows: ROWS, currentUserId: "me", health: HEALTH }),
+    );
+    expect(html).not.toContain("MISSING_MESSAGE");
+    expect(html).not.toMatch(/inbox\.[a-zA-Z]+\./);
+    expect(html).not.toMatch(/health\.[a-zA-Z]+\./);
+  });
+});

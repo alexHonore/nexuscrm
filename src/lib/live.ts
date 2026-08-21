@@ -17,7 +17,14 @@ import { useEffect, useRef } from "react";
  *    sondage est coupé : zéro invocation Vercel gaspillée.
  */
 
-export type LiveScope = "clients" | "followups" | "notifications" | "calls" | "appointments";
+export type LiveScope =
+  | "clients"
+  | "followups"
+  | "notifications"
+  | "calls"
+  | "appointments"
+  /** Fil SMS : un entrant peut arriver d'un webhook, sans action dans cet onglet. */
+  | "sms";
 
 type LiveDetail = { scope: LiveScope };
 

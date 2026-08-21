@@ -24,6 +24,7 @@ const NAMESPACES = [
   "notifications",
   "assistants",
   "campaigns",
+  "conversations",
 ] as const;
 
 export default getRequestConfig(async () => {

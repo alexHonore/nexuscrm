@@ -11,6 +11,7 @@ import {
   Globe,
   KeyRound,
   Megaphone,
+  MessageCircle,
   LayoutDashboard,
   LogOut,
   Phone,
@@ -63,11 +64,19 @@ const MAIN_NAV: NavItem[] = [
   { href: "/pipeline", labelKey: "pipeline", icon: Columns3 },
   { href: "/calls", labelKey: "callsShort", icon: PhoneCall },
   { href: "/appointments", labelKey: "appointments", icon: CalendarDays },
+  { href: "/conversations", labelKey: "conversations", icon: MessageCircle },
   { href: "/notifications", labelKey: "notifications", icon: Bell },
 ];
 
-/** Nav basse mobile : 5 onglets — les notifications restent sur la cloche du haut. */
-const MOBILE_NAV = MAIN_NAV.filter((i) => i.labelKey !== "notifications");
+/**
+ * Nav basse mobile : 5 onglets — les notifications restent sur la cloche du
+ * haut. Le pipeline en sort aussi : un tableau kanban est le moins utilisable
+ * des écrans sur un téléphone, alors que les conversations sont précisément
+ * l'écran qu'un téléphoniste ouvre depuis son cellulaire entre deux appels.
+ */
+const MOBILE_NAV = MAIN_NAV.filter(
+  (i) => i.labelKey !== "notifications" && i.labelKey !== "pipeline",
+);
 
 const ADMIN_NAV: NavItem[] = [
   { href: "/admin/users", labelKey: "users", icon: Users },
