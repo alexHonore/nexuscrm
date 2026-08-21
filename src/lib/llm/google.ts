@@ -6,7 +6,17 @@ import {
   numberOr,
   stringOr,
 } from "./http";
-import type { GenerateInput, LLMProvider, LLMResult, ModelDescriptor, ToolCall } from "./types";
+import { groupToolResults } from "./messages";
+import { finishFields, reasoningBudgetTokens } from "./reasoning";
+import type {
+  FinishReason,
+  GenerateInput,
+  LLMMessage,
+  LLMProvider,
+  LLMResult,
+  ModelDescriptor,
+  ToolCall,
+} from "./types";
 
 /**
  * Google en direct — le moins cher et le plus rapide : c'est le fournisseur
@@ -24,6 +34,50 @@ export interface GoogleOptions {
   timeoutMs?: number;
 }
 
+/**
+ * Un modèle Gemini qui sait réfléchir, d'après son identifiant — repli quand le
+ * catalogue ne le dit pas lui-même. La réflexion arrive avec la génération 2.5
+ * (avant, `thinkingConfig` fait rejeter l'appel) ; un alias « -latest » pointe
+ * forcément sur une génération qui réfléchit.
+ */
+export function isGoogleThinkingModel(modelId: string): boolean {
+  return /gemini-(2\.5|[3-9])/.test(modelId) || /^gemini-[a-z-]+-latest$/.test(modelId);
+}
+
+/**
+ * Corps de `generateContent` — exporté pour être vérifié champ par champ.
+ *
+ * Le niveau de réflexion devient `thinkingConfig.thinkingBudget`, envoyé
+ * seulement s'il est demandé : sans consigne, le modèle garde son réglage par
+ * défaut (et un modèle sans réflexion n'est pas dérangé). Le budget s'ajoute à
+ * `maxOutputTokens` : la réflexion se compte sur le même plafond que le texte,
+ * et 300 jetons de SMS seraient mangés avant le premier mot.
+ */
+export function buildGoogleBody(input: GenerateInput): Record<string, unknown> {
+  const budget = reasoningBudgetTokens(input.reasoningEffort);
+  return {
+    system_instruction: { parts: [{ text: input.system }] },
+    contents: toGoogleContents(input.messages),
+    tools:
+      input.tools && input.tools.length > 0
+        ? [
+            {
+              function_declarations: input.tools.map((tool) => ({
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.parameters,
+              })),
+            },
+          ]
+        : undefined,
+    generationConfig: {
+      temperature: input.temperature,
+      maxOutputTokens: input.maxTokens + budget,
+      ...(budget > 0 ? { thinkingConfig: { thinkingBudget: budget } } : {}),
+    },
+  };
+}
+
 export function createGoogleProvider(options: GoogleOptions): LLMProvider {
   const baseUrl = (options.baseUrl ?? API_BASE).replace(/\/$/, "");
   const fetchFn = options.fetchFn ?? fetch;
@@ -37,28 +91,7 @@ export function createGoogleProvider(options: GoogleOptions): LLMProvider {
       const { json, latencyMs } = await callJson({
         url: `${baseUrl}/models/${input.model}:generateContent`,
         headers,
-        body: {
-          system_instruction: { parts: [{ text: input.system }] },
-          contents: input.messages.map((message) => ({
-            // Google : « model » et « user » seulement ; un résultat d'outil
-            // est un `functionResponse` porté par un tour `user`.
-            role: message.role === "assistant" ? "model" : "user",
-            parts: toGoogleParts(message),
-          })),
-          tools:
-            input.tools && input.tools.length > 0
-              ? [
-                  {
-                    function_declarations: input.tools.map((tool) => ({
-                      name: tool.name,
-                      description: tool.description,
-                      parameters: tool.parameters,
-                    })),
-                  },
-                ]
-              : undefined,
-          generationConfig: { temperature: input.temperature, maxOutputTokens: input.maxTokens },
-        },
+        body: buildGoogleBody(input),
         provider: "google",
         fetchFn,
         timeoutMs,
@@ -94,6 +127,7 @@ export function createGoogleProvider(options: GoogleOptions): LLMProvider {
         },
         latencyMs,
         modelServed: stringOr(root.modelVersion, input.model),
+        ...finishFields(googleFinishReason(candidate.finishReason, toolCalls.length > 0)),
         raw: json,
       };
     },
@@ -113,32 +147,77 @@ export function createGoogleProvider(options: GoogleOptions): LLMProvider {
         const methods = asArray(model.supportedGenerationMethods).filter(
           (m): m is string => typeof m === "string",
         );
+        // Le catalogue porte un drapeau `thinking` ; à défaut, l'identifiant
+        // tranche. Sans ce drapeau, l'étape « réflexion » du sélecteur ne
+        // s'ouvrirait jamais pour un modèle Google direct.
+        const thinking = model.thinking;
         return {
           id,
           label: stringOr(model.displayName, id),
           contextTokens: numberOr(model.inputTokenLimit, 0),
           supportsTools: methods.includes("generateContent"),
+          supportsReasoning: typeof thinking === "boolean" ? thinking : isGoogleThinkingModel(id),
         };
       });
     },
   };
 }
 
-/**
- * Parts Google. Un appel devient `functionCall`, un résultat
- * `functionResponse` — le texte libre ne relie rien à rien.
- */
-function toGoogleParts(message: GenerateInput["messages"][number]): Record<string, unknown>[] {
-  if (message.role === "tool") {
-    return [
-      {
-        functionResponse: {
-          name: message.name ?? message.toolCallId ?? "tool",
-          response: { result: message.content },
-        },
-      },
-    ];
+/** `finishReason` du candidat → vocabulaire commun. */
+function googleFinishReason(raw: unknown, hasToolCalls: boolean): FinishReason | undefined {
+  switch (raw) {
+    case "STOP":
+      // Google dit « STOP » même quand le tour se termine sur des appels d'outils.
+      return hasToolCalls ? "tool_calls" : "stop";
+    case "MAX_TOKENS":
+      return "length";
+    case "SAFETY":
+    case "RECITATION":
+    case "BLOCKLIST":
+    case "PROHIBITED_CONTENT":
+    case "SPII":
+    case "IMAGE_SAFETY":
+      return "content_filter";
+    case undefined:
+    case null:
+      return undefined;
+    default:
+      return "other";
   }
+}
+
+/**
+ * Contenus Google. « model » et « user » seulement ; un résultat d'outil est un
+ * `functionResponse` porté par un tour `user`, et TOUS les résultats d'un même
+ * tour vont dans LE MÊME contenu — un tour par résultat fait rejeter la
+ * requête quand le modèle a émis deux appels en parallèle.
+ */
+function toGoogleContents(messages: LLMMessage[]): Record<string, unknown>[] {
+  return groupToolResults(messages).map((turn) => {
+    if (turn.kind === "tool_results") {
+      return {
+        role: "user",
+        parts: turn.results.map((result) => ({
+          functionResponse: {
+            name: result.name ?? result.toolCallId ?? "tool",
+            response: { result: result.content },
+          },
+        })),
+      };
+    }
+    const message = turn.message;
+    return {
+      role: message.role === "assistant" ? "model" : "user",
+      parts: toGoogleParts(message),
+    };
+  });
+}
+
+/**
+ * Parts Google. Un appel devient `functionCall` — le texte libre ne relie rien
+ * à rien.
+ */
+function toGoogleParts(message: LLMMessage): Record<string, unknown>[] {
   if (message.role === "assistant" && message.toolCalls && message.toolCalls.length > 0) {
     const parts: Record<string, unknown>[] = [];
     if (message.content !== "") parts.push({ text: message.content });

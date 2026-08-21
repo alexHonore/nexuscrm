@@ -1,6 +1,7 @@
 import { asArray, asRecord, callJson, numberOr, stringOr } from "./http";
 import { DEFAULT_LLM_TIMEOUT_MS } from "./http";
 import { chatCompletion } from "./openai-compatible";
+import { reasoningBudgetTokens } from "./reasoning";
 import type { GenerateInput, LLMProvider, LLMResult, ModelDescriptor } from "./types";
 
 /**
@@ -71,6 +72,10 @@ export function createOpenRouterProvider(options: OpenRouterOptions): LLMProvide
         provider: "openrouter",
         fetchFn,
         timeoutMs,
+        // Le routeur taille le budget de réflexion EN PROPORTION de max_tokens
+        // (chez Anthropic, « high » en prend ~80 %) : sans marge, un plafond de
+        // 300 jetons laisse une soixantaine de jetons de texte — coupé net.
+        bodyOptions: { extraOutputTokens: reasoningBudgetTokens(input.reasoningEffort) },
         ...(Object.keys(extraBody).length > 0 ? { extraBody } : {}),
       });
     },

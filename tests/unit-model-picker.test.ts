@@ -11,7 +11,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { describe, expect, it, vi } from "vitest";
 import assistantsFr from "../messages/fr/assistants.json";
 import commonFr from "../messages/fr/common.json";
-import { LABS, isFloatingAlias, isInteractiveModel, labIdOf, labOf } from "@/lib/llm/labs";
+import { LABS, UNKNOWN_LAB, isFloatingAlias, isInteractiveModel, labIdOf, labOf } from "@/lib/llm/labs";
 import type { ModelDescriptor } from "@/lib/llm/types";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -26,12 +26,16 @@ const MODELS: ModelDescriptor[] = [
   { id: "someone/free-model:free", label: "Gratuit", contextTokens: 8000, supportsTools: false },
 ];
 
-function render(value = "anthropic/claude-sonnet-5", effort: "none" | "low" | "medium" | "high" = "none") {
+function render(
+  value = "anthropic/claude-sonnet-5",
+  effort: "none" | "low" | "medium" | "high" = "none",
+  messages: Record<string, unknown> = { assistants: assistantsFr, common: commonFr },
+) {
   return renderToStaticMarkup(
     // eslint-disable-next-line react/no-children-prop
     createElement(NextIntlClientProvider, {
       locale: "fr",
-      messages: { assistants: assistantsFr, common: commonFr } as unknown as IntlMessages,
+      messages: messages as unknown as IntlMessages,
       children: createElement(ModelPicker, {
         models: MODELS, loading: false, value, effort,
         onChange: () => {}, onReload: () => {},
@@ -51,6 +55,8 @@ describe("registre des laboratoires", () => {
     const lab = labOf("inconnu-xyz/modele");
     expect(lab.name).toBe("inconnu-xyz");
     expect(LABS["inconnu-xyz"]).toBeUndefined();
+    // …et la note générique, pas une note inventée.
+    expect(lab.noteKey).toBe(UNKNOWN_LAB.noteKey);
   });
 
   it("un identifiant sans préfixe ne fait pas planter", () => {
@@ -85,6 +91,16 @@ describe("registre des laboratoires", () => {
     expect(isInteractiveModel("anthropic/claude-sonnet-5")).toBe(true);
     expect(isInteractiveModel("anthropic/claude-sonnet-5:batch")).toBe(false);
     expect(isInteractiveModel("someone/free-model:free")).toBe(false);
+  });
+
+  it("la note d'un laboratoire est une CLÉ i18n, pas une phrase en dur", () => {
+    // Un administrateur anglophone lisait des notes en français : le texte vit
+    // dans messages/<locale>/assistants.json sous model.labNote.<clé>.
+    for (const lab of Object.values(LABS)) {
+      expect(lab.noteKey, lab.id).toBe(lab.id);
+      expect(lab).not.toHaveProperty("noteFr");
+    }
+    expect(UNKNOWN_LAB.noteKey).toBe("autre");
   });
 });
 
@@ -132,6 +148,23 @@ describe("entonnoir", () => {
   it("aucune clé i18n non résolue", () => {
     const html = render();
     expect(html).not.toContain("MISSING_MESSAGE");
-    expect(html).not.toMatch(/model\.(step|effort)\./);
+    expect(html).not.toMatch(/model\.(step|effort|labNote)\./);
+  });
+
+  it("la note d'un laboratoire vient des messages de la locale", () => {
+    // Avec la clé présente, la note s'affiche traduite…
+    const withNotes = {
+      common: commonFr,
+      assistants: {
+        ...assistantsFr,
+        model: { ...assistantsFr.model, labNote: { anthropic: "Note de test Anthropic" } },
+      },
+    };
+    const html = render("anthropic/claude-sonnet-5", "none", withNotes);
+    expect(html).toContain("Note de test Anthropic");
+    // …et une clé absente (Google, Mistral ici) ne laisse fuir ni clé brute
+    // ni phrase dans la mauvaise langue.
+    expect(html).not.toContain("labNote");
+    expect(html).not.toContain("Rapide et peu coûteux");
   });
 });

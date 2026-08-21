@@ -42,6 +42,16 @@ export interface Usage {
   costUsd?: number;
 }
 
+/**
+ * Pourquoi le modèle s'est arrêté, dans un vocabulaire commun aux fournisseurs.
+ *
+ * `length` est le cas qui compte : la réponse a été coupée par le plafond de
+ * jetons. Sans ce signal, un brouillon tronqué en pleine phrase passe les
+ * garde-fous et part tel quel au client, et une réponse vide (tout le budget
+ * mangé par la réflexion) devient une escalade « sans texte » inexplicable.
+ */
+export type FinishReason = "stop" | "length" | "tool_calls" | "content_filter" | "other";
+
 export interface LLMResult {
   text: string;
   toolCalls: ToolCall[];
@@ -51,6 +61,10 @@ export interface LLMResult {
   modelServed: string;
   /** Router's served-by upstream, e.g. "Anthropic", "Google Vertex". */
   upstreamProvider?: string;
+  /** Motif d'arrêt normalisé — absent si le fournisseur ne l'a pas dit. */
+  finishReason?: FinishReason;
+  /** Vrai quand le plafond de jetons a coupé la réponse (`finishReason: "length"`). */
+  truncated?: boolean;
   /** Raw provider response — persisted in agent_turn_traces.raw_response. */
   raw: unknown;
 }

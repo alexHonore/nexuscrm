@@ -151,7 +151,7 @@ export function ModelPicker({
                     {count}
                   </Badge>
                 </span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">{brand.noteFr}</span>
+                <LabNote noteKey={brand.noteKey} />
               </span>
             </button>
           ))}
@@ -279,6 +279,20 @@ export function ModelPicker({
       ) : null}
     </div>
   );
+}
+
+/**
+ * Note d'un laboratoire — « ce qu'il vaut pour notre usage », traduite.
+ *
+ * La clé vient du registre (`labs.ts`), le texte des messages : une note
+ * absente dans la locale courante ne s'affiche pas, plutôt que de laisser
+ * fuir une clé brute ou une phrase dans la mauvaise langue.
+ */
+function LabNote({ noteKey }: { noteKey: string }) {
+  const t = useTranslations("assistants");
+  const key = `model.labNote.${noteKey}`;
+  if (!t.has(key)) return null;
+  return <span className="mt-0.5 block text-xs text-muted-foreground">{t(key)}</span>;
 }
 
 /** Fil d'Ariane des trois étapes. */

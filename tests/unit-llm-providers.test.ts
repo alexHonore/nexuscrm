@@ -6,14 +6,31 @@
  * ou par Anthropic en direct, ressort dans la MÊME forme normalisée d'appels
  * d'outils. C'est ce qui permet de changer de fournisseur par menu déroulant
  * sans toucher au moteur.
+ *
+ * Et, depuis la revue : le niveau de réflexion est ENCODÉ chez chaque
+ * fournisseur direct, dans son dialecte, vérifié sur le corps exact de la
+ * requête — un effort « élevé » qui n'arrive jamais au modèle est pire qu'un
+ * effort absent, parce que l'administrateur croit qu'il agit.
  */
 import { describe, expect, it } from "vitest";
 import { createOpenRouterProvider, toOpenRouterProvider } from "@/lib/llm/openrouter";
-import { createAnthropicProvider } from "@/lib/llm/anthropic";
-import { createGoogleProvider } from "@/lib/llm/google";
-import { createOpenAiProvider } from "@/lib/llm/openai";
+import {
+  anthropicCapabilities,
+  buildAnthropicBody,
+  createAnthropicProvider,
+} from "@/lib/llm/anthropic";
+import { buildGoogleBody, createGoogleProvider, isGoogleThinkingModel } from "@/lib/llm/google";
+import { createOpenAiProvider, isOpenAiReasoningModel } from "@/lib/llm/openai";
+import { UTILITY_MODEL_BY_PROVIDER } from "@/lib/llm/defaults";
+import { groupToolResults } from "@/lib/llm/messages";
+import { REASONING_BUDGET_TOKENS } from "@/lib/llm/reasoning";
 import { generateWithFallback } from "@/lib/llm/route";
-import { LLMProviderError, type GenerateInput, type LLMProvider } from "@/lib/llm/types";
+import {
+  LLMProviderError,
+  type GenerateInput,
+  type LLMMessage,
+  type LLMProvider,
+} from "@/lib/llm/types";
 
 // ── Faux transport ───────────────────────────────────────────────────────────
 
@@ -52,6 +69,24 @@ const INPUT: GenerateInput = {
   routing: { dataCollection: "deny", zdr: true, allowFallbacks: false, only: [] },
 };
 
+/**
+ * Un tour où l'assistant a émis DEUX appels en parallèle, et où le moteur
+ * renvoie un message `tool` par résultat — exactement ce que fait runtime.ts.
+ */
+const PARALLEL_TOOL_MESSAGES: LLMMessage[] = [
+  { role: "user", content: "Oui allo" },
+  {
+    role: "assistant",
+    content: "",
+    toolCalls: [
+      { id: "c1", name: "update_qualification", arguments: { intent: "sell" } },
+      { id: "c2", name: "get_slots", arguments: { count: 2 } },
+    ],
+  },
+  { role: "tool", toolCallId: "c1", name: "update_qualification", content: "ok" },
+  { role: "tool", toolCallId: "c2", name: "get_slots", content: "jeudi 14h" },
+];
+
 // ── OpenRouter ───────────────────────────────────────────────────────────────
 
 describe("createOpenRouterProvider", () => {
@@ -60,6 +95,7 @@ describe("createOpenRouterProvider", () => {
     provider: "Anthropic",
     choices: [
       {
+        finish_reason: "tool_calls",
         message: {
           content: "Parfait!",
           tool_calls: [
@@ -92,6 +128,9 @@ describe("createOpenRouterProvider", () => {
     expect(messages[0]).toEqual({ role: "system", content: INPUT.system });
     const tools = calls[0].body.tools as { type: string; function: { name: string } }[];
     expect(tools[0].function.name).toBe("get_slots");
+    // Sans effort demandé : ni `reasoning`, ni marge sur le plafond.
+    expect(calls[0].body.reasoning).toBeUndefined();
+    expect(calls[0].body.max_tokens).toBe(300);
   });
 
   it("traduit le routage en noms OpenRouter — deny + ZDR + aucun reroutage", async () => {
@@ -107,7 +146,19 @@ describe("createOpenRouterProvider", () => {
     });
   });
 
-  it("normalise la réponse, y compris le modèle RÉELLEMENT servi", async () => {
+  it("encode l'effort de réflexion ET ajoute le budget au plafond", async () => {
+    // Le routeur taille la réflexion en proportion de max_tokens : sans marge,
+    // 300 jetons à effort élevé laissent une soixantaine de jetons de texte.
+    const { fetchFn, calls } = makeFetch(200, openRouterAnswer);
+    await createOpenRouterProvider({ apiKey: "k", fetchFn }).generate({
+      ...INPUT,
+      reasoningEffort: "high",
+    });
+    expect(calls[0].body.reasoning).toEqual({ effort: "high" });
+    expect(calls[0].body.max_tokens).toBe(300 + REASONING_BUDGET_TOKENS.high);
+  });
+
+  it("normalise la réponse, y compris le modèle RÉELLEMENT servi et le motif d'arrêt", async () => {
     const { fetchFn } = makeFetch(200, openRouterAnswer);
     const provider = createOpenRouterProvider({ apiKey: "k", fetchFn });
 
@@ -119,6 +170,29 @@ describe("createOpenRouterProvider", () => {
     // Sur un routeur, « quel modèle a répondu » n'est pas « lequel ai-je demandé ».
     expect(result.modelServed).toBe("anthropic/claude-sonnet-5");
     expect(result.upstreamProvider).toBe("Anthropic");
+    expect(result.finishReason).toBe("tool_calls");
+    expect(result.truncated).toBe(false);
+  });
+
+  it("une réponse coupée par le plafond est SIGNALÉE tronquée", async () => {
+    const { fetchFn } = makeFetch(200, {
+      model: "anthropic/claude-sonnet-5",
+      choices: [{ finish_reason: "length", message: { content: "Jeudi 14h ou vend" } }],
+      usage: { prompt_tokens: 1, completion_tokens: 300 },
+    });
+    const result = await createOpenRouterProvider({ apiKey: "k", fetchFn }).generate(INPUT);
+    expect(result.finishReason).toBe("length");
+    expect(result.truncated).toBe(true);
+  });
+
+  it("un fournisseur muet sur le motif d'arrêt ne pose ni vrai ni faux", async () => {
+    const { fetchFn } = makeFetch(200, {
+      choices: [{ message: { content: "Parfait!" } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1 },
+    });
+    const result = await createOpenRouterProvider({ apiKey: "k", fetchFn }).generate(INPUT);
+    expect(result.finishReason).toBeUndefined();
+    expect(result.truncated).toBeUndefined();
   });
 
   it("liste les modèles avec support d'outils et prix par million de jetons", async () => {
@@ -164,6 +238,7 @@ describe("createOpenRouterProvider", () => {
 describe("createAnthropicProvider", () => {
   const anthropicAnswer = {
     model: "claude-sonnet-5",
+    stop_reason: "tool_use",
     content: [
       { type: "text", text: "Parfait!" },
       { type: "tool_use", id: "tc_1", name: "get_slots", input: { count: 2 } },
@@ -185,7 +260,7 @@ describe("createAnthropicProvider", () => {
     expect(tools[0]).toMatchObject({ name: "get_slots", input_schema: GET_SLOTS_TOOL.parameters });
   });
 
-  it("normalise blocs texte et tool_use", async () => {
+  it("normalise blocs texte et tool_use, et le motif d'arrêt", async () => {
     const { fetchFn } = makeFetch(200, anthropicAnswer);
     const result = await createAnthropicProvider({ apiKey: "k", fetchFn }).generate({
       ...INPUT,
@@ -197,6 +272,146 @@ describe("createAnthropicProvider", () => {
     expect(result.usage).toEqual({ inputTokens: 120, outputTokens: 30 });
     expect(result.modelServed).toBe("claude-sonnet-5");
     expect(result.upstreamProvider).toBeUndefined();
+    expect(result.finishReason).toBe("tool_calls");
+    expect(result.truncated).toBe(false);
+  });
+
+  it("stop_reason max_tokens → tronqué ; end_turn → complet", async () => {
+    const cut = await createAnthropicProvider({
+      apiKey: "k",
+      fetchFn: makeFetch(200, {
+        model: "claude-sonnet-5",
+        stop_reason: "max_tokens",
+        content: [{ type: "text", text: "Jeudi 14h ou vend" }],
+        usage: { input_tokens: 1, output_tokens: 300 },
+      }).fetchFn,
+    }).generate({ ...INPUT, model: "claude-sonnet-5" });
+    expect(cut.finishReason).toBe("length");
+    expect(cut.truncated).toBe(true);
+
+    const done = await createAnthropicProvider({
+      apiKey: "k",
+      fetchFn: makeFetch(200, {
+        model: "claude-sonnet-5",
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "Parfait!" }],
+        usage: { input_tokens: 1, output_tokens: 3 },
+      }).fetchFn,
+    }).generate({ ...INPUT, model: "claude-sonnet-5" });
+    expect(done.finishReason).toBe("stop");
+    expect(done.truncated).toBe(false);
+  });
+
+  it("les résultats d'appels parallèles vont dans UN SEUL message user", async () => {
+    const { fetchFn, calls } = makeFetch(200, anthropicAnswer);
+    await createAnthropicProvider({ apiKey: "k", fetchFn }).generate({
+      ...INPUT,
+      model: "claude-sonnet-5",
+      messages: PARALLEL_TOOL_MESSAGES,
+    });
+    const messages = calls[0].body.messages as { role: string; content: unknown }[];
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(messages[2].content).toEqual([
+      { type: "tool_result", tool_use_id: "c1", content: "ok" },
+      { type: "tool_result", tool_use_id: "c2", content: "jeudi 14h" },
+    ]);
+  });
+
+  it("liste les modèles : fenêtre et réflexion lues du catalogue, identifiant en repli", async () => {
+    const { fetchFn } = makeFetch(200, {
+      data: [
+        {
+          id: "claude-sonnet-5",
+          display_name: "Claude Sonnet 5",
+          max_input_tokens: 1000000,
+          capabilities: { thinking: { supported: true } },
+        },
+        { id: "claude-3-5-haiku-20241022", display_name: "Claude Haiku 3.5" },
+        { id: "claude-haiku-4-5", display_name: "Claude Haiku 4.5" },
+      ],
+    });
+    const models = await createAnthropicProvider({ apiKey: "k", fetchFn }).listModels();
+    expect(models[0]).toEqual({
+      id: "claude-sonnet-5",
+      label: "Claude Sonnet 5",
+      contextTokens: 1000000,
+      supportsTools: true,
+      supportsReasoning: true,
+    });
+    expect(models[1]).toMatchObject({ contextTokens: 200000, supportsReasoning: false });
+    expect(models[2]).toMatchObject({ supportsReasoning: true });
+  });
+});
+
+describe("Anthropic — dialecte de réflexion selon le modèle", () => {
+  const withEffort = (model: string, reasoningEffort: GenerateInput["reasoningEffort"]) =>
+    buildAnthropicBody({ ...INPUT, model, reasoningEffort });
+
+  it("reconnaît la génération d'un identifiant, daté ou non", () => {
+    expect(anthropicCapabilities("claude-sonnet-5")).toEqual({ thinking: "adaptive", sampling: false });
+    expect(anthropicCapabilities("claude-opus-4-8")).toEqual({ thinking: "adaptive", sampling: false });
+    expect(anthropicCapabilities("claude-opus-4-7")).toEqual({ thinking: "adaptive", sampling: false });
+    expect(anthropicCapabilities("claude-sonnet-4-6")).toEqual({ thinking: "adaptive", sampling: true });
+    expect(anthropicCapabilities("claude-haiku-4-5")).toEqual({ thinking: "budget", sampling: true });
+    expect(anthropicCapabilities("claude-sonnet-4-5-20250929")).toEqual({ thinking: "budget", sampling: true });
+    expect(anthropicCapabilities("claude-opus-4-1-20250805")).toEqual({ thinking: "budget", sampling: true });
+    // Suffixe daté de huit chiffres ≠ version mineure : 4.0, pas 4.20250514.
+    expect(anthropicCapabilities("claude-opus-4-20250514")).toEqual({ thinking: "budget", sampling: true });
+    expect(anthropicCapabilities("claude-3-7-sonnet-20250219")).toEqual({ thinking: "budget", sampling: true });
+    expect(anthropicCapabilities("claude-3-5-haiku-20241022")).toEqual({ thinking: "none", sampling: true });
+    // Inconnu : la forme la plus sobre.
+    expect(anthropicCapabilities("claude-nova-6")).toEqual({ thinking: "adaptive", sampling: false });
+  });
+
+  it("modèle récent : réflexion ADAPTATIVE + output_config.effort, jamais budget_tokens", () => {
+    const body = withEffort("claude-sonnet-5", "high");
+    expect(body.thinking).toEqual({ type: "adaptive" });
+    expect(body.output_config).toEqual({ effort: "high" });
+    // La réflexion se paie sur max_tokens : le plafond du texte reste 300.
+    expect(body.max_tokens).toBe(300 + REASONING_BUDGET_TOKENS.high);
+    // Les paramètres d'échantillonnage font rejeter l'appel sur 4.7+ et 5.
+    expect(body).not.toHaveProperty("temperature");
+  });
+
+  it("modèle récent sans effort : rien d'ajouté — et toujours pas de température", () => {
+    const body = withEffort("claude-sonnet-5", undefined);
+    expect(body).not.toHaveProperty("thinking");
+    expect(body).not.toHaveProperty("output_config");
+    expect(body).not.toHaveProperty("temperature");
+    expect(body.max_tokens).toBe(300);
+  });
+
+  it("4.6 : adaptative, ET la température reste acceptée", () => {
+    const body = withEffort("claude-sonnet-4-6", "low");
+    expect(body.thinking).toEqual({ type: "adaptive" });
+    expect(body.output_config).toEqual({ effort: "low" });
+    expect(body.temperature).toBe(0.6);
+  });
+
+  it("ancien modèle : budget_tokens, plafond relevé d'autant, température omise", () => {
+    const body = withEffort("claude-haiku-4-5", "medium");
+    expect(body.thinking).toEqual({ type: "enabled", budget_tokens: REASONING_BUDGET_TOKENS.medium });
+    expect(body.max_tokens).toBe(300 + REASONING_BUDGET_TOKENS.medium);
+    expect(body).not.toHaveProperty("output_config");
+    // Avec budget_tokens, toute température autre que la valeur par défaut est refusée.
+    expect(body).not.toHaveProperty("temperature");
+    // Le budget respecte le minimum d'Anthropic (1024).
+    expect(REASONING_BUDGET_TOKENS.low).toBeGreaterThanOrEqual(1024);
+  });
+
+  it("ancien modèle sans effort : température envoyée, aucune réflexion", () => {
+    const body = withEffort("claude-haiku-4-5", undefined);
+    expect(body.temperature).toBe(0.6);
+    expect(body).not.toHaveProperty("thinking");
+    expect(body.max_tokens).toBe(300);
+  });
+
+  it("modèle sans réflexion : l'effort est ignoré plutôt que de faire rejeter l'appel", () => {
+    const body = withEffort("claude-3-5-haiku-20241022", "high");
+    expect(body).not.toHaveProperty("thinking");
+    expect(body).not.toHaveProperty("output_config");
+    expect(body.temperature).toBe(0.6);
+    expect(body.max_tokens).toBe(300);
   });
 });
 
@@ -245,18 +460,21 @@ describe("§21 — parité des fournisseurs", () => {
 // ── Google ───────────────────────────────────────────────────────────────────
 
 describe("createGoogleProvider", () => {
-  it("assemble system_instruction, contents et function_declarations", async () => {
-    const { fetchFn, calls } = makeFetch(200, {
-      modelVersion: "gemini-flash-latest",
-      candidates: [
-        {
-          content: {
-            parts: [{ text: "Parfait!" }, { functionCall: { name: "get_slots", args: { count: 2 } } }],
-          },
+  const googleAnswer = {
+    modelVersion: "gemini-flash-latest",
+    candidates: [
+      {
+        finishReason: "STOP",
+        content: {
+          parts: [{ text: "Parfait!" }, { functionCall: { name: "get_slots", args: { count: 2 } } }],
         },
-      ],
-      usageMetadata: { promptTokenCount: 120, candidatesTokenCount: 30 },
-    });
+      },
+    ],
+    usageMetadata: { promptTokenCount: 120, candidatesTokenCount: 30 },
+  };
+
+  it("assemble system_instruction, contents et function_declarations", async () => {
+    const { fetchFn, calls } = makeFetch(200, googleAnswer);
     const provider = createGoogleProvider({ apiKey: "goog-test", fetchFn });
 
     const result = await provider.generate({
@@ -275,13 +493,60 @@ describe("createGoogleProvider", () => {
     expect(contents.map((c) => c.role)).toEqual(["user", "model"]);
     const tools = calls[0].body.tools as { function_declarations: { name: string }[] }[];
     expect(tools[0].function_declarations[0].name).toBe("get_slots");
+    // Sans effort : pas de thinkingConfig, plafond inchangé.
+    expect(calls[0].body.generationConfig).toEqual({ temperature: 0.6, maxOutputTokens: 300 });
 
     expect(result.text).toBe("Parfait!");
     expect(result.toolCalls).toEqual([{ id: "call_0", name: "get_slots", arguments: { count: 2 } }]);
     expect(result.usage).toEqual({ inputTokens: 120, outputTokens: 30 });
+    // Google dit « STOP » même quand le tour se termine sur un appel d'outil.
+    expect(result.finishReason).toBe("tool_calls");
   });
 
-  it("liste les modèles en retirant le préfixe models/", async () => {
+  it("encode l'effort en thinkingConfig.thinkingBudget et relève maxOutputTokens", () => {
+    const body = buildGoogleBody({ ...INPUT, model: "gemini-2.5-flash", reasoningEffort: "medium" });
+    expect(body.generationConfig).toEqual({
+      temperature: 0.6,
+      maxOutputTokens: 300 + REASONING_BUDGET_TOKENS.medium,
+      thinkingConfig: { thinkingBudget: REASONING_BUDGET_TOKENS.medium },
+    });
+  });
+
+  it("les résultats d'appels parallèles vont dans UN SEUL tour user, en autant de functionResponse", async () => {
+    // Gemini exige autant de functionResponse que de functionCall DANS LE MÊME
+    // tour ; un tour par résultat fait rejeter la deuxième requête (400).
+    const { fetchFn, calls } = makeFetch(200, googleAnswer);
+    await createGoogleProvider({ apiKey: "k", fetchFn }).generate({
+      ...INPUT,
+      model: "gemini-2.5-flash",
+      messages: PARALLEL_TOOL_MESSAGES,
+    });
+    const contents = calls[0].body.contents as { role: string; parts: Record<string, unknown>[] }[];
+    expect(contents.map((c) => c.role)).toEqual(["user", "model", "user"]);
+    expect(contents[1].parts).toEqual([
+      { functionCall: { name: "update_qualification", args: { intent: "sell" } } },
+      { functionCall: { name: "get_slots", args: { count: 2 } } },
+    ]);
+    expect(contents[2].parts).toEqual([
+      { functionResponse: { name: "update_qualification", response: { result: "ok" } } },
+      { functionResponse: { name: "get_slots", response: { result: "jeudi 14h" } } },
+    ]);
+  });
+
+  it("finishReason MAX_TOKENS → tronqué", async () => {
+    const { fetchFn } = makeFetch(200, {
+      candidates: [{ finishReason: "MAX_TOKENS", content: { parts: [{ text: "Jeudi 14h ou" }] } }],
+      usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 300 },
+    });
+    const result = await createGoogleProvider({ apiKey: "k", fetchFn }).generate({
+      ...INPUT,
+      model: "gemini-2.5-flash",
+    });
+    expect(result.finishReason).toBe("length");
+    expect(result.truncated).toBe(true);
+  });
+
+  it("liste les modèles en retirant le préfixe models/ — réflexion lue du catalogue ou déduite", async () => {
     const { fetchFn } = makeFetch(200, {
       models: [
         {
@@ -289,6 +554,20 @@ describe("createGoogleProvider", () => {
           displayName: "Gemini Flash",
           inputTokenLimit: 1000000,
           supportedGenerationMethods: ["generateContent"],
+        },
+        {
+          name: "models/gemini-2.0-flash",
+          displayName: "Gemini 2.0 Flash",
+          inputTokenLimit: 1000000,
+          supportedGenerationMethods: ["generateContent"],
+          thinking: false,
+        },
+        {
+          name: "models/gemini-2.5-pro",
+          displayName: "Gemini 2.5 Pro",
+          inputTokenLimit: 1000000,
+          supportedGenerationMethods: ["generateContent"],
+          thinking: true,
         },
       ],
     });
@@ -298,24 +577,148 @@ describe("createGoogleProvider", () => {
       label: "Gemini Flash",
       contextTokens: 1000000,
       supportsTools: true,
+      // Un alias « -latest » pointe forcément sur une génération qui réfléchit.
+      supportsReasoning: true,
     });
+    expect(models[1].supportsReasoning).toBe(false);
+    expect(models[2].supportsReasoning).toBe(true);
+  });
+
+  it("reconnaît une génération qui réfléchit d'après l'identifiant", () => {
+    expect(isGoogleThinkingModel("gemini-2.5-flash")).toBe(true);
+    expect(isGoogleThinkingModel("gemini-3-pro-preview")).toBe(true);
+    expect(isGoogleThinkingModel("gemini-flash-latest")).toBe(true);
+    expect(isGoogleThinkingModel("gemini-2.0-flash")).toBe(false);
+    expect(isGoogleThinkingModel("gemini-1.5-pro")).toBe(false);
   });
 });
 
 // ── OpenAI ───────────────────────────────────────────────────────────────────
 
 describe("createOpenAiProvider", () => {
+  const openAiAnswer = {
+    model: "gpt-5",
+    choices: [{ finish_reason: "stop", message: { content: "Parfait!" } }],
+    usage: { prompt_tokens: 5, completion_tokens: 2 },
+  };
+
   it("utilise Bearer et n'envoie AUCUN objet de routage", async () => {
-    const { fetchFn, calls } = makeFetch(200, {
-      model: "gpt-5",
-      choices: [{ message: { content: "Parfait!" } }],
-      usage: { prompt_tokens: 5, completion_tokens: 2 },
-    });
+    const { fetchFn, calls } = makeFetch(200, openAiAnswer);
     await createOpenAiProvider({ apiKey: "sk-oa", fetchFn }).generate({ ...INPUT, model: "gpt-5" });
 
     expect(calls[0].url).toBe("https://api.openai.com/v1/chat/completions");
     expect(calls[0].headers.Authorization).toBe("Bearer sk-oa");
     expect(calls[0].body.provider).toBeUndefined();
+  });
+
+  it("modèle de raisonnement : max_completion_tokens, reasoning_effort, PAS de température", async () => {
+    // gpt-5 / o-séries rejettent `max_tokens` et toute température non
+    // défaut : chaque tour finissait en 400 « llm_error ».
+    const { fetchFn, calls } = makeFetch(200, openAiAnswer);
+    await createOpenAiProvider({ apiKey: "k", fetchFn }).generate({
+      ...INPUT,
+      model: "gpt-5",
+      reasoningEffort: "high",
+    });
+    const body = calls[0].body;
+    expect(body.max_completion_tokens).toBe(300 + REASONING_BUDGET_TOKENS.high);
+    expect(body).not.toHaveProperty("max_tokens");
+    expect(body).not.toHaveProperty("temperature");
+    expect(body.reasoning_effort).toBe("high");
+  });
+
+  it("modèle de raisonnement sans effort : marge « medium » (il réfléchit quand même), pas de reasoning_effort", async () => {
+    const { fetchFn, calls } = makeFetch(200, openAiAnswer);
+    await createOpenAiProvider({ apiKey: "k", fetchFn }).generate({ ...INPUT, model: "o4-mini" });
+    const body = calls[0].body;
+    expect(body.max_completion_tokens).toBe(300 + REASONING_BUDGET_TOKENS.medium);
+    expect(body).not.toHaveProperty("temperature");
+    expect(body).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("modèle classique : température conservée, effort ignoré plutôt que rejeté", async () => {
+    const { fetchFn, calls } = makeFetch(200, { ...openAiAnswer, model: "gpt-4.1" });
+    await createOpenAiProvider({ apiKey: "k", fetchFn }).generate({
+      ...INPUT,
+      model: "gpt-4.1",
+      reasoningEffort: "high",
+    });
+    const body = calls[0].body;
+    expect(body.max_completion_tokens).toBe(300);
+    expect(body.temperature).toBe(0.6);
+    expect(body).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("finish_reason length → tronqué", async () => {
+    const { fetchFn } = makeFetch(200, {
+      model: "gpt-5",
+      choices: [{ finish_reason: "length", message: { content: "" } }],
+      usage: { prompt_tokens: 5, completion_tokens: 300 },
+    });
+    const result = await createOpenAiProvider({ apiKey: "k", fetchFn }).generate({
+      ...INPUT,
+      model: "gpt-5",
+    });
+    expect(result.truncated).toBe(true);
+    expect(result.text).toBe("");
+  });
+
+  it("reconnaît les modèles de raisonnement par identifiant", () => {
+    for (const id of ["o3", "o4-mini", "o1-pro", "gpt-5", "gpt-5-mini", "gpt-5.1", "gpt-5-codex"]) {
+      expect(isOpenAiReasoningModel(id), id).toBe(true);
+    }
+    for (const id of ["gpt-4o", "gpt-4.1-mini", "gpt-5-chat-latest", "omni-moderation-latest"]) {
+      expect(isOpenAiReasoningModel(id), id).toBe(false);
+    }
+  });
+
+  it("liste les modèles avec le drapeau de réflexion — sinon l'étape « effort » ne s'ouvre jamais", async () => {
+    const { fetchFn } = makeFetch(200, {
+      data: [{ id: "gpt-5-mini" }, { id: "gpt-4.1" }, { id: "omni-moderation-latest" }],
+    });
+    const models = await createOpenAiProvider({ apiKey: "k", fetchFn }).listModels();
+    expect(models[0]).toMatchObject({ supportsTools: true, supportsReasoning: true });
+    expect(models[1]).toMatchObject({ supportsTools: true, supportsReasoning: false });
+    expect(models[2]).toMatchObject({ supportsTools: false, supportsReasoning: false });
+  });
+});
+
+// ── Regroupement des résultats d'outils ──────────────────────────────────────
+
+describe("groupToolResults", () => {
+  it("regroupe les `tool` consécutifs et laisse le reste tel quel", () => {
+    const turns = groupToolResults(PARALLEL_TOOL_MESSAGES);
+    expect(turns.map((t) => t.kind)).toEqual(["message", "message", "tool_results"]);
+    const last = turns[2];
+    expect(last.kind === "tool_results" && last.results.map((r) => r.toolCallId)).toEqual(["c1", "c2"]);
+  });
+
+  it("deux séries séparées par un tour assistant restent deux séries", () => {
+    const turns = groupToolResults([
+      ...PARALLEL_TOOL_MESSAGES,
+      { role: "assistant", content: "", toolCalls: [{ id: "c3", name: "get_slots", arguments: {} }] },
+      { role: "tool", toolCallId: "c3", name: "get_slots", content: "vendredi" },
+    ]);
+    expect(turns.map((t) => t.kind)).toEqual([
+      "message",
+      "message",
+      "tool_results",
+      "message",
+      "tool_results",
+    ]);
+  });
+});
+
+// ── Modèle utilitaire par fournisseur ────────────────────────────────────────
+
+describe("UTILITY_MODEL_BY_PROVIDER", () => {
+  it("chaque fournisseur reçoit un identifiant QUI LUI APPARTIENT", () => {
+    // Quand seule la clé Google (ou OpenAI) est configurée, envoyer un
+    // identifiant Claude faisait échouer chaque « créer avec l'IA » sur un 404.
+    expect(UTILITY_MODEL_BY_PROVIDER.openrouter).toMatch(/^[a-z0-9-]+\/[^/]+$/);
+    expect(UTILITY_MODEL_BY_PROVIDER.anthropic).toMatch(/^claude-/);
+    expect(UTILITY_MODEL_BY_PROVIDER.google).toMatch(/^gemini-/);
+    expect(UTILITY_MODEL_BY_PROVIDER.openai).not.toMatch(/claude|gemini|\//);
   });
 });
 

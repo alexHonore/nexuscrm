@@ -10,6 +10,7 @@ import {
   creatorReplySchema,
 } from "@/lib/assistants/creator";
 import { configuredProviders, getLlmProvider } from "@/lib/llm-server";
+import { UTILITY_MODEL_BY_PROVIDER } from "@/lib/llm/defaults";
 
 /**
  * POST /api/assistants/draft — un tour de la création assistée.
@@ -69,13 +70,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "no_provider" }, { status: 503 });
   }
 
+  // Un modèle économique suffit : la tâche est une extraction guidée. Et un
+  // identifiant DU fournisseur configuré — pas un identifiant Claude envoyé à
+  // Google ou OpenAI quand ce sont les seuls à avoir une clé.
+  const provider = providers[0];
   let text: string;
   try {
-    const out = await getLlmProvider(providers[0]).generate({
+    const out = await getLlmProvider(provider).generate({
       system: CREATOR_SYSTEM,
       messages: parsed.data.messages,
-      // Un modèle économique suffit : la tâche est une extraction guidée.
-      model: providers[0] === "openrouter" ? "google/gemini-2.5-flash" : "claude-sonnet-5",
+      model: UTILITY_MODEL_BY_PROVIDER[provider],
       maxTokens: 900,
       temperature: 0.3,
     });
