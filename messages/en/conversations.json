@@ -107,7 +107,9 @@
       "send_failed": "Send failed",
       "closed_goal_reached": "Closed: goal reached",
       "closed_disqualified": "Closed: not qualified",
-      "closed_not_interested": "Closed: not interested"
+      "closed_not_interested": "Closed: not interested",
+      "truncated": "Reply cut off by the model",
+      "content_filter": "Reply filtered by the provider"
     },
     "columns": {
       "client": "Client",

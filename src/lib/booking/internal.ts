@@ -28,6 +28,7 @@ import { computeAvailability, durationFor } from "@/app/api/availability/slots";
 import { logAudit } from "@/lib/audit";
 import { bookingEventTitle, createBookingEvent, GoogleNotConnectedError } from "@/lib/google";
 import { getSetting } from "@/lib/settings";
+import { notifyCategoryChanged } from "@/lib/campaigns-server/match";
 import {
   formatSlotLabel,
   type BookInput,
@@ -260,6 +261,9 @@ async function book(input: BookInput): Promise<BookResult> {
       updatedAt: new Date(),
     })
     .where(eq(clients.id, client.id));
+  // Le passage en « Rendez-vous » est un changement de catégorie comme un
+  // autre : les campagnes « changement de catégorie » doivent le voir.
+  if (bookedCategory) notifyCategoryChanged(client.id, client.categoryId, bookedCategory.id);
 
   await logAudit({
     userId: ownerId,

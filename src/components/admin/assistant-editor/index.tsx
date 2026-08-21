@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, CheckCircle2, Loader2, Play, Save, Zap } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, Loader2, Play, Power, Save, Zap } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -120,8 +120,15 @@ export function AssistantEditor({
       });
       toast.success(t("editor.compiled", { version: res.version }));
       router.refresh();
-    } catch {
-      toast.error(t("editor.errors.compile"));
+    } catch (err) {
+      // La compilation refuse quand l'assistant a changé entre-temps : le dire
+      // vaut mieux qu'un « échec » qui laisse chercher.
+      const code = err instanceof ApiError ? err.code : "";
+      toast.error(
+        code === "assistant_changed"
+          ? t("editor.errors.changedDuringCompile")
+          : t("editor.errors.compile"),
+      );
     } finally {
       setBusy(null);
     }
@@ -154,8 +161,24 @@ export function AssistantEditor({
           ? t("editor.errors.staleCompile")
           : code === "suite_not_passed"
             ? t("editor.errors.suiteNotPassed")
-            : t("editor.errors.activate"),
+            : code === "archived"
+              ? t("editor.errors.archived")
+              : t("editor.errors.activate"),
       );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Remettre en brouillon : l'assistant se tait sur tous ses fils sans être archivé. */
+  const deactivate = async () => {
+    setBusy("activate");
+    try {
+      await api(`/api/assistants/${data.id}/deactivate`, { method: "POST" });
+      toast.success(t("list.deactivated"));
+      router.refresh();
+    } catch {
+      toast.error(t("editor.errors.save"));
     } finally {
       setBusy(null);
     }
@@ -190,7 +213,17 @@ export function AssistantEditor({
             {busy === "compile" ? <Loader2 className="animate-spin" /> : <Play />}
             {busy === "compile" ? t("editor.compiling") : t("editor.compile")}
           </Button>
-          {data.status !== "active" ? (
+          {data.status === "active" ? (
+            <Button
+              variant="outline"
+              onClick={() => void deactivate()}
+              disabled={busy !== null}
+              className="min-h-11 md:min-h-9"
+            >
+              {busy === "activate" ? <Loader2 className="animate-spin" /> : <Power />}
+              {t("list.actions.deactivate")}
+            </Button>
+          ) : data.status !== "archived" ? (
             <Button
               variant="outline"
               onClick={() => void activate()}

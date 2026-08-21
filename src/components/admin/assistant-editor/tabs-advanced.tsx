@@ -273,8 +273,8 @@ function LayerRow({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="append">append</SelectItem>
-              <SelectItem value="replace">replace</SelectItem>
+              <SelectItem value="append">{t("editor.prompt.override")}</SelectItem>
+              <SelectItem value="replace">{t("editor.prompt.overridden")}</SelectItem>
             </SelectContent>
           </Select>
           <Textarea

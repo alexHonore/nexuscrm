@@ -15,6 +15,9 @@ export default async function CampaignEditorPage({
 }) {
   await requireAdmin();
   const { id } = await params;
+  // Un identifiant qui n'est pas un uuid donnait une erreur Postgres (500)
+  // au lieu d'une page introuvable.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) notFound();
 
   const row = await db.query.campaigns.findFirst({ where: eq(campaigns.id, id) });
   if (!row) notFound();

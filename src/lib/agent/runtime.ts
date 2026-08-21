@@ -32,6 +32,7 @@ import { classifyInbound, type Classification } from "./classify";
 import { applyRefusal, requiredFieldsFor, rungNeedsSlots, type Rung } from "./goal";
 import { renderTemplate } from "./render";
 import { DEFAULT_TURN_INSTRUCTIONS } from "./templates";
+import { outreachInstructionText } from "./opening";
 import { missingFieldsError, parseToolArgs, toolDefsFor } from "./tools";
 
 /**
@@ -127,19 +128,15 @@ async function outreachInstruction(
     ? await db.query.campaigns.findFirst({ where: eq(campaigns.id, enrollment.campaignId) })
     : null;
   const ladderLength = campaignRow ? campaignRowToConfig(campaignRow).ladder.length : 0;
-  const context = campaignRow
-    ? `Contexte interne (à ne pas citer) : ${campaignRow.name}${
-        campaignRow.description ? ` — ${campaignRow.description}` : ""
-      }.`
-    : "";
-
-  if (outreach.step === 0) {
-    return historyLength === 0
-      ? `Tu écris en premier : ce contact n'a encore reçu aucun message de ta part. ${context} Écris le PREMIER message de la conversation.`.trim()
-      : `Tu écris en premier dans ce fil : tiens compte des échanges précédents. ${context} Écris ton premier message.`.trim();
-  }
-  const total = Math.max(ladderLength - 1, outreach.step);
-  return `Tu relances : le contact n'a pas répondu à ton dernier message (relance ${outreach.step} sur ${total}). ${context} Écris une relance courte qui ne répète pas le message précédent et laisse une porte de sortie.`.trim();
+  // Le TEXTE vit dans ./opening, partagé avec le bac à sable : ce que l'on
+  // teste à l'écran est mot pour mot ce que la production demande.
+  return outreachInstructionText({
+    step: outreach.step,
+    historyLength,
+    campaignName: campaignRow?.name ?? null,
+    campaignDescription: campaignRow?.description ?? null,
+    ladderLength,
+  });
 }
 
 /** Délai humanisé avant l'envoi (approach.reply_speed). */
@@ -240,9 +237,12 @@ async function executeTools(input: {
             type: input.rung.goal.appointmentType,
             count,
           });
+          // Le libellé ET l'ISO : book_meeting exige le créneau « exactement tel
+          // que retourné par get_slots », et le modèle ne voyait que le libellé —
+          // chaque réservation partait avec une heure reformulée, refusée.
           record(
             googleConnected && slots.length > 0
-              ? `get_slots : ${slots.map((s) => s.label).join(", ")}`
+              ? `get_slots : ${slots.map((s) => `${s.label} (${s.iso})`).join(", ")}`
               : "get_slots : aucune disponibilité confirmée — ne propose AUCUNE heure précise.",
           );
         } catch {
@@ -1222,6 +1222,23 @@ export async function runTurn(
       events,
       qualification,
       alert: { kind: "handoff", reason: "l'assistant n'a rien écrit" },
+    });
+  }
+
+  // Le fournisseur a coupé la réponse (max_tokens) ou l'a filtrée : un SMS
+  // tronqué au milieu d'une phrase ne part pas — un humain reprend.
+  if (result.truncated) events.push({ type: "truncated", payload: { finishReason: result.finishReason ?? null } });
+  if (result.truncated || result.finishReason === "content_filter") {
+    const reason = result.finishReason === "content_filter" ? "content_filter" : "truncated";
+    events.push({ type: "escalation", payload: { reason } });
+    return commit({
+      outcome: "handoff",
+      reason,
+      trace: { ...traceCommon, guardrailResults: guardrailJson, ...modelFacts },
+      conversationPatch: { ...baseState, needsAttention: true, attentionReason: reason },
+      events,
+      qualification,
+      alert: { kind: "handoff", reason: reason === "truncated" ? "réponse coupée par le modèle" : "réponse filtrée par le fournisseur" },
     });
   }
 

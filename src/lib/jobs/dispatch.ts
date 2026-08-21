@@ -91,6 +91,28 @@ async function pruneTraces(now: Date): Promise<void> {
  * relever. C'est le contrôle de sécurité le plus important du moteur ; il ne
  * doit pas dépendre d'une course.
  */
+/**
+ * Les jobs réglés (done / skipped / cancelled / failed) de plus de N jours
+ * partent : la table ne doit pas grossir sans fin, et rien ne les relit.
+ */
+async function pruneSettledJobs(now: Date): Promise<void> {
+  const days = Number(process.env.JOB_RETENTION_DAYS ?? 14);
+  if (!Number.isFinite(days) || days <= 0) return;
+  const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+  try {
+    await db
+      .delete(scheduledJobs)
+      .where(
+        and(
+          sql`${scheduledJobs.status} in ('done', 'skipped', 'cancelled', 'failed')`,
+          lt(scheduledJobs.runAt, cutoff),
+        ),
+      );
+  } catch {
+    // Entretien : ne jamais faire échouer un cycle pour ça.
+  }
+}
+
 async function recordHeartbeat(now: Date): Promise<void> {
   try {
     await db.execute(sql`
@@ -137,6 +159,7 @@ export async function runDispatchCycle(
 
   counts.requeued = await requeueStaleJobs(undefined, now());
   await pruneTraces(now());
+  await pruneSettledJobs(now());
   // Les barreaux dus deviennent des jobs AVANT la réclamation : ils entrent
   // ainsi dans le même cycle, au lieu d'attendre la minute suivante.
   // Les campagnes périodiques d'abord : leurs nouvelles inscriptions entrent

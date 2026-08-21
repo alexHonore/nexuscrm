@@ -56,6 +56,8 @@ const llm = vi.hoisted(() => ({
   calls: [] as { model: string; system: string; messages?: unknown[] }[],
   /** Hook exécuté au premier appel générateur — sert à injecter une course. */
   onGenerate: null as null | (() => Promise<void>),
+  /** Le fournisseur a coupé la réponse (max_tokens) — testé sur le tour. */
+  truncated: false,
 }));
 
 vi.mock("@/lib/llm-server", () => ({
@@ -89,6 +91,7 @@ vi.mock("@/lib/llm-server", () => ({
         latencyMs: 42,
         modelServed: "anthropic/claude-sonnet-5",
         upstreamProvider: "Amazon Bedrock",
+        ...(llm.truncated ? { truncated: true, finishReason: "length" as const } : {}),
         raw: { simulated: true },
       };
     },
@@ -210,6 +213,7 @@ describe("runTurn", () => {
     llm.generatorSequence = [];
     llm.onGenerate = null;
     llm.generatorError = null;
+    llm.truncated = false;
     llm.classifierJson = '{"refusal":"none","qualification":{}}';
     llm.judgeJson = '{"passed":true,"reason":"conforme"}';
     llm.calls = [];
@@ -637,6 +641,7 @@ describe("tour proactif (barreau sans texte)", () => {
     llm.generatorSequence = [];
     llm.onGenerate = null;
     llm.generatorError = null;
+    llm.truncated = false;
     llm.classifierJson = '{"refusal":"none","qualification":{}}';
     llm.judgeJson = '{"passed":true,"reason":"conforme"}';
     llm.calls = [];
@@ -751,6 +756,7 @@ describe("statut, outils et pannes (revue)", () => {
     llm.generatorSequence = [];
     llm.onGenerate = null;
     llm.generatorError = null;
+    llm.truncated = false;
     llm.classifierJson = '{"refusal":"none","qualification":{}}';
     llm.judgeJson = '{"passed":true,"reason":"conforme"}';
     llm.calls = [];
@@ -926,5 +932,81 @@ describe("statut, outils et pannes (revue)", () => {
     const result = await runTurn(conversation.id);
     expect(result.outcome).toBe("sent");
     expect(llm.calls.filter((c) => c.model === "generator-model")).toHaveLength(3);
+  });
+});
+
+describe("câblage inter-domaines (revue)", () => {
+  beforeEach(async () => {
+    await resetDb();
+    llm.generatorText = "Parfait! Préférez-vous jeudi 14 h ou vendredi 18 h 30?";
+    llm.generatorToolCalls = [];
+    llm.generatorSequence = [];
+    llm.onGenerate = null;
+    llm.generatorError = null;
+    llm.truncated = false;
+    llm.classifierJson = '{"refusal":"none","qualification":{}}';
+    llm.judgeJson = '{"passed":true,"reason":"conforme"}';
+    llm.calls = [];
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  it("get_slots rend le libellé ET l'ISO — book_meeting exige le créneau exact", async () => {
+    // Sans l'ISO, le modèle reformulait l'heure et chaque réservation était
+    // refusée : « slot_taken », puis passage à l'humain.
+    const { conversation } = await scene();
+    await inbound(conversation.id, "Quand êtes-vous libre?");
+    llm.generatorToolCalls = [{ id: "c1", name: "get_slots", arguments: { count: 2 } }];
+    let calls = 0;
+    llm.generatorSequence = ["", "Je vous propose jeudi 14 h."];
+    llm.onGenerate = async () => {
+      calls += 1;
+      if (calls >= 2) llm.generatorToolCalls = [];
+    };
+    await runTurn(conversation.id);
+    const generatorCalls = llm.calls.filter((c) => c.model === "generator-model");
+    const msgs = generatorCalls[generatorCalls.length - 1]?.messages as { role: string; content: string }[];
+    const toolMessage = msgs.find((m) => m.role === "tool");
+    expect(toolMessage?.content).toContain("2026-08-27T18:00:00.000Z");
+    expect(toolMessage?.content).toContain("jeudi 14 h");
+  });
+
+  it("une réponse COUPÉE par le modèle ne part pas : passage à l'humain", async () => {
+    const { conversation } = await scene();
+    await inbound(conversation.id, "Allo?");
+    llm.truncated = true;
+    const result = await runTurn(conversation.id);
+    expect(result.outcome).toBe("handoff");
+    expect(result.reason).toBe("truncated");
+    expect((await jobsFor(conversation.id)).filter((j) => j.type === "send_sms")).toHaveLength(0);
+    const conv = await testDb.query.conversations.findFirst({ where: eq(conversations.id, conversation.id) });
+    expect(conv!.attentionReason).toBe("truncated");
+    expect(await eventsOf(conversation.id)).toContain("truncated");
+  });
+
+  it("un SMS parti met à jour « dernier contact » du client", async () => {
+    // Sinon une campagne « sans nouvelles depuis N jours » réécrit à qui on
+    // vient d'écrire.
+    const { conversation, client } = await scene();
+    await inbound(conversation.id, "Allo?");
+    expect((await runTurn(conversation.id)).outcome).toBe("sent");
+    const [job] = (await jobsFor(conversation.id)).filter((j) => j.type === "send_sms");
+    const { handleSendSms } = await import("@/lib/jobs/handlers/send-sms");
+    expect(await handleSendSms(job)).toMatchObject({ outcome: "done" });
+    const row = await testDb.query.clients.findFirst({ where: eq(clients.id, client.id) });
+    // En dry_run rien ne part vraiment : la date ne bouge donc pas.
+    expect(row!.lastContactedAt).toBeNull();
+  });
+
+  it("interrupteur baissé : aucun appel au modèle, le tour est reporté", async () => {
+    const { conversation } = await scene();
+    await inbound(conversation.id, "Allo?");
+    const { setSetting, getSetting } = await import("@/lib/settings");
+    const current = await getSetting("sms");
+    await setSetting("sms", { ...current, killSwitch: true });
+    const { handleAgentTurn } = await import("@/lib/jobs/handlers/agent-turn");
+    const outcome = await handleAgentTurn({ id: "j", attempts: 0, payload: { conversationId: conversation.id } } as never);
+    expect(outcome.outcome).toBe("reschedule");
+    expect(llm.calls).toHaveLength(0);
+    await setSetting("sms", { ...current, killSwitch: false });
   });
 });

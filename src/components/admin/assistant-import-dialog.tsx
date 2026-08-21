@@ -198,7 +198,14 @@ export function AssistantImportDialog({ trigger }: { trigger: React.ReactNode })
                   <p className="mb-1 font-medium">{t("import.warnings")}</p>
                   <ul className="list-disc space-y-1 pl-4">
                     {preview.warnings.map((w, i) => (
-                      <li key={`${w.code}-${i}`}>{w.messageFr}</li>
+                      // Le code est traduit quand la clé existe ; sinon le
+                      // texte du serveur sert de repli plutôt qu'un vide.
+                      <li key={`${w.code}-${i}`}>
+                        {t.has(`import.warning.${w.code}`)
+                          ? t(`import.warning.${w.code}` as never)
+                          : w.messageFr}
+                        {w.path ? <span className="ml-1 font-mono text-xs">{w.path}</span> : null}
+                      </li>
                     ))}
                   </ul>
                 </AlertDescription>

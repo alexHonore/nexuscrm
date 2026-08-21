@@ -107,7 +107,9 @@
       "send_failed": "Envoi en échec",
       "closed_goal_reached": "Clos : objectif atteint",
       "closed_disqualified": "Clos : non qualifié",
-      "closed_not_interested": "Clos : pas intéressé"
+      "closed_not_interested": "Clos : pas intéressé",
+      "truncated": "Réponse coupée par le modèle",
+      "content_filter": "Réponse filtrée par le fournisseur"
     },
     "columns": {
       "client": "Client",

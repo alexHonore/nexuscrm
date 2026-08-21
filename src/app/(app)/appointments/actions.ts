@@ -20,6 +20,7 @@ import { formatPhone } from "@/lib/phone";
 import { getSetting } from "@/lib/settings";
 import { computeAvailability, durationFor } from "@/app/api/availability/slots";
 import frBooking from "../../../../messages/fr/booking.json";
+import { notifyCategoryChanged } from "@/lib/campaigns-server/match";
 
 // ── Qualification vocabulary (stored snapshot + CRM comment log) ─────────────
 
@@ -317,6 +318,7 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
       updatedAt: new Date(),
     })
     .where(eq(clients.id, client.id));
+  if (bookedCategory) notifyCategoryChanged(client.id, client.categoryId, bookedCategory.id);
 
   // ── Journal dans le fil de commentaires (le courtier le relit plus tard). ──
   await logClientComment(

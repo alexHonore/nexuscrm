@@ -358,7 +358,17 @@
     "confirm": "Import",
     "importing": "Importing…",
     "done": "Assistant imported as a draft",
-    "invalid": "This file is not a valid assistant export."
+    "invalid": "This file is not a valid assistant export.",
+    "warning": {
+      "core_rules_stripped": "Core rules contained in the file were removed: core guardrails belong to this installation.",
+      "core_override": "The file redefines a CORE rule for this assistant. Review it before activating: it replaces a shared guardrail.",
+      "unresolved_user": "A reference to a person has no equivalent here: the field stays empty.",
+      "unresolved_pack": "An objection pack does not exist here: it was removed.",
+      "pack_kept_local": "An objection pack with the same name already exists here: yours is used.",
+      "named_person_without_user": "The assistant writes on behalf of a person with no linked account: meetings would fall back to an administrator.",
+      "unknown_tool": "A tool in the file does not exist in this installation: it was removed.",
+      "docs_ignored": "The file's annotations are ignored: documentation comes from this installation."
+    }
   },
   "goalType": {
     "video_meeting": "Video meeting",
@@ -637,7 +647,29 @@
       "high": "Thinks at length. Can add several seconds before each reply — noticeable in a conversation."
     },
     "floating": "Floating alias",
-    "floatingHint": "This id follows “latest”: the model behind it can change without you touching anything. Prefer a pinned version for a tuned assistant."
+    "floatingHint": "This id follows “latest”: the model behind it can change without you touching anything. Prefer a pinned version for a tuned assistant.",
+    "labNote": {
+      "anthropic": "Follows long instructions consistently — the best pick when guardrails matter.",
+      "openai": "Very wide range, from the cheapest to the most capable.",
+      "google": "Fast and inexpensive — often the right choice for the classifier.",
+      "meta-llama": "Open models, hosted by several providers.",
+      "mistralai": "French lab, strong in French — worth trying for the Québécois tone.",
+      "deepseek": "Very good value for reasoning.",
+      "x-ai": "Grok models.",
+      "qwen": "Large open range, often economical.",
+      "moonshotai": "Kimi models, long context windows.",
+      "z-ai": "GLM models.",
+      "amazon": "Nova models.",
+      "nvidia": "Nemotron models.",
+      "minimax": "MiniMax models.",
+      "bytedance-seed": "Seed models.",
+      "perplexity": "Sonar models, wired to web search — useless here, and latency suffers.",
+      "cohere": "Command models.",
+      "tencent": "Hunyuan models.",
+      "nousresearch": "Hermes models, open settings.",
+      "openrouter": "Automatic routers — the actual model changes from call to call; avoid for a tuned assistant.",
+      "autre": "Unlisted lab."
+    }
   },
   "create": {
     "title": "Create an assistant",

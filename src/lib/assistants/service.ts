@@ -18,6 +18,7 @@ import { runFixture, runnableFixtures, suitePassed } from "@/lib/guardrails/runn
 import { objectionItemSchema, type FixtureData, type FixtureResult } from "@/lib/guardrails/types";
 import { getLlmProvider } from "@/lib/llm-server";
 import { assistantRowToConfig, type AssistantConfig } from "./schema";
+import { simulatedSlotsText } from "@/lib/agent/tool-simulation";
 
 /**
  * Orchestration serveur des assistants : compilation, exécution de la suite,
@@ -176,16 +177,21 @@ export async function compileAssistant(
 // ── Suite de garde-fous ──────────────────────────────────────────────────────
 
 /** Bloc L7 d'une fixture — le tour est rejoué dans son contexte d'origine. */
+/** Le cran d'objectif visé par une fixture — « primary » ou « fallback:n ». */
+function stepForFixture(config: AssistantConfig, fixture: FixtureData) {
+  const rung = fixture.setup.rung;
+  return rung === "primary"
+    ? config.goal.primary
+    : (config.goal.fallbacks[Number(rung.split(":")[1] ?? 0)] ?? config.goal.primary);
+}
+
 function runtimeBlockFor(row: AssistantRow, config: AssistantConfig, fixture: FixtureData): string {
   const template = row.turnInstructions ?? DEFAULT_TURN_INSTRUCTIONS;
   const qualification = Object.entries(fixture.setup.qualification)
     .map(([key, value]) => `${key}=${String(value)}`)
     .join(", ");
   const rung = fixture.setup.rung;
-  const step =
-    rung === "primary"
-      ? config.goal.primary
-      : (config.goal.fallbacks[Number(rung.split(":")[1] ?? 0)] ?? config.goal.primary);
+  const step = stepForFixture(config, fixture);
 
   const { text } = renderTemplate(template, {
     "lead.prenom": "Marie",
@@ -197,7 +203,8 @@ function runtimeBlockFor(row: AssistantRow, config: AssistantConfig, fixture: Fi
     "goal.type": step.type,
     "goal.rung": rung,
     "goal.required_fields": step.requiredFields.join(", ") || "aucune",
-    slots: "jeudi 14h, vendredi 18h30",
+    // Mêmes libellés que le bac à sable et la simulation d'outils.
+    slots: simulatedSlotsText(2),
     turns_used: fixture.setup.turnsUsed,
     max_turns: config.approach.maxTurns,
     soft_refusals: 0,
@@ -313,7 +320,9 @@ export async function runAssistantSuite(
           return {
             text: out.text,
             // `id` conservé : c'est lui qui rattache le résultat à l'appel.
-            toolCalls: out.toolCalls.map((c) => ({ id: c.id, name: c.name })),
+            // Les ARGUMENTS voyagent aussi : la simulation les valide comme
+            // la production (champs requis, créneau réellement offert).
+            toolCalls: out.toolCalls.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments })),
           };
         },
         judge: async ({ system, user }) => {
@@ -327,6 +336,12 @@ export async function runAssistantSuite(
           return out.text;
         },
         rules,
+      },
+      // Le cran visé décide si réserver est possible : la simulation d'outils
+      // juge alors comme la production (champs requis, créneau offert).
+      {
+        appointmentType: stepForFixture(config, fixture).appointmentType,
+        requiredFields: stepForFixture(config, fixture).requiredFields,
       },
     );
     results.push(result);

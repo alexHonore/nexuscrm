@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Megaphone } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { CampaignsListClient, type CampaignListItem } from "@/components/admin/campaigns-list-client";

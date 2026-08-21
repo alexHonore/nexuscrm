@@ -2,6 +2,7 @@ import { z } from "zod";
 import { MAX_ATTEMPTS, type JobOutcome, type ScheduledJob } from "@/lib/jobs/types";
 import { runTurn, type TurnOutcome } from "@/lib/agent/runtime";
 import { markTouchOutcome } from "@/lib/campaigns-server/touch";
+import { getSetting } from "@/lib/settings";
 
 /**
  * Job `agent_turn` — un tour d'agent pour une conversation.
@@ -54,6 +55,13 @@ function touchStatusFor(outcome: TurnOutcome): string {
 export async function handleAgentTurn(job: ScheduledJob): Promise<JobOutcome> {
   const parsed = agentTurnPayloadSchema.safeParse(job.payload);
   if (!parsed.success) return { outcome: "failed_permanent", error: "invalid_payload" };
+
+  // Interrupteur baissé : inutile de payer un appel au modèle pour un message
+  // qui sera jeté à l'envoi. On repasse dans un quart d'heure.
+  const sms = await getSetting("sms").catch(() => null);
+  if (sms?.killSwitch) {
+    return { outcome: "reschedule", runAt: new Date(Date.now() + 15 * 60_000) };
+  }
 
   // La file compte les tentatives : à la dernière, une panne du modèle doit
   // consommer les entrants et passer la main au lieu de réessayer dans le vide.

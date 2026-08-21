@@ -1,4 +1,4 @@
-import { asc, isNull } from "drizzle-orm";
+import { desc, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
@@ -42,7 +42,8 @@ export async function POST(req: Request) {
     .select({ orderIndex: guardrailFixtures.orderIndex })
     .from(guardrailFixtures)
     .where(isNull(guardrailFixtures.assistantId))
-    .orderBy(asc(guardrailFixtures.orderIndex))
+    // Le PLUS GRAND index (voir rules/route.ts) : sinon tout se pose au même rang.
+    .orderBy(desc(guardrailFixtures.orderIndex))
     .limit(1);
 
   const [row] = await db

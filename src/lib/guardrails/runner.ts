@@ -1,4 +1,4 @@
-import { isTerminalTool, simulatedToolResult } from "@/lib/agent/tool-simulation";
+import { isTerminalTool, simulateToolCall } from "@/lib/agent/tool-simulation";
 import type { LLMMessage } from "@/lib/llm/types";
 import { judgeWithLlm, type JudgeGenerate } from "./judge";
 import { evaluateOutputRules } from "./filter";
@@ -21,7 +21,7 @@ import type { FixtureData, FixtureResult, RuleData } from "./types";
 export interface FixtureTurnOutput {
   text: string;
   /** `id` sert à rattacher le résultat à l'appel (protocole d'outils). */
-  toolCalls: { id: string; name: string }[];
+  toolCalls: { id: string; name: string; arguments?: Record<string, unknown> }[];
 }
 
 export interface RunnerDeps {
@@ -89,11 +89,20 @@ export function evaluateExpectations(
 }
 
 /** Rejoue UNE fixture et rend son verdict. Ne touche jamais la base. */
+export interface FixtureToolContext {
+  /** Le cran d'objectif de l'assistant testé réserve-t-il, et de quel type? */
+  appointmentType: "meet" | "inperson" | null;
+  /** Champs de qualification exigés avant de réserver. */
+  requiredFields: readonly string[];
+}
+
 export async function runFixture(
   fixture: FixtureData,
   compiledPrompt: string,
   runtimeBlock: string,
   deps: RunnerDeps,
+  /** Sans contexte, la simulation se comporte comme un cran qui ne réserve pas. */
+  toolContext: FixtureToolContext = { appointmentType: null, requiredFields: [] },
 ): Promise<FixtureResult> {
   const system = runtimeBlock === "" ? compiledPrompt : `${compiledPrompt}\n\n${runtimeBlock}`;
 
@@ -121,14 +130,23 @@ export async function runFixture(
         content: last.text,
         // La suite ne rejoue pas d'arguments : seul le couple id/nom compte
         // pour que le modèle relie le résultat à son appel.
-        toolCalls: last.toolCalls.map((c) => ({ id: c.id, name: c.name, arguments: {} })),
+        toolCalls: last.toolCalls.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments ?? {} })),
       });
       for (const call of last.toolCalls) {
         turnMessages.push({
           role: "tool",
           toolCallId: call.id,
           name: call.name,
-          content: simulatedToolResult(call.name, done),
+          // Mêmes règles qu'en production : arguments validés, champs requis
+          // exigés avant de réserver, créneau comparé à ceux offerts. La suite
+          // jugeait autrement que la production sur exactement le geste que
+          // les fixtures vérifient.
+          content: simulateToolCall(call.name, done, {
+            args: call.arguments ?? {},
+            appointmentType: toolContext.appointmentType,
+            requiredFields: toolContext.requiredFields,
+            qualification: {},
+          }).content,
         });
       }
       last = await deps.generate({ system, messages: turnMessages });

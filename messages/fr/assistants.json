@@ -358,7 +358,17 @@
     "confirm": "Importer",
     "importing": "Import…",
     "done": "Assistant importé en brouillon",
-    "invalid": "Ce fichier n'est pas un export d'assistant valide."
+    "invalid": "Ce fichier n'est pas un export d'assistant valide.",
+    "warning": {
+      "core_rules_stripped": "Des règles du noyau contenues dans le fichier ont été retirées : les garde-fous du noyau appartiennent à cette installation.",
+      "core_override": "Le fichier redéfinit une règle du NOYAU pour cet assistant. Relisez-la avant d'activer : elle remplace un garde-fou commun.",
+      "unresolved_user": "Une référence à une personne n'a pas d'équivalent ici : le champ reste vide.",
+      "unresolved_pack": "Un paquet d'objections n'existe pas ici : il a été retiré.",
+      "pack_kept_local": "Un paquet d'objections du même nom existe déjà ici : c'est le vôtre qui est utilisé.",
+      "named_person_without_user": "L'assistant écrit au nom d'une personne sans compte rattaché : les rendez-vous retomberaient sur un administrateur.",
+      "unknown_tool": "Un outil du fichier n'existe pas dans cette installation : il a été retiré.",
+      "docs_ignored": "Les annotations du fichier sont ignorées : la documentation vient de cette installation."
+    }
   },
   "goalType": {
     "video_meeting": "Rencontre vidéo",
@@ -637,7 +647,29 @@
       "high": "Réfléchit longuement. Peut ajouter plusieurs secondes avant chaque réponse — ça se remarque en conversation."
     },
     "floating": "Alias flottant",
-    "floatingHint": "Cet identifiant suit « la dernière version » : le modèle derrière peut changer sans que vous touchiez à rien. Préférez une version précise pour un assistant réglé."
+    "floatingHint": "Cet identifiant suit « la dernière version » : le modèle derrière peut changer sans que vous touchiez à rien. Préférez une version précise pour un assistant réglé.",
+    "labNote": {
+      "anthropic": "Suit les consignes longues avec constance — le meilleur choix quand les garde-fous comptent.",
+      "openai": "Très large gamme, du plus économique au plus capable.",
+      "google": "Rapide et peu coûteux — souvent le bon choix pour le classifieur.",
+      "meta-llama": "Modèles ouverts, hébergés par plusieurs fournisseurs.",
+      "mistralai": "Maison française, bon en français — à essayer pour le ton québécois.",
+      "deepseek": "Très bon rapport qualité-prix sur le raisonnement.",
+      "x-ai": "Modèles Grok.",
+      "qwen": "Gamme ouverte très fournie, souvent économique.",
+      "moonshotai": "Modèles Kimi, longues fenêtres de contexte.",
+      "z-ai": "Modèles GLM.",
+      "amazon": "Modèles Nova.",
+      "nvidia": "Modèles Nemotron.",
+      "minimax": "Modèles MiniMax.",
+      "bytedance-seed": "Modèles Seed.",
+      "perplexity": "Modèles Sonar, branchés sur une recherche web — inutile ici, et la latence s'en ressent.",
+      "cohere": "Modèles Command.",
+      "tencent": "Modèles Hunyuan.",
+      "nousresearch": "Modèles Hermes, réglages ouverts.",
+      "openrouter": "Routeurs automatiques — le modèle réel change d'un appel à l'autre, à éviter pour un assistant réglé.",
+      "autre": "Laboratoire non répertorié."
+    }
   },
   "create": {
     "title": "Créer un assistant",

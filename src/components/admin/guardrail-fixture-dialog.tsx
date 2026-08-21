@@ -181,13 +181,20 @@ export function GuardrailFixtureDialog({
       enabled: draft.enabled,
     };
     try {
-      await api(
+      const res = await api<{ staleAssistants?: number }>(
         creating
           ? "/api/admin/guardrails/fixtures"
           : `/api/admin/guardrails/fixtures/${draft.id}`,
         { method: creating ? "POST" : "PATCH", body: JSON.stringify(payload) },
       );
-      toast.success(t("guardrails.saved"));
+      // Une mise en situation modifiée périme la suite des assistants : le
+      // vert affiché ailleurs ne vaut plus rien tant qu'ils n'ont pas rejoué.
+      const stale = res.staleAssistants ?? 0;
+      toast.success(
+        stale > 0
+          ? `${t("guardrails.saved")} — ${t("guardrails.invalidated", { count: stale })}`
+          : t("guardrails.saved"),
+      );
       onOpenChange(false);
       router.refresh();
     } catch {

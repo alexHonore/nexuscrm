@@ -1,4 +1,4 @@
-import { asc, eq, isNull } from "drizzle-orm";
+import { desc, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
@@ -71,7 +71,9 @@ export async function POST(req: Request) {
     .select({ orderIndex: guardrailRules.orderIndex })
     .from(guardrailRules)
     .where(body.assistantId ? eq(guardrailRules.assistantId, body.assistantId) : isNull(guardrailRules.assistantId))
-    .orderBy(asc(guardrailRules.orderIndex))
+    // Le PLUS GRAND index : trier en ordre croissant prenait le plus petit et
+    // les nouvelles règles se posaient toutes au même rang.
+    .orderBy(desc(guardrailRules.orderIndex))
     .limit(1);
 
   const [row] = await db

@@ -1,6 +1,7 @@
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { db } from "@/db";
+import { clients } from "@/db/schema";
 import { conversations, messages, smsNumbers } from "@/db/schema-sms";
 import { sendSmsPayloadSchema, type JobOutcome, type ScheduledJob } from "@/lib/jobs/types";
 import { DEFAULT_QUIET_HOURS, isWithinSendWindow, nextSendTime } from "@/lib/sms/quiet-hours";
@@ -176,6 +177,14 @@ export async function handleSendSms(
       .update(conversations)
       .set({ lastOutboundAt: now() })
       .where(eq(conversations.id, payload.conversationId));
+    // Un SMS parti est un contact : « sans nouvelles depuis N jours » doit le
+    // compter, sinon une réactivation réécrit à qui on vient d'écrire.
+    if (result.sent) {
+      await db
+        .update(clients)
+        .set({ lastContactedAt: now() })
+        .where(eq(clients.id, conversation.clientId));
+    }
   } catch {
     return { outcome: "done", note: "post_send_write_failed" };
   }

@@ -145,11 +145,18 @@ function RuleSeveritySelect({ rule }: { rule: GuardrailRuleDto }) {
   const change = async (severity: GuardrailSeverity) => {
     setPending(true);
     try {
-      await api(`/api/admin/guardrails/rules/${rule.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ severity }),
-      });
-      toast.success(t("guardrails.saved"));
+      const res = await api<{ staleAssistants?: number }>(
+        `/api/admin/guardrails/rules/${rule.id}`,
+        { method: "PATCH", body: JSON.stringify({ severity }) },
+      );
+      // Changer une règle du noyau périme les assistants : le dire tout de
+      // suite évite de croire que le changement s'applique déjà.
+      const stale = res.staleAssistants ?? 0;
+      toast.success(
+        stale > 0
+          ? `${t("guardrails.saved")} — ${t("guardrails.invalidated", { count: stale })}`
+          : t("guardrails.saved"),
+      );
       router.refresh();
     } catch {
       toast.error(t("guardrails.genericError"));
@@ -304,8 +311,16 @@ function RuleDeleteButton({ rule }: { rule: GuardrailRuleDto }) {
   const confirm = async () => {
     setPending(true);
     try {
-      await api(`/api/admin/guardrails/rules/${rule.id}`, { method: "DELETE" });
-      toast.success(t("guardrails.deleted"));
+      const res = await api<{ staleAssistants?: number }>(
+        `/api/admin/guardrails/rules/${rule.id}`,
+        { method: "DELETE" },
+      );
+      const stale = res.staleAssistants ?? 0;
+      toast.success(
+        stale > 0
+          ? `${t("guardrails.deleted")} — ${t("guardrails.invalidated", { count: stale })}`
+          : t("guardrails.deleted"),
+      );
       setOpen(false);
       router.refresh();
     } catch {
@@ -753,11 +768,13 @@ function ResetAllButton() {
   const confirm = async () => {
     setPending(true);
     try {
-      const res = await api<{ restored: number; recreated: number }>(
+      const res = await api<{ restored: number; recreated: number; staleAssistants?: number }>(
         "/api/admin/guardrails/reset-all",
         { method: "POST" },
       );
-      toast.success(t("guardrails.resetAll.done", { restored: res.restored, recreated: res.recreated }));
+      const stale = res.staleAssistants ?? 0;
+      const done = t("guardrails.resetAll.done", { restored: res.restored, recreated: res.recreated });
+      toast.success(stale > 0 ? `${done} — ${t("guardrails.invalidated", { count: stale })}` : done);
       setOpen(false);
       router.refresh();
     } catch {
