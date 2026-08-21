@@ -23,6 +23,7 @@ import {
 } from "./tabs-basic";
 import { GuardrailsTab, JsonTab, PromptTab, TestTab } from "./tabs-advanced";
 import { ModelTab } from "./tabs-model";
+import { SandboxTab } from "./tab-sandbox";
 import type { AssistantEditorData } from "./types";
 
 const TAB_IDS = [
@@ -35,6 +36,9 @@ const TAB_IDS = [
   "guardrails",
   "model",
   "prompt",
+  // Le bac à sable est placé AVANT la suite : on essaie d'abord, on teste
+  // ensuite. Régler un ton en lisant des fixtures rouges est le chemin long.
+  "sandbox",
   "test",
   "json",
 ] as const;
@@ -261,6 +265,9 @@ export function AssistantEditor({
           </TabsContent>
           <TabsContent value="prompt" className="pt-4">
             <PromptTab {...tabProps} />
+          </TabsContent>
+          <TabsContent value="sandbox" className="pt-4">
+            <SandboxTab {...tabProps} />
           </TabsContent>
           <TabsContent value="test" className="pt-4">
             <TestTab {...tabProps} onRunSuite={() => void runSuite()} running={busy === "suite"} />

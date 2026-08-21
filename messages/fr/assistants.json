@@ -189,7 +189,8 @@
       "model": "Modèle",
       "prompt": "Prompt",
       "test": "Test",
-      "json": "JSON"
+      "json": "JSON",
+      "sandbox": "Bac à sable"
     },
     "help": {
       "what": "Ce que ça fait",
@@ -342,5 +343,32 @@
     "collect_callback_time": "Ne réserve rien : convient d'un moment pour rappeler.",
     "qualify_only": "Ne propose JAMAIS de rencontre — recueille seulement de l'information.",
     "handoff": "Ne réserve rien : vise à faire reprendre la conversation par un humain."
+  },
+  "sandbox": {
+    "disclaimer": "Aperçu : rien n'est envoyé, rien n'est enregistré, aucune plage d'agenda n'est réservée. Les appels d'outils sont rapportés, jamais exécutés.",
+    "notCompiled": "Compilez l'assistant avant de l'essayer : le bac à sable utilise le prompt compilé.",
+    "failed": "L'essai n'a pas abouti.",
+    "start": "Écrivez ce qu'un client pourrait répondre, ou choisissez un exemple :",
+    "placeholder": "Ce que le client écrit…",
+    "send": "Envoyer",
+    "thinking": "L'assistant réfléchit…",
+    "reset": "Recommencer",
+    "blocked": "Bloqué par un garde-fou",
+    "emptyDraft": "(aucun texte — le modèle a seulement appelé un outil)",
+    "segments": "{chars} caractères · {segments} segment(s)",
+    "rung": "Cran : {rung}",
+    "optOut": "Désabonnement détecté",
+    "wantsHuman": "Demande un humain",
+    "softRefusals": "{count} refus mou(s) cumulé(s)",
+    "qualification": "Qualification recueillie",
+    "refusal": {
+      "soft": "Refus mou (report)",
+      "hard": "Refus ferme"
+    },
+    "lead": {
+      "firstName": "Prénom du client",
+      "city": "Secteur",
+      "projectType": "Projet"
+    }
   }
 }

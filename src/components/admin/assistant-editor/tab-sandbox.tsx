@@ -1,0 +1,350 @@
+"use client";
+
+import {
+  AlertTriangleIcon,
+  CheckCircle2,
+  Loader2,
+  RotateCcw,
+  SendIcon,
+  WrenchIcon,
+  XCircle,
+} from "lucide-react";
+import { useTranslations } from "next-intl";
+import { useRef, useState } from "react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { analyzeSms } from "@/lib/sms/segments";
+import { cn } from "@/lib/utils";
+import { ApiError, api } from "../api";
+import type { TabProps } from "./types";
+
+type Verdict = {
+  key: string;
+  label: string;
+  severity: "block" | "warn" | "off";
+  passed: boolean;
+  reason?: string;
+};
+
+type TurnResult = {
+  draft: string;
+  blocked: boolean;
+  verdicts: Verdict[];
+  toolCalls: { name: string; args: unknown }[];
+  classification: {
+    optOut: boolean;
+    refusal: "none" | "soft" | "hard";
+    wantsHuman: boolean;
+    qualification: Record<string, unknown>;
+  };
+  rung: string;
+  requiredFields: string[];
+  runtimeBlock: string;
+  softRefusals: number;
+  qualification: Record<string, unknown>;
+  error: string | null;
+};
+
+type Turn = { role: "assistant" | "user"; content: string; result?: TurnResult };
+
+/**
+ * Bac à sable — parler à l'assistant comme si on était le client.
+ *
+ * Ce qui distingue cet écran d'un simple aperçu de prompt : chaque réponse est
+ * accompagnée de ce que les garde-fous en ont dit, du cran d'objectif courant
+ * et des outils que le modèle a VOULU appeler. Régler une persistance ou un ton
+ * sans voir ces trois choses revient à changer un chiffre et espérer.
+ *
+ * Rien n'est envoyé, rien n'est écrit, rien n'est réservé. Les appels d'outils
+ * sont rapportés, jamais exécutés : un essai qui bloquerait une vraie plage
+ * d'agenda serait un piège.
+ */
+export function SandboxTab({ data }: TabProps) {
+  const t = useTranslations("assistants");
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [inbound, setInbound] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lead, setLead] = useState({ firstName: "Marie", city: "Québec", projectType: "achat" });
+  const stateRef = useRef({ qualification: {} as Record<string, unknown>, softRefusals: 0 });
+
+  const notCompiled = data.compiledPrompt === null;
+
+  const send = async () => {
+    const text = inbound.trim();
+    if (text === "" || busy) return;
+
+    setBusy(true);
+    setError(null);
+    const history = turns.map((x) => ({ role: x.role, content: x.content }));
+    setTurns((current) => [...current, { role: "user", content: text }]);
+    setInbound("");
+
+    try {
+      const result = await api<TurnResult>(`/api/assistants/${data.id}/sandbox`, {
+        method: "POST",
+        body: JSON.stringify({
+          history,
+          inbound: text,
+          lead,
+          qualification: stateRef.current.qualification,
+          softRefusals: stateRef.current.softRefusals,
+        }),
+      });
+
+      stateRef.current = {
+        qualification: result.qualification,
+        softRefusals: result.softRefusals,
+      };
+
+      setTurns((current) => [
+        ...current,
+        { role: "assistant", content: result.draft, result },
+      ]);
+      if (result.error) setError(result.error);
+    } catch (err) {
+      const code = err instanceof ApiError ? err.code : "";
+      setError(code === "not_compiled" ? t("sandbox.notCompiled") : t("sandbox.failed"));
+      // Le tour n'a pas eu lieu : on retire la bulle du client pour que
+      // l'historique reste le reflet exact de ce que le modèle a reçu.
+      setTurns((current) => current.slice(0, -1));
+      setInbound(text);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reset = () => {
+    setTurns([]);
+    setError(null);
+    stateRef.current = { qualification: {}, softRefusals: 0 };
+  };
+
+  const last = [...turns].reverse().find((x) => x.result)?.result;
+
+  return (
+    <div className="space-y-4">
+      <Alert>
+        <AlertTriangleIcon />
+        <AlertDescription>{t("sandbox.disclaimer")}</AlertDescription>
+      </Alert>
+
+      {notCompiled ? (
+        <Alert variant="destructive">
+          <AlertTriangleIcon />
+          <AlertDescription>{t("sandbox.notCompiled")}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {/* Le faux client : la couche d'exécution reçoit ces valeurs, donc les
+          changer change réellement ce que le modèle lit. */}
+      <section className="grid gap-3 rounded-lg border p-3 sm:grid-cols-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="sb-name">{t("sandbox.lead.firstName")}</Label>
+          <Input
+            id="sb-name"
+            className="min-h-11 md:min-h-9"
+            value={lead.firstName}
+            onChange={(e) => setLead({ ...lead, firstName: e.target.value })}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="sb-city">{t("sandbox.lead.city")}</Label>
+          <Input
+            id="sb-city"
+            className="min-h-11 md:min-h-9"
+            value={lead.city}
+            onChange={(e) => setLead({ ...lead, city: e.target.value })}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="sb-project">{t("sandbox.lead.projectType")}</Label>
+          <Input
+            id="sb-project"
+            className="min-h-11 md:min-h-9"
+            value={lead.projectType}
+            onChange={(e) => setLead({ ...lead, projectType: e.target.value })}
+          />
+        </div>
+      </section>
+
+      {turns.length === 0 ? (
+        <div className="space-y-2 rounded-lg border border-dashed p-4">
+          <p className="text-sm text-muted-foreground">{t("sandbox.start")}</p>
+          <div className="flex flex-wrap gap-2">
+            {["Oui, je cherche à acheter", "Pas cette semaine", "STOP", "Ça vaut combien ma maison?"].map(
+              (suggestion) => (
+                <Button
+                  key={suggestion}
+                  variant="outline"
+                  size="sm"
+                  className="min-h-11 md:min-h-8"
+                  onClick={() => setInbound(suggestion)}
+                >
+                  {suggestion}
+                </Button>
+              ),
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="max-h-[28rem] space-y-3 overflow-y-auto rounded-lg border p-3">
+          {turns.map((turn, i) => (
+            <TurnBubble key={i} turn={turn} />
+          ))}
+        </div>
+      )}
+
+      {error ? (
+        <Alert variant="destructive">
+          <AlertTriangleIcon />
+          <AlertDescription className="font-mono text-xs">{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <div className="space-y-1.5">
+        <Textarea
+          rows={2}
+          disabled={notCompiled}
+          placeholder={t("sandbox.placeholder")}
+          value={inbound}
+          onChange={(e) => setInbound(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              void send();
+            }
+          }}
+        />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="min-h-11 md:min-h-8"
+            onClick={reset}
+            disabled={busy || turns.length === 0}
+          >
+            <RotateCcw /> {t("sandbox.reset")}
+          </Button>
+          <Button
+            size="sm"
+            className="min-h-11 md:min-h-8"
+            onClick={() => void send()}
+            disabled={busy || notCompiled || inbound.trim() === ""}
+          >
+            {busy ? <Loader2 className="animate-spin" /> : <SendIcon />}
+            {busy ? t("sandbox.thinking") : t("sandbox.send")}
+          </Button>
+        </div>
+      </div>
+
+      {last ? <TurnInsight result={last} /> : null}
+    </div>
+  );
+}
+
+function TurnBubble({ turn }: { turn: Turn }) {
+  const t = useTranslations("assistants");
+  const outbound = turn.role === "assistant";
+  const result = turn.result;
+  const analysis = analyzeSms(turn.content);
+
+  return (
+    <div className={cn("flex flex-col gap-1", outbound ? "items-start" : "items-end")}>
+      <div
+        className={cn(
+          "max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap",
+          outbound
+            ? result?.blocked
+              ? "bg-destructive/10 ring-1 ring-destructive/40"
+              : "bg-muted"
+            : "bg-primary text-primary-foreground",
+        )}
+      >
+        {turn.content === "" ? (
+          <span className="italic text-muted-foreground">{t("sandbox.emptyDraft")}</span>
+        ) : (
+          turn.content
+        )}
+      </div>
+
+      {outbound ? (
+        <p className="flex flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
+          {result?.blocked ? (
+            <span className="font-medium text-destructive">{t("sandbox.blocked")}</span>
+          ) : null}
+          <span>
+            {t("sandbox.segments", { chars: analysis.units, segments: analysis.segments })}
+          </span>
+          {result?.toolCalls.length ? (
+            <span className="flex items-center gap-1">
+              <WrenchIcon className="size-3" />
+              {result.toolCalls.map((c) => c.name).join(", ")}
+            </span>
+          ) : null}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Ce que les garde-fous ont dit, et où en est l'objectif. */
+function TurnInsight({ result }: { result: TurnResult }) {
+  const t = useTranslations("assistants");
+  const shown = result.verdicts.filter((v) => v.severity !== "off");
+
+  return (
+    <section className="space-y-3 rounded-lg border p-3">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <Badge variant="secondary">{t("sandbox.rung", { rung: result.rung })}</Badge>
+        {result.classification.refusal !== "none" ? (
+          <Badge variant="outline">
+            {t(`sandbox.refusal.${result.classification.refusal}` as never)}
+          </Badge>
+        ) : null}
+        {result.classification.optOut ? (
+          <Badge variant="destructive">{t("sandbox.optOut")}</Badge>
+        ) : null}
+        {result.classification.wantsHuman ? (
+          <Badge variant="outline">{t("sandbox.wantsHuman")}</Badge>
+        ) : null}
+        {result.softRefusals > 0 ? (
+          <span className="text-xs text-muted-foreground">
+            {t("sandbox.softRefusals", { count: result.softRefusals })}
+          </span>
+        ) : null}
+      </div>
+
+      {Object.keys(result.qualification).length > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          <span className="font-medium">{t("sandbox.qualification")} :</span>{" "}
+          {Object.entries(result.qualification)
+            .map(([k, v]) => `${k}=${String(v)}`)
+            .join(" · ")}
+        </p>
+      ) : null}
+
+      {shown.length > 0 ? (
+        <ul className="space-y-1">
+          {shown.map((v) => (
+            <li key={v.key} className="flex items-start gap-1.5 text-xs">
+              {v.passed ? (
+                <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+              ) : (
+                <XCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+              )}
+              <span className={v.passed ? "text-muted-foreground" : "font-medium"}>{v.label}</span>
+              {!v.passed && v.reason ? (
+                <span className="text-muted-foreground">— {v.reason}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}

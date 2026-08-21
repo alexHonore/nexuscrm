@@ -189,7 +189,8 @@
       "model": "Model",
       "prompt": "Prompt",
       "test": "Test",
-      "json": "JSON"
+      "json": "JSON",
+      "sandbox": "Sandbox"
     },
     "help": {
       "what": "What it does",
@@ -342,5 +343,32 @@
     "collect_callback_time": "Books nothing: agrees on a time to call back.",
     "qualify_only": "NEVER proposes a meeting — only gathers information.",
     "handoff": "Books nothing: aims to hand the conversation to a human."
+  },
+  "sandbox": {
+    "disclaimer": "Preview: nothing is sent, nothing is saved, no calendar slot is booked. Tool calls are reported, never executed.",
+    "notCompiled": "Compile the assistant before trying it: the sandbox uses the compiled prompt.",
+    "failed": "The trial did not complete.",
+    "start": "Write what a client might reply, or pick an example:",
+    "placeholder": "What the client writes…",
+    "send": "Send",
+    "thinking": "The assistant is thinking…",
+    "reset": "Start over",
+    "blocked": "Blocked by a guardrail",
+    "emptyDraft": "(no text — the model only called a tool)",
+    "segments": "{chars} characters · {segments} segment(s)",
+    "rung": "Rung: {rung}",
+    "optOut": "Opt-out detected",
+    "wantsHuman": "Asks for a human",
+    "softRefusals": "{count} soft refusal(s) so far",
+    "qualification": "Qualification gathered",
+    "refusal": {
+      "soft": "Soft refusal (postponed)",
+      "hard": "Hard refusal"
+    },
+    "lead": {
+      "firstName": "Client first name",
+      "city": "Area",
+      "projectType": "Project"
+    }
   }
 }
