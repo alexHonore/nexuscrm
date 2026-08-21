@@ -534,5 +534,35 @@
       "stopRate": "Stops",
       "booked": "Booked"
     }
+  },
+  "model": {
+    "step": {
+      "lab": "Lab",
+      "model": "Model",
+      "effort": "Thinking"
+    },
+    "backToLabs": "Labs",
+    "backToModels": "Models",
+    "search": "Search a model…",
+    "noMatch": "No model matches.",
+    "empty": "No model available — check the provider key.",
+    "refresh": "Refresh",
+    "tools": "Tools",
+    "noTools": "No tools",
+    "reasons": "Thinking",
+    "price": "${price} / M tokens",
+    "effortHint": "This model can think before answering. More effort helps on hard decisions but costs tokens and adds latency.",
+    "effort": {
+      "none": "None",
+      "low": "Light",
+      "medium": "Medium",
+      "high": "High"
+    },
+    "effortDesc": {
+      "none": "Answers directly. Fastest and cheapest — enough for most SMS.",
+      "low": "Thinks briefly. A good trade-off when the assistant hesitates between two tools.",
+      "medium": "Thinks more. Useful on conversations that wander.",
+      "high": "Thinks at length. Can add several seconds before each reply — noticeable in a conversation."
+    }
   }
 }

@@ -237,6 +237,9 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
         maxTokens: config.model.maxTokens,
         temperature: config.model.temperature,
         routing: config.model.routing as unknown as Record<string, unknown>,
+        ...(config.model.reasoningEffort === "none"
+          ? {}
+          : { reasoningEffort: config.model.reasoningEffort }),
         // Les outils DOIVENT être offerts : sans eux, le modèle ne peut jamais
         // en appeler un et l'aperçu ne montrerait pas le comportement réel.
         tools,

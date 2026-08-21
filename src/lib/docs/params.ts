@@ -701,6 +701,29 @@ const model: ParamDoc[] = [
     example: 300,
   }),
   doc({
+    path: "model.reasoningEffort",
+    section: "model",
+    labelFr: "Niveau de réflexion",
+    type: "enum",
+    required: true,
+    defaultValue: "none",
+    allowed: [
+      { value: "none", labelFr: "Aucun — le modèle répond directement" },
+      { value: "low", labelFr: "Léger" },
+      { value: "medium", labelFr: "Moyen" },
+      { value: "high", labelFr: "Élevé — réfléchit longuement avant d'écrire" },
+    ],
+    whatFr:
+      "Combien le modèle réfléchit avant de répondre, quand il sait le faire.",
+    whyFr:
+      "Plus de réflexion améliore les décisions difficiles — quel outil appeler, faut-il passer la main. Sur un SMS de deux phrases, ça ne change presque rien à la formulation.",
+    effectFr: "Envoyé au routeur à chaque appel, seulement si différent de « aucun ».",
+    pitfallsFr:
+      "La réflexion est FACTURÉE en jetons et ajoute de la latence : un niveau élevé peut ajouter plusieurs secondes avant chaque réponse, ce qui se remarque dans une conversation. L'envoyer à un modèle qui ne le gère pas fait rejeter la requête entière — le sélecteur n'offre l'étape que pour les modèles compatibles.",
+    related: ["model.model", "approach.replySpeed"],
+    example: "none",
+  }),
+  doc({
     path: "model.classifier.provider",
     section: "model",
     labelFr: "Fournisseur du classifieur",

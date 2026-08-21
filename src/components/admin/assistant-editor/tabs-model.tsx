@@ -17,6 +17,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { PROVIDER_IDS, type ProviderId } from "@/lib/assistants/schema";
 import type { ModelDescriptor } from "@/lib/llm/types";
+import { ModelPicker } from "../model-picker";
 import { api } from "../api";
 import { FieldLabel } from "./param-help";
 import type { TabProps } from "./types";
@@ -64,15 +65,24 @@ export function ModelTab({ config, update }: TabProps) {
             void load(v);
           }}
         />
-        <ModelSelect
-          path="model.model"
-          provider={config.model.provider}
-          models={catalog[config.model.provider]}
-          loading={loading === config.model.provider}
-          value={config.model.model}
-          onChange={(v) => update((d) => void (d.model.model = v))}
-          onReload={() => void load(config.model.provider)}
-        />
+        <div className="space-y-1.5 md:col-span-2">
+          <FieldLabel path="model.model" />
+          {/* Entonnoir : laboratoire, puis modèle, puis effort. Une liste plate
+              de 350 identifiants demande de savoir d'avance ce qu'on cherche. */}
+          <ModelPicker
+            models={catalog[config.model.provider] ?? []}
+            loading={loading === config.model.provider}
+            value={config.model.model}
+            effort={config.model.reasoningEffort}
+            onReload={() => void load(config.model.provider)}
+            onChange={({ model, effort }) =>
+              update((d) => {
+                d.model.model = model;
+                d.model.reasoningEffort = effort;
+              })
+            }
+          />
+        </div>
 
         {chosen && !chosen.supportsTools && needsTools ? (
           <Alert className="md:col-span-2">

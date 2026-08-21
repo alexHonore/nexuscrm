@@ -58,13 +58,20 @@ export function createOpenRouterProvider(options: OpenRouterOptions): LLMProvide
 
     async generate(input: GenerateInput): Promise<LLMResult> {
       const provider = toOpenRouterProvider(input.routing);
+      // Le niveau de réflexion n'est transmis que s'il est demandé : l'envoyer
+      // à un modèle qui ne le gère pas fait rejeter la requête entière.
+      const reasoning = input.reasoningEffort ? { effort: input.reasoningEffort } : undefined;
+      const extraBody = {
+        ...(provider ? { provider } : {}),
+        ...(reasoning ? { reasoning } : {}),
+      };
       return chatCompletion(input, {
         url: `${baseUrl}/chat/completions`,
         headers,
         provider: "openrouter",
         fetchFn,
         timeoutMs,
-        ...(provider ? { extraBody: { provider } } : {}),
+        ...(Object.keys(extraBody).length > 0 ? { extraBody } : {}),
       });
     },
 
@@ -94,6 +101,7 @@ export function createOpenRouterProvider(options: OpenRouterOptions): LLMProvide
           label: stringOr(model.name, stringOr(model.id, "")),
           contextTokens: numberOr(model.context_length, 0),
           supportsTools: supported.includes("tools"),
+          supportsReasoning: supported.includes("reasoning"),
           ...(inputPrice === undefined ? {} : { inputPerMTok: inputPrice }),
           ...(outputPrice === undefined ? {} : { outputPerMTok: outputPrice }),
         };

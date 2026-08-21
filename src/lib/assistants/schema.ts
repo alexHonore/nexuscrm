@@ -164,6 +164,12 @@ export const modelConfigSchema = z.object({
   model: z.string().trim().min(1).default("anthropic/claude-sonnet-5"),
   temperature: z.number().min(0).max(1).default(0.6),
   maxTokens: z.number().int().min(50).max(2000).default(300),
+  /**
+   * Niveau de réflexion, quand le modèle le gère. « none » = on ne l'envoie
+   * pas du tout — le transmettre à un modèle qui l'ignore fait rejeter la
+   * requête entière.
+   */
+  reasoningEffort: z.enum(["none", "low", "medium", "high"]).default("none"),
   /** Classifieur séparé — le duo classifieur-économique + générateur-fort est
    * la configuration NORMALE, pas un cas limite. */
   // Identifiant EPINGLE, pas un alias « -latest » : `google/gemini-flash-latest`

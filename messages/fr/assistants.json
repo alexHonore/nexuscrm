@@ -534,5 +534,35 @@
       "stopRate": "Arrêts",
       "booked": "Rendez-vous"
     }
+  },
+  "model": {
+    "step": {
+      "lab": "Laboratoire",
+      "model": "Modèle",
+      "effort": "Réflexion"
+    },
+    "backToLabs": "Laboratoires",
+    "backToModels": "Modèles",
+    "search": "Chercher un modèle…",
+    "noMatch": "Aucun modèle ne correspond.",
+    "empty": "Aucun modèle disponible — vérifiez la clé du fournisseur.",
+    "refresh": "Actualiser",
+    "tools": "Outils",
+    "noTools": "Sans outils",
+    "reasons": "Réflexion",
+    "price": "{price} $ / M jetons",
+    "effortHint": "Ce modèle peut réfléchir avant de répondre. Plus d'effort aide sur les décisions difficiles, mais coûte des jetons et ajoute de la latence.",
+    "effort": {
+      "none": "Aucune",
+      "low": "Légère",
+      "medium": "Moyenne",
+      "high": "Élevée"
+    },
+    "effortDesc": {
+      "none": "Répond directement. Le plus rapide et le moins cher — suffisant pour la plupart des SMS.",
+      "low": "Réfléchit brièvement. Bon compromis quand l'assistant hésite entre deux outils.",
+      "medium": "Réfléchit davantage. Utile sur des conversations qui partent dans tous les sens.",
+      "high": "Réfléchit longuement. Peut ajouter plusieurs secondes avant chaque réponse — ça se remarque en conversation."
+    }
   }
 }

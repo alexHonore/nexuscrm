@@ -12,6 +12,8 @@ export interface ModelDescriptor {
   label: string;
   contextTokens: number;
   supportsTools: boolean;
+  /** Le modèle accepte-t-il un niveau de réflexion? Décide de l'étape « effort ». */
+  supportsReasoning?: boolean;
   /** USD per million tokens — informative; billing reads response usage. */
   inputPerMTok?: number;
   outputPerMTok?: number;
@@ -73,10 +75,19 @@ export interface LLMMessage {
   name?: string;
 }
 
+export const REASONING_EFFORTS = ["low", "medium", "high"] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
 export interface GenerateInput {
   system: string;
   messages: LLMMessage[];
   tools?: ToolDef[];
+  /**
+   * Niveau de réflexion. Plus d'effort = meilleures décisions d'outil, mais
+   * plus de jetons facturés ET plus de latence — sur un SMS, une réponse qui
+   * met huit secondes de plus se remarque.
+   */
+  reasoningEffort?: ReasoningEffort;
   model: string;
   maxTokens: number;
   temperature: number;

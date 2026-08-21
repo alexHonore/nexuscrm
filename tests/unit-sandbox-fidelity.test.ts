@@ -25,8 +25,11 @@ describe("fidélité du bac à sable", () => {
     // montrerait un assistant incapable de réserver alors qu'il en est capable.
     expect(source).toContain("const tools = toolDefsFor(config.tools)");
     // …et il est réellement passé à l'appel du modèle.
-    const call = source.slice(source.indexOf("generator.generate({"), source.indexOf("generator.generate({") + 500);
-    expect(call).toContain("\n        tools,\n");
+    // Assertion sur la PRÉSENCE dans l'appel, pas sur une position : ajouter
+    // un champ au corps de la requête ne doit pas casser le test.
+    const start = source.indexOf("generator.generate({");
+    const call = source.slice(start, source.indexOf("});", start));
+    expect(call).toMatch(/^\s*tools,\s*$/m);
   });
 
   it("utilise le prompt COMPILÉ, pas une reconstruction", () => {

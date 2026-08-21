@@ -649,6 +649,9 @@ export async function runTurn(conversationId: string): Promise<TurnResult> {
           maxTokens: config.model.maxTokens,
           temperature: config.model.temperature,
           routing: config.model.routing as unknown as Record<string, unknown>,
+            ...(config.model.reasoningEffort === "none"
+              ? {}
+              : { reasoningEffort: config.model.reasoningEffort }),
         });
       } catch (err) {
         llmError = err instanceof Error ? err.message : String(err);

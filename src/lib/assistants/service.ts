@@ -251,6 +251,9 @@ export async function runAssistantSuite(
             maxTokens: config.model.maxTokens,
             temperature: config.model.temperature,
             routing: config.model.routing as unknown as Record<string, unknown>,
+            ...(config.model.reasoningEffort === "none"
+              ? {}
+              : { reasoningEffort: config.model.reasoningEffort }),
             // Les outils DOIVENT être offerts : sans eux le modèle ne peut
             // jamais en appeler un, `mustCallTool` échoue toujours et
             // `mustNotCallTool` réussit toujours — deux fixtures « STOP »
