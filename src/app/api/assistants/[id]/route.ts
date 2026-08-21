@@ -99,10 +99,13 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       turnInstructions: config.turnInstructions,
       includeRuntimeLayer: config.includeRuntimeLayer,
       requireSuitePass: config.requireSuitePass,
-      // Une configuration qui bouge invalide la suite : elle a été exécutée
-      // contre l'ancienne. Laisser le vert en place laisserait activer sur la
-      // foi d'un test qui ne correspond plus.
-      ...(changes.needsRecompile ? { needsRecompile: true, suitePassed: false } : {}),
+      // La suite exerce la configuration ENTIÈRE — modèle, outils, objectif —
+      // pas seulement le prompt. Un changement quelconque la périme donc, même
+      // s'il ne force pas de recompilation : changer de modèle laisserait sinon
+      // un vert obtenu avec un autre modèle. Le drapeau de recompilation, lui,
+      // garde son sens étroit (le TEXTE du prompt).
+      suitePassed: false,
+      ...(changes.needsRecompile ? { needsRecompile: true } : {}),
       updatedAt: new Date(),
     })
     .where(eq(assistants.id, id));

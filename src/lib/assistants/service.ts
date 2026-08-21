@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { assistants, assistantVersions, guardrailRuns, objectionPacks } from "@/db/schema-sms";
 import { compileAssistantPrompt } from "@/lib/agent/compile";
 import { DEFAULT_TURN_INSTRUCTIONS } from "@/lib/agent/templates";
+import { toolDefsFor } from "@/lib/agent/tools";
 import { renderTemplate } from "@/lib/agent/render";
 import { resolveRules } from "@/lib/guardrails/resolve";
 import {
@@ -250,6 +251,12 @@ export async function runAssistantSuite(
             maxTokens: config.model.maxTokens,
             temperature: config.model.temperature,
             routing: config.model.routing as unknown as Record<string, unknown>,
+            // Les outils DOIVENT être offerts : sans eux le modèle ne peut
+            // jamais en appeler un, `mustCallTool` échoue toujours et
+            // `mustNotCallTool` réussit toujours — deux fixtures « STOP »
+            // bloquantes restaient rouges pour de bon, rendant impossible
+            // l'activation de tout assistant exigeant une suite verte.
+            tools: toolDefsFor(config.tools),
           });
           // Outils SIMULÉS : on note les appels, aucun handler ne tourne.
           return { text: out.text, toolCalls: out.toolCalls.map((c) => ({ name: c.name })) };

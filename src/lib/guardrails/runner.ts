@@ -33,6 +33,16 @@ export interface RunnerDeps {
   rules?: RuleData[];
 }
 
+/**
+ * Une fixture décrit-elle le premier message sortant?
+ *
+ * Se lit dans l'historique : aucun tour « out » avant = premier contact. Les
+ * critères qui distinguent le premier message des suivants en dépendent.
+ */
+export function isFirstOutbound(fixture: Pick<FixtureData, "setup">): boolean {
+  return !fixture.setup.priorTurns.some((turn) => turn[0] === "out");
+}
+
 /** Historique d'une fixture → messages du modèle (out = assistant, in = user). */
 export function fixtureMessages(
   fixture: Pick<FixtureData, "setup" | "inbound">,
@@ -128,7 +138,12 @@ export async function runFixture(
       const criterion = (rule.config as { criterion?: unknown }).criterion;
       if (typeof criterion !== "string" || criterion.trim() === "") continue;
       const verdict = await judgeWithLlm(
-        { criterion, output: output.text, context: fixture.inbound },
+        {
+          criterion,
+          output: output.text,
+          context: fixture.inbound,
+          isFirstOutbound: isFirstOutbound(fixture),
+        },
         deps.judge,
       );
       if (!verdict.passed && rule.severity === "block") {
@@ -143,6 +158,7 @@ export async function runFixture(
         criterion: fixture.expectations.judge,
         output: output.text,
         context: fixture.inbound,
+        isFirstOutbound: isFirstOutbound(fixture),
       },
       deps.judge,
     );

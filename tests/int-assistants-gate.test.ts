@@ -5,6 +5,8 @@
  * base. On vérifie donc les deux chemins, dont l'écriture SQL directe qui
  * tenterait de contourner l'application.
  */
+import { readFileSync } from "fs";
+import { join } from "path";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { closeDb, resetDb, sqlRaw, testDb } from "./helpers/db";
@@ -22,6 +24,8 @@ const { checkActivation, activateAssistant, compileAssistant } = await import(
   "@/lib/assistants/service"
 );
 const { seedGuardrailDefaults } = await import("@/lib/guardrails/store");
+const { runnableFixtures } = await import("@/lib/guardrails/runner");
+const { toolDefsFor } = await import("@/lib/agent/tools");
 
 async function makeAssistant(overrides: Partial<typeof assistants.$inferInsert> = {}) {
   const config = assistantConfigSchema.parse({
@@ -182,5 +186,38 @@ describe("porte d'activation", () => {
     const [row] = await testDb.select().from(assistants).where(eq(assistants.id, assistant.id));
     expect(row.status).toBe("active");
     expect(row.description).toBe("note");
+  });
+});
+
+describe("la suite offre les outils de l'assistant au modèle", () => {
+  it("les fixtures qui exigent un appel d'outil ne peuvent pas être vertes sans outils", () => {
+    // Garde-fou de régression. Le générateur de la suite doit recevoir
+    // `tools` : sans lui, `toolCalls` est TOUJOURS vide, donc
+    // `mustCallTool: ["stop"]` échoue toujours et `mustNotCallTool` réussit
+    // toujours. Deux fixtures « STOP » bloquantes restaient rouges pour de
+    // bon, ce qui rendait impossible l'activation de tout assistant exigeant
+    // une suite verte — et `mustNotCallTool` était un test qui ne pouvait
+    // rien attraper.
+    const source = readFileSync(
+      join(process.cwd(), "src", "lib", "assistants", "service.ts"),
+      "utf8",
+    );
+    expect(source).toContain("tools: toolDefsFor(config.tools)");
+  });
+
+  it("toolDefsFor rend bien les outils attendus par les fixtures semées", () => {
+    const defs = toolDefsFor(["stop", "handoff", "book_meeting"]);
+    expect(defs.map((d) => d.name).sort()).toEqual(["book_meeting", "handoff", "stop"]);
+    // Les fixtures du noyau attendent « stop » et « handoff ».
+    expect(defs.some((d) => d.name === "stop")).toBe(true);
+  });
+
+  it("les fixtures semées exigent réellement des appels d'outils", async () => {
+    await seedGuardrailDefaults();
+    const fixtures = await import("@/lib/guardrails/store").then((m) => m.loadCoreFixtures());
+    const withTools = runnableFixtures(fixtures).filter(
+      (f) => f.expectations.mustCallTool.length > 0,
+    );
+    expect(withTools.length).toBeGreaterThan(0);
   });
 });

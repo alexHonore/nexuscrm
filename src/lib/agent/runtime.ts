@@ -232,7 +232,7 @@ async function executeTools(input: {
 async function evaluateAllRules(
   draft: string,
   rules: RuleData[],
-  ctx: { toolCallNames: string[]; inbound: string },
+  ctx: { toolCallNames: string[]; inbound: string; isFirstOutbound: boolean },
   judge: (p: { system: string; user: string }) => Promise<string>,
 ): Promise<RuleVerdict[]> {
   const verdicts = evaluateOutputRules(draft, rules, { toolCallNames: ctx.toolCallNames });
@@ -244,7 +244,18 @@ async function evaluateAllRules(
     if (rule.kind !== "llm_judge") continue;
     const criterion = (rule.config as { criterion?: unknown }).criterion;
     if (typeof criterion !== "string" || criterion.trim() === "") continue;
-    const verdict = await judgeWithLlm({ criterion, output: draft, context: ctx.inbound }, judge);
+    // La position dans la conversation VOYAGE avec le critère : plusieurs
+    // critères distinguent le premier message des suivants, et un juge qui ne
+    // peut pas trancher échoue fermé — donc bloque tout.
+    const verdict = await judgeWithLlm(
+      {
+        criterion,
+        output: draft,
+        context: ctx.inbound,
+        isFirstOutbound: ctx.isFirstOutbound,
+      },
+      judge,
+    );
     verdicts.push({
       key: rule.key,
       label: rule.label,
@@ -662,7 +673,12 @@ export async function runTurn(conversationId: string): Promise<TurnResult> {
     verdicts = await evaluateAllRules(
       draft,
       rules,
-      { toolCallNames: effects.filter((e) => e.ok).map((e) => e.name), inbound: userTurn },
+      {
+        toolCallNames: effects.filter((e) => e.ok).map((e) => e.name),
+        inbound: userTurn,
+        // Aucun message de l'agent avant celui-ci = premier contact.
+        isFirstOutbound: turnsUsed === 0,
+      },
       classifierCall,
     );
     if (blockingFailures(verdicts).length === 0) break;

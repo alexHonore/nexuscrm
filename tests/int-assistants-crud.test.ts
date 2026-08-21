@@ -155,7 +155,31 @@ describe("sauvegarde", () => {
 
     const row = await testDb.query.assistants.findFirst({ where: eq(assistants.id, id) });
     expect(row!.needsRecompile).toBe(false);
-    expect(row!.suitePassed).toBe(true);
+    // …mais la suite est quand même invalidée : elle exerce la configuration
+    // entière, modèle compris. Un vert obtenu avec un AUTRE modèle ne dit rien
+    // du comportement du nouveau.
+    expect(row!.suitePassed).toBe(false);
+  });
+
+  it("changer d'outils invalide la suite même sans recompilation", async () => {
+    const { id } = await createAssistant();
+    await testDb
+      .update(assistants)
+      .set({ needsRecompile: false, suitePassed: true, compiledPrompt: "…" })
+      .where(eq(assistants.id, id));
+
+    const config = baseConfig();
+    config.tools = ["stop", "handoff"];
+    await single.PATCH(req(`/api/assistants/${id}`, "PATCH", config), {
+      params: Promise.resolve({ id }),
+    });
+
+    const row = await testDb.query.assistants.findFirst({ where: eq(assistants.id, id) });
+    // Retirer book_meeting change ce que la suite mesure : le vert d'avant ne
+    // vaut plus, sinon on active un assistant dont les fixtures n'ont jamais
+    // couvert la nouvelle configuration.
+    expect(row!.suitePassed).toBe(false);
+    expect(row!.needsRecompile).toBe(false);
   });
 
   it("une sauvegarde sans changement n'écrit rien", async () => {

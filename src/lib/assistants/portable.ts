@@ -373,6 +373,16 @@ export function planImport(
   const packsToCreate: PortablePack[] = [];
   const keptPacks: string[] = [];
   for (const id of config.objectionPacks) {
+    // `null` explicite = « laisser tomber ce paquet ». `?? id` seul aurait
+    // rendu ce choix impossible à exprimer.
+    if (Object.hasOwn(resolution, id) && resolution[id] === null) {
+      warnings.push({
+        code: "unresolved_pack",
+        path: "objectionPacks",
+        messageFr: `Le paquet d'objections « ${id} » a été écarté à l'import.`,
+      });
+      continue;
+    }
     const target = resolution[id] ?? id;
     if (available.has(target)) {
       keptPacks.push(target);

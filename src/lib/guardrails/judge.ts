@@ -11,6 +11,15 @@ export interface JudgeInput {
   output: string;
   /** Contexte minimal (message entrant, objectif courant) — facultatif. */
   context?: string;
+  /**
+   * Position du brouillon dans la conversation.
+   *
+   * Indispensable : plusieurs critères en dépendent explicitement (« s'il
+   * s'agit du PREMIER message… »). Sans cette information, le juge ne peut pas
+   * appliquer son propre critère, et comme il échoue fermé il refuse TOUT —
+   * c'est ce qui bloquait chaque réponse au milieu d'une conversation.
+   */
+  isFirstOutbound?: boolean;
 }
 
 export interface JudgeVerdict {
@@ -45,6 +54,11 @@ function extractJson(raw: string): unknown {
 export async function judgeWithLlm(input: JudgeInput, generate: JudgeGenerate): Promise<JudgeVerdict> {
   const user = [
     `Critère : ${input.criterion}`,
+    input.isFirstOutbound === undefined
+      ? null
+      : input.isFirstOutbound
+        ? "Position : c'est le PREMIER message sortant de cette conversation."
+        : "Position : ce n'est PAS le premier message sortant ; l'assistant a déjà écrit à cette personne.",
     input.context ? `Contexte : ${input.context}` : null,
     `Réponse de l'assistant : ${input.output}`,
   ]

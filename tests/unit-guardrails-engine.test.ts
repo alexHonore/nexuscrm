@@ -17,6 +17,7 @@ import {
 import { blockingRules, enabledRules, resolveRules } from "@/lib/guardrails/resolve";
 import { blockingFailures, evaluateOutputRules } from "@/lib/guardrails/filter";
 import { judgeWithLlm } from "@/lib/guardrails/judge";
+import { isFirstOutbound } from "@/lib/guardrails/runner";
 import {
   fixtureExpectationsSchema,
   fixtureSetupSchema,
@@ -436,5 +437,60 @@ describe("noyau semé", () => {
     ]) {
       expect(CORE_PROMPT_V1).toContain(heading);
     }
+  });
+});
+
+describe("le juge reçoit la position dans la conversation", () => {
+  it("le prompt du juge dit si c'est le premier message sortant", async () => {
+    // Sans cette ligne, un critère du type « s'il s'agit du PREMIER message… »
+    // est indécidable ; le juge échoue fermé et bloque TOUTES les réponses de
+    // milieu de conversation. C'est exactement ce qui rendait neuf fixtures
+    // rouges et l'activation impossible.
+    const prompts: string[] = [];
+    const capture = async (p: { system: string; user: string }) => {
+      prompts.push(p.user);
+      return JSON.stringify({ passed: true, reason: "ok" });
+    };
+
+    await judgeWithLlm(
+      { criterion: "Nomme l'organisation.", output: "Bonjour", isFirstOutbound: true },
+      capture,
+    );
+    expect(prompts[0]).toContain("PREMIER message sortant");
+
+    await judgeWithLlm(
+      { criterion: "Nomme l'organisation.", output: "Entendu", isFirstOutbound: false },
+      capture,
+    );
+    expect(prompts[1]).toContain("PAS le premier message sortant");
+  });
+
+  it("sans information de position, aucune ligne n'est inventée", async () => {
+    const prompts: string[] = [];
+    await judgeWithLlm({ criterion: "X", output: "Y" }, async (p) => {
+      prompts.push(p.user);
+      return JSON.stringify({ passed: true, reason: "ok" });
+    });
+    expect(prompts[0]).not.toContain("Position :");
+  });
+
+  it("une fixture sans tour sortant antérieur est un premier contact", () => {
+    expect(isFirstOutbound({ setup: { priorTurns: [], qualification: {}, rung: "primary", turnsUsed: 0 } })).toBe(true);
+    expect(
+      isFirstOutbound({
+        setup: {
+          priorTurns: [["out", "Bonjour"], ["in", "oui"]],
+          qualification: {},
+          rung: "primary",
+          turnsUsed: 1,
+        },
+      }),
+    ).toBe(false);
+    // Un entrant seul (le client écrit en premier) reste un premier sortant.
+    expect(
+      isFirstOutbound({
+        setup: { priorTurns: [["in", "allo?"]], qualification: {}, rung: "primary", turnsUsed: 0 },
+      }),
+    ).toBe(true);
   });
 });

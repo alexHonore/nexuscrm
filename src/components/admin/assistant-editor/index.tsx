@@ -141,7 +141,7 @@ export function AssistantEditor({
     } catch (err) {
       // La porte renvoie POURQUOI elle refuse : le dire vaut mieux qu'un
       // « activation refusée » qui laisse chercher.
-      const code = err instanceof ApiError ? String(err.data.refusal ?? "") : "";
+      const code = err instanceof ApiError ? String(err.data.reason ?? "") : "";
       toast.error(
         code === "stale_compile"
           ? t("editor.errors.staleCompile")
