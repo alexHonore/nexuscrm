@@ -10,6 +10,7 @@ import {
   FileText,
   Globe,
   KeyRound,
+  Megaphone,
   LayoutDashboard,
   LogOut,
   Phone,
@@ -78,6 +79,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin/webhooks", labelKey: "webhooks", icon: KeyRound },
   { href: "/admin/audit", labelKey: "audit", icon: ShieldCheck },
   { href: "/admin/assistants", labelKey: "assistants", icon: Bot },
+  { href: "/admin/campaigns", labelKey: "campaigns", icon: Megaphone },
   { href: "/admin/guardrails", labelKey: "guardrails", icon: ShieldAlert },
   { href: "/admin/settings", labelKey: "settings", icon: Settings },
 ];

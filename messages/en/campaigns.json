@@ -1,0 +1,186 @@
+{
+  "list": {
+    "title": "SMS campaigns",
+    "subtitle": "Who is targeted, when we write, and what stops the ladder.",
+    "new": "New campaign",
+    "empty": {
+      "title": "No campaigns",
+      "desc": "Create a campaign to start writing to your leads."
+    },
+    "status": {
+      "draft": "Draft",
+      "active": "Active",
+      "paused": "Paused",
+      "archived": "Archived"
+    },
+    "trigger": {
+      "manual": "Manual",
+      "lead_created": "New lead",
+      "category_changed": "Category change",
+      "scheduled": "Periodic sweep"
+    },
+    "stats": {
+      "enrolled": "{count} enrolled",
+      "active": "{count} in flight",
+      "replied": "{count} replies",
+      "stopped": "{count} stops",
+      "replyRate": "{rate}% reply rate"
+    },
+    "actions": {
+      "edit": "Edit",
+      "activate": "Activate",
+      "pause": "Pause",
+      "archive": "Archive",
+      "delete": "Delete"
+    },
+    "created": "Campaign created",
+    "deleted": "Campaign deleted",
+    "archived": "Campaign archived",
+    "deleteConfirm": {
+      "title": "Delete “{name}”?",
+      "body": "This campaign never enrolled anyone: it will be permanently deleted.",
+      "bodyArchive": "This campaign already enrolled people. It will be archived — enrollments and sent messages must stay readable.",
+      "confirm": "Confirm"
+    }
+  },
+  "editor": {
+    "back": "Campaigns",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Changes saved",
+    "unsaved": "Unsaved changes",
+    "activate": "Activate",
+    "pause": "Pause",
+    "activated": "Campaign active",
+    "paused": "Campaign paused",
+    "tabs": {
+      "basics": "General",
+      "trigger": "Trigger",
+      "audience": "Audience",
+      "ladder": "Ladder",
+      "variants": "A/B",
+      "enrollments": "Enrollments"
+    },
+    "basics": {
+      "name": "Name",
+      "description": "Description",
+      "assistant": "Assistant",
+      "assistantHint": "The assistant that carries the conversation once the opener is out.",
+      "noAssistant": "None — nobody will reply automatically",
+      "number": "Sending number",
+      "defaultNumber": "First active number",
+      "dailyCap": "Enrollments per day",
+      "dailyCapHint": "Bounds the ENTRY rate. The number's daily cap bounds sends.",
+      "totalCap": "Total enrollment cap",
+      "noTotalCap": "None",
+      "startsAt": "Starts",
+      "endsAt": "Ends",
+      "requireConsent": "Require valid consent",
+      "requireConsentHint": "Turning this off is a deliberate act you answer for under CASL."
+    },
+    "trigger": {
+      "kind": "Trigger type",
+      "manualHint": "You pick the audience and enroll yourself.",
+      "leadHint": "A lead arriving through the webhook is enrolled automatically.",
+      "categoryHint": "The client enters one of the chosen categories.",
+      "scheduledHint": "The audience is swept at a regular interval.",
+      "sources": "Sources",
+      "categories": "Target categories",
+      "everyHours": "Interval (hours)",
+      "allSources": "All sources",
+      "allCategories": "All categories"
+    },
+    "audience": {
+      "title": "Who is targeted",
+      "preview": "{count} people match today",
+      "previewing": "Calculating…",
+      "refresh": "Recalculate",
+      "categories": "Categories",
+      "sources": "Sources",
+      "assignedTo": "Assigned to",
+      "languages": "Language",
+      "createdWithinDays": "Created within (days)",
+      "createdBeforeDays": "Created more than (days) ago",
+      "notContactedForDays": "Not contacted for (days)",
+      "notContactedHint": "“Never contacted” counts too — otherwise reactivation misses the coldest leads.",
+      "excludeActive": "Exclude people already in another active campaign",
+      "excludeActiveHint": "Two campaigns in one week is what gets a number flagged.",
+      "excludeDoNotCall": "Exclude “do not call”",
+      "any": "Any"
+    },
+    "ladder": {
+      "title": "Follow-up ladder",
+      "hint": "Delays are CUMULATIVE: rung 2 fires after rung 1, not after enrollment.",
+      "add": "Add a rung",
+      "remove": "Remove",
+      "step": "Rung {n}",
+      "opener": "Opener",
+      "delayHours": "Delay (hours)",
+      "delayFromEnroll": "after enrollment",
+      "delayFromPrevious": "after the previous rung",
+      "body": "Message",
+      "bodyAgent": "Let the assistant write",
+      "bodyPlaceholder": "The text sent. Empty = the assistant writes.",
+      "label": "Internal label",
+      "empty": "No rungs — the campaign would enroll people and never write to them.",
+      "segments": "{chars} characters · {segments} segment(s)",
+      "schedule": "Planned send: {when}"
+    },
+    "variants": {
+      "title": "A/B test",
+      "hint": "Only the OPENER varies. Varying the whole ladder would make the result unattributable.",
+      "add": "Add a variant",
+      "remove": "Remove",
+      "key": "Key",
+      "weight": "Weight",
+      "body": "Opener",
+      "none": "No variants — everyone gets the same opener.",
+      "share": "≈ {percent}%",
+      "results": "Results",
+      "noResults": "No data yet."
+    },
+    "enrollments": {
+      "title": "Enrollments",
+      "empty": "Nobody is enrolled yet.",
+      "columns": {
+        "client": "Client",
+        "variant": "Variant",
+        "status": "Status",
+        "step": "Rung",
+        "next": "Next",
+        "ended": "Ended"
+      },
+      "status": {
+        "pending": "Pending",
+        "active": "In flight",
+        "replied": "Replied",
+        "booked": "Booked",
+        "completed": "Completed",
+        "stopped": "Stopped",
+        "excluded": "Excluded"
+      },
+      "enrollNow": "Enroll the audience",
+      "enrolling": "Enrolling…",
+      "enrolled": "{count} enrolled, {skipped} skipped",
+      "refusal": {
+        "campaign_not_active": "Campaign inactive",
+        "outside_window": "Outside window",
+        "no_phone": "No phone",
+        "no_consent": "No consent",
+        "suppressed": "Unsubscribed number",
+        "do_not_call": "Do not call",
+        "already_enrolled": "Already enrolled",
+        "active_elsewhere": "Active in another campaign",
+        "daily_cap_reached": "Daily cap reached",
+        "total_cap_reached": "Total cap reached",
+        "empty_ladder": "Empty ladder"
+      }
+    },
+    "errors": {
+      "save": "Could not save",
+      "enroll": "Could not enroll",
+      "preview": "Could not compute the audience"
+    }
+  },
+  "cancel": "Cancel"
+}

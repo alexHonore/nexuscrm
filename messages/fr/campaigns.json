@@ -1,0 +1,186 @@
+{
+  "list": {
+    "title": "Campagnes SMS",
+    "subtitle": "Qui est visé, quand on écrit, et ce qui arrête l'échelle.",
+    "new": "Nouvelle campagne",
+    "empty": {
+      "title": "Aucune campagne",
+      "desc": "Créez une campagne pour commencer à écrire à vos leads."
+    },
+    "status": {
+      "draft": "Brouillon",
+      "active": "Active",
+      "paused": "En pause",
+      "archived": "Archivée"
+    },
+    "trigger": {
+      "manual": "Manuelle",
+      "lead_created": "Nouveau lead",
+      "category_changed": "Changement de catégorie",
+      "scheduled": "Balayage périodique"
+    },
+    "stats": {
+      "enrolled": "{count} inscrits",
+      "active": "{count} en cours",
+      "replied": "{count} réponses",
+      "stopped": "{count} arrêts",
+      "replyRate": "{rate} % de réponses"
+    },
+    "actions": {
+      "edit": "Modifier",
+      "activate": "Activer",
+      "pause": "Mettre en pause",
+      "archive": "Archiver",
+      "delete": "Supprimer"
+    },
+    "created": "Campagne créée",
+    "deleted": "Campagne supprimée",
+    "archived": "Campagne archivée",
+    "deleteConfirm": {
+      "title": "Supprimer « {name} » ?",
+      "body": "Cette campagne n'a jamais inscrit personne : elle sera supprimée définitivement.",
+      "bodyArchive": "Cette campagne a déjà inscrit des gens. Elle sera archivée — les inscriptions et les messages envoyés doivent rester lisibles.",
+      "confirm": "Confirmer"
+    }
+  },
+  "editor": {
+    "back": "Campagnes",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "saved": "Modifications enregistrées",
+    "unsaved": "Modifications non enregistrées",
+    "activate": "Activer",
+    "pause": "Mettre en pause",
+    "activated": "Campagne active",
+    "paused": "Campagne en pause",
+    "tabs": {
+      "basics": "Général",
+      "trigger": "Déclencheur",
+      "audience": "Audience",
+      "ladder": "Échelle",
+      "variants": "A/B",
+      "enrollments": "Inscriptions"
+    },
+    "basics": {
+      "name": "Nom",
+      "description": "Description",
+      "assistant": "Assistant",
+      "assistantHint": "L'assistant qui tient la conversation une fois l'ouverture partie.",
+      "noAssistant": "Aucun — personne ne répondra automatiquement",
+      "number": "Numéro expéditeur",
+      "defaultNumber": "Premier numéro actif",
+      "dailyCap": "Plafond d'inscriptions par jour",
+      "dailyCapHint": "Borne le rythme d'ENTRÉE. Le plafond quotidien du numéro borne les envois.",
+      "totalCap": "Plafond total d'inscriptions",
+      "noTotalCap": "Aucun",
+      "startsAt": "Début",
+      "endsAt": "Fin",
+      "requireConsent": "Exiger un consentement valide",
+      "requireConsentHint": "Le désactiver est un geste délibéré dont vous répondez devant la LCAP."
+    },
+    "trigger": {
+      "kind": "Type de déclencheur",
+      "manualHint": "Vous choisissez l'audience et inscrivez vous-même.",
+      "leadHint": "Un lead qui arrive par le webhook est inscrit automatiquement.",
+      "categoryHint": "Le client entre dans l'une des catégories choisies.",
+      "scheduledHint": "L'audience est balayée à intervalle régulier.",
+      "sources": "Sources",
+      "categories": "Catégories d'arrivée",
+      "everyHours": "Intervalle (heures)",
+      "allSources": "Toutes les sources",
+      "allCategories": "Toutes les catégories"
+    },
+    "audience": {
+      "title": "Qui est visé",
+      "preview": "{count} personnes correspondent aujourd'hui",
+      "previewing": "Calcul…",
+      "refresh": "Recalculer",
+      "categories": "Catégories",
+      "sources": "Sources",
+      "assignedTo": "Assigné à",
+      "languages": "Langue",
+      "createdWithinDays": "Créé depuis moins de (jours)",
+      "createdBeforeDays": "Créé il y a plus de (jours)",
+      "notContactedForDays": "Sans contact depuis (jours)",
+      "notContactedHint": "« Jamais contacté » compte aussi — sinon la réactivation rate les plus froids.",
+      "excludeActive": "Exclure les gens déjà dans une autre campagne active",
+      "excludeActiveHint": "Deux campagnes la même semaine, c'est ce qui fait signaler un numéro.",
+      "excludeDoNotCall": "Exclure les « ne pas appeler »",
+      "any": "Peu importe"
+    },
+    "ladder": {
+      "title": "Échelle de relances",
+      "hint": "Les délais sont CUMULATIFS : le barreau 2 part après le barreau 1, pas après l'inscription.",
+      "add": "Ajouter un barreau",
+      "remove": "Retirer",
+      "step": "Barreau {n}",
+      "opener": "Ouverture",
+      "delayHours": "Délai (heures)",
+      "delayFromEnroll": "après l'inscription",
+      "delayFromPrevious": "après le barreau précédent",
+      "body": "Message",
+      "bodyAgent": "Laisser l'assistant rédiger",
+      "bodyPlaceholder": "Le texte envoyé. Vide = l'assistant rédige.",
+      "label": "Étiquette interne",
+      "empty": "Aucun barreau — la campagne inscrirait des gens sans jamais leur écrire.",
+      "segments": "{chars} caractères · {segments} segment(s)",
+      "schedule": "Départ prévu : {when}"
+    },
+    "variants": {
+      "title": "Test A/B",
+      "hint": "Seule l'OUVERTURE varie. Faire varier toute l'échelle rendrait le résultat inattribuable.",
+      "add": "Ajouter une variante",
+      "remove": "Retirer",
+      "key": "Clé",
+      "weight": "Poids",
+      "body": "Ouverture",
+      "none": "Aucune variante — tout le monde reçoit la même ouverture.",
+      "share": "≈ {percent} %",
+      "results": "Résultats",
+      "noResults": "Pas encore de données."
+    },
+    "enrollments": {
+      "title": "Inscriptions",
+      "empty": "Personne n'est encore inscrit.",
+      "columns": {
+        "client": "Client",
+        "variant": "Variante",
+        "status": "État",
+        "step": "Barreau",
+        "next": "Prochain",
+        "ended": "Terminé"
+      },
+      "status": {
+        "pending": "En attente",
+        "active": "En cours",
+        "replied": "A répondu",
+        "booked": "Rendez-vous",
+        "completed": "Terminée",
+        "stopped": "Arrêtée",
+        "excluded": "Écartée"
+      },
+      "enrollNow": "Inscrire l'audience",
+      "enrolling": "Inscription…",
+      "enrolled": "{count} inscrits, {skipped} écartés",
+      "refusal": {
+        "campaign_not_active": "Campagne inactive",
+        "outside_window": "Hors fenêtre",
+        "no_phone": "Sans téléphone",
+        "no_consent": "Sans consentement",
+        "suppressed": "Numéro désabonné",
+        "do_not_call": "Ne pas appeler",
+        "already_enrolled": "Déjà inscrit",
+        "active_elsewhere": "Actif dans une autre campagne",
+        "daily_cap_reached": "Plafond du jour atteint",
+        "total_cap_reached": "Plafond total atteint",
+        "empty_ladder": "Échelle vide"
+      }
+    },
+    "errors": {
+      "save": "Impossible d'enregistrer",
+      "enroll": "Impossible d'inscrire",
+      "preview": "Impossible de calculer l'audience"
+    }
+  },
+  "cancel": "Annuler"
+}

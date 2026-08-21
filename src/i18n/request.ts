@@ -23,6 +23,7 @@ const NAMESPACES = [
   "analytics",
   "notifications",
   "assistants",
+  "campaigns",
 ] as const;
 
 export default getRequestConfig(async () => {

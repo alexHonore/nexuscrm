@@ -18,7 +18,7 @@ import { NextRequest } from "next/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDb, makeCategory, makeClient, makeUser, resetDb, seedSystemCategories, testDb } from "./helpers/db";
 import { calls, categories, clients, notifications, sources, users, webhookKeys } from "@/db/schema";
-import { assistants } from "@/db/schema-sms";
+import { assistants, campaigns } from "@/db/schema-sms";
 
 vi.mock("server-only", () => ({}));
 
@@ -155,10 +155,12 @@ function collectRouteFiles(dir: string): string[] {
  * ajoutée sous /api/assistants sans garde fait échouer ce test.
  */
 const ASSISTANT_API_DIR = join(APP_DIR, "api", "assistants");
+const CAMPAIGN_API_DIR = join(APP_DIR, "api", "campaigns");
 
 const ADMIN_ROUTES = [
   ...collectRouteFiles(ADMIN_API_DIR),
   ...collectRouteFiles(ASSISTANT_API_DIR),
+  ...collectRouteFiles(CAMPAIGN_API_DIR),
 ]
   .sort()
   .map((file) => ({
@@ -175,13 +177,15 @@ type Fixtures = {
   sourceId: number;
   webhookKeyId: number;
   assistantId: string;
+  campaignId: string;
 };
 
 function concreteUrl(pattern: string, f: Fixtures): { path: string; params: Record<string, string> } {
   const params: Record<string, string> = {};
   const path = pattern.replace(/\[([^\]]+)\]/g, (_m, name: string) => {
     let value: string;
-    if (pattern.includes("/assistants/")) value = f.assistantId;
+    if (pattern.includes("/campaigns/")) value = f.campaignId;
+    else if (pattern.includes("/assistants/")) value = f.assistantId;
     else if (pattern.includes("/users/")) value = f.caller.id;
     else if (pattern.includes("/categories/")) value = String(f.categoryId);
     else if (pattern.includes("/sources/")) value = String(f.sourceId);
@@ -233,6 +237,14 @@ function bodyFor(pattern: string, f: Fixtures): unknown {
       return { userId: f.caller.id, username: "test_sub" };
     case "/api/admin/voipms/route-did":
       return { did: "4184761542", account: "551013_test", userId: f.caller.id };
+    case "/api/campaigns":
+      return {
+        name: "Campagne de test",
+        trigger: { kind: "manual" },
+        ladder: [{ delayHours: 0, body: "Bonjour." }],
+      };
+    case "/api/campaigns/[id]":
+      return { status: "paused" };
     case "/api/assistants/import":
       // Volontairement vide de sens : la garde doit refuser AVANT de regarder
       // le contenu, donc un corps invalide ne doit pas masquer un 401/403.
@@ -318,6 +330,15 @@ beforeEach(async () => {
     })
     .returning({ id: assistants.id });
 
+  const [campaign] = await testDb
+    .insert(campaigns)
+    .values({
+      name: "Campagne de test",
+      trigger: { kind: "manual" },
+      ladder: [{ delayHours: 0, body: "Bonjour.", label: "" }],
+    })
+    .returning({ id: campaigns.id });
+
   fixtures = {
     admin,
     caller,
@@ -325,6 +346,7 @@ beforeEach(async () => {
     sourceId: source.id,
     webhookKeyId: webhookKey.id,
     assistantId: assistant.id,
+    campaignId: campaign.id,
   };
 });
 
@@ -339,6 +361,7 @@ describe("routes /api/admin/** — énumération complète", () => {
     expect(ADMIN_ROUTES.map((r) => r.pattern)).toContain("/api/admin/users/[id]");
     expect(ADMIN_ROUTES.map((r) => r.pattern)).toContain("/api/assistants/[id]/activate");
     expect(ADMIN_ROUTES.map((r) => r.pattern)).toContain("/api/assistants/import");
+    expect(ADMIN_ROUTES.map((r) => r.pattern)).toContain("/api/campaigns/[id]/enroll");
   });
 
   it.each(ADMIN_ROUTES.map((r) => [r.pattern, r.file] as const))(
@@ -803,6 +826,7 @@ describe("routes admin — l'énumération couvre bien chaque fichier", () => {
     const onDisk = [
       ...collectRouteFiles(ADMIN_API_DIR),
       ...collectRouteFiles(ASSISTANT_API_DIR),
+      ...collectRouteFiles(CAMPAIGN_API_DIR),
     ].sort();
     expect(ADMIN_ROUTES.map((r) => r.file)).toEqual(onDisk);
   });
