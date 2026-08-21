@@ -395,7 +395,7 @@
     "thinking": "The assistant is thinking…",
     "reset": "Start over",
     "blocked": "Blocked by a guardrail",
-    "emptyDraft": "(no text — the model only called a tool)",
+    "emptyDraft": "(no text written by the model)",
     "segments": "{chars} characters · {segments} segment(s)",
     "rung": "Rung: {rung}",
     "optOut": "Opt-out detected",
@@ -425,7 +425,61 @@
       "lead_created": "The assistant writes the first message, as on an incoming lead.",
       "category_changed": "The assistant writes the first message, as after a stage change."
     },
-    "startConversation": "Start the conversation"
+    "startConversation": "Start the conversation",
+    "noMessage": "No message: in production the model is not even called.",
+    "suggestions": {
+      "buy": "Yes, I'm looking to buy",
+      "later": "Not this week",
+      "stop": "STOP",
+      "value": "How much is my house worth?"
+    },
+    "opener": {
+      "label": "Opening message already sent (optional)",
+      "placeholder": "Paste the first message the campaign sent to the client…",
+      "hint": "If filled in, it enters the thread as the first outbound message. Leave empty if the client writes without having received anything: the assistant's reply is then its FIRST message and it must introduce itself.",
+      "seeded": "Campaign opener"
+    },
+    "campaign": {
+      "name": "Campaign (internal context)",
+      "namePlaceholder": "e.g. Buyer reactivation 2025",
+      "description": "Campaign description",
+      "followUps": "Planned follow-ups",
+      "hint": "Name and description are slipped into the opening and follow-up instruction (\"not to be quoted\"), exactly as in production. Leave empty for an opener without context."
+    },
+    "followUp": "Client does not answer — follow-up {step}",
+    "followUpHint": "Replays the next rung of the campaign: the assistant writes a follow-up as if the contact had gone silent.",
+    "outcome": {
+      "sent": "Sent",
+      "blocked": "Blocked — nothing goes out",
+      "stopped": "Stopped — nothing goes out",
+      "handoff": "Handed off to a human — nothing goes out",
+      "error": "Model error — nothing goes out"
+    },
+    "reason": {
+      "optout": "opt-out",
+      "hard_refusal": "hard refusal",
+      "client_wants_human": "the client asks for a human",
+      "goal_chain_exhausted": "no fallback goal left",
+      "max_turns": "message budget exhausted",
+      "tool_stop": "the assistant called stop",
+      "tool_handoff": "the assistant called handoff",
+      "blocked_after_regeneration": "guardrail still failing after rewrite",
+      "guardrail_unavailable": "judge unreachable (fails closed)",
+      "booking_failed": "booking refused",
+      "no_text": "no text produced",
+      "llm_error": "provider failure"
+    },
+    "dropped": "{count} paragraph(s) cut — only the first goes out",
+    "regenerated": "rewritten once after a guardrail refusal",
+    "closed": "In production the assistant would now stay silent: AI is disabled on this conversation ({reason}). Start over for a new trial.",
+    "classifierError": "Classifier down — neutral verdict",
+    "turnsUsed": "{count} assistant message(s) counted before this turn",
+    "usage": "{calls} call(s) · {tokensIn} → {tokensOut} tokens · {latency} ms",
+    "usageCost": "US${cost}",
+    "rateLimited": "Too many trials per minute — wait a moment.",
+    "modelRead": "What the model read",
+    "instructionLabel": "Turn instruction (in place of an inbound message)",
+    "runtimeLabel": "Runtime layer (L7)"
   },
   "goLive": {
     "title": "Go live",

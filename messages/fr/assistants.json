@@ -395,7 +395,7 @@
     "thinking": "L'assistant réfléchit…",
     "reset": "Recommencer",
     "blocked": "Bloqué par un garde-fou",
-    "emptyDraft": "(aucun texte — le modèle a seulement appelé un outil)",
+    "emptyDraft": "(aucun texte écrit par le modèle)",
     "segments": "{chars} caractères · {segments} segment(s)",
     "rung": "Cran : {rung}",
     "optOut": "Désabonnement détecté",
@@ -425,7 +425,61 @@
       "lead_created": "C'est l'assistant qui écrit le premier message, comme sur un lead entrant.",
       "category_changed": "C'est l'assistant qui écrit le premier message, comme après un changement d'étape."
     },
-    "startConversation": "Démarrer la conversation"
+    "startConversation": "Démarrer la conversation",
+    "noMessage": "Aucun message : en production, le modèle n'est même pas appelé.",
+    "suggestions": {
+      "buy": "Oui, je cherche à acheter",
+      "later": "Pas cette semaine",
+      "stop": "STOP",
+      "value": "Ça vaut combien ma maison?"
+    },
+    "opener": {
+      "label": "Message d'ouverture déjà envoyé (optionnel)",
+      "placeholder": "Collez ici le premier message que la campagne a envoyé au client…",
+      "hint": "S'il est rempli, il entre dans le fil comme premier message sortant. Laissez vide si le client écrit sans avoir rien reçu : la réponse de l'assistant est alors son PREMIER message et il doit se présenter.",
+      "seeded": "Ouverture de la campagne"
+    },
+    "campaign": {
+      "name": "Campagne (contexte interne)",
+      "namePlaceholder": "ex. Réactivation acheteurs 2025",
+      "description": "Description de la campagne",
+      "followUps": "Relances prévues",
+      "hint": "Le nom et la description sont glissés dans la consigne d'ouverture et de relance (« à ne pas citer »), exactement comme en production. Laissez vide pour une ouverture sans contexte."
+    },
+    "followUp": "Le client ne répond pas — relance {step}",
+    "followUpHint": "Rejoue le barreau suivant de la campagne : l'assistant écrit une relance comme si le contact s'était tu.",
+    "outcome": {
+      "sent": "Envoyé",
+      "blocked": "Bloqué — rien ne part",
+      "stopped": "Arrêt — rien ne part",
+      "handoff": "Escalade à un humain — rien ne part",
+      "error": "Erreur du modèle — rien ne part"
+    },
+    "reason": {
+      "optout": "désabonnement",
+      "hard_refusal": "refus ferme",
+      "client_wants_human": "le client demande un humain",
+      "goal_chain_exhausted": "plus aucun objectif de repli",
+      "max_turns": "budget de messages épuisé",
+      "tool_stop": "l'assistant a appelé stop",
+      "tool_handoff": "l'assistant a appelé handoff",
+      "blocked_after_regeneration": "garde-fou encore en échec après réécriture",
+      "guardrail_unavailable": "juge injoignable (fermeture par défaut)",
+      "booking_failed": "réservation refusée",
+      "no_text": "aucun texte produit",
+      "llm_error": "panne du fournisseur"
+    },
+    "dropped": "{count} paragraphe(s) coupé(s) — seul le premier part",
+    "regenerated": "réécrit une fois après un refus de garde-fou",
+    "closed": "En production, l'assistant se tairait désormais : l'IA est désactivée sur cette conversation ({reason}). Recommencez pour un nouvel essai.",
+    "classifierError": "Classifieur en panne — verdict neutre",
+    "turnsUsed": "{count} message(s) de l'assistant comptés avant ce tour",
+    "usage": "{calls} appel(s) · {tokensIn} → {tokensOut} jetons · {latency} ms",
+    "usageCost": "{cost} $ US",
+    "rateLimited": "Trop d'essais à la minute — patientez un instant.",
+    "modelRead": "Ce que le modèle a lu",
+    "instructionLabel": "Consigne de tour (à la place d'un message entrant)",
+    "runtimeLabel": "Couche d'exécution (L7)"
   },
   "goLive": {
     "title": "Mise en service",
