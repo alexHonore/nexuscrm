@@ -22,6 +22,7 @@ export async function resetDb(): Promise<void> {
       messages, conversations, consents, suppressions, sms_numbers, scheduled_jobs,
       agent_turn_traces, agent_events,
       guardrail_runs, guardrail_audit, guardrail_fixtures, guardrail_rules,
+      campaign_touches, campaign_enrollments, campaigns,
       assistant_versions, assistants, objection_packs, prompt_cores, param_docs
     restart identity cascade;
   `);

@@ -25,6 +25,27 @@ export const consentChannelEnum = pgEnum("consent_channel", ["sms", "email", "ca
 export const consentKindEnum = pgEnum("consent_kind", ["express", "implied_inquiry"]);
 export const smsDirectionEnum = pgEnum("sms_direction", ["in", "out"]);
 export const assistantStatusEnum = pgEnum("assistant_status", ["draft", "active", "archived"]);
+export const campaignStatusEnum = pgEnum("campaign_status", [
+  "draft",
+  "active",
+  "paused",
+  "archived",
+]);
+/**
+ * Cycle de vie d'une inscription. `excluded` = jamais parti (pas de consentement,
+ * numéro supprimé, hors capacité) ; `stopped` = arrêté en cours de route
+ * (désabonnement, refus ferme). Les distinguer est ce qui permet de dire si une
+ * campagne convertit mal ou si son audience était inéligible dès le départ.
+ */
+export const enrollmentStatusEnum = pgEnum("enrollment_status", [
+  "pending",
+  "active",
+  "replied",
+  "booked",
+  "completed",
+  "stopped",
+  "excluded",
+]);
 
 // ── Tables ───────────────────────────────────────────────────────────────────
 
@@ -484,6 +505,113 @@ export const agentTurnTraces = pgTable(
   ],
 );
 
+// ── SMS engine — phase 6 (campagnes) ────────────────────────────────────────
+
+export const campaigns = pgTable(
+  "campaigns",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    description: text("description"),
+    status: campaignStatusEnum("status").notNull().default("draft"),
+    /** L'assistant qui tient la conversation une fois l'ouverture partie. */
+    assistantId: uuid("assistant_id").references(() => assistants.id, { onDelete: "restrict" }),
+    /** DID expéditeur. null = le premier numéro actif. */
+    smsNumberId: uuid("sms_number_id").references(() => smsNumbers.id, { onDelete: "set null" }),
+    /** {kind: "manual" | "lead_created" | "category_changed" | "scheduled", …} */
+    trigger: jsonb("trigger").notNull(),
+    /** Filtre d'audience — formes zod dans src/lib/campaigns/schema.ts. */
+    audience: jsonb("audience").notNull().default({}),
+    /** [{delayHours, body|null, stopOnReply}] — l'échelle de relances. */
+    ladder: jsonb("ladder").notNull().default([]),
+    /** [{key, weight, body}] — A/B. Une seule variante = pas de test. */
+    variants: jsonb("variants").notNull().default([]),
+    /**
+     * Plafonds. `dailyEnrollmentCap` borne le rythme d'entrée, pas le nombre de
+     * messages : c'est le plafond quotidien du DID qui borne les envois.
+     */
+    dailyEnrollmentCap: integer("daily_enrollment_cap").notNull().default(50),
+    totalEnrollmentCap: integer("total_enrollment_cap"),
+    /** Fenêtre de vie de la campagne — hors fenêtre, aucune inscription. */
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    /**
+     * Exiger un consentement valide avant d'inscrire. Par défaut OUI : la
+     * désactiver est un geste délibéré, journalisé, dont l'administrateur
+     * répond devant la LCAP.
+     */
+    requireConsent: boolean("require_consent").notNull().default(true),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("campaigns_status_idx").on(t.status)],
+);
+
+export const campaignEnrollments = pgTable(
+  "campaign_enrollments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    campaignId: uuid("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    /** Créée au premier envoi — une inscription exclue n'en a jamais. */
+    conversationId: uuid("conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
+    }),
+    /** Clé de la variante A/B tirée à l'inscription. */
+    variant: text("variant").notNull().default(""),
+    status: enrollmentStatusEnum("status").notNull().default("pending"),
+    /** Index du PROCHAIN barreau à envoyer ; = ladder.length quand tout est parti. */
+    step: integer("step").notNull().default(0),
+    nextTouchAt: timestamp("next_touch_at", { withTimezone: true }),
+    enrolledAt: timestamp("enrolled_at", { withTimezone: true }).notNull().defaultNow(),
+    lastTouchAt: timestamp("last_touch_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    /** Pourquoi l'inscription s'est arrêtée ou n'a jamais démarré. */
+    endReason: text("end_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // LA garantie d'idempotence : un client n'entre qu'UNE fois dans une
+    // campagne donnée. Deux déclencheurs qui partent en même temps sur le même
+    // lead ne produisent pas deux séries de messages — le second insert perd.
+    uniqueIndex("campaign_enrollments_uq").on(t.campaignId, t.clientId),
+    index("campaign_enrollments_due_idx").on(t.status, t.nextTouchAt),
+    index("campaign_enrollments_conversation_idx").on(t.conversationId),
+  ],
+);
+
+export const campaignTouches = pgTable(
+  "campaign_touches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    enrollmentId: uuid("enrollment_id")
+      .notNull()
+      .references(() => campaignEnrollments.id, { onDelete: "cascade" }),
+    /** Barreau de l'échelle — 0 = ouverture. */
+    step: integer("step").notNull(),
+    variant: text("variant").notNull().default(""),
+    /** Message produit, quand il y en a un. */
+    messageId: uuid("message_id").references(() => messages.id, { onDelete: "set null" }),
+    plannedAt: timestamp("planned_at", { withTimezone: true }).notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    /** queued | sent | skipped */
+    status: text("status").notNull().default("queued"),
+    skipReason: text("skip_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Un barreau ne part qu'une fois, jamais deux — même si le job est rejoué
+    // après une panne entre l'envoi et le règlement du job.
+    uniqueIndex("campaign_touches_step_uq").on(t.enrollmentId, t.step),
+  ],
+);
+
 // ── SMS engine — phase 5 (documentation des paramètres) ─────────────────────
 
 /**
@@ -592,4 +720,30 @@ export const guardrailRunsRelations = relations(guardrailRuns, ({ one }) => ({
 
 export const paramDocsRelations = relations(paramDocs, ({ one }) => ({
   updatedBy: one(users, { fields: [paramDocs.updatedById], references: [users.id] }),
+}));
+
+export const campaignsRelations = relations(campaigns, ({ one, many }) => ({
+  assistant: one(assistants, { fields: [campaigns.assistantId], references: [assistants.id] }),
+  smsNumber: one(smsNumbers, { fields: [campaigns.smsNumberId], references: [smsNumbers.id] }),
+  enrollments: many(campaignEnrollments),
+}));
+
+export const campaignEnrollmentsRelations = relations(campaignEnrollments, ({ one, many }) => ({
+  campaign: one(campaigns, {
+    fields: [campaignEnrollments.campaignId],
+    references: [campaigns.id],
+  }),
+  client: one(clients, { fields: [campaignEnrollments.clientId], references: [clients.id] }),
+  conversation: one(conversations, {
+    fields: [campaignEnrollments.conversationId],
+    references: [conversations.id],
+  }),
+  touches: many(campaignTouches),
+}));
+
+export const campaignTouchesRelations = relations(campaignTouches, ({ one }) => ({
+  enrollment: one(campaignEnrollments, {
+    fields: [campaignTouches.enrollmentId],
+    references: [campaignEnrollments.id],
+  }),
 }));
