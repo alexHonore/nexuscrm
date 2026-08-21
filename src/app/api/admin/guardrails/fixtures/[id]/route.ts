@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { guardrailAudit, guardrailFixtures } from "@/db/schema-sms";
 import { apiAdmin } from "@/lib/auth/guards";
+import { invalidateAssistantsForGuardrails } from "@/lib/guardrails/store";
 import {
   GUARDRAIL_SEVERITIES,
   fixtureExpectationsSchema,
@@ -11,7 +12,11 @@ import {
 } from "@/lib/guardrails/types";
 import { readJson } from "../../../_helpers";
 
-/** PATCH /api/admin/guardrails/fixtures/:id — édition d'une fixture de test. */
+/**
+ * PATCH /api/admin/guardrails/fixtures/:id — édition d'une fixture de test.
+ * Modifier ou supprimer un scénario périme la suite des assistants concernés :
+ * leur vert a été jugé contre l'ancien scénario.
+ */
 const patchSchema = z.object({
   label: z.string().trim().min(1).max(160).optional(),
   inbound: z.string().trim().min(1).max(1000).optional(),
@@ -55,15 +60,17 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     .where(eq(guardrailFixtures.id, id))
     .returning();
 
+  const staleAssistants = await invalidateAssistantsForGuardrails({ assistantId: before.assistantId });
+
   await db.insert(guardrailAudit).values({
     actorId: admin.id,
     action: "fixture_edited",
     target: `fixture:${before.label}`,
     before: { severity: before.severity, enabled: before.enabled },
-    after: { severity: after.severity, enabled: after.enabled },
+    after: { severity: after.severity, enabled: after.enabled, staleAssistants },
   });
 
-  return NextResponse.json({ fixture: after });
+  return NextResponse.json({ fixture: after, staleAssistants });
 }
 
 /**
@@ -86,13 +93,15 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
 
   await db.delete(guardrailFixtures).where(eq(guardrailFixtures.id, id));
 
+  const staleAssistants = await invalidateAssistantsForGuardrails({ assistantId: before.assistantId });
+
   await db.insert(guardrailAudit).values({
     actorId: admin.id,
     action: "fixture_deleted",
     target: `fixture:${before.label}`,
     before: { severity: before.severity, enabled: before.enabled, origin: before.origin },
-    after: null,
+    after: { staleAssistants },
   });
 
-  return NextResponse.json({ deleted: true });
+  return NextResponse.json({ deleted: true, staleAssistants });
 }

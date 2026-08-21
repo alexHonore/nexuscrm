@@ -69,11 +69,18 @@ export function evaluateExpectations(
   for (const tool of e.mustNotCallTool) {
     if (called.includes(tool)) failures.push(`outil interdit appelé : ${tool}`);
   }
+  // Le motif est NOMMÉ dans la raison : « motif interdit #1 » seul laisse
+  // l'admin deviner pourquoi la fixture est rouge. (Le motif n'est pas la
+  // sortie du modèle : aucune donnée personnelle n'y passe.)
   for (const [index, pattern] of e.mustMatch.entries()) {
-    if (!new RegExp(pattern, "iu").test(output.text)) failures.push(`motif requis #${index + 1}`);
+    if (!new RegExp(pattern, "iu").test(output.text)) {
+      failures.push(`motif requis #${index + 1} (${pattern})`);
+    }
   }
   for (const [index, pattern] of e.mustNotMatch.entries()) {
-    if (new RegExp(pattern, "iu").test(output.text)) failures.push(`motif interdit #${index + 1}`);
+    if (new RegExp(pattern, "iu").test(output.text)) {
+      failures.push(`motif interdit #${index + 1} (${pattern})`);
+    }
   }
   if (e.maxChars !== null && output.text.length > e.maxChars) {
     failures.push(`${output.text.length} caractères (max ${e.maxChars})`);

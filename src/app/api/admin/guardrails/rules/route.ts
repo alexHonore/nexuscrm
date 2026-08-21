@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { guardrailAudit, guardrailRules } from "@/db/schema-sms";
 import { apiAdmin } from "@/lib/auth/guards";
+import { invalidateAssistantsForGuardrails } from "@/lib/guardrails/store";
 import {
   GUARDRAIL_KINDS,
   GUARDRAIL_SEVERITIES,
@@ -92,13 +93,17 @@ export async function POST(req: Request) {
     })
     .returning();
 
+  // Une règle nouvelle périme les assistants concernés : L6 doit la recopier
+  // et la suite doit la rejouer. Voir invalidateAssistantsForGuardrails.
+  const staleAssistants = await invalidateAssistantsForGuardrails({ assistantId: body.assistantId });
+
   await db.insert(guardrailAudit).values({
     actorId: admin.id,
     action: "rule_created",
     target: `rule:${row.key}`,
     before: null,
-    after: { kind: row.kind, severity: row.severity, config: row.config },
+    after: { kind: row.kind, severity: row.severity, config: row.config, staleAssistants },
   });
 
-  return NextResponse.json({ rule: row }, { status: 201 });
+  return NextResponse.json({ rule: row, staleAssistants }, { status: 201 });
 }

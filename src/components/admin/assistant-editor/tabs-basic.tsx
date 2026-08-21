@@ -18,8 +18,12 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   ASSISTANT_TOOLS,
+  BOOKING_GOAL_TYPES,
   GOAL_TYPES,
   QUALIFICATION_FIELDS,
+  TYPE_MANDATED_FIELDS,
+  defaultAppointmentTypeFor,
+  withMandatedFields,
   type AssistantTool,
   type GoalStep,
   type GoalType,
@@ -34,7 +38,7 @@ const NONE = "__none__";
 const FREE_TEXT = "__free__";
 
 /** Les objectifs qui RÉSERVENT réellement quelque chose dans l'agenda. */
-const BOOKING_GOALS: GoalType[] = ["video_meeting", "in_person_meeting", "phone_call"];
+const BOOKING_GOALS = BOOKING_GOAL_TYPES;
 
 /** Curseur 1-5 rendu comme un choix : les valeurs ont un sens nommé, pas une amplitude. */
 function ScaleField({
@@ -319,16 +323,18 @@ function GoalStepFields({
               s.type = next;
               // Le type de rendez-vous DÉCOULE du type d'objectif quand il
               // n'y a rien à choisir : une rencontre vidéo se réserve en
-              // visioconférence, pas ailleurs.
+              // visioconférence, pas ailleurs. Un appel garde le choix fait,
+              // sinon « meet » — jamais null : un cran de réservation sans
+              // type de rendez-vous promet un appel que l'agenda refuse.
               s.appointmentType =
-                next === "video_meeting"
-                  ? "meet"
-                  : next === "in_person_meeting"
-                    ? "inperson"
-                    : BOOKING_GOALS.includes(next)
-                      ? s.appointmentType
-                      : null;
+                next === "video_meeting" || next === "in_person_meeting"
+                  ? defaultAppointmentTypeFor(next)
+                  : BOOKING_GOALS.includes(next)
+                    ? (s.appointmentType ?? defaultAppointmentTypeFor(next))
+                    : null;
               if (!BOOKING_GOALS.includes(next)) s.durationMin = null;
+              // Les champs que le nouveau type impose sont ajoutés d'office.
+              s.requiredFields = withMandatedFields(next, s.requiredFields);
             })
           }
         >
@@ -426,7 +432,11 @@ function GoalStepFields({
         <FieldLabel path={`${prefix}.requiredFields`} />
         <div className="grid gap-2 sm:grid-cols-2">
           {QUALIFICATION_FIELDS.map((field) => {
-            const checked = step.requiredFields.includes(field);
+            // Un champ que le type impose (le courriel pour « obtenir le
+            // courriel ») est coché et verrouillé : le schéma le rajouterait
+            // de toute façon à l'enregistrement, autant le montrer.
+            const mandated = TYPE_MANDATED_FIELDS[step.type].includes(field);
+            const checked = mandated || step.requiredFields.includes(field);
             return (
               <label
                 key={field}
@@ -434,6 +444,7 @@ function GoalStepFields({
               >
                 <Checkbox
                   checked={checked}
+                  disabled={mandated}
                   onCheckedChange={(next) =>
                     onChange((s) => {
                       s.requiredFields = next
@@ -443,6 +454,11 @@ function GoalStepFields({
                   }
                 />
                 {t(`qualificationField.${field}`)}
+                {mandated ? (
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {t("editor.goal.mandatedField")}
+                  </span>
+                ) : null}
               </label>
             );
           })}
@@ -485,12 +501,14 @@ export function GoalTab({ config, update, data }: TabProps) {
 
   const addFallback = () =>
     update((d) => {
+      // Un appel se réserve : le type de rendez-vous est posé d'emblée (null
+      // rendait le cran impossible à réserver tout en affichant « Visio »).
       d.goal.fallbacks.push({
         type: "phone_call",
         durationMin: 15,
-        appointmentType: null,
+        appointmentType: defaultAppointmentTypeFor("phone_call"),
         withUserId: null,
-        requiredFields: [],
+        requiredFields: withMandatedFields("phone_call", []),
         slotOfferCount: 2,
         confirmationTemplate: null,
       });

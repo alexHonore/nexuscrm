@@ -1,8 +1,8 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { assistants, assistantVersions, guardrailRuns, objectionPacks } from "@/db/schema-sms";
-import { compileAssistantPrompt } from "@/lib/agent/compile";
+import { compileAssistantPrompt, type ObjectionPack } from "@/lib/agent/compile";
 import { DEFAULT_TURN_INSTRUCTIONS } from "@/lib/agent/templates";
 import { toolDefsFor } from "@/lib/agent/tools";
 import { renderTemplate } from "@/lib/agent/render";
@@ -15,7 +15,7 @@ import {
   loadCoreRules,
 } from "@/lib/guardrails/store";
 import { runFixture, runnableFixtures, suitePassed } from "@/lib/guardrails/runner";
-import type { FixtureData, FixtureResult } from "@/lib/guardrails/types";
+import { objectionItemSchema, type FixtureData, type FixtureResult } from "@/lib/guardrails/types";
 import { getLlmProvider } from "@/lib/llm-server";
 import { assistantRowToConfig, type AssistantConfig } from "./schema";
 
@@ -27,6 +27,15 @@ import { assistantRowToConfig, type AssistantConfig } from "./schema";
  * (drizzle/0003_phase3-assistants.trigger.sql) : le cahier exige les deux, pour
  * qu'une écriture directe en base ne puisse pas activer un assistant dont le
  * prompt est périmé ou la suite rouge.
+ *
+ * Deux écritures ici sont des « compare-and-set » : la fin de la compilation
+ * et la fin de la suite. Toutes deux durent (la suite, jusqu'à quatre minutes)
+ * et écrivent des drapeaux que la porte d'activation lit. Entre-temps, un
+ * autre onglet, un import ou un collègue a pu enregistrer une configuration ou
+ * recompiler : écrire sans condition poserait alors un vert obtenu contre un
+ * prompt qui n'existe plus, ou effacerait un drapeau de recompilation tout
+ * juste posé. Le point de comparaison est `updated_at` (toute écriture de
+ * config le bouge) et `compiled_at`.
  */
 
 /** Marge sous le maxDuration de la route (300 s) pour finir proprement. */
@@ -40,18 +49,32 @@ async function loadAssistant(assistantId: string): Promise<AssistantRow> {
   return row;
 }
 
-async function loadPacks(ids: string[]) {
+/**
+ * Égalité d'horodatage robuste : Postgres garde les microsecondes, le pilote
+ * JS tronque à la milliseconde. Comparer les deux bruts ferait échouer la
+ * condition sur toute rangée écrite par un `now()` de la base.
+ */
+function sameInstant(column: typeof assistants.updatedAt | typeof assistants.compiledAt, value: Date | null) {
+  // ISO explicite : dans un fragment `sql`, le pilote ne sérialise pas un Date.
+  return value === null
+    ? sql`${column} is null`
+    : sql`date_trunc('milliseconds', ${column}) = ${value.toISOString()}::timestamptz`;
+}
+
+async function loadPacks(ids: string[]): Promise<ObjectionPack[]> {
   if (ids.length === 0) return [];
   const rows = await db.select().from(objectionPacks);
   const byId = new Map(rows.map((row) => [row.id, row]));
   return ids
     .map((id) => byId.get(id))
     .filter((row): row is (typeof rows)[number] => row !== undefined)
-    .map((row) => ({
-      id: row.id,
-      label: row.label,
-      items: (row.items as { key: string; triggerHint: string; acknowledge: string; reframe: string; ask: string }[]) ?? [],
-    }));
+    .map((row) => {
+      // Un paquet au contenu illisible (jsonb bricolé, fichier importé) ne
+      // doit pas compiler du charabia dans le prompt : l'erreur nomme le paquet.
+      const items = objectionItemSchema.array().safeParse(row.items ?? []);
+      if (!items.success) throw new Error(`objection_pack_invalid:${row.id}`);
+      return { id: row.id, label: row.label, items: items.data };
+    });
 }
 
 /** Règles applicables à un assistant : core + ses forks, dans l'ordre résolu. */
@@ -63,6 +86,7 @@ export async function resolvedRulesFor(assistantId: string) {
 // ── Compilation ──────────────────────────────────────────────────────────────
 
 export interface CompileResult {
+  /** Nouveau numéro de version — incrémenté à CHAQUE compilation. */
   version: number;
   coreVersion: number;
   prompt: string;
@@ -70,9 +94,14 @@ export interface CompileResult {
 }
 
 /**
- * Compile L0-L6, gèle un instantané de version et efface `needs_recompile`.
- * Toute sauvegarde de config repose le drapeau — un prompt périmé est un bogue,
- * jamais un choix.
+ * Compile L0-L6, incrémente la version, gèle un instantané et efface
+ * `needs_recompile`. Toute sauvegarde de config repose le drapeau — un prompt
+ * périmé est un bogue, jamais un choix.
+ *
+ * La version monte à chaque compilation : c'est elle que les traces, les
+ * exécutions de suite et les conversations référencent. Sans incrément, seul
+ * le premier prompt était gelé et « reconstituer ce que disait l'assistant le
+ * mois dernier » devenait impossible.
  */
 export async function compileAssistant(
   assistantId: string,
@@ -100,38 +129,48 @@ export async function compileAssistant(
     })),
   );
 
-  const now = new Date();
-  await db
-    .update(assistants)
-    .set({
-      compiledPrompt: compiled.prompt,
-      compiledCoreVersion: compiled.coreVersion,
-      compiledAt: now,
-      needsRecompile: false,
-      // Un prompt qui change invalide la suite : elle devra être rejouée.
-      suitePassed: false,
-      updatedAt: now,
-    })
-    .where(eq(assistants.id, assistantId));
+  // Un prompt vide (mode libre sans texte) n'est pas un prompt : on refuse
+  // ici plutôt que de l'enregistrer et de laisser la porte le découvrir sous
+  // un « stale_compile » trompeur.
+  if (compiled.prompt.trim() === "") throw new Error("empty_prompt");
 
-  await db
-    .insert(assistantVersions)
-    .values({
+  const now = new Date();
+  return db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(assistants)
+      .set({
+        version: sql`${assistants.version} + 1`,
+        compiledPrompt: compiled.prompt,
+        compiledCoreVersion: compiled.coreVersion,
+        compiledAt: now,
+        needsRecompile: false,
+        // Un prompt qui change invalide la suite : elle devra être rejouée.
+        suitePassed: false,
+        updatedAt: now,
+      })
+      // Compare-and-set : si la configuration a bougé depuis la lecture, ce
+      // prompt a été compilé à partir d'une config qui n'est plus celle de la
+      // rangée — et effacer `needs_recompile` mentirait.
+      .where(and(eq(assistants.id, assistantId), sameInstant(assistants.updatedAt, row.updatedAt)))
+      .returning({ version: assistants.version });
+    if (!updated) throw new Error("assistant_changed_during_compile");
+
+    await tx.insert(assistantVersions).values({
       assistantId,
-      version: row.version,
+      version: updated.version,
       snapshot: config,
       compiledPrompt: compiled.prompt,
       coreVersion: compiled.coreVersion,
       createdById: actorId,
-    })
-    .onConflictDoNothing();
+    });
 
-  return {
-    version: row.version,
-    coreVersion: compiled.coreVersion,
-    prompt: compiled.prompt,
-    layers: compiled.layers,
-  };
+    return {
+      version: updated.version,
+      coreVersion: compiled.coreVersion,
+      prompt: compiled.prompt,
+      layers: compiled.layers,
+    };
+  });
 }
 
 // ── Suite de garde-fous ──────────────────────────────────────────────────────
@@ -174,6 +213,12 @@ export interface SuiteOutcome {
   runId: string;
   passed: boolean;
   results: FixtureResult[];
+  /**
+   * Vrai quand la configuration ou le prompt a changé PENDANT l'exécution :
+   * les résultats décrivent un assistant qui n'existe plus, le drapeau
+   * `suite_passed` est resté faux et la suite est à relancer.
+   */
+  superseded: boolean;
 }
 
 /**
@@ -213,10 +258,13 @@ export async function runAssistantSuite(
   // Une suite qui démarre INVALIDE immédiatement le vert précédent : si le
   // processus meurt en cours de route (délai Vercel, panne fournisseur),
   // l'assistant ne doit surtout pas rester activable sur une ancienne suite.
-  await db
+  // L'empreinte renvoyée (updated_at, compiled_at) est celle que la fin de
+  // la suite devra retrouver intacte pour avoir le droit d'écrire son vert.
+  const [claimed] = await db
     .update(assistants)
     .set({ suitePassed: false, suiteRunId: run.id })
-    .where(eq(assistants.id, assistantId));
+    .where(eq(assistants.id, assistantId))
+    .returning({ updatedAt: assistants.updatedAt, compiledAt: assistants.compiledAt });
 
   // Budget de temps : 14 fixtures × (générateur + juge) peuvent dépasser le
   // maxDuration de la route. On s'arrête proprement et on consigne l'échec
@@ -310,21 +358,55 @@ export async function runAssistantSuite(
 
   const passed = suitePassed(results);
   const finishedAt = new Date();
-  await db
-    .update(guardrailRuns)
-    .set({ finishedAt, passed, results })
-    .where(eq(guardrailRuns.id, run.id));
-  await db
+
+  // Compare-and-set : le vert ne se pose que sur la rangée TELLE QUE la suite
+  // l'a testée. Une sauvegarde, une recompilation, une règle de noyau changée
+  // ou une autre suite lancée entre-temps font échouer la condition — et
+  // `suite_passed` reste faux, comme la réclamation du début l'a posé.
+  const [settled] = await db
     .update(assistants)
     .set({ suitePassed: passed, suiteRunId: run.id, updatedAt: finishedAt })
-    .where(eq(assistants.id, assistantId));
+    .where(
+      and(
+        eq(assistants.id, assistantId),
+        eq(assistants.suiteRunId, run.id),
+        sameInstant(assistants.updatedAt, claimed?.updatedAt ?? row.updatedAt),
+        sameInstant(assistants.compiledAt, claimed?.compiledAt ?? row.compiledAt),
+      ),
+    )
+    .returning({ id: assistants.id });
+  const superseded = !settled;
 
-  return { runId: run.id, passed, results };
+  await db
+    .update(guardrailRuns)
+    .set({
+      finishedAt,
+      // Une exécution dépassée est consignée ROUGE : afficher « 14/14 » en vert
+      // pour un prompt qui n'existe plus ferait croire à une suite valable.
+      passed: passed && !superseded,
+      results: superseded
+        ? [
+            ...results,
+            {
+              fixtureId: null,
+              label: "configuration modifiée pendant la suite — résultat écarté",
+              severity: "block",
+              passed: false,
+              reason: "la configuration ou le prompt a changé pendant l'exécution : relancer la suite",
+              output: "",
+              toolsCalled: [],
+            },
+          ]
+        : results,
+    })
+    .where(eq(guardrailRuns.id, run.id));
+
+  return { runId: run.id, passed: passed && !superseded, results, superseded };
 }
 
 // ── Porte d'activation (§11.4) ───────────────────────────────────────────────
 
-export type ActivationRefusal = "stale_compile" | "suite_not_passed";
+export type ActivationRefusal = "archived" | "stale_compile" | "suite_not_passed";
 
 export interface ActivationCheck {
   allowed: boolean;
@@ -335,9 +417,24 @@ export interface ActivationCheck {
 
 export async function checkActivation(assistantId: string): Promise<ActivationCheck> {
   const row = await loadAssistant(assistantId);
-  const core = await currentCore();
 
-  if (!row.compiledPrompt || row.compiledCoreVersion !== core.version || row.needsRecompile) {
+  // « Archivé » est terminal : l'assistant a été retiré parce qu'il avait
+  // parlé à des clients. Le remettre en service par la même porte qu'un
+  // brouillon le ferait réapparaître dans les campagnes sans que personne ne
+  // l'ait décidé explicitement.
+  if (row.status === "archived") {
+    return { allowed: false, reason: "archived", failingFixtures: [] };
+  }
+
+  const core = await currentCore();
+  // Un prompt vide ou blanc n'est pas plus un prompt qu'un NULL (même règle
+  // que le trigger : btrim(compiled_prompt) = '').
+  if (
+    !row.compiledPrompt ||
+    row.compiledPrompt.trim() === "" ||
+    row.compiledCoreVersion !== core.version ||
+    row.needsRecompile
+  ) {
     return { allowed: false, reason: "stale_compile", failingFixtures: [] };
   }
   if (row.requireSuitePass && !row.suitePassed) {
@@ -362,4 +459,24 @@ export async function activateAssistant(assistantId: string): Promise<Activation
     .set({ status: "active", updatedAt: new Date() })
     .where(eq(assistants.id, assistantId));
   return check;
+}
+
+export type DeactivationResult =
+  | { ok: true; changed: boolean; status: "draft" }
+  | { ok: false; reason: "archived" };
+
+/**
+ * Retire un assistant du service : il repasse en BROUILLON. Pas de porte ici
+ * (on ne fait qu'ôter), mais un assistant archivé reste archivé — le
+ * brouillon est l'état d'où l'on réactive, et l'archivage est terminal.
+ */
+export async function deactivateAssistant(assistantId: string): Promise<DeactivationResult> {
+  const row = await loadAssistant(assistantId);
+  if (row.status === "archived") return { ok: false, reason: "archived" };
+  if (row.status === "draft") return { ok: true, changed: false, status: "draft" };
+  await db
+    .update(assistants)
+    .set({ status: "draft", updatedAt: new Date() })
+    .where(eq(assistants.id, assistantId));
+  return { ok: true, changed: true, status: "draft" };
 }

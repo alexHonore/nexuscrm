@@ -345,8 +345,12 @@ export function GuardrailRuleDialog({
     setBusy(true);
     setError(null);
     try {
+      // La réponse dit combien d'assistants cette règle vient de périmer :
+      // leur L6 recopie son texte et leur suite doit être rejouée. Le dire
+      // ici évite de le découvrir à l'activation suivante.
+      let result: { staleAssistants?: number };
       if (creating) {
-        await api("/api/admin/guardrails/rules", {
+        result = await api<{ staleAssistants?: number }>("/api/admin/guardrails/rules", {
           method: "POST",
           body: JSON.stringify({
             key: draft.key,
@@ -360,7 +364,7 @@ export function GuardrailRuleDialog({
           }),
         });
       } else {
-        await api(`/api/admin/guardrails/rules/${draft.id}`, {
+        result = await api<{ staleAssistants?: number }>(`/api/admin/guardrails/rules/${draft.id}`, {
           method: "PATCH",
           body: JSON.stringify({
             label: draft.label,
@@ -372,7 +376,12 @@ export function GuardrailRuleDialog({
           }),
         });
       }
-      toast.success(t("guardrails.saved"));
+      const stale = result.staleAssistants ?? 0;
+      toast.success(
+        stale > 0
+          ? `${t("guardrails.saved")} — ${t("guardrails.invalidated", { count: stale })}`
+          : t("guardrails.saved"),
+      );
       onOpenChange(false);
       router.refresh();
     } catch (err) {

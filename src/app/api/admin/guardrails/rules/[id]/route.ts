@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { guardrailAudit, guardrailRules } from "@/db/schema-sms";
 import { apiAdmin } from "@/lib/auth/guards";
+import { invalidateAssistantsForGuardrails } from "@/lib/guardrails/store";
 import { GUARDRAIL_SEVERITIES, safeParseRuleConfig, type GuardrailKind } from "@/lib/guardrails/types";
 import { readJson } from "../../../_helpers";
 
@@ -69,6 +70,10 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     .where(eq(guardrailRules.id, id))
     .returning();
 
+  // L6 recopie le texte de la règle et la suite la rejoue : les assistants
+  // concernés sont périmés, et la réponse le dit.
+  const staleAssistants = await invalidateAssistantsForGuardrails({ assistantId: before.assistantId });
+
   await db.insert(guardrailAudit).values({
     actorId: admin.id,
     action: body.enabled === false ? "rule_disabled" : "rule_edited",
@@ -84,10 +89,11 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       enabled: after.enabled,
       promptText: after.promptText,
       config: after.config,
+      staleAssistants,
     },
   });
 
-  return NextResponse.json({ rule: after });
+  return NextResponse.json({ rule: after, staleAssistants });
 }
 
 /** DELETE — supprime une règle. L'admin peut tout supprimer ; « Tout
@@ -103,12 +109,15 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
   const [deleted] = await db.delete(guardrailRules).where(eq(guardrailRules.id, id)).returning();
   if (!deleted) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
+  // Une règle disparue change L6 et ce que la suite mesure : on périme.
+  const staleAssistants = await invalidateAssistantsForGuardrails({ assistantId: deleted.assistantId });
+
   await db.insert(guardrailAudit).values({
     actorId: admin.id,
     action: "rule_deleted",
     target: `rule:${deleted.key}`,
     before: { severity: deleted.severity, enabled: deleted.enabled, config: deleted.config },
-    after: null,
+    after: { staleAssistants },
   });
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, staleAssistants });
 }

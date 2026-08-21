@@ -6,7 +6,10 @@
 --   1. il est compilé contre la version COURANTE de prompt_cores (toujours —
 --      un prompt périmé est un bug, pas un choix de politique) ;
 --   2. sa suite de garde-fous est verte — sauf si require_suite_pass = false
---      (§11.2.3 : la porte devient consultative, l'UI affiche un avertissement).
+--      (§11.2.3 : la porte devient consultative, l'UI affiche un avertissement) ;
+--   3. il n'est pas archivé : « archivé » est TERMINAL. Un assistant retiré
+--      parce qu'il a écrit à des clients ne revient pas en service par une
+--      simple mise à jour de statut.
 --
 -- La même règle est vérifiée dans l'action serveur ; le trigger attrape les
 -- écritures directes en base (exigence explicite du cahier, testée).
@@ -18,8 +21,14 @@ DECLARE
 BEGIN
   was_active := (TG_OP = 'UPDATE' AND OLD.status = 'active');
   IF NEW.status = 'active' AND NOT was_active THEN
+    IF TG_OP = 'UPDATE' AND OLD.status = 'archived' THEN
+      RAISE EXCEPTION 'activation_gate: archived';
+    END IF;
     SELECT max(version) INTO max_core FROM prompt_cores;
+    -- Un prompt VIDE (mode libre sans texte) n'est pas plus un prompt qu'un
+    -- NULL : la porte serveur le refuse (`!compiled_prompt`), la base aussi.
     IF NEW.compiled_prompt IS NULL
+       OR btrim(NEW.compiled_prompt) = ''
        OR max_core IS NULL
        OR NEW.compiled_core_version IS DISTINCT FROM max_core
        OR NEW.needs_recompile THEN

@@ -117,13 +117,33 @@ function evaluateRule(draft: string, rule: RuleData, ctx: FilterContext): RuleVe
   }
 }
 
+/**
+ * Une règle dont la config ne se lit pas (jsonb édité à la main, fichier
+ * importé bricolé) ÉCHOUE au lieu de lever : lever ferait avorter le tour
+ * entier — aucune réponse, aucune trace, personne d'averti — alors qu'un
+ * verdict rouge bloque l'envoi proprement et se voit dans le fil.
+ */
+function evaluateRuleSafely(draft: string, rule: RuleData, ctx: FilterContext): RuleVerdict {
+  try {
+    return evaluateRule(draft, rule, ctx);
+  } catch (err) {
+    return {
+      key: rule.key,
+      label: rule.label,
+      severity: rule.severity,
+      passed: false,
+      reason: `garde-fou illisible : ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`,
+    };
+  }
+}
+
 /** Verdicts des règles déterministes, dans l'ordre résolu. */
 export function evaluateOutputRules(
   draft: string,
   rules: RuleData[],
   ctx: FilterContext = {},
 ): RuleVerdict[] {
-  return enabledRules(rules).map((rule) => evaluateRule(draft, rule, ctx));
+  return enabledRules(rules).map((rule) => evaluateRuleSafely(draft, rule, ctx));
 }
 
 /** Les règles `block` en échec — non vide = l'envoi est refusé (§11.5). */

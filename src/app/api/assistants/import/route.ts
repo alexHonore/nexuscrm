@@ -40,7 +40,9 @@ export async function POST(req: Request) {
 
   try {
     if (parsed.data.mode === "preview") {
-      const preview = await previewImport(parsed.data.bundle);
+      // Les liaisons déjà choisies passent : les avertissements décrivent ce
+      // qui sera VRAIMENT écrit, pas un état où rien n'est résolu.
+      const preview = await previewImport(parsed.data.bundle, parsed.data.resolution);
       return NextResponse.json(preview);
     }
 

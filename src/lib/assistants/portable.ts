@@ -9,6 +9,8 @@ import {
   GUARDRAIL_SEVERITIES,
   fixtureExpectationsSchema,
   fixtureSetupSchema,
+  objectionItemSchema,
+  safeParseRuleConfig,
   type FixtureData,
   type RuleData,
 } from "@/lib/guardrails/types";
@@ -57,19 +59,36 @@ export type Binding = z.infer<typeof bindingSchema>;
 
 // ── Règles et fixtures transportables ────────────────────────────────────────
 
-const portableRuleSchema = z.object({
-  scope: z.enum(["core", "assistant"]),
-  key: z.string().min(1),
-  label: z.string().min(1),
-  description: z.string().nullable().default(null),
-  kind: z.enum(GUARDRAIL_KINDS),
-  config: z.unknown(),
-  promptText: z.string().nullable().default(null),
-  severity: z.enum(GUARDRAIL_SEVERITIES),
-  enabled: z.boolean(),
-  overridesKey: z.string().nullable().default(null),
-  orderIndex: z.number().int(),
-});
+const portableRuleSchema = z
+  .object({
+    scope: z.enum(["core", "assistant"]),
+    key: z.string().min(1),
+    label: z.string().min(1),
+    description: z.string().nullable().default(null),
+    kind: z.enum(GUARDRAIL_KINDS),
+    config: z.unknown(),
+    promptText: z.string().nullable().default(null),
+    severity: z.enum(GUARDRAIL_SEVERITIES),
+    enabled: z.boolean(),
+    overridesKey: z.string().nullable().default(null),
+    orderIndex: z.number().int(),
+  })
+  // La config est validée selon le `kind` DÈS la lecture du fichier, comme
+  // l'API le fait à la création. Une règle illisible écrite telle quelle
+  // faisait lever le filtre de sortie à CHAQUE tour : l'assistant ne
+  // répondait plus et personne n'était prévenu. Ici, le fichier est refusé
+  // avec le chemin exact de la règle fautive.
+  .superRefine((rule, ctx) => {
+    const parsed = safeParseRuleConfig(rule.kind, rule.config ?? {});
+    if (parsed.success) return;
+    for (const issue of parsed.error.issues) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["config", ...issue.path.map(String)],
+        message: `règle « ${rule.key} » : ${issue.message}`,
+      });
+    }
+  });
 export type PortableRule = z.infer<typeof portableRuleSchema>;
 
 const portableFixtureSchema = z.object({
@@ -89,7 +108,10 @@ const portablePackSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   language: z.string().default("fr-CA"),
-  items: z.unknown(),
+  // Des items TYPÉS : un paquet « items: "texte" » itérait caractère par
+  // caractère et compilait « Si undefined : reconnais (undefined)… » dans le
+  // prompt d'un assistant en service. Le fichier est refusé avec le chemin.
+  items: z.array(objectionItemSchema),
   isBuiltin: z.boolean().default(false),
 });
 export type PortablePack = z.infer<typeof portablePackSchema>;
@@ -104,19 +126,72 @@ const docBlockSchema = z.object({
   pitfalls: z.string().optional(),
 });
 
-export const bundleSchema = z.object({
-  format: z.literal(EXPORT_FORMAT),
-  exportedAt: z.string(),
-  /** Nom de l'installation d'origine — purement informatif. */
-  sourceOrg: z.string().default(""),
-  assistant: assistantConfigSchema,
-  bindings: z.array(bindingSchema).default([]),
-  guardrails: z.array(portableRuleSchema).default([]),
-  fixtures: z.array(portableFixtureSchema).default([]),
-  objectionPacks: z.array(portablePackSchema).default([]),
-  /** Annotations lisibles — ignorées à la relecture. */
-  _docs: z.record(z.string(), docBlockSchema).optional(),
+/**
+ * Forme de TRANSPORT de la config : identique à la config stockée, sauf les
+ * outils, lus comme de simples chaînes. Un fichier venu d'une version future
+ * peut nommer un outil inconnu ici ; `planImport` le retire avec un
+ * avertissement au lieu que tout le fichier soit refusé pour ça. La config
+ * repasse par `assistantConfigSchema` (strict) avant toute écriture.
+ */
+const portableAssistantSchema = assistantConfigSchema.extend({
+  tools: z.array(z.string()).default([...ASSISTANT_TOOLS]),
 });
+
+export const bundleSchema = z
+  .object({
+    format: z.literal(EXPORT_FORMAT),
+    exportedAt: z.string(),
+    /** Nom de l'installation d'origine — purement informatif. */
+    sourceOrg: z.string().default(""),
+    assistant: portableAssistantSchema,
+    bindings: z.array(bindingSchema).default([]),
+    guardrails: z.array(portableRuleSchema).default([]),
+    fixtures: z.array(portableFixtureSchema).default([]),
+    objectionPacks: z.array(portablePackSchema).default([]),
+    /** Annotations lisibles — ignorées à la relecture. */
+    _docs: z.record(z.string(), docBlockSchema).optional(),
+  })
+  // Deux règles de même clé violeraient l'index unique en pleine transaction :
+  // l'import entier tombait en 500 « duplicate key ». Ici, c'est une erreur de
+  // fichier, dite à la prévisualisation, avec la position du doublon.
+  .superRefine((bundle, ctx) => {
+    const seenRules = new Set<string>();
+    bundle.guardrails.forEach((rule, i) => {
+      const id = `${rule.scope}:${rule.key}`;
+      if (seenRules.has(id)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["guardrails", i, "key"],
+          message: `clé de règle en double : « ${rule.key} »`,
+        });
+      }
+      seenRules.add(id);
+    });
+    const seenFixtures = new Set<string>();
+    bundle.fixtures.forEach((fixture, i) => {
+      if (fixture.key === null) return;
+      const id = `${fixture.scope}:${fixture.key}`;
+      if (seenFixtures.has(id)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["fixtures", i, "key"],
+          message: `clé de fixture en double : « ${fixture.key} »`,
+        });
+      }
+      seenFixtures.add(id);
+    });
+    const seenPacks = new Set<string>();
+    bundle.objectionPacks.forEach((pack, i) => {
+      if (seenPacks.has(pack.id)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["objectionPacks", i, "id"],
+          message: `paquet d'objections en double : « ${pack.id} »`,
+        });
+      }
+      seenPacks.add(pack.id);
+    });
+  });
 export type AssistantBundle = z.infer<typeof bundleSchema>;
 
 // ── Export ───────────────────────────────────────────────────────────────────
@@ -232,7 +307,7 @@ export function buildBundle(input: BuildBundleInput): AssistantBundle {
     objectionPacks: input.objectionPacks.filter((p) => config.objectionPacks.includes(p.id)),
   };
 
-  if (input.annotate !== false) bundle._docs = buildDocs(bundle.assistant);
+  if (input.annotate !== false) bundle._docs = buildDocs(config);
   return bundle;
 }
 
@@ -291,6 +366,8 @@ function sortKeys(value: unknown): unknown {
 export interface ImportWarning {
   code:
     | "core_rules_stripped"
+    | "core_override"
+    | "pack_kept_local"
     | "unresolved_user"
     | "unresolved_pack"
     | "named_person_without_user"
@@ -305,6 +382,8 @@ export interface ImportCatalog {
   userIds: Set<string>;
   /** Identifiants de paquets d'objections disponibles. */
   packIds: Set<string>;
+  /** Clés des règles du noyau de CETTE installation — pour nommer les forks. */
+  coreRuleKeys?: Set<string>;
 }
 
 export interface ImportPlan {
@@ -384,11 +463,21 @@ export function planImport(
       continue;
     }
     const target = resolution[id] ?? id;
+    const supplied = bundle.objectionPacks.find((p) => p.id === id);
     if (available.has(target)) {
       keptPacks.push(target);
+      // Le fichier apporte aussi sa version du paquet : c'est la LOCALE qui
+      // est gardée, et le contenu du fichier ignoré. Sans avertissement, un
+      // collègue qui a retouché les items du paquet croit l'avoir importé.
+      if (supplied && target === id) {
+        warnings.push({
+          code: "pack_kept_local",
+          path: "objectionPacks",
+          messageFr: `Le paquet d'objections « ${id} » existe déjà ici : la version locale est conservée, le contenu du fichier est ignoré.`,
+        });
+      }
       continue;
     }
-    const supplied = bundle.objectionPacks.find((p) => p.id === id);
     if (supplied) {
       packsToCreate.push(supplied);
       keptPacks.push(supplied.id);
@@ -431,9 +520,39 @@ export function planImport(
     });
   }
 
+  // Ce qui REDÉFINIT un garde-fou du noyau pour cet assistant est gardé —
+  // c'est un choix d'auteur légitime — mais JAMAIS en silence : aucun écran
+  // ne sait créer un fork, seul un fichier le peut, et un fork « off » annule
+  // la règle globale pour cet assistant sans que la liste du noyau ne change.
+  const rules = bundle.guardrails.filter((r) => r.scope === "assistant");
+  rules.forEach((rule) => {
+    if (!rule.overridesKey) return;
+    const neutralises = !rule.enabled || rule.severity === "off";
+    const knownLocally = catalog.coreRuleKeys ? catalog.coreRuleKeys.has(rule.overridesKey) : true;
+    warnings.push({
+      code: "core_override",
+      path: `guardrails.${rule.key}`,
+      messageFr: knownLocally
+        ? `La règle « ${rule.key} » REMPLACE la règle du noyau « ${rule.overridesKey} » pour cet assistant${neutralises ? " — et la neutralise (désactivée ou inactive)" : ""}.`
+        : `La règle « ${rule.key} » prétend remplacer une règle du noyau « ${rule.overridesKey} » qui n'existe pas ici : elle s'appliquera comme une règle ordinaire.`,
+    });
+  });
+  for (const layer of ["L0", "L6"] as const) {
+    const override = config.layerOverrides[layer];
+    if (override?.mode !== "replace") continue;
+    warnings.push({
+      code: "core_override",
+      path: `layerOverrides.${layer}`,
+      messageFr:
+        layer === "L0"
+          ? "La couche L0 (noyau : rôle, limites OACIQ, honnêteté) est REMPLACÉE par le texte du fichier : le prompt de cet assistant n'énonce plus les limites professionnelles du noyau."
+          : "La couche L6 (garde-fous) est REMPLACÉE par le texte du fichier : les règles du noyau ne sont plus rédigées dans le prompt de cet assistant (elles restent évaluées à l'exécution).",
+    });
+  }
+
   return {
     config: assistantConfigSchema.parse(config),
-    rules: bundle.guardrails.filter((r) => r.scope === "assistant"),
+    rules,
     fixtures: bundle.fixtures.filter((f) => f.scope === "assistant"),
     packsToCreate,
     bindings: bundle.bindings,

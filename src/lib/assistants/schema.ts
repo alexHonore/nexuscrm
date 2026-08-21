@@ -40,7 +40,13 @@ export const QUALIFICATION_FIELDS = [
 ] as const;
 export type QualificationField = (typeof QUALIFICATION_FIELDS)[number];
 
-/** Fields a goal type mandates — checked and locked in the editor (phase 5). */
+/**
+ * Fields a goal type mandates. Enforced by `goalStepSchema` (the list is
+ * completed at parse time — API, import, JSON tab and editor all go through
+ * it) and shown checked + locked in the editor. Without this, a
+ * « collect_email » assistant could be saved with no required field at all and
+ * would book before ever asking for the e-mail it exists to collect.
+ */
 export const TYPE_MANDATED_FIELDS: Record<GoalType, QualificationField[]> = {
   video_meeting: ["project_type"],
   in_person_meeting: ["project_type"],
@@ -93,21 +99,65 @@ export type IdentityConfig = z.infer<typeof identitySchema>;
 
 // ── Objectif (L2 + runtime) ──────────────────────────────────────────────────
 
-export const goalStepSchema = z.object({
-  type: z.enum(GOAL_TYPES),
-  /** Meeting length in minutes — meaningful for booking-backed types only. */
-  durationMin: z.number().int().min(5).max(240).nullable().default(null),
-  /** Internal booking binding (D4): existing appointment kinds. */
-  appointmentType: z.enum(["meet", "inperson"]).nullable().default(null),
-  /** Broker the meeting is booked with — binding remapped at import. */
-  withUserId: z.uuid().nullable().default(null),
-  /** Qualification fields required before book_meeting accepts. */
-  requiredFields: z.array(z.enum(QUALIFICATION_FIELDS)).default([]),
-  /** Real slots offered per ask (brief: 2-3). */
-  slotOfferCount: z.number().int().min(1).max(3).default(2),
-  /** Confirmation copy with {{variables}} — falls back to a built-in default. */
-  confirmationTemplate: z.string().max(600).nullable().default(null),
-});
+/** Goal types that actually book something in the calendar. */
+export const BOOKING_GOAL_TYPES: readonly GoalType[] = [
+  "video_meeting",
+  "in_person_meeting",
+  "phone_call",
+];
+
+/**
+ * Type de rendez-vous CRM qu'un cran de réservation utilise quand rien n'est
+ * précisé : la visio et l'appel passent par « meet », la rencontre en personne
+ * par « inperson ». Un cran de réservation SANS type de rendez-vous est un
+ * cran que les outils d'agenda refusent de servir — le prompt promet alors un
+ * appel que personne ne peut réserver.
+ */
+export function defaultAppointmentTypeFor(type: GoalType): "meet" | "inperson" | null {
+  if (type === "in_person_meeting") return "inperson";
+  if (type === "video_meeting" || type === "phone_call") return "meet";
+  return null;
+}
+
+/** Champs requis complétés des champs que le type impose (ordre conservé). */
+export function withMandatedFields(
+  type: GoalType,
+  fields: readonly QualificationField[],
+): QualificationField[] {
+  const out = [...fields];
+  for (const field of TYPE_MANDATED_FIELDS[type]) if (!out.includes(field)) out.push(field);
+  return out;
+}
+
+export const goalStepSchema = z
+  .object({
+    type: z.enum(GOAL_TYPES),
+    /** Meeting length in minutes — meaningful for booking-backed types only. */
+    durationMin: z.number().int().min(5).max(240).nullable().default(null),
+    /** Internal booking binding (D4): existing appointment kinds. */
+    appointmentType: z.enum(["meet", "inperson"]).nullable().default(null),
+    /** Broker the meeting is booked with — binding remapped at import. */
+    withUserId: z.uuid().nullable().default(null),
+    /** Qualification fields required before book_meeting accepts. */
+    requiredFields: z.array(z.enum(QUALIFICATION_FIELDS)).default([]),
+    /** Real slots offered per ask (brief: 2-3). */
+    slotOfferCount: z.number().int().min(1).max(3).default(2),
+    /** Confirmation copy with {{variables}} — falls back to a built-in default. */
+    confirmationTemplate: z.string().max(600).nullable().default(null),
+  })
+  // Normalisation à la frontière, PAS un rejet : des configurations déjà en
+  // base (et des tests) décrivent un appel sans type de rendez-vous ou un
+  // objectif « courriel » sans le champ courriel. Les refuser rendrait ces
+  // fiches illisibles ; les compléter rend chaque chemin (éditeur, import,
+  // créateur, onglet JSON) d'accord sur ce que le moteur exécute. `.overwrite`
+  // garde le schéma introspectable (la doc des paramètres le parcourt).
+  .overwrite((step) => ({
+    ...step,
+    appointmentType:
+      step.appointmentType ??
+      (BOOKING_GOAL_TYPES.includes(step.type) ? defaultAppointmentTypeFor(step.type) : null),
+    requiredFields: withMandatedFields(step.type, step.requiredFields),
+  }));
 export type GoalStep = z.infer<typeof goalStepSchema>;
 
 export const goalConfigSchema = z.object({
@@ -231,6 +281,25 @@ export const assistantConfigSchema = z.object({
   requireSuitePass: z.boolean().default(true),
 });
 export type AssistantConfig = z.infer<typeof assistantConfigSchema>;
+
+/**
+ * Schéma d'ENTRÉE (création, sauvegarde) : identique à la forme stockée, plus
+ * les refus qui ne valent que pour ce qui ARRIVE. Un prompt libre vide est
+ * refusé ici plutôt qu'à la compilation — l'administrateur voit le champ en
+ * cause au moment où il enregistre. La lecture d'une rangée existante reste
+ * sur `assistantConfigSchema` : une refonte de règle ne doit jamais rendre une
+ * fiche déjà en base impossible à ouvrir.
+ */
+export const assistantConfigInputSchema = assistantConfigSchema.superRefine((config, ctx) => {
+  if (config.promptMode === "raw" && (config.systemPromptOverride ?? "").trim() === "") {
+    ctx.addIssue({
+      code: "custom",
+      path: ["systemPromptOverride"],
+      message:
+        "Le mode libre exige un prompt : sans texte, l'assistant n'aurait aucune instruction.",
+    });
+  }
+});
 
 /**
  * The config as stored across the assistants row's columns — helper to

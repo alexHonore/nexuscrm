@@ -316,7 +316,10 @@ const goal: ParamDoc[] = [
     pitfallsFr:
       "Une chaîne trop longue prolonge des conversations déjà perdues. Deux replis suffisent presque toujours. Attention : la chaîne ne rattrape JAMAIS un vrai refus — elle ne s'applique qu'aux reports.",
     related: ["approach.persistence", "goal.primary.type"],
-    example: [{ type: "phone_call", durationMin: 15 }],
+    // Un repli « appel » est un cran de RÉSERVATION : l'exemple porte le type
+    // de rendez-vous que les outils d'agenda exigent (le schéma le complète
+    // de toute façon, mais un exemple incomplet enseigne un format boiteux).
+    example: [{ type: "phone_call", durationMin: 15, appointmentType: "meet" }],
   }),
   ...goalStepDocs("goal.fallbacks[]", "Repli"),
 ];

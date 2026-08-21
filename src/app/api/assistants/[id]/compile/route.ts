@@ -33,6 +33,21 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
     if (message === "assistant_not_found") {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
+    // La configuration a bougé entre la lecture et l'écriture (autre onglet,
+    // import, collègue) : le prompt compilé ne correspond plus — recompiler.
+    if (message === "assistant_changed_during_compile") {
+      return NextResponse.json({ error: "assistant_changed" }, { status: 409 });
+    }
+    // Mode libre sans texte : rien à compiler, et on ne l'enregistre pas.
+    if (message === "empty_prompt") {
+      return NextResponse.json({ error: "empty_prompt" }, { status: 409 });
+    }
+    if (message.startsWith("objection_pack_invalid:")) {
+      return NextResponse.json(
+        { error: "objection_pack_invalid", pack: message.slice("objection_pack_invalid:".length) },
+        { status: 409 },
+      );
+    }
     return NextResponse.json({ error: "compile_failed", message }, { status: 500 });
   }
 }

@@ -22,6 +22,7 @@
     "columns": {
       "label": "Nom",
       "key": "Clé",
+      "description": "Description",
       "kind": "Type",
       "enabled": "Actif",
       "severity": "Sévérité"
@@ -61,6 +62,7 @@
     "emptyFixtures": "Aucune fixture — exécutez le seed",
     "emptyCore": "Aucun noyau de prompt — exécutez le seed",
     "saved": "Enregistré",
+    "invalidated": "{count, plural, =0 {Aucun assistant touché} one {# assistant à recompiler et à re-tester} other {# assistants à recompiler et à re-tester}}",
     "genericError": "Une erreur est survenue",
     "help": "Aide",
     "helpWhen": "Quand l'utiliser",
@@ -183,6 +185,7 @@
       "duplicate": "Dupliquer",
       "delete": "Supprimer",
       "archive": "Archiver",
+      "deactivate": "Désactiver",
       "test": "Tester"
     },
     "deleteConfirm": {
@@ -191,9 +194,15 @@
       "bodyArchive": "Cet assistant a déjà écrit des messages. Il sera archivé, pas supprimé — les conversations doivent rester relisibles avec l'assistant qui les a rédigées.",
       "confirm": "Confirmer"
     },
+    "deactivateConfirm": {
+      "title": "Désactiver « {name} » ?",
+      "body": "L'assistant repasse en brouillon : il cesse de répondre et disparaît des choix de campagne. Il pourra être réactivé après recompilation et suite verte.",
+      "confirm": "Désactiver"
+    },
     "created": "Assistant créé",
     "deleted": "Assistant supprimé",
-    "archived": "Assistant archivé"
+    "archived": "Assistant archivé",
+    "deactivated": "Assistant désactivé — repassé en brouillon"
   },
   "editor": {
     "back": "Assistants",
@@ -253,7 +262,8 @@
       "calendarSlot": "Où la rencontre a lieu",
       "calendarMeet": "En visioconférence (lien Google Meet)",
       "calendarInperson": "En personne (adresse)",
-      "calendarHint": "Détermine le type de rendez-vous du CRM consulté pour les disponibilités."
+      "calendarHint": "Détermine le type de rendez-vous du CRM consulté pour les disponibilités.",
+      "mandatedField": "imposé par l'objectif"
     },
     "knowledge": {
       "add": "Ajouter un fait",
@@ -302,6 +312,8 @@
       "lastRun": "Dernière exécution : {when}",
       "never": "Jamais exécutée",
       "passed": "{passed}/{total} fixtures passées",
+      "stale": "Résultat périmé : la configuration ou le prompt a changé depuis. Relancez la suite avant d'activer.",
+      "superseded": "La configuration a changé pendant l'exécution : ce résultat n'a pas été retenu.",
       "blocking": "Bloquante",
       "output": "Réponse produite",
       "reason": "Raison de l'échec"
@@ -322,7 +334,9 @@
       "suite": "La suite n'a pas pu s'exécuter",
       "activate": "Activation refusée",
       "staleCompile": "Le prompt doit être recompilé avant l'activation.",
-      "suiteNotPassed": "La suite de garde-fous doit être verte avant l'activation."
+      "suiteNotPassed": "La suite de garde-fous doit être verte avant l'activation.",
+      "archived": "Un assistant archivé ne peut pas être réactivé.",
+      "changedDuringCompile": "La configuration a changé pendant la compilation : recompilez."
     },
     "identity": {
       "namedPersonWarning": "L'assistant écrit au nom d'une personne mais aucun compte n'y est rattaché : les rendez-vous retomberont sur un administrateur.",
@@ -358,12 +372,12 @@
   "qualificationField": {
     "project_type": "Type de projet",
     "timing": "Échéance",
-    "neighbourhood": "Secteur",
     "budget": "Budget",
-    "property_type": "Type de propriété",
+    "sector": "Secteur",
     "financing": "Financement",
     "current_situation": "Situation actuelle",
-    "email": "Courriel"
+    "email": "Courriel",
+    "preferred_time": "Moment préféré"
   },
   "tool": {
     "get_slots": "Consulter les disponibilités",
