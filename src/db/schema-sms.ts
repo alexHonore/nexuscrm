@@ -484,6 +484,35 @@ export const agentTurnTraces = pgTable(
   ],
 );
 
+// ── SMS engine — phase 5 (documentation des paramètres) ─────────────────────
+
+/**
+ * Documentation des paramètres d'assistant.
+ *
+ * Le registre de code (`src/lib/docs/params.ts`) reste la SOURCE DE VÉRITÉ : un
+ * test échoue si un chemin du schéma n'y est pas documenté. Cette table ne le
+ * duplique pas, elle le RECOUVRE — une ligne n'existe que si un administrateur a
+ * réécrit un texte. Les lectures fusionnent registre + surcouche.
+ *
+ * L'inverse (tout stocker en base, semé au déploiement) laisserait la base
+ * dériver du schéma dès qu'un paramètre change de nom : la ligne survivrait à la
+ * disparition du champ et personne ne le verrait.
+ */
+export const paramDocs = pgTable("param_docs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** Chemin du registre : « approach.persistence ». Unique. */
+  path: text("path").notNull().unique(),
+  labelFr: text("label_fr"),
+  whatFr: text("what_fr"),
+  whyFr: text("why_fr"),
+  effectFr: text("effect_fr"),
+  pitfallsFr: text("pitfalls_fr"),
+  /** Qui a réécrit le texte, pour qu'on sache à qui demander pourquoi. */
+  updatedById: uuid("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // ── Relations ────────────────────────────────────────────────────────────────
 
 export const smsNumbersRelations = relations(smsNumbers, ({ one, many }) => ({
@@ -559,4 +588,8 @@ export const agentTurnTracesRelations = relations(agentTurnTraces, ({ one }) => 
 
 export const guardrailRunsRelations = relations(guardrailRuns, ({ one }) => ({
   assistant: one(assistants, { fields: [guardrailRuns.assistantId], references: [assistants.id] }),
+}));
+
+export const paramDocsRelations = relations(paramDocs, ({ one }) => ({
+  updatedBy: one(users, { fields: [paramDocs.updatedById], references: [users.id] }),
 }));

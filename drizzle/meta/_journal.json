@@ -36,6 +36,13 @@
       "when": 1787275701363,
       "tag": "0004_phase4-agent-runtime",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787277056738,
+      "tag": "0005_phase5-param-docs",
+      "breakpoints": true
     }
   ]
 }
