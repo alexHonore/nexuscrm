@@ -449,5 +449,34 @@
         "fix": "No model key configured: the assistant cannot write anything."
       }
     }
+  },
+  "report": {
+    "title": "Engine report",
+    "since": "Last {days} days",
+    "outbound": "Sent",
+    "delivered": "Delivered",
+    "failed": "Failed",
+    "inbound": "Received",
+    "replies": "Conversations with a reply",
+    "optOuts": "Opt-outs",
+    "handoffs": "Handed to a human",
+    "blocked": "Blocked drafts",
+    "agentTurns": "Assistant turns",
+    "cost": "Model cost",
+    "suppressed": "Unsubscribed numbers",
+    "byAssistant": "By assistant",
+    "byCampaign": "By campaign",
+    "columns": {
+      "name": "Name",
+      "turns": "Turns",
+      "sent": "Sent",
+      "blocked": "Blocked",
+      "handoffs": "Handoffs",
+      "cost": "Cost",
+      "enrolled": "Enrolled",
+      "replyRate": "Replies",
+      "stopRate": "Stops",
+      "booked": "Booked"
+    }
   }
 }

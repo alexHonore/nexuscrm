@@ -449,5 +449,34 @@
         "fix": "Aucune clé de modèle configurée : l'assistant ne peut rien rédiger."
       }
     }
+  },
+  "report": {
+    "title": "Bilan du moteur",
+    "since": "Les {days} derniers jours",
+    "outbound": "Envoyés",
+    "delivered": "Livrés",
+    "failed": "En échec",
+    "inbound": "Reçus",
+    "replies": "Conversations avec réponse",
+    "optOuts": "Désabonnements",
+    "handoffs": "Passages à un humain",
+    "blocked": "Brouillons bloqués",
+    "agentTurns": "Tours d'assistant",
+    "cost": "Coût des modèles",
+    "suppressed": "Numéros désabonnés",
+    "byAssistant": "Par assistant",
+    "byCampaign": "Par campagne",
+    "columns": {
+      "name": "Nom",
+      "turns": "Tours",
+      "sent": "Envoyés",
+      "blocked": "Bloqués",
+      "handoffs": "Passages",
+      "cost": "Coût",
+      "enrolled": "Inscrits",
+      "replyRate": "Réponses",
+      "stopRate": "Arrêts",
+      "booked": "Rendez-vous"
+    }
   }
 }
