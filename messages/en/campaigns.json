@@ -31,7 +31,8 @@
       "activate": "Activate",
       "pause": "Pause",
       "archive": "Archive",
-      "delete": "Delete"
+      "delete": "Delete",
+      "export": "Export (JSON)"
     },
     "created": "Campaign created",
     "deleted": "Campaign deleted",
@@ -41,7 +42,8 @@
       "body": "This campaign never enrolled anyone: it will be permanently deleted.",
       "bodyArchive": "This campaign already enrolled people. It will be archived — enrollments and sent messages must stay readable.",
       "confirm": "Confirm"
-    }
+    },
+    "import": "Import"
   },
   "create": {
     "title": "Create a campaign",
@@ -245,7 +247,29 @@
       "save": "Could not save",
       "enroll": "Could not enroll",
       "preview": "Could not compute the audience"
-    }
+    },
+    "export": "Export"
   },
-  "cancel": "Cancel"
+  "cancel": "Cancel",
+  "import": {
+    "title": "Import a campaign",
+    "pick": "Choose a JSON file",
+    "bindings": "Bindings",
+    "bindingsNote": "The file comes from another installation: its ids point at nothing here. Anything with the same name, e-mail or number is linked automatically; pick the rest.",
+    "autoResolved": "linked automatically",
+    "unbound": "Leave empty",
+    "warnings": "Warnings",
+    "confirm": "Import",
+    "importing": "Importing…",
+    "done": "Campaign imported as a draft",
+    "invalid": "This file is not a valid campaign export.",
+    "draftNote": "The campaign is imported as a draft: nothing goes out until you activate it here.",
+    "kind": {
+      "assistant": "assistant",
+      "sms_number": "sending number",
+      "category": "category",
+      "source": "source",
+      "user": "user"
+    }
+  }
 }

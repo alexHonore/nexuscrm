@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Megaphone, MoreHorizontal, Pause, Play, Plus, Trash2 } from "lucide-react";
+import { Download, Loader2, Megaphone, MoreHorizontal, Pause, Play, Plus, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -30,6 +30,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import type { TriggerKind } from "@/lib/campaigns/schema";
 import { api } from "./api";
 import { CampaignCreateDialog } from "./campaign-create";
+import { CampaignImportDialog } from "./campaign-import-dialog";
 import { TriggerIcon } from "./trigger-look";
 
 export type CampaignListItem = {
@@ -97,7 +98,14 @@ export function CampaignsListClient({
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap justify-end gap-2">
+        <CampaignImportDialog
+          trigger={
+            <Button variant="outline" className="min-h-11 md:min-h-9">
+              <Upload /> {t("list.import")}
+            </Button>
+          }
+        />
         <CampaignCreateDialog
           trigger={
             <Button className="min-h-11 md:min-h-9">
@@ -174,6 +182,11 @@ export function CampaignsListClient({
                     <DropdownMenuGroup>
                       <DropdownMenuItem render={<Link href={`/admin/campaigns/${item.id}`} />}>
                         {t("list.actions.edit")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        render={<a href={`/api/campaigns/${item.id}/export`} download />}
+                      >
+                        <Download /> {t("list.actions.export")}
                       </DropdownMenuItem>
                       {item.status === "active" ? (
                         <DropdownMenuItem onClick={() => void setStatus(item, "paused")}>

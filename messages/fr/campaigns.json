@@ -31,7 +31,8 @@
       "activate": "Activer",
       "pause": "Mettre en pause",
       "archive": "Archiver",
-      "delete": "Supprimer"
+      "delete": "Supprimer",
+      "export": "Exporter (JSON)"
     },
     "created": "Campagne créée",
     "deleted": "Campagne supprimée",
@@ -41,7 +42,8 @@
       "body": "Cette campagne n'a jamais inscrit personne : elle sera supprimée définitivement.",
       "bodyArchive": "Cette campagne a déjà inscrit des gens. Elle sera archivée — les inscriptions et les messages envoyés doivent rester lisibles.",
       "confirm": "Confirmer"
-    }
+    },
+    "import": "Importer"
   },
   "create": {
     "title": "Créer une campagne",
@@ -245,7 +247,29 @@
       "save": "Impossible d'enregistrer",
       "enroll": "Impossible d'inscrire",
       "preview": "Impossible de calculer l'audience"
-    }
+    },
+    "export": "Exporter"
   },
-  "cancel": "Annuler"
+  "cancel": "Annuler",
+  "import": {
+    "title": "Importer une campagne",
+    "pick": "Choisir un fichier JSON",
+    "bindings": "Liaisons",
+    "bindingsNote": "Le fichier vient d'une autre installation : ses identifiants n'y désignent rien ici. Ce qui porte le même nom, le même courriel ou le même numéro est relié tout seul ; choisissez le reste.",
+    "autoResolved": "relié automatiquement",
+    "unbound": "Laisser vide",
+    "warnings": "Avertissements",
+    "confirm": "Importer",
+    "importing": "Import…",
+    "done": "Campagne importée en brouillon",
+    "invalid": "Ce fichier n'est pas un export de campagne valide.",
+    "draftNote": "La campagne est importée en brouillon : rien ne part avant que vous l'activiez ici.",
+    "kind": {
+      "assistant": "assistant",
+      "sms_number": "numéro d'envoi",
+      "category": "catégorie",
+      "source": "source",
+      "user": "utilisateur"
+    }
+  }
 }

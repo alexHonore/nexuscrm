@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, Loader2, Pause, Play, Save } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Download, Loader2, Pause, Play, Save } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -133,6 +133,14 @@ export function CampaignEditor({ data }: { data: CampaignEditorData }) {
         <Badge variant={data.status === "active" ? "default" : "secondary"}>
           {t(`list.status.${data.status}` as never)}
         </Badge>
+        <Button
+          variant="outline"
+          size="sm"
+          className="min-h-11 md:min-h-9"
+          render={<a href={`/api/campaigns/${data.id}/export`} download />}
+        >
+          <Download /> {t("editor.export")}
+        </Button>
         <Button
           onClick={() => void save()}
           disabled={busy !== null || !dirty}
