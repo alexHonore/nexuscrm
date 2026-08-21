@@ -20,7 +20,7 @@ type IntlMessages = ComponentProps<typeof NextIntlClientProvider>["messages"];
 const NOW = new Date("2026-08-21T15:00:00Z");
 const ready = (o: Partial<PreflightFacts> = {}): PreflightFacts => ({
   mode: "live", rawMode: "live", liveConfirmed: true, killSwitch: false, killSwitchReason: null,
-  hasTwilioCredentials: true, hasWebhookSignatureSecret: true, activeNumberCount: 1,
+  hasTwilioCredentials: true, twilioMissing: [], hasWebhookSignatureSecret: true, activeNumberCount: 1,
   numbersWithoutMessagingService: 0, consentValidity: "unlimited", consentedClientCount: 12,
   quietHoursLabel: "9h-20h", activeAssistantCount: 1, activeAssistantsWithRedSuite: 0,
   activeCampaignCount: 1, lastDispatchAt: new Date(NOW.getTime() - 30_000), now: NOW,

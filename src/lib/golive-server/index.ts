@@ -47,16 +47,25 @@ export async function collectPreflight(now = new Date()): Promise<PreflightRepor
       .from(campaigns),
   ]);
 
+  // La MÊME exigence que `getSmsProvider` : compte + paire de clé + service de
+  // messagerie. Sans les trois, le fournisseur retombe en dry_run.
+  const env = process.env;
+  const smsKeyPair = Boolean(env.TWILIO_SMS_API_KEY_SID && env.TWILIO_SMS_API_KEY_SECRET);
+  const voiceKeyPair = Boolean(env.TWILIO_API_KEY_SID && env.TWILIO_API_KEY_SECRET);
+  const twilioMissing = [
+    env.TWILIO_ACCOUNT_SID ? null : "TWILIO_ACCOUNT_SID",
+    smsKeyPair || voiceKeyPair ? null : "TWILIO_API_KEY_SID/SECRET",
+    env.TWILIO_MESSAGING_SERVICE_SID ? null : "TWILIO_MESSAGING_SERVICE_SID",
+  ].filter((v): v is string => v !== null);
+
   const facts: PreflightFacts = {
     mode: resolveSmsMode(process.env),
     rawMode: process.env.SMS_MODE,
     liveConfirmed: process.env.SMS_LIVE_CONFIRMED === "true",
     killSwitch: smsSettings?.killSwitch ?? false,
     killSwitchReason: smsSettings?.killSwitchReason ?? null,
-    hasTwilioCredentials: Boolean(
-      process.env.TWILIO_ACCOUNT_SID &&
-        (process.env.TWILIO_AUTH_TOKEN || process.env.TWILIO_API_KEY_SECRET),
-    ),
+    hasTwilioCredentials: twilioMissing.length === 0,
+    twilioMissing,
     hasWebhookSignatureSecret: Boolean(process.env.TWILIO_AUTH_TOKEN),
     activeNumberCount: numbers[0]?.active ?? 0,
     numbersWithoutMessagingService: numbers[0]?.withoutService ?? 0,

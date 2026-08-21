@@ -49,7 +49,16 @@ export interface PreflightFacts {
   liveConfirmed: boolean;
   killSwitch: boolean;
   killSwitchReason: string | null;
+  /**
+   * Le transport peut-il RÉELLEMENT partir? Pas « des identifiants existent » :
+   * `getSmsProvider` exige compte + paire de clé API + Messaging Service, et
+   * retombe en dry_run sans les trois. Vérifier moins ici dirait « prêt »
+   * pendant que le moteur refuse d'envoyer — exactement ce que ce contrôle
+   * existe pour empêcher.
+   */
   hasTwilioCredentials: boolean;
+  /** Détail de ce qui manque, pour que le message soit actionnable. */
+  twilioMissing: string[];
   hasWebhookSignatureSecret: boolean;
   activeNumberCount: number;
   numbersWithoutMessagingService: number;
@@ -105,7 +114,12 @@ export function preflight(facts: PreflightFacts): PreflightReport {
 
   add("kill_switch", "blocker", !facts.killSwitch, facts.killSwitchReason ?? undefined);
 
-  add("twilio_credentials", "blocker", facts.hasTwilioCredentials);
+  add(
+    "twilio_credentials",
+    "blocker",
+    facts.hasTwilioCredentials,
+    facts.twilioMissing.length > 0 ? facts.twilioMissing.join(", ") : undefined,
+  );
 
   // Sans secret de signature, n'importe qui peut forger un entrant : ce n'est
   // pas un blocage d'ENVOI, mais c'est une porte ouverte.

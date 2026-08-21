@@ -19,6 +19,7 @@ function ready(overrides: Partial<PreflightFacts> = {}): PreflightFacts {
     killSwitch: false,
     killSwitchReason: null,
     hasTwilioCredentials: true,
+    twilioMissing: [],
     hasWebhookSignatureSecret: true,
     activeNumberCount: 1,
     numbersWithoutMessagingService: 0,
@@ -125,6 +126,23 @@ describe("avertissements — ça partira, mais quelque chose surprendra", () => 
     const report = preflight(ready({ activeCampaignCount: 0 }));
     expect(report.canSendLive).toBe(true);
     expect(report.warnings).toContain("campaign_active");
+  });
+});
+
+describe("identifiants Twilio — ce que le transport exige VRAIMENT", () => {
+  it("le détail des variables manquantes est affiché", () => {
+    // « Identifiants Twilio manquants » sans dire lesquels renvoie à la même
+    // chasse au trésor que ce contrôle doit supprimer.
+    const report = preflight(
+      ready({
+        hasTwilioCredentials: false,
+        twilioMissing: ["TWILIO_API_KEY_SID/SECRET", "TWILIO_MESSAGING_SERVICE_SID"],
+      }),
+    );
+    expect(report.blockers).toContain("twilio_credentials");
+    expect(report.checks.find((c) => c.id === "twilio_credentials")?.detail).toContain(
+      "TWILIO_MESSAGING_SERVICE_SID",
+    );
   });
 });
 
