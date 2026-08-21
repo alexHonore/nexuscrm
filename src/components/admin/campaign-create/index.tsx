@@ -100,10 +100,17 @@ export function CampaignCreateDialog({ trigger }: { trigger: React.ReactNode }) 
           </DialogDescription>
         </DialogHeader>
 
-        {mode === "choose" ? <ModeChooser onPick={setMode} /> : null}
-        {mode === "ai" ? <AiCreator busy={busy} onCreate={create} /> : null}
-        {mode === "simple" ? <SimpleCreator busy={busy} onCreate={create} /> : null}
-        {mode === "complex" ? <ComplexCreator busy={busy} onCreate={create} /> : null}
+        {/* `key` sur le mode : le panneau est REMONTÉ à chaque changement, donc
+            l'animation d'entrée rejoue et le changement d'écran se voit. */}
+        <div
+          key={mode}
+          className="animate-in fade-in-0 slide-in-from-right-2 duration-200 motion-reduce:animate-none"
+        >
+          {mode === "choose" ? <ModeChooser onPick={setMode} /> : null}
+          {mode === "ai" ? <AiCreator busy={busy} onCreate={create} /> : null}
+          {mode === "simple" ? <SimpleCreator busy={busy} onCreate={create} /> : null}
+          {mode === "complex" ? <ComplexCreator busy={busy} onCreate={create} /> : null}
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -120,7 +127,7 @@ function ModeChooser({ onPick }: { onPick: (mode: Mode) => void }) {
   return (
     <div className="space-y-3">
       <SparkleTrail className="h-5 w-full text-primary" />
-      {modes.map(({ key, color, Illustration, badge }) => (
+      {modes.map(({ key, color, Illustration, badge }, i) => (
         <button
           key={key}
           type="button"
@@ -129,8 +136,11 @@ function ModeChooser({ onPick }: { onPick: (mode: Mode) => void }) {
             "group flex w-full items-center gap-4 rounded-xl border p-4 text-left",
             "transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md",
             "hover:border-[color:var(--tone)]",
+            // Les trois portes arrivent l'une après l'autre : on les lit dans
+            // l'ordre au lieu de voir un bloc de trois d'un coup.
+            "animate-in fade-in-0 slide-in-from-bottom-2 fill-mode-backwards duration-300 motion-reduce:animate-none",
           )}
-          style={{ ["--tone" as string]: color }}
+          style={{ ["--tone" as string]: color, animationDelay: `${i * 70}ms` }}
         >
           <span
             className="flex size-20 shrink-0 items-center justify-center rounded-lg transition-transform duration-200 group-hover:scale-105"
