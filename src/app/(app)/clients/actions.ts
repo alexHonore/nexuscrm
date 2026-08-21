@@ -16,6 +16,7 @@ import {
   sources,
   users,
 } from "@/db/schema";
+import { runAfterResponse } from "@/lib/after-response";
 import { getCurrentUser } from "@/lib/auth/guards";
 import { diffFields, getClientIp, logAudit, type AuditChanges } from "@/lib/audit";
 import { cancelEvent } from "@/lib/google";
@@ -244,6 +245,18 @@ export async function setClientCategoryAction(
     entityId: clientId,
     detail: { from: existing.categoryId, to: categoryId, ...(changes ? { changes } : {}) },
   });
+
+  // Déclencheur « changement de catégorie ». Seulement si la catégorie a
+  // VRAIMENT changé : réenregistrer la même valeur ne doit pas relancer une
+  // campagne. L'inscription est idempotente de toute façon, mais faire le
+  // travail pour rien à chaque sauvegarde n'a pas de sens.
+  if (existing.categoryId !== categoryId && categoryId !== null) {
+    runAfterResponse(async () => {
+      const { matchCampaigns } = await import("@/lib/campaigns-server/match");
+      await matchCampaigns(clientId, { kind: "category_changed" });
+    });
+  }
+
   revalidateClient(clientId);
   return { ok: true, id: clientId };
 }

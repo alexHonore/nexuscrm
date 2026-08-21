@@ -7,6 +7,7 @@ import { clients, notifications, users } from "@/db/schema";
 import { consents, conversations, messages, smsNumbers, suppressions } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
 import { normalizePhone, phoneMatchKey } from "@/lib/phone";
+import { markEnrollmentsReplied, markEnrollmentsStopped } from "@/lib/campaigns-server/inbound";
 import { detectOptOut } from "@/lib/sms/optout";
 import { analyzeSms } from "@/lib/sms/segments";
 import { isValidTwilioSignature, publicWebhookUrl } from "@/lib/sms-server/twilio-signature";
@@ -198,6 +199,18 @@ export async function POST(req: NextRequest) {
         attentionReason: optOut.optOut ? "optout" : "inbound",
       })
       .where(eq(conversations.id, conversation.id));
+
+    // Les inscriptions de campagne sont réglées TOUT DE SUITE, pas au prochain
+    // barreau. Une échelle qui se termine avant que la personne réponde
+    // resterait « completed » et sa réponse ne compterait dans aucune variante :
+    // le taux de réponse d'un test A/B serait sous-estimé exactement là où on
+    // compare. Un désabonnement, lui, arrête TOUTES ses inscriptions — le refus
+    // porte sur le numéro, pas sur une campagne.
+    if (optOut.optOut) {
+      await markEnrollmentsStopped(client.id, now);
+    } else {
+      await markEnrollmentsReplied(conversation.id, now);
+    }
 
     // Destinataires : l'assigné de la conversation, sinon celui de la fiche,
     // sinon tous les admins actifs — chacun dans SA langue.

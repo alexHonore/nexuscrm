@@ -195,8 +195,12 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
             aiGenerated: false,
             sentById: null,
           },
-          // Un barreau donné ne met en file qu'un envoi, jamais deux.
-          dedupeKey: `touch:${enrollment.id}:${step}`,
+          // Espace de noms DISTINCT de celui du job `campaign_touch`
+          // (`ctouch:…`). Avec la même clé, le job de barreau encore VIVANT
+          // absorbait cette mise en file — c'est le comportement documenté du
+          // dédoublonnage — et l'envoi disparaissait en silence : l'échelle
+          // avançait, les traces disaient « envoyé », et aucun SMS ne partait.
+          dedupeKey: `csend:${enrollment.id}:${step}`,
         },
         tx,
       );

@@ -50,6 +50,13 @@
       "when": 1787279864418,
       "tag": "0006_phase6-campaigns",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787281484125,
+      "tag": "0007_phase6-sweep-tracking",
+      "breakpoints": true
     }
   ]
 }

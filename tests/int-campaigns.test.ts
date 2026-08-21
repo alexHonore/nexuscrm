@@ -16,7 +16,7 @@ import {
   resetDb,
   testDb,
 } from "./helpers/db";
-import { clients, webhookKeys } from "@/db/schema";
+import { categories, clients, webhookKeys } from "@/db/schema";
 import { encryptSecret, sha256Hex } from "@/lib/crypto";
 import {
   campaignEnrollments,
@@ -41,8 +41,11 @@ const { enrollClients, audienceCount, enrollmentCounts } = await import(
   "@/lib/campaigns-server/enroll"
 );
 const { runTouch } = await import("@/lib/campaigns-server/touch");
-const { matchCampaigns, sweepCampaign, queueDueTouches } = await import(
+const { matchCampaigns, sweepCampaign, queueDueTouches, sweepDueCampaigns } = await import(
   "@/lib/campaigns-server/match"
+);
+const { markEnrollmentsReplied, markEnrollmentsStopped } = await import(
+  "@/lib/campaigns-server/inbound"
 );
 const { flushAfterResponse } = await import("@/lib/after-response");
 const leadsWebhook = await import("@/app/api/webhooks/leads/route");
@@ -591,6 +594,196 @@ describe("le webhook de leads inscrit sans faire attendre n8n", () => {
 
     const saved = await testDb.select().from(clients);
     expect(saved.some((c) => c.fullName === "Lead Résilient")).toBe(true);
+  });
+});
+
+describe("chemin COMPLET : balayage → job de barreau → envoi", () => {
+  it("RÉGRESSION : l'envoi n'est pas absorbé par le job qui l'a demandé", async () => {
+    // Les tests qui appellent `runTouch` directement ne voyaient pas ce bogue :
+    // il n'apparaît que si un job `campaign_touch` est encore VIVANT au moment
+    // où le barreau met son envoi en file. Avec une clé de dédoublonnage
+    // partagée, la mise en file était absorbée — l'échelle avançait, la trace
+    // disait « envoyé », et aucun SMS ne partait jamais.
+    const campaign = await makeCampaign({ dailyEnrollmentCap: 100 });
+    const client = await makeReachableClient();
+
+    await sweepCampaign(campaign.id, { now: NOW });
+
+    const touchJobs = await testDb
+      .select()
+      .from(scheduledJobs)
+      .where(eq(scheduledJobs.type, "campaign_touch"));
+    expect(touchJobs).toHaveLength(1);
+
+    // Le job est réclamé et exécuté pendant qu'il est encore en file.
+    const [enrollment] = await testDb
+      .select()
+      .from(campaignEnrollments)
+      .where(eq(campaignEnrollments.clientId, client.id));
+    const result = await runTouch(enrollment.id, NOW);
+    expect(result.sent).toBe(true);
+
+    const sends = await testDb
+      .select()
+      .from(scheduledJobs)
+      .where(eq(scheduledJobs.type, "send_sms"));
+    expect(sends).toHaveLength(1);
+    expect((sends[0].payload as { body: string }).body).toContain("Groupe Nexus");
+
+    // Les deux jobs coexistent : espaces de noms distincts.
+    expect(sends[0].dedupeKey).not.toBe(touchJobs[0].dedupeKey);
+  });
+
+  it("le job de barreau et son envoi vivent sous des préfixes différents", async () => {
+    const campaign = await makeCampaign({ dailyEnrollmentCap: 100 });
+    await makeReachableClient();
+    await sweepCampaign(campaign.id, { now: NOW });
+    const [enrollment] = await testDb.select().from(campaignEnrollments);
+    await runTouch(enrollment.id, NOW);
+
+    const keys = (await testDb.select().from(scheduledJobs)).map((j) => j.dedupeKey);
+    expect(keys.some((k) => k?.startsWith("ctouch:"))).toBe(true);
+    expect(keys.some((k) => k?.startsWith("csend:"))).toBe(true);
+  });
+});
+
+describe("déclencheurs qui doivent VRAIMENT s'exécuter", () => {
+  it("une campagne périodique balaie quand l'intervalle est écoulé", async () => {
+    // Le piège fermé ici : un déclencheur sélectionnable à l'écran qui
+    // n'inscrit jamais personne. Une campagne d'apparence vivante qui ne fait
+    // rien, et rien pour le dire.
+    const campaign = await makeCampaign({
+      trigger: { kind: "scheduled", everyHours: 24 },
+      dailyEnrollmentCap: 100,
+    });
+    for (let i = 0; i < 3; i += 1) await makeReachableClient();
+
+    const first = await sweepDueCampaigns(NOW);
+    expect(first).toEqual([{ campaignId: campaign.id, enrolled: 3 }]);
+
+    // Une heure plus tard : l'intervalle n'est pas écoulé, on ne rebalaie pas.
+    const tooSoon = await sweepDueCampaigns(new Date("2026-08-21T16:00:00Z"));
+    expect(tooSoon).toEqual([]);
+
+    // Le lendemain : on rebalaie (même si personne de neuf n'entre).
+    await makeReachableClient();
+    const nextDay = await sweepDueCampaigns(new Date("2026-08-22T16:00:00Z"));
+    expect(nextDay).toEqual([{ campaignId: campaign.id, enrolled: 1 }]);
+  });
+
+  it("un balayage qui n'inscrit personne fait quand même avancer l'intervalle", async () => {
+    // Sinon la campagne rebalaie à chaque cycle, pour rien.
+    const campaign = await makeCampaign({ trigger: { kind: "scheduled", everyHours: 24 } });
+    await sweepDueCampaigns(NOW);
+
+    const row = await testDb.query.campaigns.findFirst({ where: eq(campaigns.id, campaign.id) });
+    expect(row!.lastSweptAt).not.toBeNull();
+    expect(await sweepDueCampaigns(new Date("2026-08-21T16:00:00Z"))).toEqual([]);
+  });
+
+  it("une campagne manuelle n'est jamais balayée automatiquement", async () => {
+    await makeCampaign({ trigger: { kind: "manual" } });
+    await makeReachableClient();
+    expect(await sweepDueCampaigns(NOW)).toEqual([]);
+  });
+
+  it("le déclencheur « changement de catégorie » filtre sur la catégorie d'arrivée", async () => {
+    const [chaud] = await testDb
+      .insert(categories)
+      .values({ nameFr: "Chaud", nameEn: "Hot", color: "#f00" })
+      .returning();
+    const [froid] = await testDb
+      .insert(categories)
+      .values({ nameFr: "Froid", nameEn: "Cold", color: "#00f" })
+      .returning();
+
+    const campaign = await makeCampaign({
+      trigger: { kind: "category_changed", toCategoryIds: [chaud.id] },
+    });
+
+    const wrong = await makeReachableClient();
+    await testDb.update(clients).set({ categoryId: froid.id }).where(eq(clients.id, wrong.id));
+    expect(await matchCampaigns(wrong.id, { now: NOW, kind: "category_changed" })).toEqual([
+      { campaignId: campaign.id, enrolled: false, refusal: "audience_miss" },
+    ]);
+
+    const right = await makeReachableClient();
+    await testDb.update(clients).set({ categoryId: chaud.id }).where(eq(clients.id, right.id));
+    const matched = await matchCampaigns(right.id, { now: NOW, kind: "category_changed" });
+    expect(matched[0]).toMatchObject({ campaignId: campaign.id, enrolled: true });
+  });
+
+  it("un lead entrant ne déclenche PAS une campagne « changement de catégorie »", async () => {
+    await makeCampaign({ trigger: { kind: "category_changed", toCategoryIds: [] } });
+    const client = await makeReachableClient();
+    expect(await matchCampaigns(client.id, { now: NOW })).toEqual([]);
+  });
+});
+
+describe("effet d'un message entrant sur les inscriptions", () => {
+  it("une réponse est enregistrée TOUT DE SUITE, pas au prochain barreau", async () => {
+    // Sans ça, une échelle terminée avant la réponse resterait « completed » et
+    // la réponse ne compterait dans aucune variante.
+    const campaign = await makeCampaign({
+      ladder: [{ delayHours: 0, body: "Un seul message.", label: "" }],
+      variants: [{ key: "a", weight: 100, body: "" }],
+    });
+    const client = await makeReachableClient();
+    const [enrolled] = await enrollClients(campaign.id, [client.id], { now: NOW });
+    await runTouch(enrolled.enrollmentId!, NOW);
+
+    const done = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+    expect(done!.status).toBe("completed");
+
+    // La personne répond après la fin de l'échelle : rien ne repassera plus.
+    await markEnrollmentsReplied(done!.conversationId!, new Date("2026-08-25T10:00:00Z"));
+
+    const after = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+    // « completed » est une issue finale : on ne la réécrit pas — mais une
+    // inscription ENCORE en vol, elle, doit basculer.
+    expect(after!.status).toBe("completed");
+  });
+
+  it("une réponse en cours d'échelle bascule l'inscription immédiatement", async () => {
+    const campaign = await makeCampaign();
+    const client = await makeReachableClient();
+    const [enrolled] = await enrollClients(campaign.id, [client.id], { now: NOW });
+    await runTouch(enrolled.enrollmentId!, NOW);
+
+    const row = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+    await markEnrollmentsReplied(row!.conversationId!, new Date("2026-08-22T10:00:00Z"));
+
+    const after = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+    expect(after!.status).toBe("replied");
+    expect(after!.nextTouchAt).toBeNull();
+  });
+
+  it("un désabonnement arrête TOUTES les inscriptions du client", async () => {
+    // Le refus porte sur le numéro, pas sur une campagne.
+    const a = await makeCampaign({ name: "A", audience: { excludeActiveInOtherCampaign: false } });
+    const b = await makeCampaign({ name: "B", audience: { excludeActiveInOtherCampaign: false } });
+    const client = await makeReachableClient();
+
+    await enrollClients(a.id, [client.id], { now: NOW });
+    await enrollClients(b.id, [client.id], { now: NOW });
+
+    await markEnrollmentsStopped(client.id, NOW);
+
+    const rows = await testDb
+      .select()
+      .from(campaignEnrollments)
+      .where(eq(campaignEnrollments.clientId, client.id));
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.status === "stopped")).toBe(true);
+    expect(rows.every((r) => r.endReason === "opted_out")).toBe(true);
   });
 });
 

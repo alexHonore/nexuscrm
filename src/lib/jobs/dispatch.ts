@@ -4,7 +4,7 @@ import { agentTurnTraces, scheduledJobs } from "@/db/schema-sms";
 import { handleAgentTurn } from "./handlers/agent-turn";
 import { handleSendSms } from "./handlers/send-sms";
 import { handleCampaignTouch } from "./handlers/campaign-touch";
-import { queueDueTouches } from "@/lib/campaigns-server/match";
+import { queueDueTouches, sweepDueCampaigns } from "@/lib/campaigns-server/match";
 import {
   claimDueJobs,
   completeJob,
@@ -106,6 +106,9 @@ export async function runDispatchCycle(
   await pruneTraces(now());
   // Les barreaux dus deviennent des jobs AVANT la réclamation : ils entrent
   // ainsi dans le même cycle, au lieu d'attendre la minute suivante.
+  // Les campagnes périodiques d'abord : leurs nouvelles inscriptions entrent
+  // dans le même cycle que les barreaux déjà dus.
+  await sweepDueCampaigns(now()).catch(() => []);
   await queueDueTouches(200, now()).catch(() => 0);
 
   const jobs = await claimDueJobs(opts.limit ?? 50, now());

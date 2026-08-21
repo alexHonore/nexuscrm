@@ -541,6 +541,13 @@ export const campaigns = pgTable(
      * répond devant la LCAP.
      */
     requireConsent: boolean("require_consent").notNull().default(true),
+    /**
+     * Dernier balayage d'une campagne `scheduled`. Sans cette colonne, il n'y a
+     * aucun moyen de savoir si l'intervalle est écoulé : compter sur la date de
+     * la dernière inscription échouerait précisément quand un balayage
+     * n'inscrit personne — il repartirait alors à chaque cycle.
+     */
+    lastSweptAt: timestamp("last_swept_at", { withTimezone: true }),
     createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

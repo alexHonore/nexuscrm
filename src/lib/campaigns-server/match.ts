@@ -93,9 +93,19 @@ export async function sweepCampaign(
   // pour en refuser 4 950 coûte une requête inutile à chaque balayage.
   const limit = Math.min(opts.limit ?? config.dailyEnrollmentCap, config.dailyEnrollmentCap);
   const candidates = await audienceClientIds(campaignId, limit, now);
-  if (candidates.length === 0) return { considered: 0, enrolled: 0, refusals: {} };
+  if (candidates.length === 0) {
+    // Un balayage qui n'inscrit personne compte quand même comme un balayage :
+    // sinon l'intervalle ne s'écoule jamais et la campagne rebalaie à chaque
+    // cycle, pour rien.
+    await db.update(campaigns).set({ lastSweptAt: now }).where(eq(campaigns.id, campaignId));
+    return { considered: 0, enrolled: 0, refusals: {} };
+  }
 
   const results = await enrollClients(campaignId, candidates, { now });
+  await db
+    .update(campaigns)
+    .set({ lastSweptAt: now })
+    .where(eq(campaigns.id, campaignId));
   const refusals: Record<string, number> = {};
   let enrolled = 0;
 
@@ -124,8 +134,10 @@ export async function queueTouch(enrollmentId: string, runAt: Date): Promise<voi
     payload: { enrollmentId },
     // Le barreau est dans la clé : mettre en file le barreau 2 ne peut pas
     // absorber le barreau 1 encore en attente, et rejouer le même barreau ne
-    // crée pas un deuxième job.
-    dedupeKey: `touch:${enrollmentId}:${enrollment.step}`,
+    // crée pas un deuxième job. Le préfixe `ctouch:` sépare CE job de l'envoi
+    // qu'il produira (`csend:`) — une clé partagée ferait absorber l'envoi par
+    // le job encore vivant qui l'a demandé.
+    dedupeKey: `ctouch:${enrollmentId}:${enrollment.step}`,
   });
 }
 
@@ -152,8 +164,52 @@ export async function queueDueTouches(limit: number, now = new Date()): Promise<
       type: "campaign_touch",
       runAt: now,
       payload: { enrollmentId: row.id },
-      dedupeKey: `touch:${row.id}:${row.step}`,
+      dedupeKey: `ctouch:${row.id}:${row.step}`,
     });
   }
   return rows.length;
+}
+
+/**
+ * Balaie les campagnes `scheduled` dont l'intervalle est écoulé.
+ *
+ * Sans cet appel, le déclencheur « balayage périodique » serait sélectionnable
+ * à l'écran et n'inscrirait JAMAIS personne : une campagne d'apparence vivante
+ * qui ne fait rien, et rien pour le dire.
+ */
+export async function sweepDueCampaigns(
+  now = new Date(),
+): Promise<{ campaignId: string; enrolled: number }[]> {
+  const rows = await db
+    .select()
+    .from(campaigns)
+    .where(and(eq(campaigns.status, "active"), sql`${campaigns.trigger}->>'kind' = 'scheduled'`));
+
+  const out: { campaignId: string; enrolled: number }[] = [];
+  for (const row of rows) {
+    const config = campaignRowToConfig(row);
+    if (config.trigger.kind !== "scheduled") continue;
+
+    const dueAt =
+      row.lastSweptAt === null
+        ? now
+        : new Date(row.lastSweptAt.getTime() + config.trigger.everyHours * 60 * 60 * 1000);
+    if (dueAt > now) continue;
+
+    try {
+      const result = await sweepCampaign(row.id, { now });
+      out.push({ campaignId: row.id, enrolled: result.enrolled });
+    } catch (err) {
+      // Une campagne mal configurée ne doit pas empêcher les autres de tourner.
+      console.error(
+        JSON.stringify({
+          at: "campaigns/sweep",
+          event: "sweep_failed",
+          campaignId: row.id,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+  }
+  return out;
 }
