@@ -67,6 +67,8 @@ export async function collectPreflight(now = new Date()): Promise<PreflightRepor
     hasTwilioCredentials: twilioMissing.length === 0,
     twilioMissing,
     hasWebhookSignatureSecret: Boolean(process.env.TWILIO_AUTH_TOKEN),
+    appUrl: process.env.NEXT_PUBLIC_APP_URL ?? null,
+    hasMessagingServiceEnv: Boolean(env.TWILIO_MESSAGING_SERVICE_SID),
     activeNumberCount: numbers[0]?.active ?? 0,
     numbersWithoutMessagingService: numbers[0]?.withoutService ?? 0,
     consentValidity: smsSettings?.consentValidity ?? "unlimited",

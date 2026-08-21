@@ -503,6 +503,10 @@
       "llm_provider": {
         "label": "Fournisseur de modèle",
         "fix": "Aucune clé de modèle configurée : l'assistant ne peut rien rédiger."
+      },
+      "app_url": {
+        "label": "URL publique de l'application",
+        "fix": "NEXT_PUBLIC_APP_URL doit être l'adresse https exacte que Twilio appelle : la signature des webhooks et le rappel de statut en dépendent."
       }
     }
   },

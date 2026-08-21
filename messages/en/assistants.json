@@ -503,6 +503,10 @@
       "llm_provider": {
         "label": "Model provider",
         "fix": "No model key configured: the assistant cannot write anything."
+      },
+      "app_url": {
+        "label": "Public app URL",
+        "fix": "NEXT_PUBLIC_APP_URL must be the exact https address Twilio calls: webhook signatures and status callbacks depend on it."
       }
     }
   },

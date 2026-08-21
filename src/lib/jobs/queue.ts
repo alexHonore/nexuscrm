@@ -173,6 +173,8 @@ export async function failJob(job: ScheduledJob, error: string, now: Date = new 
 export async function cancelPendingJobs(filter: {
   types?: string[];
   conversationId?: string;
+  /** Vrai = seulement les envois AUTOMATISÉS (un humain qui tape garde son message). */
+  automatedOnly?: boolean;
 }): Promise<number> {
   const conditions = [eq(scheduledJobs.status, "pending")];
   if (filter.types !== undefined) {
@@ -181,6 +183,9 @@ export async function cancelPendingJobs(filter: {
   }
   if (filter.conversationId !== undefined) {
     conditions.push(sql`${scheduledJobs.payload}->>'conversationId' = ${filter.conversationId}`);
+  }
+  if (filter.automatedOnly) {
+    conditions.push(sql`coalesce(${scheduledJobs.payload}->>'automated', 'true') = 'true'`);
   }
   const cancelled = await db
     .update(scheduledJobs)

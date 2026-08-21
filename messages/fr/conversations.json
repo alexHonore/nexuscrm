@@ -31,7 +31,12 @@
       "received": "Reçu",
       "cancelled": "Annulé",
       "dry_run": "Simulation (mode essai)",
-      "sending": "Envoi en cours"
+      "sending": "Envoi en cours",
+      "accepted": "Accepté",
+      "scheduled": "Programmé",
+      "canceled": "Annulé",
+      "unknown": "Envoi incertain",
+      "skipped": "Non envoyé"
     },
     "failedHint": "Ce message n'est pas parti. Code {code}.",
     "noNumber": "Aucun numéro SMS actif n'est configuré.",
@@ -41,7 +46,22 @@
     "sendsTo": "Ce message part par SMS à {name} · {phone}",
     "cancel": "Annuler l'envoi",
     "cancelled": "Envoi annulé — le message n'est jamais parti",
-    "tooLate": "Trop tard : le message a déjà été remis à l'opérateur. Un SMS parti ne se rappelle pas."
+    "tooLate": "Trop tard : le message a déjà été remis à l'opérateur. Un SMS parti ne se rappelle pas.",
+    "skip": {
+      "kill_switch": "interrupteur d'arrêt baissé",
+      "sandbox_not_allowlisted": "numéro hors liste d'essai",
+      "suppressed": "numéro désabonné",
+      "invalid_to": "numéro invalide",
+      "provider_rejected": "refusé par Twilio",
+      "transport_error": "délai ou réseau — Twilio a peut-être accepté",
+      "not_sent": "non envoyé"
+    },
+    "queued": "En file — part {when}",
+    "queuedNow": "En file — part dans un instant",
+    "cancelQueued": "Annuler",
+    "skippedLabel": "Non envoyé : {reason}",
+    "noConsent": "Aucun consentement SMS au dossier et la personne n'a jamais écrit : enregistrez d'abord le consentement sur la fiche.",
+    "assistantUnavailable": "Cet assistant n'est pas actif."
   },
   "ai": {
     "on": "IA active",
@@ -53,7 +73,8 @@
     "banner": "Vous avez le contrôle de cette conversation. L'assistant ne répondra pas tant que vous ne lui aurez pas rendu la main.",
     "bannerBy": "Mis en pause par {name} · {when}",
     "reason": "Raison (facultatif)",
-    "confirmPause": "Prendre le contrôle"
+    "confirmPause": "Prendre le contrôle",
+    "pausePrompt": "Pourquoi prenez-vous le contrôle ? (facultatif)"
   },
   "inbox": {
     "title": "Conversations",
@@ -75,7 +96,18 @@
       "guardrail": "Garde-fou déclenché",
       "booking_failed": "Réservation impossible",
       "max_turns": "Budget de messages atteint",
-      "no_assistant": "Aucun assistant"
+      "no_assistant": "Aucun assistant",
+      "hard_refusal": "Refus clair du contact",
+      "llm_error": "Panne du modèle",
+      "no_text": "L'assistant n'a rien écrit",
+      "blocked_output": "Réponse bloquée par un garde-fou",
+      "guardrail_unavailable": "Juge indisponible",
+      "client_wants_human": "Demande de parler à un humain",
+      "goal_chain_exhausted": "Plus rien à proposer",
+      "send_failed": "Envoi en échec",
+      "closed_goal_reached": "Clos : objectif atteint",
+      "closed_disqualified": "Clos : non qualifié",
+      "closed_not_interested": "Clos : pas intéressé"
     },
     "columns": {
       "client": "Client",
@@ -145,5 +177,12 @@
     "revoked": "Consentement révoqué",
     "failed": "L'enregistrement a échoué",
     "suppressedHint": "Ce numéro s'est désabonné : enregistrer un consentement ne rouvrirait rien — la suppression est définitive."
+  },
+  "assistant": {
+    "label": "Assistant",
+    "none": "Aucun (un humain répond)",
+    "assign": "Confier à…",
+    "assigned": "Fil confié à l'assistant",
+    "unassigned": "Assistant retiré du fil"
   }
 }

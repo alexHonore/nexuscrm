@@ -20,7 +20,7 @@ import {
   resetDb,
   testDb,
 } from "./helpers/db";
-import { conversations, messages, scheduledJobs, smsNumbers, suppressions } from "@/db/schema-sms";
+import { assistants, consents, conversations, messages, scheduledJobs, smsNumbers, suppressions } from "@/db/schema-sms";
 
 const ctx = vi.hoisted(() => ({ cookies: new Map<string, string>() }));
 
@@ -40,11 +40,25 @@ vi.mock("next/headers", () => ({
 
 const {
   cancelOutboundSmsAction,
+  cancelQueuedSmsAction,
+  assignAssistantAction,
   sendManualSmsAction,
   setConversationAiAction,
   markConversationHandledAction,
   assignConversationAction,
 } = await import("@/app/(app)/conversations/actions");
+const { seedGuardrailDefaults } = await import("@/lib/guardrails/store");
+
+/** Consentement SMS exprès au dossier — sans lui, un envoi à la main est refusé. */
+async function grantConsent(clientId: string) {
+  await testDb.insert(consents).values({
+    clientId,
+    channel: "sms",
+    kind: "express",
+    source: "manual:test",
+    evidence: {},
+  });
+}
 
 async function loginAs(user: { id: string; role: string; tokenVersion: number } | null) {
   ctx.cookies.clear();
@@ -81,6 +95,7 @@ afterAll(async () => {
 describe("envoi manuel", () => {
   it("un TÉLÉPHONISTE peut écrire — et le fil est créé au besoin", async () => {
     const client = await makeClient();
+    await grantConsent(client.id);
 
     const result = await sendManualSmsAction({ clientId: client.id, body: "Bonjour, ici Alex." });
     expect(result.ok).toBe(true);
@@ -99,6 +114,7 @@ describe("envoi manuel", () => {
 
   it("écrire vaut prise en charge : le fil sort de « à traiter »", async () => {
     const client = await makeClient();
+    await grantConsent(client.id);
     await makeConversation({
       clientId: client.id,
       clientPhone: client.phone,
@@ -152,6 +168,7 @@ describe("envoi manuel", () => {
 
   it("écrire dans un fil en PAUSE fonctionne : c'est justement le but", async () => {
     const client = await makeClient();
+    await grantConsent(client.id);
     await makeConversation({
       clientId: client.id,
       clientPhone: client.phone,
@@ -391,5 +408,117 @@ describe("annulation d'un envoi", () => {
     const { message } = await queuedMessage();
     await loginAs(null);
     expect(await cancelOutboundSmsAction(message.id)).toEqual({ ok: false, error: "forbidden" });
+  });
+});
+
+describe("envoi manuel — garde-fous de la revue", () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  it("SANS consentement et sans message entrant, l'envoi à la main est refusé", async () => {
+    // Loi anti-pourriel : un texto commercial exige un consentement — ou une
+    // conversation que la personne a elle-même engagée.
+    const caller = await makeUser({ role: "caller", email: "c1@x.test" });
+    await loginAs(caller);
+    await makeSmsNumber();
+    const client = await makeClient({ phone: "+15145550171" });
+    const result = await sendManualSmsAction({ clientId: client.id, body: "Bonjour!" });
+    expect(result).toEqual({ ok: false, error: "noConsent" });
+    expect(await testDb.select().from(scheduledJobs)).toHaveLength(0);
+  });
+
+  it("la personne a écrit en premier : répondre est permis sans consentement au dossier", async () => {
+    const caller = await makeUser({ role: "caller", email: "c2@x.test" });
+    await loginAs(caller);
+    const number = await makeSmsNumber();
+    const client = await makeClient({ phone: "+15145550172" });
+    const thread = await makeConversation({ clientId: client.id, clientPhone: client.phone, smsNumberId: number.id });
+    await testDb.insert(messages).values({ conversationId: thread.id, direction: "in", body: "Allo?", source: "human", status: "received" });
+    const result = await sendManualSmsAction({ clientId: client.id, body: "Bonjour, ici Alex." });
+    expect(result.ok).toBe(true);
+  });
+
+  it("un fil existant garde SON numéro, même si un autre numéro est actif", async () => {
+    const caller = await makeUser({ role: "caller", email: "c3@x.test" });
+    await loginAs(caller);
+    const first = await makeSmsNumber({ e164: "+15810000001" });
+    const second = await makeSmsNumber({ e164: "+15810000002" });
+    void second;
+    const client = await makeClient({ phone: "+15145550173" });
+    await grantConsent(client.id);
+    const thread = await makeConversation({ clientId: client.id, clientPhone: client.phone, smsNumberId: first.id });
+    const result = await sendManualSmsAction({ clientId: client.id, body: "Suite de notre échange." });
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.id).toBe(thread.id);
+    const rows = await testDb.select().from(conversations).where(eq(conversations.clientPhone, client.phone));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("un envoi EN FILE s'annule par son job ; une fois pris, trop tard", async () => {
+    const caller = await makeUser({ role: "caller", email: "c4@x.test" });
+    await loginAs(caller);
+    await makeSmsNumber();
+    const client = await makeClient({ phone: "+15145550174" });
+    await grantConsent(client.id);
+    await sendManualSmsAction({ clientId: client.id, body: "Oups, pas celui-là." });
+    const [job] = await testDb.select().from(scheduledJobs);
+    expect(job.status).toBe("pending");
+    expect(await cancelQueuedSmsAction(job.id)).toEqual({ ok: true, id: job.id });
+    const [after] = await testDb.select().from(scheduledJobs);
+    expect(after.status).toBe("cancelled");
+    // Déjà pris par le répartiteur : refus explicite.
+    await testDb.update(scheduledJobs).set({ status: "running" }).where(eq(scheduledJobs.id, job.id));
+    expect(await cancelQueuedSmsAction(job.id)).toEqual({ ok: false, error: "alreadySent" });
+  });
+
+  it("prendre le contrôle ANNULE les envois automatisés en file, pas ceux tapés à la main", async () => {
+    const caller = await makeUser({ role: "caller", email: "c5@x.test" });
+    await loginAs(caller);
+    const number = await makeSmsNumber();
+    const client = await makeClient({ phone: "+15145550175" });
+    const thread = await makeConversation({ clientId: client.id, clientPhone: client.phone, smsNumberId: number.id });
+    await testDb.insert(scheduledJobs).values([
+      { type: "send_sms", runAt: new Date(Date.now() + 60_000), payload: { conversationId: thread.id, to: client.phone, body: "réponse IA différée", source: "agent", automated: true } },
+      { type: "send_sms", runAt: new Date(), payload: { conversationId: thread.id, to: client.phone, body: "message humain", source: "human", automated: false } },
+      { type: "agent_turn", runAt: new Date(), payload: { conversationId: thread.id } },
+    ]);
+    expect(await setConversationAiAction({ conversationId: thread.id, enabled: false, reason: "je reprends" })).toMatchObject({ ok: true });
+    const jobs = await testDb.select().from(scheduledJobs);
+    const byBody = (b: string) => jobs.find((j) => (j.payload as { body?: string }).body === b)!;
+    expect(byBody("réponse IA différée").status).toBe("cancelled");
+    expect(byBody("message humain").status).toBe("pending");
+    expect(jobs.find((j) => j.type === "agent_turn")!.status).toBe("cancelled");
+    const conv = await testDb.query.conversations.findFirst({ where: eq(conversations.id, thread.id) });
+    expect(conv!.pauseReason).toBe("je reprends");
+  });
+
+  it("confier un fil à un assistant ACTIF ; un inactif est refusé ; un entrant en attente déclenche un tour", async () => {
+    const admin = await makeUser({ role: "admin", email: "a6@x.test" });
+    await loginAs(admin);
+    await seedGuardrailDefaults();
+    const number = await makeSmsNumber();
+    const client = await makeClient({ phone: "+15145550176" });
+    const thread = await makeConversation({ clientId: client.id, clientPhone: client.phone, smsNumberId: number.id, aiEnabled: false });
+    const [draft] = await testDb.insert(assistants).values({ name: "Brouillon", status: "draft", identity: {}, goal: {}, approach: {}, model: {} }).returning();
+    expect(await assignAssistantAction({ conversationId: thread.id, assistantId: draft.id })).toEqual({ ok: false, error: "assistantUnavailable" });
+    const [active] = await testDb
+      .insert(assistants)
+      .values({
+        name: "Actif", status: "active", identity: {}, goal: {}, approach: {}, model: {},
+        compiledPrompt: "prompt", compiledCoreVersion: 1, needsRecompile: false, requireSuitePass: false,
+      })
+      .returning();
+    await testDb.insert(messages).values({ conversationId: thread.id, direction: "in", body: "Allo?", source: "human", status: "received" });
+    expect(await assignAssistantAction({ conversationId: thread.id, assistantId: active.id })).toEqual({ ok: true, id: thread.id });
+    const conv = await testDb.query.conversations.findFirst({ where: eq(conversations.id, thread.id) });
+    expect(conv!.activeAssistantId).toBe(active.id);
+    // Confier = l'IA reprend la parole.
+    expect(conv!.aiEnabled).toBe(true);
+    const turns = (await testDb.select().from(scheduledJobs)).filter((j) => j.type === "agent_turn");
+    expect(turns).toHaveLength(1);
+    // Retirer l'assistant.
+    expect(await assignAssistantAction({ conversationId: thread.id, assistantId: null })).toEqual({ ok: true, id: thread.id });
+    expect((await testDb.query.conversations.findFirst({ where: eq(conversations.id, thread.id) }))!.activeAssistantId).toBeNull();
   });
 });

@@ -22,6 +22,8 @@ vi.mock("@/app/(app)/clients/consent-actions", () => ({
   revokeSmsConsentAction: vi.fn(),
 }));
 vi.mock("@/app/(app)/conversations/actions", () => ({
+  assignAssistantAction: vi.fn(),
+  cancelQueuedSmsAction: vi.fn(),
   cancelOutboundSmsAction: vi.fn(),
   sendManualSmsAction: vi.fn(),
   setConversationAiAction: vi.fn(),
@@ -57,6 +59,8 @@ const THREAD: SmsThreadData = {
   attentionReason: null,
   suppressed: false,
   consent: { status: "valid", kind: "express", source: "manual:phone_call", grantedAt: "2026-08-01T12:00:00.000Z", expiresAt: null },
+  assistant: { currentId: null, currentName: null, options: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Acheteur FB" }] },
+  queued: [],
   hasActiveNumber: true,
   messages: [
     {
@@ -66,6 +70,7 @@ const THREAD: SmsThreadData = {
       createdAt: "2026-08-21T14:00:00.000Z",
       status: "delivered",
       errorCode: null,
+      skipReason: null,
       source: "opener",
       aiGenerated: false,
       sentByName: null,
@@ -77,6 +82,7 @@ const THREAD: SmsThreadData = {
       createdAt: "2026-08-21T14:20:00.000Z",
       status: "received",
       errorCode: null,
+      skipReason: null,
       source: "human",
       aiGenerated: false,
       sentByName: null,
@@ -88,6 +94,7 @@ const THREAD: SmsThreadData = {
       createdAt: "2026-08-21T14:22:00.000Z",
       status: "failed",
       errorCode: 30007,
+      skipReason: null,
       source: "agent",
       aiGenerated: true,
       sentByName: null,
@@ -99,6 +106,7 @@ const THREAD: SmsThreadData = {
       createdAt: "2026-08-21T15:00:00.000Z",
       status: "sent",
       errorCode: null,
+      skipReason: null,
       source: "human",
       aiGenerated: false,
       sentByName: "Alex-Honoré",
@@ -229,7 +237,7 @@ describe("fil SMS", () => {
         {
           id: "m9", direction: "out" as const, body: "Envoi imminent",
           createdAt: "2026-08-21T15:00:00.000Z", status: "queued",
-          errorCode: null, source: "human", aiGenerated: false, sentByName: "Alex",
+          errorCode: null, skipReason: null, source: "human", aiGenerated: false, sentByName: "Alex",
         },
       ],
     };
@@ -367,7 +375,7 @@ describe("consentement dans le fil", () => {
           messages: [
             {
               id: "m-dry", direction: "out", body: "Bonjour", createdAt: "2026-08-21T15:00:00.000Z",
-              status: "dry_run", errorCode: null, source: "agent", aiGenerated: true, sentByName: null,
+              status: "dry_run", errorCode: null, skipReason: null, source: "agent", aiGenerated: true, sentByName: null,
             },
           ],
         },
@@ -375,5 +383,47 @@ describe("consentement dans le fil", () => {
     );
     expect(html).toContain("Simulation");
     expect(html).not.toContain("thread.status.");
+  });
+});
+
+describe("envois en file, envois non partis, assistant du fil", () => {
+  it("un envoi EN FILE est visible et annulable", () => {
+    const html = wrap(
+      createElement(SmsThreadCard, {
+        clientId: "x",
+        thread: {
+          ...THREAD,
+          queued: [{ jobId: "j1", body: "Bonjour, ça part bientôt", source: "human", automated: false, runAt: new Date().toISOString() }],
+        },
+      }),
+    );
+    expect(html).toContain("Bonjour, ça part bientôt");
+    expect(html).toContain("En file");
+    expect(html).toContain("Annuler");
+  });
+
+  it("un envoi NON PARTI dit pourquoi, au lieu de disparaître", () => {
+    const html = wrap(
+      createElement(SmsThreadCard, {
+        clientId: "x",
+        thread: {
+          ...THREAD,
+          messages: [
+            {
+              id: "m-skip", direction: "out", body: "Bonjour", createdAt: "2026-08-21T15:00:00.000Z",
+              status: "skipped", errorCode: null, skipReason: "kill_switch", source: "human", aiGenerated: false, sentByName: "Alex",
+            },
+          ],
+        },
+      }),
+    );
+    expect(html).toContain("Non envoyé");
+    expect(html).toContain("interrupteur d&#x27;arrêt baissé");
+  });
+
+  it("le fil montre à quel assistant il est confié, et propose de changer", () => {
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    expect(html).toContain("Assistant");
+    expect(html).toContain("Aucun (un humain répond)");
   });
 });

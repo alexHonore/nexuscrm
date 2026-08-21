@@ -22,7 +22,7 @@ const ready = (o: Partial<PreflightFacts> = {}): PreflightFacts => ({
   mode: "live", rawMode: "live", liveConfirmed: true, killSwitch: false, killSwitchReason: null,
   hasTwilioCredentials: true, twilioMissing: [], hasWebhookSignatureSecret: true, activeNumberCount: 1,
   numbersWithoutMessagingService: 0, consentValidity: "unlimited", consentedClientCount: 12,
-  quietHoursLabel: "9h-20h", activeAssistantCount: 1, activeAssistantsWithRedSuite: 0,
+  quietHoursLabel: "9h-20h", appUrl: "https://crm.example.com", hasMessagingServiceEnv: true, activeAssistantCount: 1, activeAssistantsWithRedSuite: 0,
   activeCampaignCount: 1, lastDispatchAt: new Date(NOW.getTime() - 30_000), now: NOW,
   llmProvidersConfigured: ["openrouter"], ...o,
 });
@@ -58,11 +58,11 @@ describe("écran de mise en service", () => {
     const html = render(ready({ lastDispatchAt: null }));
     expect(html).toContain("Répartiteur");
     expect(html).toContain("s&#x27;accumulent en file");
-    expect(html).toContain("jamais");
+    expect(html).toContain("Jamais");
   });
 
   it("blocages et avertissements sont séparés", () => {
-    const html = render(ready({ numbersWithoutMessagingService: 2, activeNumberCount: 0 }));
+    const html = render(ready({ numbersWithoutMessagingService: 2, hasMessagingServiceEnv: false, activeNumberCount: 0 }));
     expect(html).toContain("Blocages");
     expect(html).toContain("Avertissements");
     // Un avertissement ne mérite pas la même urgence ; les mêler ferait

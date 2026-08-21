@@ -8,6 +8,7 @@ import {
   Loader2,
   MessageSquareText,
   PhoneCall,
+  Power,
   Unplug,
   XCircle,
 } from "lucide-react";
@@ -730,6 +731,130 @@ export function TelephonyCard({
           </div>
         )}
       </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * L'interrupteur d'arrêt, enfin à portée de main. Il n'existait que comme
+ * route API : la page de mise en service disait « relevez-le dans les
+ * réglages SMS » et il n'y avait rien à relever.
+ */
+export function KillSwitchCard({
+  initial,
+}: {
+  initial: { enabled: boolean; reason: string | null; at: string | null };
+}) {
+  const t = useTranslations("admin");
+  const router = useRouter();
+  const [state, setState] = useState(initial);
+  const [reason, setReason] = useState("");
+  const [pending, setPending] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const apply = async (enabled: boolean) => {
+    setPending(true);
+    try {
+      const res = await api<{ enabled: boolean; cancelledJobs: number }>("/api/kill-switch", {
+        method: "POST",
+        body: JSON.stringify({ enabled, reason: reason.trim() || undefined }),
+      });
+      setState({
+        enabled: res.enabled,
+        reason: enabled ? reason.trim() || null : null,
+        at: enabled ? new Date().toISOString() : null,
+      });
+      setReason("");
+      setConfirmOpen(false);
+      toast.success(
+        enabled
+          ? t("settings.killSwitch.lowered", { cancelled: res.cancelledJobs })
+          : t("settings.killSwitch.raised"),
+      );
+      router.refresh();
+    } catch {
+      toast.error(t("genericError"));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <Card className={state.enabled ? "border-destructive/50 shadow-xs" : "shadow-xs"}>
+      <CardHeader className="border-b">
+        <div className="flex items-center gap-3">
+          <CardIcon>
+            <Power className={state.enabled ? "text-destructive" : undefined} />
+          </CardIcon>
+          <div className="space-y-0.5">
+            <CardTitle>{t("settings.killSwitch.title")}</CardTitle>
+            <CardDescription>{t("settings.killSwitch.desc")}</CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p
+          role={state.enabled ? "alert" : undefined}
+          className={
+            state.enabled
+              ? "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive"
+              : "rounded-lg border bg-muted/40 px-3 py-2 text-sm"
+          }
+        >
+          {state.enabled ? t("settings.killSwitch.down") : t("settings.killSwitch.up")}
+          {state.enabled && state.at ? (
+            <span className="block text-xs font-normal opacity-80">
+              {t("settings.killSwitch.since", {
+                when: new Date(state.at).toLocaleString("fr-CA", { timeZone: "America/Toronto" }),
+              })}
+              {state.reason ? ` — ${state.reason}` : ""}
+            </span>
+          ) : null}
+        </p>
+        {!state.enabled ? (
+          <div className="max-w-sm space-y-1.5">
+            <Label htmlFor="kill-switch-reason">{t("settings.killSwitch.reason")}</Label>
+            <Input
+              id="kill-switch-reason"
+              className="min-h-11 md:min-h-8"
+              maxLength={500}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </div>
+        ) : null}
+      </CardContent>
+      <CardFooter>
+        {state.enabled ? (
+          <Button onClick={() => void apply(false)} disabled={pending} className="min-h-11 md:min-h-8">
+            {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+            {t("settings.killSwitch.raise")}
+          </Button>
+        ) : (
+          <Button
+            variant="destructive"
+            onClick={() => setConfirmOpen(true)}
+            disabled={pending}
+            className="min-h-11 md:min-h-8"
+          >
+            <Power className="size-4" /> {t("settings.killSwitch.lower")}
+          </Button>
+        )}
+      </CardFooter>
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("settings.killSwitch.confirmLower")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("settings.killSwitch.confirmLowerBody")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pending}>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void apply(true)} disabled={pending}>
+              {t("settings.killSwitch.lower")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

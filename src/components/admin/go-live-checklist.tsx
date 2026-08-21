@@ -73,6 +73,7 @@ function CheckGroup({
   tone: "blocker" | "warning" | "ok" | "info";
 }) {
   const t = useTranslations("assistants");
+  const tCommon = useTranslations("common");
 
   return (
     <Card>
@@ -103,6 +104,10 @@ function CheckGroup({
                   <span className="ml-1.5 font-mono text-xs text-muted-foreground">
                     {check.detail}
                   </span>
+                ) : check.id === "dispatcher" ? (
+                  // Le module de vérification est pur et ne porte pas de
+                  // texte : « jamais » se traduit ici.
+                  <span className="ml-1.5 text-xs text-muted-foreground">{tCommon("never")}</span>
                 ) : null}
               </p>
               {/* La consigne n'apparaît que quand il y a quelque chose à faire :

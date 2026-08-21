@@ -1,6 +1,8 @@
 import { Settings2 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { BookingCard, GoogleCard, SmsCard, TelephonyCard } from "@/components/admin/settings-client";
+import { BookingCard, GoogleCard, KillSwitchCard, SmsCard, TelephonyCard } from "@/components/admin/settings-client";
+import { SmsNumbersCard } from "@/components/admin/sms-numbers-card";
+import { listSmsNumbersForAdmin } from "@/lib/sms-server/numbers";
 import { PageHeader } from "@/components/shell/page-header";
 import { requireAdmin } from "@/lib/auth/guards";
 import { getSetting } from "@/lib/settings";
@@ -9,11 +11,12 @@ export default async function AdminSettingsPage() {
   await requireAdmin();
   const t = await getTranslations("admin");
 
-  const [google, booking, telephony, sms] = await Promise.all([
+  const [google, booking, telephony, sms, numbers] = await Promise.all([
     getSetting("google"),
     getSetting("booking"),
     getSetting("telephony"),
     getSetting("sms"),
+    listSmsNumbersForAdmin(),
   ]);
 
   const voipmsHints = {
@@ -53,6 +56,10 @@ export default async function AdminSettingsPage() {
         }}
       />
 
+      <KillSwitchCard
+        initial={{ enabled: sms.killSwitch, reason: sms.killSwitchReason, at: sms.killSwitchAt }}
+      />
+      <SmsNumbersCard initial={numbers} twilioConfigured={twilioHints.TWILIO_ACCOUNT_SID} />
       <SmsCard initialValidity={sms.consentValidity} />
 
       <TelephonyCard initialProvider={telephony.provider} voipms={voipmsHints} twilio={twilioHints} />

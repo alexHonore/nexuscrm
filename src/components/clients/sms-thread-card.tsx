@@ -4,6 +4,7 @@ import { enUS, fr } from "date-fns/locale";
 import {
   AlertTriangleIcon,
   BotIcon,
+  ClockIcon,
   FileCheck2Icon,
   HandIcon,
   SmartphoneIcon,
@@ -15,7 +16,9 @@ import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
+  assignAssistantAction,
   cancelOutboundSmsAction,
+  cancelQueuedSmsAction,
   markConversationHandledAction,
   sendManualSmsAction,
   setConversationAiAction,
@@ -29,6 +32,13 @@ import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/componen
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatPhone } from "@/lib/phone";
 import { analyzeSms } from "@/lib/sms/segments";
 import { emitDataChange, useDataChange, useVisiblePolling } from "@/lib/live";
@@ -41,9 +51,20 @@ export type SmsMessageData = {
   createdAt: string;
   status: string | null;
   errorCode: number | null;
+  /** Pourquoi un sortant n'est PAS parti (code, éventuellement suivi de « : détail »). */
+  skipReason: string | null;
   source: string;
   aiGenerated: boolean;
   sentByName: string | null;
+};
+
+/** Un envoi encore EN FILE — pas encore de rangée message, mais annulable. */
+export type QueuedSendData = {
+  jobId: string;
+  body: string;
+  source: string;
+  automated: boolean;
+  runAt: string;
 };
 
 export type SmsThreadData = {
@@ -61,6 +82,13 @@ export type SmsThreadData = {
   hasActiveNumber: boolean;
   /** Consentement SMS au dossier — sans lui, aucune campagne n'écrira. */
   consent: SmsConsentState;
+  /** Qui parle côté IA, et à qui on peut confier le fil. */
+  assistant: {
+    currentId: string | null;
+    currentName: string | null;
+    options: { id: string; name: string }[];
+  };
+  queued: QueuedSendData[];
   messages: SmsMessageData[];
 };
 
@@ -137,6 +165,7 @@ export function SmsThreadCard({
       createdAt: new Date().toISOString(),
       status: "queued",
       errorCode: null,
+      skipReason: null,
       source: "human",
       aiGenerated: false,
       sentByName: t("thread.you"),
@@ -156,7 +185,9 @@ export function SmsThreadCard({
               ? t("thread.suppressed")
               : result.error === "noNumber"
                 ? t("thread.noNumber")
-                : t("thread.error"),
+                : result.error === "noConsent"
+                  ? t("thread.noConsent")
+                  : t("thread.error"),
           );
           return;
         }
@@ -169,18 +200,51 @@ export function SmsThreadCard({
     });
   };
 
-  const toggleAi = (enabled: boolean) => {
+  // Prendre le contrôle demande une raison (facultative) : « qui et pourquoi »
+  // était promis, seul « qui » existait.
+  const [pausePrompt, setPausePrompt] = useState<string | null>(null);
+  const toggleAi = (enabled: boolean, reason?: string) => {
     if (!thread.conversationId) return;
     startTransition(async () => {
       const result = await setConversationAiAction({
         conversationId: thread.conversationId!,
         enabled,
+        reason: reason?.trim() ? reason.trim() : null,
       });
       if (!result.ok) {
         toast.error(t("error"));
         return;
       }
+      setPausePrompt(null);
       toast.success(enabled ? t("ai.resumed") : t("ai.paused"));
+      emitDataChange("sms");
+      router.refresh();
+    });
+  };
+
+  const assignAssistant = (assistantId: string | null) => {
+    if (!thread.conversationId) return;
+    startTransition(async () => {
+      const result = await assignAssistantAction({ conversationId: thread.conversationId!, assistantId });
+      if (!result.ok) {
+        toast.error(result.error === "assistantUnavailable" ? t("thread.assistantUnavailable") : t("error"));
+        return;
+      }
+      toast.success(assistantId ? t("assistant.assigned") : t("assistant.unassigned"));
+      emitDataChange("sms");
+      router.refresh();
+    });
+  };
+
+  const cancelQueued = (jobId: string) => {
+    startTransition(async () => {
+      const result = await cancelQueuedSmsAction(jobId);
+      if (!result.ok) {
+        toast.error(result.error === "alreadySent" ? t("thread.tooLate") : t("error"));
+        router.refresh();
+        return;
+      }
+      toast.success(t("thread.cancelled"));
       emitDataChange("sms");
       router.refresh();
     });
@@ -239,7 +303,7 @@ export function SmsThreadCard({
               size="sm"
               className="min-h-11 md:min-h-7"
               disabled={pending}
-              onClick={() => toggleAi(!thread.aiEnabled)}
+              onClick={() => (thread.aiEnabled ? setPausePrompt("") : toggleAi(true))}
             >
               {thread.aiEnabled ? <HandIcon /> : <BotIcon />}
               {thread.aiEnabled ? t("ai.pause") : t("ai.resume")}
@@ -249,6 +313,60 @@ export function SmsThreadCard({
       </CardHeader>
 
       <CardContent className="space-y-3">
+        {pausePrompt !== null ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+            <Label htmlFor={`pause-reason-${clientId}`} className="sr-only">
+              {t("ai.reason")}
+            </Label>
+            <Input
+              id={`pause-reason-${clientId}`}
+              className="min-h-11 flex-1 md:min-h-9"
+              placeholder={t("ai.pausePrompt")}
+              maxLength={200}
+              value={pausePrompt}
+              onChange={(e) => setPausePrompt(e.target.value)}
+            />
+            <Button size="sm" className="min-h-11 md:min-h-8" disabled={pending} onClick={() => toggleAi(false, pausePrompt)}>
+              <HandIcon /> {t("ai.confirmPause")}
+            </Button>
+            <Button variant="ghost" size="sm" className="min-h-11 md:min-h-8" disabled={pending} onClick={() => setPausePrompt(null)}>
+              {t("consent.cancel")}
+            </Button>
+          </div>
+        ) : null}
+
+        {/* Qui parle côté IA — et le geste de confier ou retirer le fil. Sans
+            lui, seul un barreau de campagne savait donner un fil à un
+            assistant : un contact qui écrivait de lui-même n'avait jamais de
+            réponse IA. */}
+        {thread.conversationId ? (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <BotIcon className="size-4 shrink-0 text-muted-foreground" />
+            <span className="text-muted-foreground">{t("assistant.label")} :</span>
+            <Select
+              items={[
+                { value: "__none__", label: t("assistant.none") },
+                ...thread.assistant.options.map((a) => ({ value: a.id, label: a.name })),
+              ]}
+              value={thread.assistant.currentId ?? "__none__"}
+              onValueChange={(v) => assignAssistant(v === "__none__" ? null : String(v))}
+              disabled={pending}
+            >
+              <SelectTrigger className="min-h-11 w-auto min-w-44 md:min-h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">{t("assistant.none")}</SelectItem>
+                {thread.assistant.options.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>
+                    {a.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
+
         {/* Prise de contrôle : voyante par construction. Tant qu'elle est là,
             l'assistant se tait — c'est trop important pour une pastille. */}
         {thread.conversationId && !thread.aiEnabled ? (
@@ -305,7 +423,7 @@ export function SmsThreadCard({
           </div>
         ) : null}
 
-        {rows.length === 0 ? (
+        {rows.length === 0 && thread.queued.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted-foreground">
             {thread.hasActiveNumber ? t("thread.start") : t("thread.noNumber")}
           </p>
@@ -319,6 +437,41 @@ export function SmsThreadCard({
                 onCancel={cancelSend}
                 busy={pending}
               />
+            ))}
+            {/* Envois encore EN FILE : aucune rangée message n'existe tant que
+                le répartiteur ne les a pas pris — c'est ici, et seulement ici,
+                qu'« annuler » veut dire quelque chose. */}
+            {thread.queued.map((q) => (
+              <div key={q.jobId} className="flex flex-col items-end gap-1">
+                <div className="max-w-[85%] rounded-2xl border border-dashed border-primary/50 bg-primary/5 px-3 py-2 text-sm whitespace-pre-wrap">
+                  {q.body}
+                </div>
+                <p className="flex flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
+                  <ClockIcon className="size-3" />
+                  <span>{t(`thread.source.${q.source}` as never)}</span>
+                  <span>
+                    ·{" "}
+                    {t("thread.queued", {
+                      when: new Date(q.runAt).toLocaleString(locale === "en" ? "en-CA" : "fr-CA", {
+                        timeZone: "America/Toronto",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        day: "numeric",
+                        month: "short",
+                      }),
+                    })}
+                  </span>
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="min-h-11 px-2 text-[11px] text-muted-foreground md:min-h-7"
+                  disabled={pending}
+                  onClick={() => cancelQueued(q.jobId)}
+                >
+                  <Undo2Icon className="size-3" /> {t("thread.cancelQueued")}
+                </Button>
+              </div>
             ))}
           </div>
         )}
@@ -382,8 +535,13 @@ function MessageBubble({
 }) {
   const t = useTranslations("conversations");
   const outbound = message.direction === "out";
-  const failed = message.status === "failed" || message.status === "undelivered";
+  const failed =
+    message.status === "failed" ||
+    message.status === "undelivered" ||
+    message.status === "skipped" ||
+    message.status === "unknown";
   const cancelled = message.status === "cancelled";
+  const skipCode = message.skipReason ? message.skipReason.split(":")[0] : null;
   // Encore en file : la seule fenêtre où « annuler » veut dire quelque chose.
   const cancellable =
     outbound && message.status === "queued" && !message.id.startsWith(DRAFT_PREFIX);
@@ -429,12 +587,21 @@ function MessageBubble({
           {t("thread.failedHint", { code: message.errorCode })}
         </p>
       ) : null}
+      {/* Non envoyé : la RAISON est dite. « Message mis en file » puis plus
+          rien était la pire réponse possible pour un téléphoniste. */}
+      {skipCode ? (
+        <p className="px-1 text-[11px] font-medium text-destructive">
+          {t("thread.skippedLabel", {
+            reason: t.has(`thread.skip.${skipCode}`) ? t(`thread.skip.${skipCode}` as never) : skipCode,
+          })}
+        </p>
+      ) : null}
 
       {cancellable ? (
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 px-2 text-[11px] text-muted-foreground"
+          className="min-h-11 px-2 text-[11px] text-muted-foreground md:min-h-7"
           disabled={busy}
           onClick={() => onCancel(message.id)}
         >

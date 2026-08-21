@@ -26,6 +26,8 @@ function ready(overrides: Partial<PreflightFacts> = {}): PreflightFacts {
     consentValidity: "unlimited",
     consentedClientCount: 120,
     quietHoursLabel: "9h-20h",
+    appUrl: "https://crm.example.com",
+    hasMessagingServiceEnv: true,
     activeAssistantCount: 1,
     activeAssistantsWithRedSuite: 0,
     activeCampaignCount: 1,
@@ -82,7 +84,7 @@ describe("le répartiteur, panne la plus silencieuse", () => {
     // ailleurs pendant des heures.
     const report = preflight(ready({ lastDispatchAt: null }));
     expect(report.blockers).toContain("dispatcher");
-    expect(report.checks.find((c) => c.id === "dispatcher")?.detail).toBe("jamais");
+    expect(report.checks.find((c) => c.id === "dispatcher")?.detail).toBeUndefined();
   });
 
   it("un battement vieux de plus de quinze minutes bloque", () => {
@@ -98,7 +100,7 @@ describe("le répartiteur, panne la plus silencieuse", () => {
 
 describe("avertissements — ça partira, mais quelque chose surprendra", () => {
   it("un numéro sans service de messagerie avertit sans bloquer", () => {
-    const report = preflight(ready({ numbersWithoutMessagingService: 1 }));
+    const report = preflight(ready({ numbersWithoutMessagingService: 1, hasMessagingServiceEnv: false }));
     expect(report.canSendLive).toBe(true);
     expect(report.warnings).toContain("messaging_service");
   });
@@ -167,5 +169,24 @@ describe("informations", () => {
   it("l'interrupteur affiche SA raison", () => {
     const report = preflight(ready({ killSwitch: true, killSwitchReason: "incident Twilio" }));
     expect(report.checks.find((c) => c.id === "kill_switch")?.detail).toBe("incident Twilio");
+  });
+});
+
+describe("revue : URL publique et service de messagerie", () => {
+  it("une URL publique absente ou en http est un avertissement — la signature des webhooks en dépend", () => {
+    expect(preflight(ready({ appUrl: null })).warnings).toContain("app_url");
+    expect(preflight(ready({ appUrl: "http://localhost:3000" })).warnings).toContain("app_url");
+    expect(preflight(ready({ appUrl: "https://crm.example.com" })).warnings).not.toContain("app_url");
+  });
+
+  it("le service de messagerie est jugé sur la variable que le chemin d'envoi utilise", () => {
+    expect(preflight(ready({ hasMessagingServiceEnv: true, numbersWithoutMessagingService: 3 })).warnings).not.toContain("messaging_service");
+    expect(preflight(ready({ hasMessagingServiceEnv: false, numbersWithoutMessagingService: 1 })).warnings).toContain("messaging_service");
+  });
+
+  it("un répartiteur qui n'a jamais battu ne produit pas de texte français brut", () => {
+    const report = preflight(ready({ lastDispatchAt: null }));
+    const check = report.checks.find((c) => c.id === "dispatcher")!;
+    expect(check.detail).toBeUndefined();
   });
 });

@@ -24,6 +24,7 @@ export type CheckLevel = (typeof CHECK_LEVELS)[number];
 
 export const CHECK_IDS = [
   "mode",
+  "app_url",
   "live_confirmed",
   "kill_switch",
   "twilio_credentials",
@@ -60,6 +61,10 @@ export interface PreflightFacts {
   /** Détail de ce qui manque, pour que le message soit actionnable. */
   twilioMissing: string[];
   hasWebhookSignatureSecret: boolean;
+  /** NEXT_PUBLIC_APP_URL — l'URL que Twilio appelle et que la signature suppose. */
+  appUrl: string | null;
+  /** TWILIO_MESSAGING_SERVICE_SID présent : c'est lui que le chemin d'envoi utilise. */
+  hasMessagingServiceEnv: boolean;
   activeNumberCount: number;
   numbersWithoutMessagingService: number;
   consentValidity: string;
@@ -124,16 +129,26 @@ export function preflight(facts: PreflightFacts): PreflightReport {
   // Sans secret de signature, n'importe qui peut forger un entrant : ce n'est
   // pas un blocage d'ENVOI, mais c'est une porte ouverte.
   add("webhook_signature", "warning", facts.hasWebhookSignatureSecret);
+  // L'URL publique sert au rappel de statut ET à la signature des webhooks :
+  // absente ou en http, chaque entrant est refusé en silence.
+  add(
+    "app_url",
+    "warning",
+    facts.appUrl !== null && facts.appUrl.startsWith("https://"),
+    facts.appUrl ?? undefined,
+  );
 
   add("sms_number", "blocker", facts.activeNumberCount > 0, `${facts.activeNumberCount}`);
 
   // Un numéro sans service de messagerie envoie quand même, mais perd le
   // regroupement A2P — c'est ce qui fait classer un numéro comme indésirable.
+  // C'est la variable d'environnement que le chemin d'envoi utilise ; la
+  // colonne par numéro n'est qu'informative.
   add(
     "messaging_service",
     "warning",
-    facts.numbersWithoutMessagingService === 0,
-    `${facts.numbersWithoutMessagingService}`,
+    facts.hasMessagingServiceEnv || facts.numbersWithoutMessagingService === 0,
+    facts.hasMessagingServiceEnv ? undefined : `${facts.numbersWithoutMessagingService}`,
   );
 
   // ── Ce qui décide qu'il part vers QUELQU'UN ──────────────────────────────
@@ -169,7 +184,8 @@ export function preflight(facts: PreflightFacts): PreflightReport {
     "dispatcher",
     "blocker",
     dispatchFresh,
-    facts.lastDispatchAt === null ? "jamais" : facts.lastDispatchAt.toISOString(),
+    // Pas de texte ici : le module est pur et l'écran traduit l'absence.
+    facts.lastDispatchAt === null ? undefined : facts.lastDispatchAt.toISOString(),
   );
 
   const blockers = checks.filter((c) => c.level === "blocker" && !c.ok).map((c) => c.id);

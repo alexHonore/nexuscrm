@@ -1,14 +1,15 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
-import { conversations, messages, scheduledJobs, smsNumbers } from "@/db/schema-sms";
+import { assistants, consents, conversations, messages, scheduledJobs, smsNumbers } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth/guards";
-import { enqueueJob } from "@/lib/jobs/queue";
+import { cancelPendingJobs, enqueueJob } from "@/lib/jobs/queue";
+import { kickDispatch } from "@/lib/jobs/kick";
 import { analyzeSms } from "@/lib/sms/segments";
 
 /**
@@ -28,7 +29,15 @@ export type SmsActionResult =
   | { ok: true; id?: string }
   | {
       ok: false;
-      error: "invalid" | "forbidden" | "notFound" | "suppressed" | "noNumber" | "alreadySent";
+      error:
+        | "invalid"
+        | "forbidden"
+        | "notFound"
+        | "suppressed"
+        | "noNumber"
+        | "alreadySent"
+        | "noConsent"
+        | "assistantUnavailable";
     };
 
 const INVALID = { ok: false, error: "invalid" } as const;
@@ -73,8 +82,39 @@ export async function sendManualSmsAction(input: {
   });
   if (suppressed) return { ok: false, error: "suppressed" };
 
-  const number = await db.query.smsNumbers.findFirst({ where: eq(smsNumbers.active, true) });
+  // Un fil existant garde SON numéro : écrire depuis un autre créerait un
+  // second fil pour la même personne, et sa réponse tomberait à côté.
+  const existing = await db.query.conversations.findFirst({
+    where: eq(conversations.clientPhone, client.phone),
+    orderBy: [desc(conversations.lastInboundAt), desc(conversations.createdAt)],
+  });
+  const number = existing
+    ? await db.query.smsNumbers.findFirst({ where: eq(smsNumbers.id, existing.smsNumberId) })
+    : await db.query.smsNumbers.findFirst({ where: eq(smsNumbers.active, true) });
   if (!number) return { ok: false, error: "noNumber" };
+
+  // Loi anti-pourriel : un texto commercial exige un consentement — ou une
+  // conversation que la personne a ELLE-MÊME engagée. Un téléphoniste qui
+  // vient d'obtenir le oui au téléphone l'enregistre d'abord sur la fiche.
+  const nowTs = new Date();
+  const [consent, priorInbound] = await Promise.all([
+    db.query.consents.findFirst({
+      where: and(
+        eq(consents.clientId, client.id),
+        eq(consents.channel, "sms"),
+        isNull(consents.revokedAt),
+        or(isNull(consents.expiresAt), gte(consents.expiresAt, nowTs)),
+      ),
+      columns: { id: true },
+    }),
+    existing
+      ? db.query.messages.findFirst({
+          where: and(eq(messages.conversationId, existing.id), eq(messages.direction, "in")),
+          columns: { id: true },
+        })
+      : Promise.resolve(undefined),
+  ]);
+  if (!consent && !priorInbound) return { ok: false, error: "noConsent" };
 
   const analysis = analyzeSms(parsed.data.body);
 
@@ -125,9 +165,118 @@ export async function sendManualSmsAction(input: {
     entityId: conversationId,
     detail: { clientId: client.id, segments: analysis.segments, encoding: analysis.encoding },
   });
-
+  // Chemin rapide : le message part dans les secondes, sans attendre le cron.
+  kickDispatch();
   revalidateFor(client.id);
   return { ok: true, id: conversationId };
+}
+
+/**
+ * Annuler un envoi encore EN FILE — identifié par son JOB. Tant que le
+ * répartiteur ne l'a pas pris, aucune rangée `messages` n'existe : c'est le
+ * job qu'il faut annuler, et c'est le seul moment où « annuler » veut dire
+ * quelque chose. Un SMS remis à Twilio ne se rappelle pas.
+ */
+export async function cancelQueuedSmsAction(jobId: string): Promise<SmsActionResult> {
+  const user = await getCurrentUser();
+  if (!user) return FORBIDDEN;
+  if (!z.uuid().safeParse(jobId).success) return INVALID;
+  const job = await db.query.scheduledJobs.findFirst({ where: eq(scheduledJobs.id, jobId) });
+  if (!job || job.type !== "send_sms") return NOT_FOUND;
+  const payload = job.payload as { conversationId?: string };
+  const rows = await db
+    .update(scheduledJobs)
+    .set({ status: "cancelled" })
+    .where(and(eq(scheduledJobs.id, jobId), eq(scheduledJobs.status, "pending")))
+    .returning({ id: scheduledJobs.id });
+  if (rows.length === 0) return { ok: false, error: "alreadySent" };
+  await logAudit({
+    userId: user.id,
+    action: "sms.cancel",
+    entity: "conversation",
+    entityId: payload.conversationId,
+    detail: { jobId },
+  });
+  if (payload.conversationId) {
+    const thread = await db.query.conversations.findFirst({
+      where: eq(conversations.id, payload.conversationId),
+    });
+    if (thread?.clientId) revalidateFor(thread.clientId);
+  }
+  return { ok: true, id: jobId };
+}
+
+/**
+ * Confier le fil à un assistant (ou le lui retirer). Avant, seul un barreau de
+ * campagne savait le faire : un contact qui écrivait de lui-même n'avait jamais
+ * de réponse IA, et un humain ne pouvait pas « rendre » un fil à l'assistant.
+ */
+export async function assignAssistantAction(input: {
+  conversationId: string;
+  assistantId: string | null;
+}): Promise<SmsActionResult> {
+  const user = await getCurrentUser();
+  if (!user) return FORBIDDEN;
+  if (!z.uuid().safeParse(input.conversationId).success) return INVALID;
+  if (input.assistantId !== null && !z.uuid().safeParse(input.assistantId).success) return INVALID;
+  const thread = await db.query.conversations.findFirst({
+    where: eq(conversations.id, input.conversationId),
+  });
+  if (!thread) return NOT_FOUND;
+
+  let version: number | null = null;
+  if (input.assistantId !== null) {
+    const target = await db.query.assistants.findFirst({
+      where: eq(assistants.id, input.assistantId),
+      columns: { id: true, status: true, compiledPrompt: true, version: true },
+    });
+    if (!target || target.status !== "active" || !target.compiledPrompt) {
+      return { ok: false, error: "assistantUnavailable" };
+    }
+    version = target.version;
+  }
+  await db
+    .update(conversations)
+    .set({
+      activeAssistantId: input.assistantId,
+      activeAssistantVersion: version,
+      // Confier = l'IA reprend la parole ; retirer = un humain répond.
+      ...(input.assistantId !== null
+        ? { aiEnabled: true, pausedById: null, pausedAt: null, pauseReason: null }
+        : {}),
+    })
+    .where(eq(conversations.id, thread.id));
+
+  // Un entrant attend ? L'assistant répond tout de suite.
+  if (input.assistantId !== null) {
+    const pending = await db.query.messages.findFirst({
+      where: and(
+        eq(messages.conversationId, thread.id),
+        eq(messages.direction, "in"),
+        isNull(messages.processedAt),
+      ),
+      columns: { id: true },
+    });
+    if (pending) {
+      await enqueueJob({
+        type: "agent_turn",
+        runAt: new Date(),
+        payload: { conversationId: thread.id },
+        dedupeKey: `turn:${thread.id}`,
+      });
+      kickDispatch();
+    }
+  }
+  await logAudit({
+    userId: user.id,
+    action: input.assistantId ? "conversation.assign_assistant" : "conversation.unassign_assistant",
+    entity: "conversation",
+    entityId: thread.id,
+    detail: { assistantId: input.assistantId },
+  });
+  if (thread.clientId) revalidateFor(thread.clientId);
+  else revalidatePath("/conversations");
+  return { ok: true, id: thread.id };
 }
 
 const pauseSchema = z.object({
@@ -173,6 +322,13 @@ export async function setConversationAiAction(input: {
           },
     )
     .where(eq(conversations.id, thread.id));
+  // Prendre le contrôle annule ce que l'IA avait DÉJÀ mis en file pour ce
+  // fil : une réponse différée (heures de politesse) composée avant la prise
+  // de contrôle partirait sinon par-dessus l'humain.
+  if (!parsed.data.enabled) {
+    await cancelPendingJobs({ types: ["send_sms"], conversationId: thread.id, automatedOnly: true });
+    await cancelPendingJobs({ types: ["agent_turn"], conversationId: thread.id });
+  }
 
   await logAudit({
     userId: user.id,

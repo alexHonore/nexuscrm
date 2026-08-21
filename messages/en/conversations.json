@@ -31,7 +31,12 @@
       "received": "Received",
       "cancelled": "Cancelled",
       "dry_run": "Simulation (test mode)",
-      "sending": "Sending"
+      "sending": "Sending",
+      "accepted": "Accepted",
+      "scheduled": "Scheduled",
+      "canceled": "Cancelled",
+      "unknown": "Uncertain send",
+      "skipped": "Not sent"
     },
     "failedHint": "This message did not go out. Code {code}.",
     "noNumber": "No active SMS number is configured.",
@@ -41,7 +46,22 @@
     "sendsTo": "This goes out by SMS to {name} · {phone}",
     "cancel": "Cancel send",
     "cancelled": "Send cancelled — the message never went out",
-    "tooLate": "Too late: the message was already handed to the carrier. A sent SMS cannot be recalled."
+    "tooLate": "Too late: the message was already handed to the carrier. A sent SMS cannot be recalled.",
+    "skip": {
+      "kill_switch": "kill switch down",
+      "sandbox_not_allowlisted": "number not on the test allowlist",
+      "suppressed": "number opted out",
+      "invalid_to": "invalid number",
+      "provider_rejected": "rejected by Twilio",
+      "transport_error": "timeout or network — Twilio may have accepted",
+      "not_sent": "not sent"
+    },
+    "queued": "Queued — leaves {when}",
+    "queuedNow": "Queued — leaves in a moment",
+    "cancelQueued": "Cancel",
+    "skippedLabel": "Not sent: {reason}",
+    "noConsent": "No SMS consent on file and the person never wrote first: record the consent on the client page first.",
+    "assistantUnavailable": "This assistant is not active."
   },
   "ai": {
     "on": "AI on",
@@ -53,7 +73,8 @@
     "banner": "You have control of this conversation. The assistant will not reply until you hand it back.",
     "bannerBy": "Paused by {name} · {when}",
     "reason": "Reason (optional)",
-    "confirmPause": "Take control"
+    "confirmPause": "Take control",
+    "pausePrompt": "Why are you taking over? (optional)"
   },
   "inbox": {
     "title": "Conversations",
@@ -75,7 +96,18 @@
       "guardrail": "Guardrail triggered",
       "booking_failed": "Booking failed",
       "max_turns": "Message budget reached",
-      "no_assistant": "No assistant"
+      "no_assistant": "No assistant",
+      "hard_refusal": "Clear refusal from the contact",
+      "llm_error": "Model failure",
+      "no_text": "The assistant wrote nothing",
+      "blocked_output": "Reply blocked by a guardrail",
+      "guardrail_unavailable": "Judge unavailable",
+      "client_wants_human": "Asked to talk to a human",
+      "goal_chain_exhausted": "Nothing left to offer",
+      "send_failed": "Send failed",
+      "closed_goal_reached": "Closed: goal reached",
+      "closed_disqualified": "Closed: not qualified",
+      "closed_not_interested": "Closed: not interested"
     },
     "columns": {
       "client": "Client",
@@ -145,5 +177,12 @@
     "revoked": "Consent revoked",
     "failed": "Could not save",
     "suppressedHint": "This number opted out: recording a consent would reopen nothing — the suppression is permanent."
+  },
+  "assistant": {
+    "label": "Assistant",
+    "none": "None (a human replies)",
+    "assign": "Hand over to…",
+    "assigned": "Thread handed to the assistant",
+    "unassigned": "Assistant removed from the thread"
   }
 }

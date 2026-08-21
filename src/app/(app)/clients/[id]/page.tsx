@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { formatInTimeZone } from "date-fns-tz";
 import { enUS, fr } from "date-fns/locale";
 import { HistoryIcon } from "lucide-react";
@@ -6,7 +6,7 @@ import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 import { db } from "@/db";
 import { auditLogs, categories, sources, users } from "@/db/schema";
-import { messages, smsNumbers } from "@/db/schema-sms";
+import { assistants, messages, scheduledJobs, smsNumbers } from "@/db/schema-sms";
 import { requireUser } from "@/lib/auth/guards";
 import { dispositionDisplayMap } from "@/lib/dispositions";
 import { APP_TZ } from "@/components/clients/timezone";
@@ -63,6 +63,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
             createdAt: messages.createdAt,
             status: messages.status,
             errorCode: messages.errorCode,
+            skipReason: messages.skipReason,
             source: messages.source,
             aiGenerated: messages.aiGenerated,
             sentByName: users.name,
@@ -70,8 +71,11 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
           .from(messages)
           .leftJoin(users, eq(users.id, messages.sentById))
           .where(eq(messages.conversationId, thread.id))
-          .orderBy(asc(messages.createdAt))
+          // Les 200 plus RÉCENTS, remis dans l'ordre : un long fil perdait
+          // ses derniers messages.
+          .orderBy(desc(messages.createdAt))
           .limit(200)
+          .then((rows) => rows.reverse())
       : Promise.resolve([]),
     client.phone
       ? db.query.suppressions.findFirst({
@@ -80,6 +84,35 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
       : Promise.resolve(undefined),
     db.query.smsNumbers.findFirst({ where: eq(smsNumbers.active, true) }),
     readSmsConsent(client.id),
+  ]);
+
+  // Envois encore EN FILE (pas encore de rangée messages) : visibles et
+  // annulables. Et les assistants actifs, pour confier le fil.
+  const [queuedJobs, activeAssistants, currentAssistant] = await Promise.all([
+    thread
+      ? db
+          .select({ id: scheduledJobs.id, payload: scheduledJobs.payload, runAt: scheduledJobs.runAt })
+          .from(scheduledJobs)
+          .where(
+            and(
+              eq(scheduledJobs.type, "send_sms"),
+              eq(scheduledJobs.status, "pending"),
+              sql`${scheduledJobs.payload}->>'conversationId' = ${thread.id}`,
+            ),
+          )
+          .orderBy(asc(scheduledJobs.runAt))
+      : Promise.resolve([]),
+    db
+      .select({ id: assistants.id, name: assistants.name })
+      .from(assistants)
+      .where(eq(assistants.status, "active"))
+      .orderBy(asc(assistants.name)),
+    thread?.activeAssistantId
+      ? db.query.assistants.findFirst({
+          where: eq(assistants.id, thread.activeAssistantId),
+          columns: { id: true, name: true },
+        })
+      : Promise.resolve(undefined),
   ]);
 
   const smsThread: SmsThreadData = {
@@ -95,6 +128,21 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
     suppressed: suppressedRow !== undefined,
     hasActiveNumber: activeNumber !== undefined,
     consent,
+    assistant: {
+      currentId: thread?.activeAssistantId ?? null,
+      currentName: currentAssistant?.name ?? null,
+      options: activeAssistants,
+    },
+    queued: queuedJobs.map((j) => {
+      const payload = j.payload as { body?: string; source?: string; automated?: boolean };
+      return {
+        jobId: j.id,
+        body: payload.body ?? "",
+        source: payload.source ?? "human",
+        automated: payload.automated !== false,
+        runAt: j.runAt.toISOString(),
+      };
+    }),
     messages: threadMessages.map((m) => ({
       id: m.id,
       direction: m.direction,
@@ -102,6 +150,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
       createdAt: m.createdAt.toISOString(),
       status: m.status,
       errorCode: m.errorCode,
+      skipReason: m.skipReason,
       source: m.source,
       aiGenerated: m.aiGenerated,
       sentByName: m.sentByName,
