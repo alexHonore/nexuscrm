@@ -18,6 +18,7 @@ import { NextRequest } from "next/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDb, makeCategory, makeClient, makeUser, resetDb, seedSystemCategories, testDb } from "./helpers/db";
 import { calls, categories, clients, notifications, sources, users, webhookKeys } from "@/db/schema";
+import { assistants } from "@/db/schema-sms";
 
 vi.mock("server-only", () => ({}));
 
@@ -147,11 +148,24 @@ function collectRouteFiles(dir: string): string[] {
   return out.sort();
 }
 
-const ADMIN_ROUTES = collectRouteFiles(ADMIN_API_DIR).map((file) => ({
-  file,
-  /** ex. "/api/admin/users/[id]" */
-  pattern: "/" + relative(APP_DIR, file).split(sep).slice(0, -1).join("/"),
-}));
+/**
+ * Les routes d'assistants vivent hors de /api/admin mais sont tout aussi
+ * réservées : compiler, activer, exporter ou importer un assistant sont des
+ * gestes d'administrateur. Elles sont balayées avec les autres — une route
+ * ajoutée sous /api/assistants sans garde fait échouer ce test.
+ */
+const ASSISTANT_API_DIR = join(APP_DIR, "api", "assistants");
+
+const ADMIN_ROUTES = [
+  ...collectRouteFiles(ADMIN_API_DIR),
+  ...collectRouteFiles(ASSISTANT_API_DIR),
+]
+  .sort()
+  .map((file) => ({
+    file,
+    /** ex. "/api/admin/users/[id]" */
+    pattern: "/" + relative(APP_DIR, file).split(sep).slice(0, -1).join("/"),
+  }));
 
 /** Identifiants concrets injectés dans les segments dynamiques + les corps. */
 type Fixtures = {
@@ -160,13 +174,15 @@ type Fixtures = {
   categoryId: number;
   sourceId: number;
   webhookKeyId: number;
+  assistantId: string;
 };
 
 function concreteUrl(pattern: string, f: Fixtures): { path: string; params: Record<string, string> } {
   const params: Record<string, string> = {};
   const path = pattern.replace(/\[([^\]]+)\]/g, (_m, name: string) => {
     let value: string;
-    if (pattern.includes("/users/")) value = f.caller.id;
+    if (pattern.includes("/assistants/")) value = f.assistantId;
+    else if (pattern.includes("/users/")) value = f.caller.id;
     else if (pattern.includes("/categories/")) value = String(f.categoryId);
     else if (pattern.includes("/sources/")) value = String(f.sourceId);
     else if (pattern.includes("/webhook-keys/")) value = String(f.webhookKeyId);
@@ -217,6 +233,10 @@ function bodyFor(pattern: string, f: Fixtures): unknown {
       return { userId: f.caller.id, username: "test_sub" };
     case "/api/admin/voipms/route-did":
       return { did: "4184761542", account: "551013_test", userId: f.caller.id };
+    case "/api/assistants/import":
+      // Volontairement vide de sens : la garde doit refuser AVANT de regarder
+      // le contenu, donc un corps invalide ne doit pas masquer un 401/403.
+      return { mode: "preview", bundle: {} };
     default:
       return {};
   }
@@ -287,12 +307,24 @@ beforeEach(async () => {
     })
     .returning();
 
+  const [assistant] = await testDb
+    .insert(assistants)
+    .values({
+      name: "Assistant de test",
+      identity: {},
+      goal: { primary: { type: "qualify_only" }, fallbacks: [] },
+      approach: {},
+      model: {},
+    })
+    .returning({ id: assistants.id });
+
   fixtures = {
     admin,
     caller,
     categoryId: category.id,
     sourceId: source.id,
     webhookKeyId: webhookKey.id,
+    assistantId: assistant.id,
   };
 });
 
@@ -305,6 +337,8 @@ describe("routes /api/admin/** — énumération complète", () => {
   it("trouve bien toutes les routes admin sur le disque", () => {
     expect(ADMIN_ROUTES.length).toBeGreaterThanOrEqual(24);
     expect(ADMIN_ROUTES.map((r) => r.pattern)).toContain("/api/admin/users/[id]");
+    expect(ADMIN_ROUTES.map((r) => r.pattern)).toContain("/api/assistants/[id]/activate");
+    expect(ADMIN_ROUTES.map((r) => r.pattern)).toContain("/api/assistants/import");
   });
 
   it.each(ADMIN_ROUTES.map((r) => [r.pattern, r.file] as const))(
@@ -765,8 +799,11 @@ describe("routes admin — l'énumération couvre bien chaque fichier", () => {
     }
   });
 
-  it("aucune route admin n'a été oubliée par rapport au disque", () => {
-    const onDisk = collectRouteFiles(ADMIN_API_DIR);
+  it("aucune route réservée n'a été oubliée par rapport au disque", () => {
+    const onDisk = [
+      ...collectRouteFiles(ADMIN_API_DIR),
+      ...collectRouteFiles(ASSISTANT_API_DIR),
+    ].sort();
     expect(ADMIN_ROUTES.map((r) => r.file)).toEqual(onDisk);
   });
 });

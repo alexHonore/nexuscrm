@@ -813,7 +813,7 @@ const prompt: ParamDoc[] = [
     defaultValue: "composed",
     allowed: [
       { value: "composed", labelFr: "Composé — assemblé depuis les onglets" },
-      { value: "libre", labelFr: "Libre — un seul document que vous écrivez" },
+      { value: "raw", labelFr: "Libre — un seul document que vous écrivez" },
     ],
     whatFr: "Comment le prompt système est produit.",
     whyFr:

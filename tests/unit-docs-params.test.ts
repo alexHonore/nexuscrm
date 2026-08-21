@@ -42,6 +42,37 @@ function leafPaths(schema: z.ZodType, prefix = ""): string[] {
   return [prefix];
 }
 
+
+/** Options d'un enum zod au chemin donné, ou null si le chemin n'est pas un enum. */
+function enumOptionsAt(path: string): string[] | null {
+  let node: z.ZodType = assistantConfigSchema;
+  for (const segment of path.split(".")) {
+    const unwrapped = unwrap(node);
+    const def = (unwrapped as unknown as { def: { type: string; shape?: Record<string, z.ZodType>; element?: z.ZodType } }).def;
+    if (segment.endsWith("[]")) {
+      const key = segment.slice(0, -2);
+      const child = def.shape?.[key];
+      if (!child) return null;
+      const arr = (unwrap(child) as unknown as { def: { element?: z.ZodType } }).def.element;
+      if (!arr) return null;
+      node = arr;
+      continue;
+    }
+    const child = def.shape?.[segment];
+    if (!child) return null;
+    node = child;
+  }
+  const final = unwrap(node);
+  const def = (final as unknown as { def: { type: string; entries?: Record<string, string> } }).def;
+  if (def.type !== "enum" || !def.entries) return null;
+  return Object.values(def.entries);
+}
+
+function unwrap(schema: z.ZodType): z.ZodType {
+  const inner = (schema as unknown as { def: { innerType?: z.ZodType } }).def.innerType;
+  return inner ? unwrap(inner) : schema;
+}
+
 describe("registre de documentation", () => {
   it("§19.1 — CHAQUE chemin de la config d'assistant est documenté", () => {
     const paths = leafPaths(assistantConfigSchema);
@@ -112,6 +143,35 @@ describe("registre de documentation", () => {
         expect(value.labelFr.trim().length, entry.path).toBeGreaterThan(0);
       }
     }
+  });
+
+
+  it("les valeurs permises documentées existent VRAIMENT dans le schéma", () => {
+    // Le piège que ce test attrape : documenter « libre » alors que le schéma
+    // attend « raw ». La fiche paraît juste et l'import échoue.
+    let checked = 0;
+    for (const entry of PARAM_DOCS) {
+      if (entry.type !== "enum" || !entry.allowed) continue;
+      const options = enumOptionsAt(entry.path);
+      if (!options) continue;
+      checked += 1;
+      const documented = entry.allowed.map((a) => a.value).filter((v) => v !== null);
+      for (const value of documented) {
+        expect(
+          options,
+          `${entry.path} : « ${String(value)} » est documenté mais absent du schéma`,
+        ).toContain(value);
+      }
+      // L'inverse compte autant : une valeur du schéma jamais documentée est
+      // une option que personne ne sait utiliser.
+      for (const option of options) {
+        expect(
+          documented,
+          `${entry.path} : « ${option} » existe dans le schéma mais n'est pas documenté`,
+        ).toContain(option);
+      }
+    }
+    expect(checked, "aucun enum vérifié — le résolveur de chemin est cassé").toBeGreaterThan(5);
   });
 
   it("les pièges nomment un symptôme, pas seulement une consigne", () => {
