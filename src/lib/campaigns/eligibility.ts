@@ -95,6 +95,8 @@ export const TOUCH_REFUSALS = [
   "ladder_exhausted",
   "already_sent",
   "replied",
+  /** Pas encore l'heure — un rejeu ne doit pas avancer l'échelle. */
+  "not_due",
 ] as const;
 export type TouchRefusal = (typeof TOUCH_REFUSALS)[number];
 

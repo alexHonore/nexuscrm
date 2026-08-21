@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { categories, clients, notifications, sources, users, webhookKeys } from "@/db/schema";
 import { consents } from "@/db/schema-sms";
 import { notificationContent } from "@/components/clients/notification-content";
+import { runAfterResponse } from "@/lib/after-response";
 import { logAudit } from "@/lib/audit";
 import { sha256Hex } from "@/lib/crypto";
 import { formatPhone, normalizePhone, phoneMatchKey } from "@/lib/phone";
@@ -309,6 +310,37 @@ export async function POST(req: Request) {
     entity: "client",
     entityId: clientId,
     detail: { keyId: key.id, keyName: key.name, created },
+  });
+
+  // Le moteur de campagnes tourne APRÈS la réponse. n8n attend un 200 ; le
+  // faire patienter pendant l'évaluation des audiences et la mise en file des
+  // barreaux finirait par un délai dépassé côté n8n, un renvoi du lead, et un
+  // deuxième client. Une campagne qui échoue ne doit pas non plus faire échouer
+  // l'entrée du lead — d'où le catch silencieux, le détail étant journalisé.
+  runAfterResponse(async () => {
+    try {
+      const { matchCampaigns } = await import("@/lib/campaigns-server/match");
+      const matches = await matchCampaigns(clientId);
+      const enrolled = matches.filter((m) => m.enrolled);
+      if (enrolled.length > 0) {
+        await logAudit({
+          userId: null,
+          action: "campaign.enroll",
+          entity: "client",
+          entityId: clientId,
+          detail: { campaignIds: enrolled.map((m) => m.campaignId), via: "lead_created" },
+        });
+      }
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          at: "webhooks/leads",
+          event: "match_campaigns_failed",
+          clientId,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
   });
 
   return NextResponse.json({ ok: true, clientId, created });

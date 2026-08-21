@@ -3,6 +3,8 @@ import { db } from "@/db";
 import { agentTurnTraces, scheduledJobs } from "@/db/schema-sms";
 import { handleAgentTurn } from "./handlers/agent-turn";
 import { handleSendSms } from "./handlers/send-sms";
+import { handleCampaignTouch } from "./handlers/campaign-touch";
+import { queueDueTouches } from "@/lib/campaigns-server/match";
 import {
   claimDueJobs,
   completeJob,
@@ -88,6 +90,7 @@ export async function runDispatchCycle(
   const registry: Record<string, JobHandler> = {
     send_sms: (job) => handleSendSms(job, now),
     agent_turn: (job) => handleAgentTurn(job),
+    campaign_touch: (job) => handleCampaignTouch(job, now),
   };
 
   const counts: DispatchCounts = {
@@ -101,6 +104,9 @@ export async function runDispatchCycle(
 
   counts.requeued = await requeueStaleJobs(undefined, now());
   await pruneTraces(now());
+  // Les barreaux dus deviennent des jobs AVANT la réclamation : ils entrent
+  // ainsi dans le même cycle, au lieu d'attendre la minute suivante.
+  await queueDueTouches(200, now()).catch(() => 0);
 
   const jobs = await claimDueJobs(opts.limit ?? 50, now());
   counts.claimed = jobs.length;
