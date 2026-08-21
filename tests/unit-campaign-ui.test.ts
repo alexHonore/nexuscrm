@@ -18,7 +18,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: 
 
 const { CampaignEditor } = await import("@/components/admin/campaign-editor");
 const { CampaignsListClient } = await import("@/components/admin/campaigns-list-client");
-const { LadderTab, VariantsTab, EnrollmentsTab, AudienceTab } = await import(
+const { LadderTab, VariantsTab, EnrollmentsTab, AudienceTab, TriggerTab } = await import(
   "@/components/admin/campaign-editor/tabs"
 );
 
@@ -179,8 +179,25 @@ describe("onglets rendus isolément", () => {
     expect(html).toContain("suppressed");
   });
 
+  it("Déclencheur : les QUATRE options sont visibles, chacune expliquée", () => {
+    // Une liste déroulante cachait trois options sur quatre et n'expliquait le
+    // choix qu'une fois fait — sur le réglage qui décide QUI reçoit un SMS.
+    const html = wrap(createElement(TriggerTab, tabProps));
+    for (const label of [
+      "Nouveau lead",
+      "Changement de catégorie",
+      "Balayage périodique",
+      "Manuelle",
+    ]) {
+      expect(html, label).toContain(label);
+    }
+    // La pastille colorée est la même qu'à la création.
+    expect(html).toContain("#F59E0B");
+  });
+
   it("aucun onglet ne laisse fuir une clé i18n", () => {
     for (const html of [
+      wrap(createElement(TriggerTab, tabProps)),
       wrap(createElement(LadderTab, tabProps)),
       wrap(createElement(VariantsTab, tabProps)),
       wrap(createElement(AudienceTab, tabProps)),

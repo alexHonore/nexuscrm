@@ -563,7 +563,9 @@
       "low": "Réfléchit brièvement. Bon compromis quand l'assistant hésite entre deux outils.",
       "medium": "Réfléchit davantage. Utile sur des conversations qui partent dans tous les sens.",
       "high": "Réfléchit longuement. Peut ajouter plusieurs secondes avant chaque réponse — ça se remarque en conversation."
-    }
+    },
+    "floating": "Alias flottant",
+    "floatingHint": "Cet identifiant suit « la dernière version » : le modèle derrière peut changer sans que vous touchiez à rien. Préférez une version précise pour un assistant réglé."
   },
   "create": {
     "title": "Créer un assistant",

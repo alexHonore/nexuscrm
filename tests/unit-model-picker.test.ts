@@ -11,7 +11,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { describe, expect, it, vi } from "vitest";
 import assistantsFr from "../messages/fr/assistants.json";
 import commonFr from "../messages/fr/common.json";
-import { LABS, isInteractiveModel, labIdOf, labOf } from "@/lib/llm/labs";
+import { LABS, isFloatingAlias, isInteractiveModel, labIdOf, labOf } from "@/lib/llm/labs";
 import type { ModelDescriptor } from "@/lib/llm/types";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -55,6 +55,28 @@ describe("registre des laboratoires", () => {
 
   it("un identifiant sans préfixe ne fait pas planter", () => {
     expect(labIdOf("modele-sans-slash")).toBe("autre");
+  });
+
+  it("un même laboratoire ne se dédouble PAS sous deux préfixes", () => {
+    // OpenRouter publie « ~anthropic/claude-sonnet-latest » à côté de
+    // « anthropic/claude-sonnet-5 ». Sans normalisation, l'entonnoir montre
+    // deux tuiles Anthropic : une à sa couleur, une grise.
+    expect(labIdOf("~anthropic/claude-sonnet-latest")).toBe("anthropic");
+    expect(labOf("~anthropic/claude-sonnet-latest").name).toBe("Anthropic");
+    expect(labIdOf("meta/muse-spark-1.2")).toBe("meta-llama");
+    expect(labOf("meta/muse-spark-1.2").name).toBe("Meta");
+  });
+
+  it("un alias flottant est SIGNALÉ, pas masqué", () => {
+    // Derrière « -latest » le modèle change sans prévenir : un assistant dont
+    // le prompt et les garde-fous ont été réglés répond autrement du jour au
+    // lendemain, sans qu'aucune configuration n'ait bougé.
+    expect(isFloatingAlias("~anthropic/claude-sonnet-latest")).toBe(true);
+    expect(isFloatingAlias("google/gemini-flash-latest")).toBe(true);
+    expect(isFloatingAlias("openrouter/auto")).toBe(true);
+    expect(isFloatingAlias("anthropic/claude-sonnet-5")).toBe(false);
+    // Signalé ≠ écarté : il reste choisissable.
+    expect(isInteractiveModel("~anthropic/claude-sonnet-latest")).toBe(true);
   });
 
   it("les variantes différées et gratuites sont ÉCARTÉES", () => {

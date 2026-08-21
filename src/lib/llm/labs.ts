@@ -100,6 +100,56 @@ export const LABS: Record<string, LabBrand> = {
     noteFr: "Modèles Seed.",
     glyph: "hex",
   },
+  perplexity: {
+    id: "perplexity",
+    name: "Perplexity",
+    color: "#20808D",
+    noteFr: "Modèles Sonar, branchés sur une recherche web — inutile ici, et la latence s'en ressent.",
+    glyph: "orbit",
+  },
+  cohere: {
+    id: "cohere",
+    name: "Cohere",
+    color: "#39594D",
+    noteFr: "Modèles Command.",
+    glyph: "bars",
+  },
+  tencent: {
+    id: "tencent",
+    name: "Tencent",
+    color: "#0052D9",
+    noteFr: "Modèles Hunyuan.",
+    glyph: "loop",
+  },
+  nousresearch: {
+    id: "nousresearch",
+    name: "Nous Research",
+    color: "#8B5CF6",
+    noteFr: "Modèles Hermes, réglages ouverts.",
+    glyph: "spark",
+  },
+  openrouter: {
+    id: "openrouter",
+    name: "OpenRouter",
+    color: "#6467F2",
+    noteFr: "Routeurs automatiques — le modèle réel change d'un appel à l'autre, à éviter pour un assistant réglé.",
+    glyph: "cross",
+  },
+};
+
+/**
+ * Préfixes qui désignent la MÊME maison.
+ *
+ * OpenRouter préfixe d'un « ~ » ses espaces de noms d'alias flottants, et
+ * publie certaines gammes sous deux préfixes. Sans cette table, Anthropic
+ * apparaît DEUX FOIS dans l'entonnoir : une tuile à sa couleur, une tuile
+ * grise « ~anthropic ».
+ */
+const LAB_ALIASES: Record<string, string> = {
+  "~anthropic": "anthropic",
+  "~openai": "openai",
+  "~google": "google",
+  meta: "meta-llama",
 };
 
 /** Laboratoire inconnu : gris neutre plutôt qu'une couleur inventée. */
@@ -114,7 +164,22 @@ export const UNKNOWN_LAB: LabBrand = {
 /** Le préfixe d'un identifiant OpenRouter — « anthropic/claude-… » → anthropic. */
 export function labIdOf(modelId: string): string {
   const slash = modelId.indexOf("/");
-  return slash === -1 ? "autre" : modelId.slice(0, slash);
+  if (slash === -1) return "autre";
+  const prefix = modelId.slice(0, slash);
+  return LAB_ALIASES[prefix] ?? prefix;
+}
+
+/**
+ * Un identifiant qui pointe vers « la dernière version » plutôt que vers une
+ * version précise.
+ *
+ * Ce n'est pas interdit, c'est SIGNALÉ : le modèle derrière l'alias change
+ * sans prévenir, et un assistant dont le prompt et les garde-fous ont été
+ * réglés sur un modèle donné peut se mettre à répondre autrement du jour au
+ * lendemain, sans qu'aucune configuration n'ait bougé.
+ */
+export function isFloatingAlias(modelId: string): boolean {
+  return modelId.startsWith("~") || /-latest(:|$)/.test(modelId) || /^openrouter\//.test(modelId);
 }
 
 export function labOf(modelId: string): LabBrand {

@@ -26,10 +26,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { TRIGGER_KINDS, type TriggerKind } from "@/lib/campaigns/schema";
+import { TRIGGER_KINDS } from "@/lib/campaigns/schema";
 import { planLadder } from "@/lib/campaigns/ladder";
 import { analyzeSms } from "@/lib/sms/segments";
+import { cn } from "@/lib/utils";
 import { api } from "../api";
+import { TRIGGER_LOOK, TriggerIcon } from "../trigger-look";
 import type { CampaignTabProps } from "./types";
 
 const NONE = "__none__";
@@ -251,45 +253,51 @@ export function TriggerTab({ config, update, data }: CampaignTabProps) {
     <div className="space-y-4">
       <div className="space-y-1.5">
         <Label>{t("editor.trigger.kind")}</Label>
-        <Select
-          items={TRIGGER_KINDS.map((k) => ({ value: k, label: t(`list.trigger.${k}`) }))}
-          value={kind}
-          onValueChange={(v) =>
-            update((d) => {
-              const next = String(v) as TriggerKind;
-              d.trigger =
-                next === "lead_created"
-                  ? { kind: "lead_created", sourceIds: [] }
-                  : next === "category_changed"
-                    ? { kind: "category_changed", toCategoryIds: [] }
-                    : next === "scheduled"
-                      ? { kind: "scheduled", everyHours: 24 }
-                      : { kind: "manual" };
-            })
-          }
-        >
-          <SelectTrigger className="min-h-11 w-full md:min-h-9 md:w-80">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {TRIGGER_KINDS.map((k) => (
-              <SelectItem key={k} value={k}>
-                {t(`list.trigger.${k}`)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-sm text-muted-foreground">
-          {t(
-            kind === "manual"
-              ? "editor.trigger.manualHint"
-              : kind === "lead_created"
-                ? "editor.trigger.leadHint"
-                : kind === "category_changed"
-                  ? "editor.trigger.categoryHint"
-                  : "editor.trigger.scheduledHint",
-          )}
-        </p>
+        {/* Quatre tuiles plutôt qu'une liste déroulante : elle cachait trois
+            options sur quatre et n'expliquait le choix qu'une fois fait. Même
+            pastille et même couleur qu'à la création. */}
+        <div className="grid gap-2 sm:grid-cols-2">
+          {TRIGGER_KINDS.map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() =>
+                update((d) => {
+                  d.trigger =
+                    k === "lead_created"
+                      ? { kind: "lead_created", sourceIds: [] }
+                      : k === "category_changed"
+                        ? { kind: "category_changed", toCategoryIds: [] }
+                        : k === "scheduled"
+                          ? { kind: "scheduled", everyHours: 24 }
+                          : { kind: "manual" };
+                })
+              }
+              className={cn(
+                "flex items-start gap-2.5 rounded-lg border p-2.5 text-left text-sm",
+                "transition-all duration-150 hover:border-[color:var(--tone)] hover:bg-[color:var(--tone)]/5",
+                kind === k && "border-[color:var(--tone)] bg-[color:var(--tone)]/5",
+              )}
+              style={{ ["--tone" as string]: TRIGGER_LOOK[k].color }}
+            >
+              <TriggerIcon kind={k} />
+              <span className="min-w-0">
+                <span className="font-medium">{t(`list.trigger.${k}`)}</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  {t(
+                    k === "manual"
+                      ? "editor.trigger.manualHint"
+                      : k === "lead_created"
+                        ? "editor.trigger.leadHint"
+                        : k === "category_changed"
+                          ? "editor.trigger.categoryHint"
+                          : "editor.trigger.scheduledHint",
+                  )}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {config.trigger.kind === "lead_created" ? (

@@ -1,12 +1,21 @@
 "use client";
 
-import { CheckIcon, ChevronLeftIcon, Loader2, RefreshCwIcon, SearchIcon, WrenchIcon, ZapIcon } from "lucide-react";
+import {
+  CheckIcon,
+  ChevronLeftIcon,
+  Loader2,
+  RefreshCwIcon,
+  SearchIcon,
+  TriangleAlertIcon,
+  WrenchIcon,
+  ZapIcon,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { LABS, isInteractiveModel, labIdOf, labOf, type LabBrand } from "@/lib/llm/labs";
+import { LABS, isFloatingAlias, isInteractiveModel, labIdOf, labOf, type LabBrand } from "@/lib/llm/labs";
 import type { ModelDescriptor } from "@/lib/llm/types";
 import { cn } from "@/lib/utils";
 import { LabMark } from "./lab-mark";
@@ -107,6 +116,13 @@ export function ModelPicker({
         </Button>
       </div>
 
+      {isFloatingAlias(value) ? (
+        <p className="flex items-start gap-1.5 text-xs text-amber-600">
+          <TriangleAlertIcon className="mt-px size-3.5 shrink-0" />
+          {t("model.floatingHint")}
+        </p>
+      ) : null}
+
       <Steps step={step} />
 
       {step === "lab" ? (
@@ -203,6 +219,14 @@ export function ModelPicker({
                       {model.supportsReasoning ? (
                         <Badge variant="outline" className="gap-1 text-[10px]">
                           <ZapIcon className="size-2.5" /> {t("model.reasons")}
+                        </Badge>
+                      ) : null}
+                      {/* Signalé, pas masqué : derrière un alias le modèle
+                          change sans prévenir, et un assistant réglé sur
+                          celui d'hier répond autrement demain. */}
+                      {isFloatingAlias(model.id) ? (
+                        <Badge variant="outline" className="gap-1 text-[10px] text-amber-600">
+                          <TriangleAlertIcon className="size-2.5" /> {t("model.floating")}
                         </Badge>
                       ) : null}
                       {model.inputPerMTok !== undefined ? (

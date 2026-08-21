@@ -563,7 +563,9 @@
       "low": "Thinks briefly. A good trade-off when the assistant hesitates between two tools.",
       "medium": "Thinks more. Useful on conversations that wander.",
       "high": "Thinks at length. Can add several seconds before each reply — noticeable in a conversation."
-    }
+    },
+    "floating": "Floating alias",
+    "floatingHint": "This id follows “latest”: the model behind it can change without you touching anything. Prefer a pinned version for a tuned assistant."
   },
   "create": {
     "title": "Create an assistant",
