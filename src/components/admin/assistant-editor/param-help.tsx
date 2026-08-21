@@ -1,0 +1,106 @@
+"use client";
+
+import { AlertTriangle, HelpCircle } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { createContext, useContext } from "react";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
+import type { ParamDoc } from "@/lib/docs/types";
+
+/**
+ * L'aide en ligne d'un paramètre.
+ *
+ * Le texte vient du registre serveur (surcouches administrateur comprises) et
+ * descend par contexte : écrire l'aide dans chaque composant la condamnerait à
+ * diverger du schéma. Un champ sans documentation ne s'affiche pas sans aide —
+ * il n'existe pas, un test le refuse.
+ */
+
+export type ParamDocView = ParamDoc & { overridden: boolean };
+
+const DocsContext = createContext<Record<string, ParamDocView>>({});
+
+export function ParamDocsProvider({
+  docs,
+  children,
+}: {
+  docs: Record<string, ParamDocView>;
+  children: React.ReactNode;
+}) {
+  return <DocsContext.Provider value={docs}>{children}</DocsContext.Provider>;
+}
+
+export function useParamDoc(path: string): ParamDocView | undefined {
+  const docs = useContext(DocsContext);
+  return docs[path] ?? docs[path.replace(/\[\d+\]/g, "[]")];
+}
+
+/** Bulle d'aide : quoi, pourquoi, effet, et surtout le piège. */
+export function ParamHelp({ path }: { path: string }) {
+  const t = useTranslations("assistants");
+  const doc = useParamDoc(path);
+  if (!doc) return null;
+
+  return (
+    <Popover>
+      <PopoverTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-6 text-muted-foreground"
+            aria-label={`${t("editor.help.show")} — ${doc.labelFr}`}
+          />
+        }
+      >
+        <HelpCircle className="size-3.5" />
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 space-y-3 text-sm">
+        <div>
+          <p className="font-medium">{doc.labelFr}</p>
+          <p className="mt-1 text-muted-foreground">{doc.whatFr}</p>
+        </div>
+        <Section title={t("editor.help.why")} body={doc.whyFr} />
+        {doc.effectFr ? <Section title={t("editor.help.effect")} body={doc.effectFr} /> : null}
+        {doc.pitfallsFr ? (
+          <div className="rounded-md bg-amber-500/10 p-2">
+            <p className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+              <AlertTriangle className="size-3.5" /> {t("editor.help.pitfalls")}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">{doc.pitfallsFr}</p>
+          </div>
+        ) : null}
+        <p className="font-mono text-[11px] text-muted-foreground">{doc.path}</p>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function Section({ title, body }: { title: string; body: string }) {
+  return (
+    <div>
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
+      <p className="mt-0.5 text-xs text-muted-foreground">{body}</p>
+    </div>
+  );
+}
+
+/** Libellé + bulle d'aide — le couple répété dans tous les onglets. */
+export function FieldLabel({
+  path,
+  htmlFor,
+  children,
+}: {
+  path: string;
+  htmlFor?: string;
+  children?: React.ReactNode;
+}) {
+  const doc = useParamDoc(path);
+  return (
+    <div className="flex items-center gap-0.5">
+      <Label htmlFor={htmlFor}>{children ?? doc?.labelFr ?? path}</Label>
+      <ParamHelp path={path} />
+    </div>
+  );
+}

@@ -68,6 +68,7 @@ export const LAYER_IDS = ["L0", "L1", "L2", "L3", "L4", "L5", "L6"] as const;
 export type LayerId = (typeof LAYER_IDS)[number];
 
 export const PROVIDER_IDS = ["openrouter", "anthropic", "google", "openai"] as const;
+export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 // ── Identité (L1) ────────────────────────────────────────────────────────────
 

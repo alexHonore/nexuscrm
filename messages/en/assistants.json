@@ -62,5 +62,221 @@
     "emptyCore": "No prompt core — run the seed",
     "saved": "Saved",
     "genericError": "Something went wrong"
-  }
+  },
+  "list": {
+    "title": "AI assistants",
+    "subtitle": "Every assistant is fully editable: goal, tone, tools, guardrails and prompt.",
+    "new": "New assistant",
+    "import": "Import",
+    "empty": {
+      "title": "No assistants",
+      "desc": "Create an assistant or import one from a JSON file."
+    },
+    "columns": {
+      "name": "Name",
+      "status": "Status",
+      "goal": "Goal",
+      "compiled": "Prompt",
+      "updated": "Updated"
+    },
+    "status": {
+      "draft": "Draft",
+      "active": "Active",
+      "archived": "Archived"
+    },
+    "compiled": {
+      "fresh": "Up to date",
+      "stale": "Needs recompile",
+      "never": "Never compiled"
+    },
+    "suite": {
+      "passed": "Suite green",
+      "failed": "Suite red"
+    },
+    "actions": {
+      "edit": "Edit",
+      "export": "Export",
+      "duplicate": "Duplicate",
+      "delete": "Delete",
+      "archive": "Archive"
+    },
+    "deleteConfirm": {
+      "title": "Delete “{name}”?",
+      "body": "This assistant has never sent a message: it will be permanently deleted.",
+      "bodyArchive": "This assistant has already sent messages. It will be archived, not deleted — conversations must stay readable alongside the assistant that wrote them.",
+      "confirm": "Confirm"
+    },
+    "created": "Assistant created",
+    "deleted": "Assistant deleted",
+    "archived": "Assistant archived"
+  },
+  "editor": {
+    "back": "Assistants",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Changes saved",
+    "noChanges": "No changes",
+    "compile": "Compile",
+    "compiling": "Compiling…",
+    "compiled": "Prompt compiled (v{version})",
+    "runSuite": "Run suite",
+    "runningSuite": "Running…",
+    "activate": "Activate",
+    "activated": "Assistant activated",
+    "unsaved": "Unsaved changes",
+    "unsavedLeave": "You have unsaved changes. Leaving this page will discard them.",
+    "stale": {
+      "title": "Stale prompt",
+      "body": "The configuration changed since the last compile. Settings re-read every turn (tools, model, budgets) already apply; the prompt TEXT is still the one from the last compile.",
+      "bodyActive": "This assistant is active. Settings re-read every turn already apply to ongoing conversations; the prompt text is still the older one. Recompile to align them."
+    },
+    "effects": {
+      "immediate": "{count, plural, one {# setting applies} other {# settings apply}} from the next message",
+      "pending": "{count, plural, one {# setting is waiting} other {# settings are waiting}} for a recompile"
+    },
+    "tabs": {
+      "identity": "Identity",
+      "goal": "Goal",
+      "approach": "Approach",
+      "knowledge": "Knowledge",
+      "objections": "Objections",
+      "tools": "Tools",
+      "guardrails": "Guardrails",
+      "model": "Model",
+      "prompt": "Prompt",
+      "test": "Test",
+      "json": "JSON"
+    },
+    "help": {
+      "what": "What it does",
+      "why": "Why",
+      "effect": "Effect",
+      "pitfalls": "Watch out",
+      "show": "Help",
+      "related": "See also"
+    },
+    "goal": {
+      "primary": "Primary goal",
+      "fallbacks": "Fallback chain",
+      "addFallback": "Add a fallback",
+      "removeFallback": "Remove",
+      "fallbackAt": "Fallback {n}",
+      "chainNote": "A SOFT refusal steps down one rung. A hard refusal never touches the chain: the conversation closes.",
+      "noFallbacks": "No fallbacks — a postponement ends the follow-up."
+    },
+    "knowledge": {
+      "add": "Add a fact",
+      "placeholder": "A verifiable fact the assistant may state",
+      "empty": "No allowed claims: the assistant may not state any business information.",
+      "warning": "Anything listed here will be stated in writing on behalf of a licensed broker."
+    },
+    "objections": {
+      "none": "No packs available.",
+      "items": "{count} responses"
+    },
+    "tools": {
+      "required": "Required",
+      "requiredNote": "“stop” and “handoff” cannot be disabled: they are how a refusal is honoured and a human is brought in."
+    },
+    "guardrails": {
+      "coreTitle": "Core rules",
+      "coreNote": "Shared by every assistant. Edit them under Guardrails; here they can only be overridden for this assistant.",
+      "ownTitle": "Rules specific to this assistant",
+      "ownEmpty": "No specific rules — the core rules apply alone.",
+      "manage": "Manage guardrails"
+    },
+    "model": {
+      "loadModels": "Load list",
+      "loading": "Loading…",
+      "supportsTools": "Tools",
+      "noTools": "No tools",
+      "toolWarning": "This model does not support tools: the assistant will not be able to check the calendar or book.",
+      "routingTitle": "Routing (OpenRouter)",
+      "routingNote": "These values apply to the router only; direct providers ignore them."
+    },
+    "prompt": {
+      "modeComposed": "Composed from the tabs",
+      "modeRaw": "Free prompt",
+      "layers": "Layers",
+      "overridden": "Overridden",
+      "generated": "Generated",
+      "override": "Override",
+      "resetLayer": "Reset",
+      "runtimeLayer": "Runtime layer (L7)",
+      "notCompiled": "Not compiled yet — run a compile to see the prompt.",
+      "rawWarning": "In free mode the tabs no longer write the prompt. The configuration still drives runtime behaviour."
+    },
+    "test": {
+      "run": "Run suite",
+      "lastRun": "Last run: {when}",
+      "never": "Never run",
+      "passed": "{passed}/{total} fixtures passed",
+      "blocking": "Blocking",
+      "output": "Produced reply",
+      "reason": "Failure reason"
+    },
+    "json": {
+      "title": "Raw configuration",
+      "copy": "Copy",
+      "copied": "Copied",
+      "download": "Export",
+      "annotated": "With documentation",
+      "invalid": "Invalid JSON",
+      "apply": "Apply",
+      "applied": "Configuration replaced — remember to save."
+    },
+    "errors": {
+      "save": "Could not save",
+      "compile": "Could not compile",
+      "suite": "The suite could not run",
+      "activate": "Activation refused",
+      "staleCompile": "The prompt must be recompiled before activation.",
+      "suiteNotPassed": "The guardrail suite must be green before activation."
+    },
+    "identity": {
+      "namedPersonWarning": "The assistant writes on behalf of a person but no account is attached: meetings will fall back to an administrator."
+    }
+  },
+  "import": {
+    "title": "Import an assistant",
+    "pick": "Choose a JSON file",
+    "bindings": "Bindings",
+    "bindingsNote": "The file comes from another installation: its ids point at nobody here. Pick the local equivalent for each reference.",
+    "unbound": "Leave empty",
+    "warnings": "Warnings",
+    "confirm": "Import",
+    "importing": "Importing…",
+    "done": "Assistant imported as a draft",
+    "invalid": "This file is not a valid assistant export."
+  },
+  "goalType": {
+    "video_meeting": "Video meeting",
+    "in_person_meeting": "In-person meeting",
+    "phone_call": "Phone call",
+    "collect_email": "Collect email",
+    "collect_callback_time": "Callback time",
+    "qualify_only": "Qualify only",
+    "handoff": "Hand off"
+  },
+  "qualificationField": {
+    "project_type": "Project type",
+    "timing": "Timing",
+    "neighbourhood": "Neighbourhood",
+    "budget": "Budget",
+    "property_type": "Property type",
+    "financing": "Financing",
+    "current_situation": "Current situation",
+    "email": "Email"
+  },
+  "tool": {
+    "get_slots": "Check availability",
+    "book_meeting": "Book the meeting",
+    "update_qualification": "Save qualification",
+    "schedule_followup": "Schedule a follow-up",
+    "stop": "Stop and unsubscribe",
+    "handoff": "Hand off to a human",
+    "transfer_assistant": "Transfer to another assistant",
+    "close_conversation": "Close the conversation"
+  },
+  "cancel": "Cancel"
 }

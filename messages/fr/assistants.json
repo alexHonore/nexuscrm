@@ -62,5 +62,221 @@
     "emptyCore": "Aucun noyau de prompt — exécutez le seed",
     "saved": "Enregistré",
     "genericError": "Une erreur est survenue"
-  }
+  },
+  "list": {
+    "title": "Assistants IA",
+    "subtitle": "Chaque assistant est entièrement modifiable : objectif, ton, outils, garde-fous et prompt.",
+    "new": "Nouvel assistant",
+    "import": "Importer",
+    "empty": {
+      "title": "Aucun assistant",
+      "desc": "Créez un assistant ou importez-en un depuis un fichier JSON."
+    },
+    "columns": {
+      "name": "Nom",
+      "status": "État",
+      "goal": "Objectif",
+      "compiled": "Prompt",
+      "updated": "Modifié"
+    },
+    "status": {
+      "draft": "Brouillon",
+      "active": "Actif",
+      "archived": "Archivé"
+    },
+    "compiled": {
+      "fresh": "À jour",
+      "stale": "À recompiler",
+      "never": "Jamais compilé"
+    },
+    "suite": {
+      "passed": "Suite verte",
+      "failed": "Suite rouge"
+    },
+    "actions": {
+      "edit": "Modifier",
+      "export": "Exporter",
+      "duplicate": "Dupliquer",
+      "delete": "Supprimer",
+      "archive": "Archiver"
+    },
+    "deleteConfirm": {
+      "title": "Supprimer « {name} » ?",
+      "body": "Cet assistant n'a jamais écrit de message : il sera supprimé définitivement.",
+      "bodyArchive": "Cet assistant a déjà écrit des messages. Il sera archivé, pas supprimé — les conversations doivent rester relisibles avec l'assistant qui les a rédigées.",
+      "confirm": "Confirmer"
+    },
+    "created": "Assistant créé",
+    "deleted": "Assistant supprimé",
+    "archived": "Assistant archivé"
+  },
+  "editor": {
+    "back": "Assistants",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "saved": "Modifications enregistrées",
+    "noChanges": "Aucune modification",
+    "compile": "Compiler",
+    "compiling": "Compilation…",
+    "compiled": "Prompt compilé (v{version})",
+    "runSuite": "Lancer la suite",
+    "runningSuite": "Exécution…",
+    "activate": "Activer",
+    "activated": "Assistant activé",
+    "unsaved": "Modifications non enregistrées",
+    "unsavedLeave": "Vous avez des modifications non enregistrées. Quitter cette page les perdra.",
+    "stale": {
+      "title": "Prompt périmé",
+      "body": "La configuration a changé depuis la dernière compilation. Les réglages relus à chaque tour (outils, modèle, budgets) s'appliquent déjà ; le TEXTE du prompt, lui, reste celui de la dernière compilation.",
+      "bodyActive": "Cet assistant est actif. Les réglages relus à chaque tour s'appliquent déjà aux conversations en cours ; le texte du prompt reste celui d'avant. Recompilez pour aligner les deux."
+    },
+    "effects": {
+      "immediate": "{count, plural, one {# réglage s'applique} other {# réglages s'appliquent}} dès le prochain message",
+      "pending": "{count, plural, one {# réglage attend} other {# réglages attendent}} la recompilation"
+    },
+    "tabs": {
+      "identity": "Identité",
+      "goal": "Objectif",
+      "approach": "Approche",
+      "knowledge": "Connaissances",
+      "objections": "Objections",
+      "tools": "Outils",
+      "guardrails": "Garde-fous",
+      "model": "Modèle",
+      "prompt": "Prompt",
+      "test": "Test",
+      "json": "JSON"
+    },
+    "help": {
+      "what": "Ce que ça fait",
+      "why": "Pourquoi",
+      "effect": "Effet",
+      "pitfalls": "Attention",
+      "show": "Aide",
+      "related": "Voir aussi"
+    },
+    "goal": {
+      "primary": "Objectif principal",
+      "fallbacks": "Chaîne de replis",
+      "addFallback": "Ajouter un repli",
+      "removeFallback": "Retirer",
+      "fallbackAt": "Repli {n}",
+      "chainNote": "Un refus MOU descend d'un cran. Un refus ferme ne touche jamais la chaîne : la conversation se clôt.",
+      "noFallbacks": "Aucun repli — un report met fin à la relance."
+    },
+    "knowledge": {
+      "add": "Ajouter un fait",
+      "placeholder": "Un fait vérifiable que l'assistant peut affirmer",
+      "empty": "Aucun fait autorisé : l'assistant ne pourra affirmer aucune information d'affaires.",
+      "warning": "Tout ce qui figure ici sera affirmé par écrit au nom d'un courtier titulaire d'un permis."
+    },
+    "objections": {
+      "none": "Aucun paquet disponible.",
+      "items": "{count} réponses"
+    },
+    "tools": {
+      "required": "Requis",
+      "requiredNote": "« stop » et « handoff » ne se désactivent pas : ce sont les moyens de respecter un refus et de passer la main."
+    },
+    "guardrails": {
+      "coreTitle": "Règles du noyau",
+      "coreNote": "Communes à tous les assistants. Modifiables dans Garde-fous ; ici, on peut seulement les surcharger pour cet assistant.",
+      "ownTitle": "Règles propres à cet assistant",
+      "ownEmpty": "Aucune règle propre — les règles du noyau s'appliquent seules.",
+      "manage": "Gérer les garde-fous"
+    },
+    "model": {
+      "loadModels": "Charger la liste",
+      "loading": "Chargement…",
+      "supportsTools": "Outils",
+      "noTools": "Sans outils",
+      "toolWarning": "Ce modèle ne prend pas en charge les outils : l'assistant ne pourra ni consulter l'agenda ni réserver.",
+      "routingTitle": "Routage (OpenRouter)",
+      "routingNote": "Ces valeurs ne s'appliquent qu'au routeur ; les fournisseurs directs les ignorent."
+    },
+    "prompt": {
+      "modeComposed": "Composé depuis les onglets",
+      "modeRaw": "Prompt libre",
+      "layers": "Couches",
+      "overridden": "Modifié",
+      "generated": "Généré",
+      "override": "Surcharger",
+      "resetLayer": "Rétablir",
+      "runtimeLayer": "Couche d'exécution (L7)",
+      "notCompiled": "Pas encore compilé — lancez une compilation pour voir le prompt.",
+      "rawWarning": "En mode libre, les onglets ne rédigent plus le prompt. La configuration continue de piloter l'exécution."
+    },
+    "test": {
+      "run": "Lancer la suite",
+      "lastRun": "Dernière exécution : {when}",
+      "never": "Jamais exécutée",
+      "passed": "{passed}/{total} fixtures passées",
+      "blocking": "Bloquante",
+      "output": "Réponse produite",
+      "reason": "Raison de l'échec"
+    },
+    "json": {
+      "title": "Configuration brute",
+      "copy": "Copier",
+      "copied": "Copié",
+      "download": "Exporter",
+      "annotated": "Avec la documentation",
+      "invalid": "JSON invalide",
+      "apply": "Appliquer",
+      "applied": "Configuration remplacée — pensez à enregistrer."
+    },
+    "errors": {
+      "save": "Impossible d'enregistrer",
+      "compile": "Impossible de compiler",
+      "suite": "La suite n'a pas pu s'exécuter",
+      "activate": "Activation refusée",
+      "staleCompile": "Le prompt doit être recompilé avant l'activation.",
+      "suiteNotPassed": "La suite de garde-fous doit être verte avant l'activation."
+    },
+    "identity": {
+      "namedPersonWarning": "L'assistant écrit au nom d'une personne mais aucun compte n'y est rattaché : les rendez-vous retomberont sur un administrateur."
+    }
+  },
+  "import": {
+    "title": "Importer un assistant",
+    "pick": "Choisir un fichier JSON",
+    "bindings": "Liaisons",
+    "bindingsNote": "Le fichier vient d'une autre installation : ses identifiants n'y désignent personne ici. Choisissez l'équivalent local de chaque référence.",
+    "unbound": "Laisser vide",
+    "warnings": "Avertissements",
+    "confirm": "Importer",
+    "importing": "Import…",
+    "done": "Assistant importé en brouillon",
+    "invalid": "Ce fichier n'est pas un export d'assistant valide."
+  },
+  "goalType": {
+    "video_meeting": "Rencontre vidéo",
+    "in_person_meeting": "Rencontre en personne",
+    "phone_call": "Appel téléphonique",
+    "collect_email": "Obtenir le courriel",
+    "collect_callback_time": "Moment de rappel",
+    "qualify_only": "Qualifier seulement",
+    "handoff": "Passer la main"
+  },
+  "qualificationField": {
+    "project_type": "Type de projet",
+    "timing": "Échéance",
+    "neighbourhood": "Secteur",
+    "budget": "Budget",
+    "property_type": "Type de propriété",
+    "financing": "Financement",
+    "current_situation": "Situation actuelle",
+    "email": "Courriel"
+  },
+  "tool": {
+    "get_slots": "Consulter les disponibilités",
+    "book_meeting": "Réserver la rencontre",
+    "update_qualification": "Enregistrer la qualification",
+    "schedule_followup": "Programmer une relance",
+    "stop": "Arrêter et désabonner",
+    "handoff": "Passer à un humain",
+    "transfer_assistant": "Transférer vers un autre assistant",
+    "close_conversation": "Clore la conversation"
+  },
+  "cancel": "Annuler"
 }
