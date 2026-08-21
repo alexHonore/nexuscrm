@@ -43,6 +43,71 @@
       "confirm": "Confirm"
     }
   },
+  "create": {
+    "title": "Create a campaign",
+    "subtitle": "Three ways to get there — each produces a complete campaign, as a draft.",
+    "back": "Back",
+    "ai": {
+      "name": "Describe your campaign",
+      "badge": "AI",
+      "pitch": "Write down who you want to reach. We ask two or three questions, then set everything up.",
+      "time": "About a minute",
+      "title": "Describe your campaign",
+      "subtitle": "A few questions, and the campaign is ready to review.",
+      "prompt": "Who do you want to reach, and on what occasion?",
+      "example": "For example: “wake up buyers I haven't heard from in six months, with two follow-ups”",
+      "placeholder": "Describe your campaign…",
+      "thinking": "Thinking…",
+      "ready": "Ready to create",
+      "createIt": "Create this campaign",
+      "noProvider": "No model key configured — assisted creation needs a provider.",
+      "retry": "Unreadable model reply. Rephrase and try again.",
+      "failed": "Assisted creation did not complete."
+    },
+    "simple": {
+      "name": "Simple setup",
+      "pitch": "Three choices: what triggers it, who it targets, and how many follow-ups.",
+      "time": "About two minutes",
+      "title": "Simple setup",
+      "subtitle": "The three settings that decide who gets what, and when.",
+      "fieldName": "Campaign name",
+      "trigger": "What starts the campaign?",
+      "triggerHint": {
+        "lead_created": "Every new lead is enrolled as it arrives.",
+        "category_changed": "When a contact moves to another pipeline stage.",
+        "scheduled": "A regular sweep of your database, using a filter.",
+        "manual": "You enroll people yourself, one at a time."
+      },
+      "cold": "Who is targeted?",
+      "coldDays": "No contact for {days} days",
+      "followUps": "How many follow-ups?",
+      "none": "None",
+      "noneHint": "A single message. No insisting.",
+      "one": "One",
+      "oneHint": "One reminder three days later. The usual setting.",
+      "two": "Two",
+      "twoHint": "Two spaced reminders. Watch the opt-out rate.",
+      "createIt": "Create this campaign"
+    },
+    "complex": {
+      "name": "Full setup",
+      "pitch": "Every setting: trigger, audience, ladder, A/B variants, caps, consent.",
+      "time": "Six tabs",
+      "title": "Full setup",
+      "subtitle": "We create a draft, then you configure everything in the editor.",
+      "note": "The campaign is created as a draft, with cautious defaults. Nothing goes out until you activate it.",
+      "createIt": "Create and open the editor"
+    },
+    "summary": {
+      "ladder": "The message ladder",
+      "now": "Right away",
+      "dayN": "Day {days}",
+      "written": "text provided",
+      "byAssistant": "written by the assistant",
+      "abTest": "A/B test",
+      "dailyCap": "{count, plural, one {# person / day} other {# people / day}}"
+    }
+  },
   "editor": {
     "back": "Campaigns",
     "save": "Save",

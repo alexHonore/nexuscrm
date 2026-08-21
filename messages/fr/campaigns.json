@@ -43,6 +43,71 @@
       "confirm": "Confirmer"
     }
   },
+  "create": {
+    "title": "Créer une campagne",
+    "subtitle": "Trois façons d'y arriver — toutes produisent une campagne complète, en brouillon.",
+    "back": "Retour",
+    "ai": {
+      "name": "Décrivez votre campagne",
+      "badge": "IA",
+      "pitch": "Écrivez qui vous voulez rejoindre. On vous pose deux ou trois questions, puis tout est préparé.",
+      "time": "Environ une minute",
+      "title": "Décrivez votre campagne",
+      "subtitle": "Quelques questions, et la campagne est prête à relire.",
+      "prompt": "Qui voulez-vous rejoindre, et à quelle occasion ?",
+      "example": "Par exemple : « réveiller mes acheteurs sans nouvelles depuis six mois, avec deux relances »",
+      "placeholder": "Décrivez votre campagne…",
+      "thinking": "Réflexion…",
+      "ready": "Prêt à créer",
+      "createIt": "Créer cette campagne",
+      "noProvider": "Aucune clé de modèle configurée — la création assistée a besoin d'un fournisseur.",
+      "retry": "Réponse illisible du modèle. Reformulez et réessayez.",
+      "failed": "La création assistée n'a pas abouti."
+    },
+    "simple": {
+      "name": "Configuration simple",
+      "pitch": "Trois choix : ce qui déclenche, qui est visé, et combien de relances.",
+      "time": "Environ deux minutes",
+      "title": "Configuration simple",
+      "subtitle": "Les trois réglages qui décident qui reçoit quoi, et quand.",
+      "fieldName": "Nom de la campagne",
+      "trigger": "Qu'est-ce qui déclenche la campagne ?",
+      "triggerHint": {
+        "lead_created": "Chaque nouveau lead est inscrit dès son arrivée.",
+        "category_changed": "Quand un contact change d'étape dans le pipeline.",
+        "scheduled": "Un balayage régulier de votre base, selon un filtre.",
+        "manual": "Vous inscrivez les gens vous-même, un par un."
+      },
+      "cold": "Qui est visé ?",
+      "coldDays": "Sans nouvelles depuis {days} jours",
+      "followUps": "Combien de relances ?",
+      "none": "Aucune",
+      "noneHint": "Un seul message. On n'insiste pas.",
+      "one": "Une",
+      "oneHint": "Un rappel trois jours plus tard. Le réglage habituel.",
+      "two": "Deux",
+      "twoHint": "Deux rappels espacés. Attention aux désabonnements.",
+      "createIt": "Créer cette campagne"
+    },
+    "complex": {
+      "name": "Configuration complète",
+      "pitch": "Tous les réglages : déclencheur, audience, échelle, variantes A/B, plafonds, consentement.",
+      "time": "Six onglets",
+      "title": "Configuration complète",
+      "subtitle": "On crée un brouillon, puis vous réglez tout dans l'éditeur.",
+      "note": "La campagne est créée en brouillon, avec des valeurs par défaut prudentes. Rien ne part avant que vous l'activiez.",
+      "createIt": "Créer et ouvrir l'éditeur"
+    },
+    "summary": {
+      "ladder": "L'échelle des messages",
+      "now": "Tout de suite",
+      "dayN": "Jour {days}",
+      "written": "texte dicté",
+      "byAssistant": "rédigé par l'assistant",
+      "abTest": "Test A/B",
+      "dailyCap": "{count, plural, one {# personne / jour} other {# personnes / jour}}"
+    }
+  },
   "editor": {
     "back": "Campagnes",
     "save": "Enregistrer",

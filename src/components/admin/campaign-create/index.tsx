@@ -19,53 +19,48 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { GOAL_TYPES, type AssistantConfig, type GoalType } from "@/lib/assistants/schema";
-import { briefToConfig } from "@/lib/assistants/creator";
-import { cn } from "@/lib/utils";
-import { ApiError, api } from "../api";
 import {
   ChatIllustration,
   DashboardIllustration,
   FormIllustration,
   SparkleTrail,
 } from "../create-illustrations";
+import { briefToCampaignConfig } from "@/lib/campaigns/creator";
+import type { CampaignConfig, TriggerKind } from "@/lib/campaigns/schema";
+import { cn } from "@/lib/utils";
+import { TRIGGER_LOOK, TriggerIcon } from "../trigger-look";
+import { ApiError, api } from "../api";
 
 type Mode = "choose" | "ai" | "simple" | "complex";
+
 type Turn = { role: "user" | "assistant"; content: string };
 
 /**
- * Création d'un assistant — trois chemins vers le même objet.
+ * Création d'une campagne — mêmes trois portes que pour un assistant.
  *
- * Le formulaire complet compte onze onglets. C'est ce qu'il faut pour régler un
- * assistant en production, et c'est beaucoup trop pour en créer un premier :
- * on abandonne avant d'avoir compris ce qu'on configure. D'où trois portes
- * d'entrée — décrire son besoin, répondre à quatre questions, ou tout régler —
- * qui produisent toutes une configuration complète et valide.
+ * Une campagne se règle sur six onglets et met en jeu des envois réels à de
+ * vraies personnes. Commencer par un brouillon vide invite à activer sans avoir
+ * compris ce que déclenche quoi.
  */
-export function AssistantCreateDialog({ trigger }: { trigger: React.ReactNode }) {
-  const t = useTranslations("assistants");
+export function CampaignCreateDialog({ trigger }: { trigger: React.ReactNode }) {
+  const t = useTranslations("campaigns");
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("choose");
   const [busy, setBusy] = useState(false);
 
-  const reset = () => {
-    setMode("choose");
-    setBusy(false);
-  };
-
-  /** Enregistre la configuration et ouvre l'éditeur dessus. */
-  const create = async (config: AssistantConfig, opening?: string) => {
+  const create = async (config: CampaignConfig) => {
     setBusy(true);
     try {
-      const created = await api<{ id: string }>("/api/assistants", {
+      const created = await api<{ id: string }>("/api/campaigns", {
         method: "POST",
         body: JSON.stringify(config),
       });
       toast.success(t("list.created"));
       setOpen(false);
-      reset();
-      router.push(`/admin/assistants/${created.id}${opening ?? ""}`);
+      setMode("choose");
+      setBusy(false);
+      router.push(`/admin/campaigns/${created.id}`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : t("editor.errors.save"));
       setBusy(false);
@@ -77,7 +72,10 @@ export function AssistantCreateDialog({ trigger }: { trigger: React.ReactNode })
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) reset();
+        if (!next) {
+          setMode("choose");
+          setBusy(false);
+        }
       }}
     >
       <DialogTrigger render={trigger as React.ReactElement} />
@@ -111,20 +109,12 @@ export function AssistantCreateDialog({ trigger }: { trigger: React.ReactNode })
   );
 }
 
-// ── Choix du mode ────────────────────────────────────────────────────────────
-
 function ModeChooser({ onPick }: { onPick: (mode: Mode) => void }) {
-  const t = useTranslations("assistants");
-
+  const t = useTranslations("campaigns");
   const modes = [
-    {
-      key: "ai" as const,
-      color: "var(--color-primary)",
-      Illustration: ChatIllustration,
-      badge: t("create.ai.badge"),
-    },
-    { key: "simple" as const, color: "#10B981", Illustration: FormIllustration, badge: null },
-    { key: "complex" as const, color: "#8B5CF6", Illustration: DashboardIllustration, badge: null },
+    { key: "ai" as const, color: "var(--color-primary)", Illustration: ChatIllustration, badge: true },
+    { key: "simple" as const, color: "#10B981", Illustration: FormIllustration, badge: false },
+    { key: "complex" as const, color: "#8B5CF6", Illustration: DashboardIllustration, badge: false },
   ];
 
   return (
@@ -144,10 +134,7 @@ function ModeChooser({ onPick }: { onPick: (mode: Mode) => void }) {
         >
           <span
             className="flex size-20 shrink-0 items-center justify-center rounded-lg transition-transform duration-200 group-hover:scale-105"
-            style={{
-              color,
-              backgroundColor: `color-mix(in srgb, ${color} 12%, transparent)`,
-            }}
+            style={{ color, backgroundColor: `color-mix(in srgb, ${color} 12%, transparent)` }}
           >
             <Illustration className="h-12 w-16" />
           </span>
@@ -156,7 +143,7 @@ function ModeChooser({ onPick }: { onPick: (mode: Mode) => void }) {
               <span className="font-medium">{t(`create.${key}.name`)}</span>
               {badge ? (
                 <Badge className="gap-1" style={{ backgroundColor: color }}>
-                  <SparklesIcon className="size-3" /> {badge}
+                  <SparklesIcon className="size-3" /> {t("create.ai.badge")}
                 </Badge>
               ) : null}
             </span>
@@ -173,20 +160,18 @@ function ModeChooser({ onPick }: { onPick: (mode: Mode) => void }) {
   );
 }
 
-// ── Mode « créateur IA » ─────────────────────────────────────────────────────
-
 type DraftReply =
   | { done: false; question: string; suggestions: string[] }
-  | { done: true; summary: string; config: AssistantConfig };
+  | { done: true; summary: string; config: CampaignConfig };
 
 function AiCreator({
   busy,
   onCreate,
 }: {
   busy: boolean;
-  onCreate: (config: AssistantConfig) => void;
+  onCreate: (config: CampaignConfig) => void;
 }) {
-  const t = useTranslations("assistants");
+  const t = useTranslations("campaigns");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
@@ -196,22 +181,18 @@ function AiCreator({
   const ask = async (text: string) => {
     const trimmed = text.trim();
     if (trimmed === "" || thinking) return;
-
     const next: Turn[] = [...turns, { role: "user", content: trimmed }];
     setTurns(next);
     setInput("");
     setThinking(true);
     setError(null);
-
     try {
-      const result = await api<DraftReply>("/api/assistants/draft", {
+      const result = await api<DraftReply>("/api/campaigns/draft", {
         method: "POST",
         body: JSON.stringify({ messages: next }),
       });
       setReply(result);
-      if (!result.done) {
-        setTurns([...next, { role: "assistant", content: result.question }]);
-      }
+      if (!result.done) setTurns([...next, { role: "assistant", content: result.question }]);
     } catch (err) {
       const code = err instanceof ApiError ? err.code : "";
       setError(
@@ -239,10 +220,7 @@ function AiCreator({
       ) : (
         <div className="max-h-64 space-y-2 overflow-y-auto rounded-lg border p-3">
           {turns.map((turn, i) => (
-            <div
-              key={i}
-              className={cn("flex", turn.role === "user" ? "justify-end" : "justify-start")}
-            >
+            <div key={i} className={cn("flex", turn.role === "user" ? "justify-end" : "justify-start")}>
               <p
                 className={cn(
                   "max-w-[85%] rounded-2xl px-3 py-2 text-sm",
@@ -262,14 +240,12 @@ function AiCreator({
       )}
 
       {reply?.done ? (
-        /* Le résumé est relu AVANT toute écriture : c'est le seul moment où on
-           peut encore corriger sans avoir créé quoi que ce soit. */
         <div className="space-y-3 rounded-lg border-2 border-primary/40 bg-primary/5 p-4">
           <p className="flex items-center gap-2 text-sm font-medium text-primary">
             <SparklesIcon className="size-4" /> {t("create.ai.ready")}
           </p>
           <p className="text-sm">{reply.summary}</p>
-          <ConfigSummary config={reply.config} />
+          <CampaignSummary config={reply.config} />
           <Button
             className="w-full min-h-11 md:min-h-9"
             disabled={busy}
@@ -284,13 +260,7 @@ function AiCreator({
       {suggestions.length > 0 && !thinking ? (
         <div className="flex flex-wrap gap-2">
           {suggestions.map((s) => (
-            <Button
-              key={s}
-              variant="outline"
-              size="sm"
-              className="min-h-11 md:min-h-8"
-              onClick={() => void ask(s)}
-            >
+            <Button key={s} variant="outline" size="sm" className="min-h-11 md:min-h-8" onClick={() => void ask(s)}>
               {s}
             </Button>
           ))}
@@ -331,44 +301,37 @@ function AiCreator({
   );
 }
 
-// ── Mode « simple » ──────────────────────────────────────────────────────────
-
 function SimpleCreator({
   busy,
   onCreate,
 }: {
   busy: boolean;
-  onCreate: (config: AssistantConfig) => void;
+  onCreate: (config: CampaignConfig) => void;
 }) {
-  const t = useTranslations("assistants");
+  const t = useTranslations("campaigns");
   const [name, setName] = useState("");
-  const [audience, setAudience] = useState<"buyer" | "seller" | "both">("buyer");
-  const [goalType, setGoalType] = useState<GoalType>("video_meeting");
-  const [persistence, setPersistence] = useState(3);
+  const [trigger, setTrigger] = useState<TriggerKind>("scheduled");
+  const [coldDays, setColdDays] = useState(90);
+  const [followUps, setFollowUps] = useState(1);
 
-  const config = briefToConfig(
-    {
-      name: name.trim() || null,
-      description: null,
-      audience,
-      goalType,
-      durationMin: 30,
-      requiredFields: ["project_type", "timing"],
-      persistence,
-      warmth: 3,
-      questionBudget: 2,
-      formality: "vous",
-      claims: [],
-    },
-    { orgName: "Groupe Nexus", brokerName: "Alex-Honoré", brokerUserId: null },
-  );
+  const config = briefToCampaignConfig({
+    name: name.trim() || null,
+    description: null,
+    trigger,
+    notContactedForDays: trigger === "scheduled" ? coldDays : null,
+    followUps,
+    daysBetween: 3,
+    opener: null,
+    abTest: false,
+    dailyCap: 50,
+  });
 
   return (
     <div className="space-y-4">
       <div className="space-y-1.5">
-        <Label htmlFor="sc-name">{t("create.simple.fieldName")}</Label>
+        <Label htmlFor="cpc-name">{t("create.simple.fieldName")}</Label>
         <Input
-          id="sc-name"
+          id="cpc-name"
           className="min-h-11 md:min-h-9"
           placeholder={config.name}
           value={name}
@@ -377,43 +340,88 @@ function SimpleCreator({
       </div>
 
       <Choice
-        label={t("create.simple.audience")}
-        value={audience}
-        onChange={(v) => setAudience(v as typeof audience)}
-        options={[
-          { value: "buyer", label: t("create.simple.buyer") },
-          { value: "seller", label: t("create.simple.seller") },
-          { value: "both", label: t("create.simple.both") },
-        ]}
-      />
-
-      <Choice
-        label={t("create.simple.goal")}
-        value={goalType}
-        onChange={(v) => setGoalType(v as GoalType)}
-        options={GOAL_TYPES.filter((g) => g !== "handoff").map((g) => ({
-          value: g,
-          label: t(`goalType.${g}`),
-          hint: t(`goalTypeHint.${g}`),
+        label={t("create.simple.trigger")}
+        value={trigger}
+        onChange={(v) => setTrigger(v as TriggerKind)}
+        options={(["lead_created", "category_changed", "scheduled", "manual"] as const).map((k) => ({
+          value: k,
+          label: t(`list.trigger.${k}`),
+          hint: t(`create.simple.triggerHint.${k}`),
+          color: TRIGGER_LOOK[k].color,
+          icon: <TriggerIcon kind={k} />,
         }))}
       />
 
+      {trigger === "scheduled" ? (
+        <Choice
+          label={t("create.simple.cold")}
+          value={String(coldDays)}
+          onChange={(v) => setColdDays(Number(v))}
+          options={[30, 90, 180, 365].map((d) => ({
+            value: String(d),
+            label: t("create.simple.coldDays", { days: d }),
+          }))}
+        />
+      ) : null}
+
       <Choice
-        label={t("create.simple.persistence")}
-        value={String(persistence)}
-        onChange={(v) => setPersistence(Number(v))}
+        label={t("create.simple.followUps")}
+        value={String(followUps)}
+        onChange={(v) => setFollowUps(Number(v))}
         options={[
-          { value: "1", label: t("create.simple.soft"), hint: t("create.simple.softHint") },
-          { value: "3", label: t("create.simple.balanced"), hint: t("create.simple.balancedHint") },
-          { value: "5", label: t("create.simple.firm"), hint: t("create.simple.firmHint") },
+          { value: "0", label: t("create.simple.none"), hint: t("create.simple.noneHint") },
+          { value: "1", label: t("create.simple.one"), hint: t("create.simple.oneHint") },
+          { value: "2", label: t("create.simple.two"), hint: t("create.simple.twoHint") },
         ]}
       />
 
-      <ConfigSummary config={config} />
+      <CampaignSummary config={config} />
 
       <Button className="w-full min-h-11 md:min-h-9" disabled={busy} onClick={() => onCreate(config)}>
         {busy ? <Loader2 className="animate-spin" /> : null}
         {t("create.simple.createIt")}
+      </Button>
+    </div>
+  );
+}
+
+function ComplexCreator({
+  busy,
+  onCreate,
+}: {
+  busy: boolean;
+  onCreate: (config: CampaignConfig) => void;
+}) {
+  const t = useTranslations("campaigns");
+  const [name, setName] = useState("");
+  const config = briefToCampaignConfig({
+    name: name.trim() || "Nouvelle campagne",
+    description: null,
+    trigger: "manual",
+    notContactedForDays: null,
+    followUps: 1,
+    daysBetween: 3,
+    opener: null,
+    abTest: false,
+    dailyCap: 50,
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <Label htmlFor="cpx-name">{t("create.simple.fieldName")}</Label>
+        <Input
+          id="cpx-name"
+          className="min-h-11 md:min-h-9"
+          placeholder="Nouvelle campagne"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </div>
+      <p className="text-sm text-muted-foreground">{t("create.complex.note")}</p>
+      <Button className="w-full min-h-11 md:min-h-9" disabled={busy} onClick={() => onCreate(config)}>
+        {busy ? <Loader2 className="animate-spin" /> : null}
+        {t("create.complex.createIt")}
       </Button>
     </div>
   );
@@ -428,116 +436,105 @@ function Choice({
   label: string;
   value: string;
   onChange: (value: string) => void;
-  options: { value: string; label: string; hint?: string }[];
+  options: { value: string; label: string; hint?: string; color?: string; icon?: React.ReactNode }[];
 }) {
   return (
     <div className="space-y-1.5">
       <Label>{label}</Label>
       <div className="grid gap-2 sm:grid-cols-2">
-        {options.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => onChange(option.value)}
-            className={cn(
-              "rounded-lg border p-2.5 text-left text-sm transition-colors",
-              "hover:border-primary hover:bg-primary/5",
-              value === option.value && "border-primary bg-primary/5",
-            )}
-          >
-            <span className="font-medium">{option.label}</span>
-            {option.hint ? (
-              <span className="mt-0.5 block text-xs text-muted-foreground">{option.hint}</span>
-            ) : null}
-          </button>
-        ))}
+        {options.map((option) => {
+          const selected = value === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onChange(option.value)}
+              className={cn(
+                "flex items-start gap-2.5 rounded-lg border p-2.5 text-left text-sm",
+                "transition-all duration-150 hover:bg-[color:var(--tone)]/5",
+                "hover:border-[color:var(--tone)]",
+                selected && "border-[color:var(--tone)] bg-[color:var(--tone)]/5",
+              )}
+              style={{ ["--tone" as string]: option.color ?? "var(--color-primary)" }}
+            >
+              {option.icon}
+              <span className="min-w-0">
+                <span className="font-medium">{option.label}</span>
+                {option.hint ? (
+                  <span className="mt-0.5 block text-xs text-muted-foreground">{option.hint}</span>
+                ) : null}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-// ── Mode « complet » ─────────────────────────────────────────────────────────
-
-function ComplexCreator({
-  busy,
-  onCreate,
-}: {
-  busy: boolean;
-  onCreate: (config: AssistantConfig, opening?: string) => void;
-}) {
-  const t = useTranslations("assistants");
-  const [name, setName] = useState("");
-
-  const config = briefToConfig(
-    {
-      name: name.trim() || "Nouvel assistant",
-      description: null,
-      audience: "unknown",
-      goalType: "video_meeting",
-      durationMin: 30,
-      requiredFields: ["project_type", "timing"],
-      persistence: 3,
-      warmth: 3,
-      questionBudget: 2,
-      formality: "vous",
-      claims: [],
-    },
-    { orgName: "Groupe Nexus", brokerName: "Alex-Honoré", brokerUserId: null },
-  );
-
+/**
+ * Aperçu de ce qui va être créé — même bloc dans les trois modes.
+ *
+ * L'échelle est montrée comme une FRISE avec des jours absolus : les délais
+ * sont cumulatifs dans le moteur, et « 72 h » sur trois barreaux se lit
+ * facilement comme « trois messages dans trois jours » alors que le dernier
+ * part le neuvième jour.
+ */
+function CampaignSummary({ config }: { config: CampaignConfig }) {
+  const t = useTranslations("campaigns");
+  // Somme courante calculée d'un coup, EN HEURES : les délais sont cumulatifs,
+  // et rechaîner sur des jours déjà arrondis fait dériver la frise dès qu'un
+  // barreau n'est pas un multiple de 24 h.
+  const hoursOf = config.ladder.reduce<number[]>((acc, step, i) => {
+    acc.push((i === 0 ? 0 : acc[i - 1]) + step.delayHours);
+    return acc;
+  }, []);
   return (
-    <div className="space-y-4">
-      <div className="space-y-1.5">
-        <Label htmlFor="cc-name">{t("create.simple.fieldName")}</Label>
-        <Input
-          id="cc-name"
-          className="min-h-11 md:min-h-9"
-          placeholder="Nouvel assistant"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
+    <div className="space-y-3 rounded-lg bg-muted/40 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <TriggerIcon kind={config.trigger.kind} />
+        <span className="text-sm font-medium">{t(`list.trigger.${config.trigger.kind}`)}</span>
+        {config.audience.notContactedForDays ? (
+          <Badge variant="outline" className="font-normal">
+            {t("create.simple.coldDays", { days: config.audience.notContactedForDays })}
+          </Badge>
+        ) : null}
+        {config.variants.length > 0 ? (
+          <Badge variant="outline" className="font-normal">
+            {t("create.summary.abTest")}
+          </Badge>
+        ) : null}
+        {/* Le plafond quotidien est AFFICHÉ : c'est le réglage qui, mal
+            compris, produit une campagne active qui n'écrit à personne. */}
+        <Badge variant="outline" className="font-normal">
+          {t("create.summary.dailyCap", { count: config.dailyEnrollmentCap })}
+        </Badge>
       </div>
-      <p className="text-sm text-muted-foreground">{t("create.complex.note")}</p>
-      <Button className="w-full min-h-11 md:min-h-9" disabled={busy} onClick={() => onCreate(config)}>
-        {busy ? <Loader2 className="animate-spin" /> : null}
-        {t("create.complex.createIt")}
-      </Button>
-    </div>
-  );
-}
 
-/** Aperçu de ce qui va être créé — même bloc dans les trois modes. */
-function ConfigSummary({ config }: { config: AssistantConfig }) {
-  const t = useTranslations("assistants");
-  return (
-    <dl className="grid gap-x-4 gap-y-1 rounded-lg bg-muted/40 p-3 text-xs sm:grid-cols-2">
-      <Row label={t("create.summary.goal")} value={t(`goalType.${config.goal.primary.type}`)} />
-      <Row
-        label={t("create.summary.fallback")}
-        value={
-          config.goal.fallbacks.length > 0
-            ? t(`goalType.${config.goal.fallbacks[0].type}`)
-            : t("create.summary.none")
-        }
-      />
-      <Row
-        label={t("create.summary.required")}
-        value={
-          config.goal.primary.requiredFields.length > 0
-            ? config.goal.primary.requiredFields.map((f) => t(`qualificationField.${f}`)).join(", ")
-            : t("create.summary.none")
-        }
-      />
-      <Row label={t("create.summary.persistence")} value={`${config.approach.persistence}/5`} />
-    </dl>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex justify-between gap-2 sm:block">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="font-medium">{value}</dd>
+      <div>
+        <p className="text-xs font-medium text-muted-foreground">{t("create.summary.ladder")}</p>
+        <ol className="mt-1.5 space-y-1.5">
+          {config.ladder.map((step, i) => {
+            const days = Math.round(hoursOf[i] / 24);
+            return (
+              <li key={i} className="flex items-center gap-2 text-xs">
+                <span className="relative flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-medium text-primary">
+                  {i + 1}
+                  {i < config.ladder.length - 1 ? (
+                    <span aria-hidden className="absolute left-1/2 top-full h-1.5 w-px -translate-x-1/2 bg-primary/25" />
+                  ) : null}
+                </span>
+                <span className="font-medium">
+                  {days === 0 ? t("create.summary.now") : t("create.summary.dayN", { days })}
+                </span>
+                <span className="text-muted-foreground">
+                  {step.body ? t("create.summary.written") : t("create.summary.byAssistant")}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      </div>
     </div>
   );
 }

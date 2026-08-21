@@ -2,7 +2,7 @@
 
 import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,10 +47,19 @@ export function ModelTab({ config, update }: TabProps) {
     }
   }, []);
 
-  // Le catalogue se charge sur GESTE, jamais au montage : rien ne justifie
-  // d'appeler le fournisseur à chaque ouverture de l'onglet, et l'avertissement
-  // « ce modèle ne gère pas les outils » ne doit apparaître que sur un modèle
-  // qu'on a réellement consulté — pas sur un catalogue absent.
+  // Le catalogue du fournisseur PRINCIPAL se charge une fois, à l'ouverture de
+  // l'onglet : l'entonnoir commence par la liste des laboratoires, et sans
+  // catalogue il n'affiche rien du tout — on demandait un geste pour voir le
+  // premier écran. La réponse est mise en cache six heures côté serveur, donc
+  // c'est un appel par session d'édition, pas par affichage.
+  const requested = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const provider = config.model.provider;
+    if (requested.current.has(provider)) return;
+    requested.current.add(provider);
+    void load(provider);
+  }, [config.model.provider, load]);
+
   const chosen = (catalog[config.model.provider] ?? []).find((m) => m.id === config.model.model);
   const needsTools = config.tools.some((tool) => tool === "get_slots" || tool === "book_meeting");
 

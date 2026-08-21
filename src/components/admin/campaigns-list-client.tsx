@@ -29,6 +29,8 @@ import {
 import { EmptyState } from "@/components/ui/empty-state";
 import type { TriggerKind } from "@/lib/campaigns/schema";
 import { api } from "./api";
+import { CampaignCreateDialog } from "./campaign-create";
+import { TriggerIcon } from "./trigger-look";
 
 export type CampaignListItem = {
   id: string;
@@ -60,28 +62,8 @@ export function CampaignsListClient({
 }) {
   const t = useTranslations("campaigns");
   const router = useRouter();
-  const [creating, setCreating] = useState(false);
   const [target, setTarget] = useState<CampaignListItem | null>(null);
   const [busy, setBusy] = useState(false);
-
-  const create = async () => {
-    setCreating(true);
-    try {
-      const created = await api<{ id: string }>("/api/campaigns", {
-        method: "POST",
-        body: JSON.stringify({
-          name: t("list.new"),
-          trigger: { kind: "manual" },
-          ladder: [{ delayHours: 0, body: "", label: "" }],
-        }),
-      });
-      toast.success(t("list.created"));
-      router.push(`/admin/campaigns/${created.id}`);
-    } catch {
-      toast.error(t("editor.errors.save"));
-      setCreating(false);
-    }
-  };
 
   const setStatus = async (item: CampaignListItem, status: "active" | "paused") => {
     try {
@@ -116,9 +98,13 @@ export function CampaignsListClient({
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button onClick={() => void create()} disabled={creating} className="min-h-11 md:min-h-9">
-          {creating ? <Loader2 className="animate-spin" /> : <Plus />} {t("list.new")}
-        </Button>
+        <CampaignCreateDialog
+          trigger={
+            <Button className="min-h-11 md:min-h-9">
+              <Plus /> {t("list.new")}
+            </Button>
+          }
+        />
       </div>
 
       {items.length === 0 ? (
@@ -126,6 +112,15 @@ export function CampaignsListClient({
           icon={<Megaphone />}
           title={t("list.empty.title")}
           hint={t("list.empty.desc")}
+          action={
+            <CampaignCreateDialog
+              trigger={
+                <Button className="min-h-11 md:min-h-9">
+                  <Plus /> {t("list.new")}
+                </Button>
+              }
+            />
+          }
         />
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
@@ -143,7 +138,10 @@ export function CampaignsListClient({
                     <Badge variant={item.status === "active" ? "default" : "secondary"}>
                       {t(`list.status.${item.status}` as never)}
                     </Badge>
-                    <Badge variant="outline" className="font-normal">
+                    <Badge variant="outline" className="gap-1 pl-1 font-normal">
+                      {/* Même pastille qu'à la création : ce qu'on a choisi
+                          doit se reconnaître ici sans relire le libellé. */}
+                      <TriggerIcon kind={item.triggerKind} size="sm" />
                       {t(`list.trigger.${item.triggerKind}`)}
                     </Badge>
                   </div>

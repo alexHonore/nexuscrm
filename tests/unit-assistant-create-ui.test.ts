@@ -14,12 +14,14 @@ import commonFr from "../messages/fr/common.json";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }));
 
-const { AssistantCreateDialog } = await import("@/components/admin/assistant-create");
+const { AssistantCreateDialog, AiCreator, SimpleCreator, ComplexCreator } = await import(
+  "@/components/admin/assistant-create"
+);
 const {
   ChatIllustration,
   FormIllustration,
   DashboardIllustration,
-} = await import("@/components/admin/assistant-create/illustrations");
+} = await import("@/components/admin/create-illustrations");
 
 type IntlMessages = ComponentProps<typeof NextIntlClientProvider>["messages"];
 
@@ -87,5 +89,43 @@ describe("textes de création", () => {
       .create.simple;
     expect(simple.name).toBe("Configuration simple");
     expect(simple.fieldName).toBe("Nom de l'assistant");
+  });
+});
+
+describe("panneaux des trois modes", () => {
+  // Le corps d'un dialogue Base UI n'existe pas dans le rendu serveur : sans
+  // ces rendus directs, une clé i18n manquante à l'intérieur ne se verrait
+  // qu'à l'ouverture, en production.
+  const noop = () => {};
+
+  it("le mode IA demande le besoin avant d'écrire quoi que ce soit", () => {
+    const html = wrap(createElement(AiCreator, { busy: false, onCreate: noop }));
+    expect(html).toContain("Que voulez-vous que cet assistant accomplisse");
+    expect(html).not.toContain("Créer cet assistant");
+  });
+
+  it("le mode simple pose ses questions et résume ce qui sera créé", () => {
+    const html = wrap(createElement(SimpleCreator, { busy: false, onCreate: noop }));
+    expect(html).toContain("Des acheteurs");
+    expect(html).toContain("Des vendeurs");
+    expect(html).toContain("Objectif");
+    expect(html).toContain("Créer cet assistant");
+  });
+
+  it("le mode complet ouvre l'éditeur sur un brouillon", () => {
+    const html = wrap(createElement(ComplexCreator, { busy: false, onCreate: noop }));
+    expect(html).toContain("Créer et ouvrir");
+  });
+
+  it("aucun panneau ne laisse fuir un chemin de traduction brut", () => {
+    for (const [name, Panel] of [
+      ["ai", AiCreator],
+      ["simple", SimpleCreator],
+      ["complex", ComplexCreator],
+    ] as const) {
+      const html = wrap(createElement(Panel, { busy: false, onCreate: noop }));
+      expect(html, name).not.toContain("create.");
+      expect(html, name).not.toContain("assistants.");
+    }
   });
 });
