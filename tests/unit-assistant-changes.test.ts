@@ -77,14 +77,59 @@ describe("diffConfig", () => {
     expect(diffConfig(before, after).changed).toEqual(["tools"]);
   });
 
-  it("un chemin de repli ajouté est signalé", () => {
+  it("un chemin de repli ajouté est signalé — immédiat ET en attente", () => {
     const after = base();
     after.goal.fallbacks = [
-      { type: "phone_call", durationMin: 15, appointmentType: null, withUserId: null, requiredFields: [], slotOfferCount: 2, confirmationTemplate: null },
+      { type: "phone_call", durationMin: 15, appointmentType: "meet", withUserId: null, requiredFields: ["project_type"], slotOfferCount: 2, confirmationTemplate: null },
     ];
     const d = diffConfig(base(), after);
     expect(d.changed).toContain("goal.fallbacks");
+    // Le moteur relit la chaîne à chaque tour (cran courant, créneaux)…
     expect(d.immediate).toContain("goal.fallbacks");
+    // …mais L2 la rédige aussi : sans recompilation, le prompt décrit une
+    // chaîne qui n'est plus celle que le moteur exécute.
+    expect(d.pending).toContain("goal.fallbacks");
+    expect(d.needsRecompile).toBe(true);
+  });
+
+  it("changer l'objectif principal force la recompilation (L2 le rédige)", () => {
+    const after = base();
+    after.goal.primary.type = "qualify_only";
+    const d = diffConfig(base(), after);
+    expect(d.pending).toContain("goal.primary.type");
+    expect(d.needsRecompile).toBe(true);
+  });
+
+  it("la persistance et la longueur max vivent dans L3 : JAMAIS immédiates", () => {
+    // Le piège fermé ici : persistance 5 → 1 était classée « immédiate », la
+    // fiche disait « s'applique dès le prochain message », et le prompt
+    // compilé continuait de dire « Persistance : insiste ». Aucun code
+    // d'exécution ne relit ces deux valeurs — seul le prompt les porte.
+    const after = base();
+    after.approach.persistence = 1;
+    after.approach.maxChars = 160;
+    const d = diffConfig(base(), after);
+    expect(d.immediate).toEqual([]);
+    expect(d.pending).toEqual(["approach.maxChars", "approach.persistence"]);
+    expect(d.needsRecompile).toBe(true);
+  });
+
+  it("seuls les réglages strictement relus à l'exécution laissent le prompt intact", () => {
+    for (const mutate of [
+      (c: AssistantConfig) => void (c.approach.maxTurns = 20),
+      (c: AssistantConfig) => void (c.approach.replySpeed = "instant"),
+      (c: AssistantConfig) => void (c.model.temperature = 0.1),
+      (c: AssistantConfig) => void (c.tools = ["stop"]),
+      (c: AssistantConfig) => void (c.requireSuitePass = false),
+      (c: AssistantConfig) => void (c.includeRuntimeLayer = false),
+      (c: AssistantConfig) => void (c.turnInstructions = "Bloc libre"),
+    ]) {
+      const after = base();
+      mutate(after);
+      const d = diffConfig(base(), after);
+      expect(d.needsRecompile, d.changed.join(",")).toBe(false);
+      expect(d.pending, d.changed.join(",")).toEqual([]);
+    }
   });
 
   it("par prudence, un chemin inconnu des deux listes force la recompilation", () => {

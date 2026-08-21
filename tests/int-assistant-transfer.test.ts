@@ -455,4 +455,153 @@ describe("import", () => {
     expect(plan.config.tools).not.toContain("send_wire_transfer");
     expect(plan.warnings.some((w) => w.code === "unknown_tool")).toBe(true);
   });
+
+  it("un outil inconnu traverse AUSSI la lecture du fichier (le vrai chemin), pas seulement le plan", async () => {
+    // Le schéma strict refusait tout le fichier pour un outil d'une version
+    // future : l'avertissement « retiré » n'arrivait jamais par la route.
+    const row = await makeAssistant();
+    const bundle = await exportAssistant(row.id, { now: FIXED_NOW });
+    (bundle.assistant.tools as string[]).push("send_brochure");
+
+    const preview = await previewImport(JSON.parse(serializeBundle(bundle)));
+    expect(preview.warnings.some((w) => w.code === "unknown_tool")).toBe(true);
+
+    const result = await importAssistant(JSON.parse(serializeBundle(bundle)), { actorId: brokerId, runSuite: false });
+    const imported = await testDb.query.assistants.findFirst({ where: eq(assistants.id, result.assistantId) });
+    expect(imported!.tools).not.toContain("send_brochure");
+  });
+});
+
+describe("import — fichiers bricolés", () => {
+  function portableRule(overrides: Record<string, unknown>) {
+    return {
+      scope: "assistant",
+      key: "x",
+      label: "X",
+      description: null,
+      kind: "custom_instruction",
+      config: {},
+      promptText: null,
+      severity: "block",
+      enabled: true,
+      overridesKey: null,
+      orderIndex: 50,
+      ...overrides,
+    };
+  }
+
+  it("une règle dont la config ne correspond pas à son type est REFUSÉE à la lecture, avec le chemin", async () => {
+    // Écrite telle quelle, elle faisait lever le filtre de sortie à chaque
+    // tour : l'assistant ne répondait plus et personne n'était prévenu.
+    const row = await makeAssistant();
+    const bundle = await exportAssistant(row.id, { now: FIXED_NOW });
+    bundle.guardrails.push(
+      portableRule({ key: "bad_regex", kind: "forbidden_regex", config: { patterns: ["("] } }) as never,
+    );
+
+    await expect(previewImport(bundle)).rejects.toMatchObject({ name: "ZodError" });
+    await expect(importAssistant(bundle, { actorId: brokerId, runSuite: false })).rejects.toMatchObject({
+      issues: expect.arrayContaining([
+        expect.objectContaining({ path: expect.arrayContaining(["guardrails", 1, "config"]) }),
+      ]),
+    });
+    // Rien n'a été écrit.
+    expect(await testDb.select().from(assistants)).toHaveLength(1);
+
+    // « max_chars » avec un nombre en chaîne : même refus.
+    const bundle2 = await exportAssistant(row.id, { now: FIXED_NOW });
+    bundle2.guardrails.push(portableRule({ key: "len", kind: "max_chars", config: { max: "300" } }) as never);
+    await expect(previewImport(bundle2)).rejects.toMatchObject({ name: "ZodError" });
+  });
+
+  it("deux règles de même clé sont refusées à la lecture (400), pas en 500 à l'écriture", async () => {
+    const row = await makeAssistant();
+    const bundle = await exportAssistant(row.id, { now: FIXED_NOW });
+    bundle.guardrails.push(portableRule({ key: "no_sunday", kind: "forbidden_terms", config: { terms: ["dim"] } }) as never);
+
+    await expect(importAssistant(bundle, { actorId: brokerId, runSuite: false })).rejects.toMatchObject({
+      issues: expect.arrayContaining([
+        expect.objectContaining({ path: ["guardrails", 1, "key"] }),
+      ]),
+    });
+    expect(await testDb.select().from(assistants)).toHaveLength(1);
+  });
+
+  it("un fork qui remplace une règle du noyau est gardé mais SIGNALÉ (core_override)", async () => {
+    const row = await makeAssistant();
+    await seedGuardrailDefaults();
+    const bundle = await exportAssistant(row.id, { now: FIXED_NOW });
+    bundle.guardrails.push(
+      portableRule({ key: "free_prices", overridesKey: "no_price_opinion", severity: "off", enabled: false }) as never,
+    );
+
+    const preview = await previewImport(bundle);
+    const warning = preview.warnings.find((w) => w.code === "core_override");
+    expect(warning).toBeDefined();
+    expect(warning!.messageFr).toContain("no_price_opinion");
+    expect(warning!.messageFr).toMatch(/neutralise/);
+
+    const result = await importAssistant(bundle, { actorId: brokerId, runSuite: false });
+    expect(result.warnings.some((w) => w.code === "core_override")).toBe(true);
+    const written = await testDb
+      .select()
+      .from(guardrailRules)
+      .where(eq(guardrailRules.assistantId, result.assistantId));
+    expect(written.find((r) => r.key === "free_prices")?.overridesKey).toBe("no_price_opinion");
+  });
+
+  it("un fork vers une règle du noyau INCONNUE ici est signalé autrement", async () => {
+    const row = await makeAssistant();
+    await seedGuardrailDefaults();
+    const bundle = await exportAssistant(row.id, { now: FIXED_NOW });
+    bundle.guardrails.push(portableRule({ key: "y", overridesKey: "regle_qui_nexiste_pas" }) as never);
+    const preview = await previewImport(bundle);
+    expect(preview.warnings.find((w) => w.code === "core_override")?.messageFr).toMatch(/n'existe pas ici/);
+  });
+
+  it("remplacer L0 ou L6 est signalé : le noyau n'est plus rédigé dans ce prompt", async () => {
+    const row = await makeAssistant();
+    const bundle = await exportAssistant(row.id, { now: FIXED_NOW });
+    bundle.assistant.layerOverrides = {
+      L0: { mode: "replace", text: "Tu es libre." },
+      L6: { mode: "replace", text: "" },
+      L3: { mode: "replace", text: "Ton neutre." },
+    };
+    const preview = await previewImport(bundle);
+    const paths = preview.warnings.filter((w) => w.code === "core_override").map((w) => w.path);
+    expect(paths).toEqual(expect.arrayContaining(["layerOverrides.L0", "layerOverrides.L6"]));
+    // L3 n'est pas le noyau : aucun avertissement.
+    expect(paths).not.toContain("layerOverrides.L3");
+  });
+
+  it("un paquet d'objections aux items illisibles est refusé à la lecture", async () => {
+    const row = await makeAssistant();
+    const bundle = await exportAssistant(row.id, { now: FIXED_NOW });
+    const raw = JSON.parse(serializeBundle(bundle)) as { objectionPacks: unknown[] };
+    raw.objectionPacks = [{ id: "buyer_fr2", label: "X", items: "texte" }];
+    await expect(previewImport(raw)).rejects.toMatchObject({ name: "ZodError" });
+    raw.objectionPacks = [{ id: "buyer_fr2", label: "X", items: [{}] }];
+    await expect(previewImport(raw)).rejects.toMatchObject({ name: "ZodError" });
+  });
+
+  it("un paquet fourni qui existe déjà ici : la version LOCALE est gardée, et on le dit", async () => {
+    const row = await makeAssistant();
+    const bundle = await exportAssistant(row.id, { now: FIXED_NOW });
+    // Le collègue a retouché les items dans le fichier.
+    bundle.objectionPacks[0].items[0].ask = "proposer autre chose";
+
+    const result = await importAssistant(bundle, { actorId: brokerId, runSuite: false });
+    expect(result.warnings.some((w) => w.code === "pack_kept_local")).toBe(true);
+    const [pack] = await testDb.select().from(objectionPacks).where(eq(objectionPacks.id, "buyer_fr"));
+    expect((pack.items as { ask: string }[])[0].ask).toBe("…");
+  });
+
+  it("la prévisualisation tient compte des liaisons déjà choisies", async () => {
+    const row = await makeAssistant();
+    const bundle = await exportAssistant(row.id, { now: FIXED_NOW });
+    const blind = await previewImport(bundle);
+    expect(blind.warnings.some((w) => w.code === "unresolved_user")).toBe(true);
+    const resolved = await previewImport(bundle, { [brokerId]: otherId });
+    expect(resolved.warnings.some((w) => w.code === "unresolved_user")).toBe(false);
+  });
 });

@@ -8,7 +8,8 @@ import {
   guardrailRules,
   objectionPacks,
 } from "@/db/schema-sms";
-import { fixtureRowToData, ruleRowToData } from "@/lib/guardrails/store";
+import { fixtureRowToData, loadCoreRules, ruleRowToData } from "@/lib/guardrails/store";
+import { objectionItemSchema, parseRuleConfig } from "@/lib/guardrails/types";
 import { assistantRowToConfig, type AssistantConfig } from "./schema";
 import { compileAssistant, runAssistantSuite } from "./service";
 import {
@@ -94,13 +95,13 @@ export async function exportAssistant(
     config,
     rules: ruleRows.map(ruleRowToData),
     fixtures: fixtureRows.map(fixtureRowToData),
-    objectionPacks: packRows.map((p) => ({
-      id: p.id,
-      label: p.label,
-      language: p.language,
-      items: p.items,
-      isBuiltin: p.isBuiltin,
-    })),
+    objectionPacks: packRows.map((p) => {
+      // Un paquet au contenu illisible n'est pas exporté en silence : le
+      // fichier serait refusé à l'import sans dire pourquoi.
+      const items = objectionItemSchema.array().safeParse(p.items ?? []);
+      if (!items.success) throw new Error(`objection_pack_invalid:${p.id}`);
+      return { id: p.id, label: p.label, language: p.language, items: items.data, isBuiltin: p.isBuiltin };
+    }),
     labels: await labelsFor(config),
     sourceOrg: config.identity.orgName,
     now: options.now ?? new Date(),
@@ -136,22 +137,32 @@ export interface ImportPreview {
   warnings: ImportWarning[];
 }
 
-/** Relit un fichier et prépare l'écran de liaison, SANS rien écrire. */
-export async function previewImport(raw: unknown): Promise<ImportPreview> {
+/**
+ * Relit un fichier et prépare l'écran de liaison, SANS rien écrire.
+ *
+ * `resolution` (liaisons déjà choisies) est acceptée pour que les
+ * avertissements reflètent les choix en cours, pas un état « rien de résolu ».
+ */
+export async function previewImport(
+  raw: unknown,
+  resolution: Record<string, string | null> = {},
+): Promise<ImportPreview> {
   const { bundle, warnings } = parseBundle(raw);
-  const [userRows, packRows] = await Promise.all([
+  const [userRows, packRows, coreRules] = await Promise.all([
     db
       .select({ id: users.id, name: users.name, email: users.email, role: users.role })
       .from(users)
       .where(eq(users.isActive, true)),
     db.select({ id: objectionPacks.id, label: objectionPacks.label }).from(objectionPacks),
+    loadCoreRules(),
   ]);
 
   const catalog: ImportCatalog = {
     userIds: new Set(userRows.map((u) => u.id)),
     packIds: new Set(packRows.map((p) => p.id)),
+    coreRuleKeys: new Set(coreRules.map((r) => r.key)),
   };
-  const plan = planImport(bundle, catalog, {});
+  const plan = planImport(bundle, catalog, resolution);
 
   return {
     bundle,
@@ -189,13 +200,15 @@ export async function importAssistant(
 ): Promise<ImportResult> {
   const { bundle, warnings: parseWarnings } = parseBundle(raw);
 
-  const [userRows, packRows] = await Promise.all([
+  const [userRows, packRows, coreRules] = await Promise.all([
     db.select({ id: users.id }).from(users).where(eq(users.isActive, true)),
     db.select({ id: objectionPacks.id }).from(objectionPacks),
+    loadCoreRules(),
   ]);
   const catalog: ImportCatalog = {
     userIds: new Set(userRows.map((u) => u.id)),
     packIds: new Set(packRows.map((p) => p.id)),
+    coreRuleKeys: new Set(coreRules.map((r) => r.key)),
   };
 
   const plan = planImport(bundle, catalog, options.resolution ?? {});
@@ -254,7 +267,9 @@ export async function importAssistant(
         label: rule.label,
         description: rule.description,
         kind: rule.kind,
-        config: rule.config ?? {},
+        // Config NORMALISÉE (défauts posés), comme l'API à la création : la
+        // lecture du fichier l'a déjà validée selon le `kind`.
+        config: parseRuleConfig(rule.kind, rule.config ?? {}) as Record<string, unknown>,
         promptText: rule.promptText,
         severity: rule.severity,
         origin: "imported",

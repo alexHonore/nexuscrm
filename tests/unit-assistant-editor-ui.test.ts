@@ -350,6 +350,55 @@ describe("onglets rendus isolément", () => {
     ]) {
       expect(html).not.toContain("MISSING_MESSAGE");
       expect(html).not.toMatch(/editor\.[a-zA-Z]+\./);
+      // Les huit champs de qualification (dont « sector » et
+      // « preferred_time », renommés sans que les libellés ne suivent).
+      expect(html).not.toMatch(/qualificationField\.[a-z_]+/);
     }
+  });
+
+  it("Objectif : chaque champ de qualification a un libellé, et les champs imposés sont verrouillés", () => {
+    const html = renderTab(createElement(GoalTab, tabProps));
+    expect(html).toContain("Secteur");
+    expect(html).toContain("Moment préféré");
+    // « type de projet » est imposé par une rencontre vidéo : coché, non décochable.
+    expect(html).toMatch(/imposé par l(&#x27;|')objectif/);
+
+    const email = {
+      ...tabProps,
+      config: {
+        ...CONFIG,
+        goal: {
+          primary: { ...CONFIG.goal.primary, type: "collect_email" as const, requiredFields: [] },
+          fallbacks: [],
+        },
+      },
+    };
+    const emailHtml = renderTab(createElement(GoalTab, email));
+    // Le courriel est coché d'office pour « obtenir le courriel », même si la
+    // config (non normalisée) ne le liste pas.
+    expect(emailHtml).toMatch(/imposé par l(&#x27;|')objectif/);
+  });
+
+  it("Test : un vert dont le drapeau a été effacé est signalé comme périmé", () => {
+    const green = { ...DATA.lastRun!, passed: true, passedCount: 2 };
+    const stale = renderTab(
+      createElement(TestTab, {
+        ...tabProps,
+        data: { ...DATA, lastRun: green, suitePassed: false },
+        onRunSuite: () => {},
+        running: false,
+      }),
+    );
+    expect(stale).toContain("Résultat périmé");
+    const fresh = renderTab(
+      createElement(TestTab, {
+        ...tabProps,
+        data: { ...DATA, lastRun: green, suitePassed: true },
+        onRunSuite: () => {},
+        running: false,
+      }),
+    );
+    expect(fresh).not.toContain("Résultat périmé");
+    expect(fresh).toContain("Dernière exécution");
   });
 });

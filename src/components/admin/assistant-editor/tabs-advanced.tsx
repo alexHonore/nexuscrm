@@ -302,15 +302,35 @@ export function TestTab({
 }: TabProps & { onRunSuite: () => void; running: boolean }) {
   const t = useTranslations("assistants");
   const run = data.lastRun;
+  // Un vert affiché n'en est un que si le drapeau de la fiche le confirme :
+  // une sauvegarde ou une recompilation l'efface sans toucher à l'exécution
+  // passée. Sans ce signal, l'onglet disait « 14/14 » et la porte refusait.
+  const stale = run !== null && run.passed && !data.suitePassed;
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
+        <div className="space-y-1">
           {run ? (
-            <p className="text-sm">
-              {t("editor.test.passed", { passed: run.passedCount, total: run.total })}
-            </p>
+            <>
+              <p className="text-sm">
+                {t("editor.test.passed", { passed: run.passedCount, total: run.total })}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {t("editor.test.lastRun", {
+                  when: new Date(run.createdAt).toLocaleString("fr-CA", {
+                    timeZone: "America/Toronto",
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  }),
+                })}
+              </p>
+              {stale ? (
+                <p className="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="size-3.5" /> {t("editor.test.stale")}
+                </p>
+              ) : null}
+            </>
           ) : (
             <p className="text-sm text-muted-foreground">{t("editor.test.never")}</p>
           )}

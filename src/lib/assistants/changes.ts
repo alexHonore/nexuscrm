@@ -15,8 +15,12 @@ import type { AssistantConfig } from "./schema";
  * chemins modifiés et on dit lesquels attendent quoi.
  */
 
-/** Chemins dont l'effet passe UNIQUEMENT par le prompt compilé (L0-L6). */
-const PROMPT_ONLY_PREFIXES = [
+/**
+ * Chemins dont l'effet passe par le prompt compilé (L0-L6). La liste suit
+ * lib/agent/compile.ts ligne à ligne : tout ce que le compilateur RÉDIGE est
+ * ici, même si l'exécution relit aussi la valeur.
+ */
+const PROMPT_PREFIXES = [
   "identity",
   "knowledge",
   "objectionPacks",
@@ -24,30 +28,43 @@ const PROMPT_ONLY_PREFIXES = [
   "promptMode",
   "layerOverrides",
   "description",
-  // Le ton : rédigé dans L3, jamais relu à l'exécution.
+  // L3 entier : ton, persistance, budget de questions, longueur. La
+  // persistance et la longueur ne sont PAS relues à l'exécution — seul le
+  // prompt les porte. Les classer « immédiates » faisait croire qu'une
+  // persistance baissée s'appliquait au message suivant alors que le prompt
+  // d'hier continuait d'insister.
   "approach.formality",
   "approach.warmth",
   "approach.proactivity",
   "approach.emoji",
   "approach.questionBudget",
+  "approach.persistence",
+  "approach.maxChars",
+  // L2 : type d'objectif, durée, champs requis, chaîne de replis.
+  "goal",
 ];
 
 /**
- * Chemins relus à CHAQUE tour — effet immédiat, même sans recompilation.
- * (Le prompt les mentionne aussi ; c'est l'exécution qui tranche.)
+ * Chemins relus à CHAQUE tour, et SEULEMENT relus : un changement ici
+ * s'applique au message suivant sans qu'aucune ligne du prompt ne mente.
  */
-const RUNTIME_LIVE_PREFIXES = [
+const RUNTIME_ONLY_PREFIXES = [
   "tools",
   "model",
   "turnInstructions",
   "includeRuntimeLayer",
   "requireSuitePass",
   "approach.maxTurns",
-  "approach.maxChars",
   "approach.replySpeed",
-  "approach.persistence",
-  "goal",
 ];
+
+/**
+ * Chemins relus à CHAQUE tour — effet immédiat, même sans recompilation.
+ * « goal » y figure AUSSI : le cran courant, les créneaux et les champs
+ * requis viennent de la config à chaque tour. Mais L2 en parle : il est donc
+ * à la fois immédiat (exécution) et en attente (texte du prompt).
+ */
+const RUNTIME_LIVE_PREFIXES = [...RUNTIME_ONLY_PREFIXES, "goal"];
 
 export interface ChangeSummary {
   /** Chemins modifiés, à plat. */
@@ -67,7 +84,7 @@ export function diffConfig(before: AssistantConfig, after: AssistantConfig): Cha
 
   for (const path of changed) {
     if (matches(path, RUNTIME_LIVE_PREFIXES)) immediate.push(path);
-    if (matches(path, PROMPT_ONLY_PREFIXES)) pending.push(path);
+    if (matches(path, PROMPT_PREFIXES)) pending.push(path);
     // Un chemin qui ne tombe dans aucune liste (« name », « language ») ne
     // change ni l'un ni l'autre : il n'apparaît que dans `changed`.
   }
@@ -76,10 +93,11 @@ export function diffConfig(before: AssistantConfig, after: AssistantConfig): Cha
     changed,
     immediate,
     pending,
-    // Prudence délibérée : tout ce qui n'est pas strictement relu à l'exécution
-    // peut avoir été rédigé dans le prompt. Recompiler pour rien coûte quelques
-    // secondes ; ne pas recompiler laisse un prompt qui ment.
-    needsRecompile: changed.some((p) => !matches(p, RUNTIME_LIVE_PREFIXES)),
+    // Prudence délibérée : tout ce qui n'est pas STRICTEMENT relu à
+    // l'exécution peut avoir été rédigé dans le prompt. Recompiler pour rien
+    // coûte quelques secondes ; ne pas recompiler laisse un prompt qui ment —
+    // et la porte d'activation laisserait passer ce prompt, faute de drapeau.
+    needsRecompile: changed.some((p) => !matches(p, RUNTIME_ONLY_PREFIXES)),
   };
 }
 

@@ -6,7 +6,7 @@ import { agentTurnTraces, assistants, conversations, messages } from "@/db/schem
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { diffConfig } from "@/lib/assistants/changes";
-import { assistantConfigSchema, assistantRowToConfig } from "@/lib/assistants/schema";
+import { assistantConfigInputSchema, assistantRowToConfig } from "@/lib/assistants/schema";
 
 async function loadRow(id: string) {
   return db.query.assistants.findFirst({ where: eq(assistants.id, id) });
@@ -64,7 +64,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const parsed = assistantConfigSchema.safeParse(raw);
+  const parsed = assistantConfigInputSchema.safeParse(raw);
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid_body", issues: parsed.error.issues }, { status: 400 });
   }

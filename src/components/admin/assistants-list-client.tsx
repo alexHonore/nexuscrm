@@ -8,6 +8,7 @@ import {
   Loader2,
   MessageSquare,
   MoreHorizontal,
+  PowerOff,
   Plus,
   Trash2,
   Upload,
@@ -77,7 +78,26 @@ export function AssistantsListClient({
   const t = useTranslations("assistants");
   const router = useRouter();
   const [target, setTarget] = useState<AssistantListItem | null>(null);
+  const [toDeactivate, setToDeactivate] = useState<AssistantListItem | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Retirer un assistant du service sans l'archiver : il repasse en brouillon
+  // et devra repasser la porte d'activation. C'était le geste qui manquait
+  // pour arrêter un assistant actif qui dérape.
+  const deactivate = async () => {
+    if (!toDeactivate) return;
+    setBusy(true);
+    try {
+      await api(`/api/assistants/${toDeactivate.id}/deactivate`, { method: "POST" });
+      toast.success(t("list.deactivated"));
+      setToDeactivate(null);
+      router.refresh();
+    } catch {
+      toast.error(t("editor.errors.save"));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const remove = async () => {
     if (!target) return;
@@ -189,6 +209,11 @@ export function AssistantsListClient({
                       >
                         <Download /> {t("list.actions.export")}
                       </DropdownMenuItem>
+                      {item.status === "active" ? (
+                        <DropdownMenuItem onClick={() => setToDeactivate(item)}>
+                          <PowerOff /> {t("list.actions.deactivate")}
+                        </DropdownMenuItem>
+                      ) : null}
                       <DropdownMenuItem variant="destructive" onClick={() => setTarget(item)}>
                         <Trash2 />{" "}
                         {item.hasWritten ? t("list.actions.archive") : t("list.actions.delete")}
@@ -225,6 +250,27 @@ export function AssistantsListClient({
             <AlertDialogAction onClick={() => void remove()} disabled={busy}>
               {busy ? <Loader2 className="animate-spin" /> : null}
               {t("list.deleteConfirm.confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={toDeactivate !== null}
+        onOpenChange={(open) => !open && setToDeactivate(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("list.deactivateConfirm.title", { name: toDeactivate?.name ?? "" })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>{t("list.deactivateConfirm.body")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void deactivate()} disabled={busy}>
+              {busy ? <Loader2 className="animate-spin" /> : null}
+              {t("list.deactivateConfirm.confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -201,4 +201,43 @@ describe("fixtures", () => {
     const rows = await testDb.select().from(guardrailAudit);
     expect(rows.some((r) => r.action === "fixture_deleted")).toBe(true);
   });
+
+  it("créer, modifier et supprimer une fixture PÉRIMENT les assistants, et la réponse le dit", async () => {
+    // Le vert de chaque assistant a été jugé sans ce scénario (ou avec son
+    // ancienne version) : il ne vaut plus. Comme pour le noyau et les règles,
+    // on pose les drapeaux au lieu de laisser la porte le découvrir.
+    const [a] = await testDb
+      .insert(assistants)
+      .values({
+        name: "Acheteur", identity: {}, goal: { primary: { type: "qualify_only" }, fallbacks: [] },
+        approach: {}, model: {}, needsRecompile: false, suitePassed: true,
+      })
+      .returning();
+    const flags = async () => {
+      const row = await testDb.query.assistants.findFirst({ where: eq(assistants.id, a.id) });
+      return { needsRecompile: row!.needsRecompile, suitePassed: row!.suitePassed };
+    };
+    const reset = () =>
+      testDb.update(assistants).set({ needsRecompile: false, suitePassed: true }).where(eq(assistants.id, a.id));
+
+    const created = await fixtureCollection.POST(req("/api/admin/guardrails/fixtures", "POST", VALID));
+    const { fixture, staleAssistants } = (await created.json()) as { fixture: { id: string }; staleAssistants: number };
+    expect(staleAssistants).toBe(1);
+    expect(await flags()).toEqual({ needsRecompile: true, suitePassed: false });
+
+    await reset();
+    const patched = await fixtureSingle.PATCH(
+      req(`/api/admin/guardrails/fixtures/${fixture.id}`, "PATCH", { severity: "warn" }),
+      { params: Promise.resolve({ id: fixture.id }) },
+    );
+    expect(((await patched.json()) as { staleAssistants: number }).staleAssistants).toBe(1);
+    expect(await flags()).toEqual({ needsRecompile: true, suitePassed: false });
+
+    await reset();
+    const deleted = await fixtureSingle.DELETE(req(`/api/admin/guardrails/fixtures/${fixture.id}`, "DELETE"), {
+      params: Promise.resolve({ id: fixture.id }),
+    });
+    expect(((await deleted.json()) as { staleAssistants: number }).staleAssistants).toBe(1);
+    expect(await flags()).toEqual({ needsRecompile: true, suitePassed: false });
+  });
 });

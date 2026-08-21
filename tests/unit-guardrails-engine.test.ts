@@ -171,6 +171,29 @@ describe("evaluateOutputRules", () => {
     expect(verdict.reason).not.toContain("450");
   });
 
+  it("une config illisible ÉCHOUE au lieu de lever : le tour est bloqué, pas avorté", () => {
+    // Lever ici faisait planter runTurn à chaque message : aucune réponse,
+    // aucune trace, personne d'averti. Un verdict rouge bloque proprement.
+    const broken: RuleData = {
+      scope: "assistant",
+      key: "broken",
+      label: "Cassée",
+      kind: "forbidden_regex",
+      config: { patterns: ["("] },
+      promptText: null,
+      severity: "block",
+      enabled: true,
+      orderIndex: 0,
+    };
+    const verdicts = evaluateOutputRules("Bonjour!", [broken, priceRule()]);
+    expect(verdicts).toHaveLength(2);
+    expect(verdicts[0]).toMatchObject({ key: "broken", passed: false });
+    expect(verdicts[0].reason).toMatch(/illisible/);
+    expect(blockingFailures(verdicts)).toHaveLength(1);
+    // Les règles saines continuent d'être évaluées.
+    expect(verdicts[1].passed).toBe(true);
+  });
+
   it("forbidden_terms ignore accents et casse, sans faux positif sur un autre mot", () => {
     const terms = rule({
       key: "no_commission_terms",

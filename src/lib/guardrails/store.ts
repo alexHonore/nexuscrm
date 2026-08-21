@@ -1,7 +1,8 @@
 import "server-only";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  assistants,
   guardrailFixtures,
   guardrailRules,
   objectionPacks,
@@ -283,4 +284,33 @@ export async function resetGuardrailDefaults(): Promise<{ restored: number; recr
   const seeded = await seedGuardrailDefaults();
 
   return { restored, recreated: seeded.rules + seeded.fixtures + seeded.packs };
+}
+
+// ── Péremption des assistants ────────────────────────────────────────────────
+
+/**
+ * Une règle ou une fixture qui change PÉRIME les assistants concernés, comme
+ * la publication d'un noyau : L6 du prompt compilé recopie le texte des
+ * règles, et la suite a été jugée contre les règles et fixtures d'AVANT. Sans
+ * ce geste, un brouillon passait la porte d'activation avec un L6 d'hier et un
+ * vert obtenu contre d'autres scénarios ; un assistant actif gardait l'ancien
+ * L6 jusqu'à ce que quelqu'un pense à recompiler.
+ *
+ * Portée noyau (`assistantId` null) : tout assistant non archivé. Portée
+ * assistant : lui seul. Renvoie le nombre d'assistants touchés, pour que la
+ * réponse de l'API — et l'écran — le disent.
+ */
+export async function invalidateAssistantsForGuardrails(opts: {
+  assistantId: string | null;
+}): Promise<number> {
+  const scope =
+    opts.assistantId === null
+      ? sql`${assistants.status} <> 'archived'`
+      : eq(assistants.id, opts.assistantId);
+  const stale = await db
+    .update(assistants)
+    .set({ needsRecompile: true, suitePassed: false, updatedAt: new Date() })
+    .where(scope)
+    .returning({ id: assistants.id });
+  return stale.length;
 }

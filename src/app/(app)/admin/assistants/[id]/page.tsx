@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { notFound } from "next/navigation";
+import { z } from "zod";
 import { AssistantEditor } from "@/components/admin/assistant-editor";
 import type { ParamDocView } from "@/components/admin/assistant-editor/param-help";
 import type { AssistantEditorData, EditorRule, EditorRun } from "@/components/admin/assistant-editor/types";
@@ -21,6 +22,10 @@ export default async function AssistantEditorPage({
   await requireAdmin();
   const { id } = await params;
   const { tab } = await searchParams;
+
+  // Un segment qui n'est pas un UUID donnerait une erreur Postgres (500) au
+  // lieu d'une page introuvable : une faute de frappe n'est pas une panne.
+  if (!z.uuid().safeParse(id).success) notFound();
 
   const row = await db.query.assistants.findFirst({ where: eq(assistants.id, id) });
   if (!row) notFound();

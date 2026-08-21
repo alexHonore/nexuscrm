@@ -22,6 +22,7 @@
     "columns": {
       "label": "Name",
       "key": "Key",
+      "description": "Description",
       "kind": "Kind",
       "enabled": "Enabled",
       "severity": "Severity"
@@ -61,6 +62,7 @@
     "emptyFixtures": "No fixtures — run the seed",
     "emptyCore": "No prompt core — run the seed",
     "saved": "Saved",
+    "invalidated": "{count, plural, =0 {No assistant affected} one {# assistant to recompile and re-test} other {# assistants to recompile and re-test}}",
     "genericError": "Something went wrong",
     "help": "Help",
     "helpWhen": "When to use it",
@@ -183,6 +185,7 @@
       "duplicate": "Duplicate",
       "delete": "Delete",
       "archive": "Archive",
+      "deactivate": "Deactivate",
       "test": "Test"
     },
     "deleteConfirm": {
@@ -191,9 +194,15 @@
       "bodyArchive": "This assistant has already sent messages. It will be archived, not deleted — conversations must stay readable alongside the assistant that wrote them.",
       "confirm": "Confirm"
     },
+    "deactivateConfirm": {
+      "title": "Deactivate “{name}”?",
+      "body": "The assistant goes back to draft: it stops replying and leaves the campaign pick lists. It can be activated again after a recompile and a green suite.",
+      "confirm": "Deactivate"
+    },
     "created": "Assistant created",
     "deleted": "Assistant deleted",
-    "archived": "Assistant archived"
+    "archived": "Assistant archived",
+    "deactivated": "Assistant deactivated — back to draft"
   },
   "editor": {
     "back": "Assistants",
@@ -253,7 +262,8 @@
       "calendarSlot": "Where the meeting happens",
       "calendarMeet": "Video call (Google Meet link)",
       "calendarInperson": "In person (address)",
-      "calendarHint": "Decides which CRM appointment type is checked for availability."
+      "calendarHint": "Decides which CRM appointment type is checked for availability.",
+      "mandatedField": "required by the goal"
     },
     "knowledge": {
       "add": "Add a fact",
@@ -302,6 +312,8 @@
       "lastRun": "Last run: {when}",
       "never": "Never run",
       "passed": "{passed}/{total} fixtures passed",
+      "stale": "Stale result: the configuration or the prompt changed since. Run the suite again before activating.",
+      "superseded": "The configuration changed while the suite was running: this result was not kept.",
       "blocking": "Blocking",
       "output": "Produced reply",
       "reason": "Failure reason"
@@ -322,7 +334,9 @@
       "suite": "The suite could not run",
       "activate": "Activation refused",
       "staleCompile": "The prompt must be recompiled before activation.",
-      "suiteNotPassed": "The guardrail suite must be green before activation."
+      "suiteNotPassed": "The guardrail suite must be green before activation.",
+      "archived": "An archived assistant cannot be reactivated.",
+      "changedDuringCompile": "The configuration changed while compiling: compile again."
     },
     "identity": {
       "namedPersonWarning": "The assistant writes on behalf of a person but no account is attached: meetings will fall back to an administrator.",
@@ -358,12 +372,12 @@
   "qualificationField": {
     "project_type": "Project type",
     "timing": "Timing",
-    "neighbourhood": "Neighbourhood",
     "budget": "Budget",
-    "property_type": "Property type",
+    "sector": "Sector",
     "financing": "Financing",
     "current_situation": "Current situation",
-    "email": "Email"
+    "email": "Email",
+    "preferred_time": "Preferred time"
   },
   "tool": {
     "get_slots": "Check availability",

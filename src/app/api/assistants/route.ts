@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { assistants } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
-import { assistantConfigSchema } from "@/lib/assistants/schema";
+import { assistantConfigInputSchema } from "@/lib/assistants/schema";
 
 /** GET /api/assistants — liste, la plus récemment modifiée d'abord. */
 export async function GET() {
@@ -46,7 +46,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const parsed = assistantConfigSchema.safeParse(raw);
+  const parsed = assistantConfigInputSchema.safeParse(raw);
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid_body", issues: parsed.error.issues }, { status: 400 });
   }

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { guardrailAudit, guardrailFixtures } from "@/db/schema-sms";
 import { apiAdmin } from "@/lib/auth/guards";
+import { invalidateAssistantsForGuardrails } from "@/lib/guardrails/store";
 import {
   GUARDRAIL_SEVERITIES,
   fixtureExpectationsSchema,
@@ -16,6 +17,10 @@ import { readJson } from "../../_helpers";
  *
  * `origin: "custom"` : « Tout réinitialiser » restaure les fixtures semées et
  * ne doit pas emporter les scénarios écrits à la main.
+ *
+ * Une fixture nouvelle périme la suite de chaque assistant : leur vert a été
+ * obtenu sans ce scénario. On pose les deux drapeaux (recompilation + suite),
+ * comme pour les règles, pour que la liste le montre d'un coup d'œil.
  */
 const createSchema = z.object({
   label: z.string().trim().min(1).max(160),
@@ -58,13 +63,15 @@ export async function POST(req: Request) {
     })
     .returning();
 
+  const staleAssistants = await invalidateAssistantsForGuardrails({ assistantId: null });
+
   await db.insert(guardrailAudit).values({
     actorId: admin.id,
     action: "fixture_created",
     target: `fixture:${row.id}`,
     before: null,
-    after: { label: row.label, severity: row.severity },
+    after: { label: row.label, severity: row.severity, staleAssistants },
   });
 
-  return NextResponse.json({ fixture: row }, { status: 201 });
+  return NextResponse.json({ fixture: row, staleAssistants }, { status: 201 });
 }

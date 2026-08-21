@@ -98,6 +98,23 @@ export function safeParseRuleConfig(kind: GuardrailKind, config: unknown) {
   return CONFIG_SCHEMAS[kind].safeParse(config);
 }
 
+// ── Paquets d'objections ─────────────────────────────────────────────────────
+
+/**
+ * Un item d'objection (table `objection_packs.items`). Validé à l'import et à
+ * la compilation : un paquet dont les items ne sont pas des objets (chaîne,
+ * tableau vide d'objets vides…) compilerait « Si undefined : reconnais
+ * (undefined)… » dans le prompt système d'un assistant en service.
+ */
+export const objectionItemSchema = z.object({
+  key: z.string().min(1),
+  triggerHint: z.string().min(1),
+  acknowledge: z.string().min(1),
+  reframe: z.string().min(1),
+  ask: z.string().min(1),
+});
+export type ObjectionItemData = z.infer<typeof objectionItemSchema>;
+
 // ── Règles ───────────────────────────────────────────────────────────────────
 
 export interface RuleData {
