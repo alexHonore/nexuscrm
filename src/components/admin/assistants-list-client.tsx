@@ -41,6 +41,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import type { GoalType } from "@/lib/assistants/schema";
 import { api } from "./api";
 import { AssistantImportDialog } from "./assistant-import-dialog";
+import { AssistantCreateDialog } from "./assistant-create";
 
 export type AssistantListItem = {
   id: string;
@@ -75,30 +76,8 @@ export function AssistantsListClient({
 }) {
   const t = useTranslations("assistants");
   const router = useRouter();
-  const [creating, setCreating] = useState(false);
   const [target, setTarget] = useState<AssistantListItem | null>(null);
   const [busy, setBusy] = useState(false);
-
-  const create = async () => {
-    setCreating(true);
-    try {
-      const created = await api<{ id: string }>("/api/assistants", {
-        method: "POST",
-        body: JSON.stringify({
-          name: t("list.new"),
-          identity: {},
-          goal: { primary: { type: "video_meeting", durationMin: 30, appointmentType: "meet" }, fallbacks: [] },
-          approach: {},
-          model: {},
-        }),
-      });
-      toast.success(t("list.created"));
-      router.push(`/admin/assistants/${created.id}`);
-    } catch {
-      toast.error(t("editor.errors.save"));
-      setCreating(false);
-    }
-  };
 
   const remove = async () => {
     if (!target) return;
@@ -127,9 +106,15 @@ export function AssistantsListClient({
             </Button>
           }
         />
-        <Button onClick={() => void create()} disabled={creating} className="min-h-11 md:min-h-9">
-          {creating ? <Loader2 className="animate-spin" /> : <Plus />} {t("list.new")}
-        </Button>
+        {/* Trois portes d'entrée plutôt qu'un brouillon vide jeté dans un
+            éditeur à onze onglets. */}
+        <AssistantCreateDialog
+          trigger={
+            <Button className="min-h-11 md:min-h-9">
+              <Plus /> {t("list.new")}
+            </Button>
+          }
+        />
       </div>
 
       {items.length === 0 ? (

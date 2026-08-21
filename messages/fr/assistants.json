@@ -564,5 +564,64 @@
       "medium": "Réfléchit davantage. Utile sur des conversations qui partent dans tous les sens.",
       "high": "Réfléchit longuement. Peut ajouter plusieurs secondes avant chaque réponse — ça se remarque en conversation."
     }
+  },
+  "create": {
+    "title": "Créer un assistant",
+    "subtitle": "Trois façons d'y arriver — toutes produisent une configuration complète.",
+    "back": "Retour",
+    "ai": {
+      "name": "Décrivez votre besoin",
+      "badge": "IA",
+      "pitch": "Écrivez ce que vous voulez obtenir. L'assistant vous pose deux ou trois questions, puis prépare tout.",
+      "time": "Environ une minute",
+      "title": "Décrivez votre besoin",
+      "subtitle": "Quelques questions, et la configuration est prête à relire.",
+      "prompt": "Que voulez-vous que cet assistant accomplisse ?",
+      "example": "Par exemple : « relancer mes vieux leads vendeurs qui dorment depuis des mois »",
+      "placeholder": "Décrivez votre besoin…",
+      "thinking": "Réflexion…",
+      "ready": "Prêt à créer",
+      "createIt": "Créer cet assistant",
+      "noProvider": "Aucune clé de modèle configurée — la création assistée a besoin d'un fournisseur.",
+      "retry": "Réponse illisible du modèle. Reformulez et réessayez.",
+      "failed": "La création assistée n'a pas abouti."
+    },
+    "simple": {
+      "name": "Configuration simple",
+      "pitch": "Quatre choix : à qui vous écrivez, ce que vous voulez, et à quel point insister.",
+      "time": "Environ deux minutes",
+      "title": "Configuration simple",
+      "subtitle": "Les quatre réglages qui changent vraiment le comportement.",
+      "audience": "À qui écrivez-vous ?",
+      "goal": "Que voulez-vous obtenir ?",
+      "persistence": "À quel point insister ?",
+      "buyer": "Des acheteurs",
+      "seller": "Des vendeurs",
+      "both": "Les deux",
+      "soft": "Peu",
+      "softHint": "Une demande, puis on lâche prise.",
+      "balanced": "Modérément",
+      "balancedHint": "Deux relances espacées. Le réglage habituel.",
+      "firm": "Beaucoup",
+      "firmHint": "Insiste. Attention au taux de désabonnement.",
+      "createIt": "Créer cet assistant",
+      "fieldName": "Nom de l'assistant"
+    },
+    "complex": {
+      "name": "Configuration complète",
+      "pitch": "Tous les réglages : objectif, ton, connaissances, outils, garde-fous, modèle, prompt.",
+      "time": "Onze onglets",
+      "title": "Configuration complète",
+      "subtitle": "On crée un brouillon, puis vous réglez tout dans l'éditeur.",
+      "note": "L'assistant est créé avec des valeurs par défaut raisonnables. Vous ajusterez chaque onglet ensuite.",
+      "createIt": "Créer et ouvrir l'éditeur"
+    },
+    "summary": {
+      "goal": "Objectif",
+      "fallback": "Repli",
+      "required": "À recueillir",
+      "persistence": "Persistance",
+      "none": "Aucun"
+    }
   }
 }

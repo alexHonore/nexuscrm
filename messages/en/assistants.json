@@ -564,5 +564,64 @@
       "medium": "Thinks more. Useful on conversations that wander.",
       "high": "Thinks at length. Can add several seconds before each reply — noticeable in a conversation."
     }
+  },
+  "create": {
+    "title": "Create an assistant",
+    "subtitle": "Three ways to get there — all produce a complete configuration.",
+    "back": "Back",
+    "ai": {
+      "name": "Describe what you need",
+      "badge": "AI",
+      "pitch": "Write what you want to achieve. It asks two or three questions, then prepares everything.",
+      "time": "About a minute",
+      "title": "Describe what you need",
+      "subtitle": "A few questions, and the configuration is ready to review.",
+      "prompt": "What should this assistant achieve?",
+      "example": "For example: \"follow up on my old seller leads that have been dormant for months\"",
+      "placeholder": "Describe what you need…",
+      "thinking": "Thinking…",
+      "ready": "Ready to create",
+      "createIt": "Create this assistant",
+      "noProvider": "No model key configured — assisted creation needs a provider.",
+      "retry": "Unreadable model reply. Rephrase and try again.",
+      "failed": "Assisted creation did not complete."
+    },
+    "simple": {
+      "name": "Simple setup",
+      "pitch": "Four choices: who you write to, what you want, and how hard to push.",
+      "time": "About two minutes",
+      "title": "Simple setup",
+      "subtitle": "The four settings that really change behaviour.",
+      "audience": "Who are you writing to?",
+      "goal": "What do you want to get?",
+      "persistence": "How hard should it push?",
+      "buyer": "Buyers",
+      "seller": "Sellers",
+      "both": "Both",
+      "soft": "Lightly",
+      "softHint": "One ask, then let go.",
+      "balanced": "Moderately",
+      "balancedHint": "Two spaced follow-ups. The usual setting.",
+      "firm": "Hard",
+      "firmHint": "Pushes. Watch the opt-out rate.",
+      "createIt": "Create this assistant",
+      "fieldName": "Assistant name"
+    },
+    "complex": {
+      "name": "Full setup",
+      "pitch": "Every setting: goal, tone, knowledge, tools, guardrails, model, prompt.",
+      "time": "Eleven tabs",
+      "title": "Full setup",
+      "subtitle": "We create a draft, then you configure everything in the editor.",
+      "note": "The assistant is created with sensible defaults. You will adjust each tab next.",
+      "createIt": "Create and open the editor"
+    },
+    "summary": {
+      "goal": "Goal",
+      "fallback": "Fallback",
+      "required": "To gather",
+      "persistence": "Persistence",
+      "none": "None"
+    }
   }
 }
