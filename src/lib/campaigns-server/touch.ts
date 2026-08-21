@@ -205,14 +205,18 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
         tx,
       );
     } else {
-      // Barreau sans texte : c'est l'assistant qui écrit. On le réveille au
-      // lieu d'inventer une formulation ici.
+      // Barreau sans texte : c'est l'assistant qui écrit. On le réveille avec le
+      // CONTEXTE du barreau — sans lui, le tour cherche un entrant à traiter,
+      // n'en trouve pas et se termine en « skipped » : rien ne part, et rien ne
+      // le dit. Clé distincte de `turn:<conversation>` : un tour de réponse en
+      // vol (le contact vient d'écrire) ne doit pas absorber l'ouverture, ni
+      // l'inverse — le runtime arbitre entre les deux au moment d'écrire.
       await enqueueJob(
         {
           type: "agent_turn",
           runAt: now,
-          payload: { conversationId: thread.id },
-          dedupeKey: `turn:${thread.id}`,
+          payload: { conversationId: thread.id, outreach: { enrollmentId: enrollment.id, step } },
+          dedupeKey: `outreach:${enrollment.id}:${step}`,
         },
         tx,
       );
@@ -278,4 +282,24 @@ async function finish(
     })
     .where(eq(campaignEnrollments.id, enrollmentId));
   return result;
+}
+
+/**
+ * Résultat d'un tour proactif, écrit sur la trace du barreau.
+ *
+ * Le barreau est créé « queued » au moment où l'assistant est réveillé ; c'est
+ * le tour qui sait ensuite si un message est parti, a été bloqué par un
+ * garde-fou, ou a cédé la place à une réponse du contact. Sans cette écriture,
+ * tous les barreaux rédigés par l'assistant resteraient « queued » pour
+ * toujours et les statistiques ne distingueraient pas « envoyé » de « rien ».
+ */
+export async function markTouchOutcome(
+  enrollmentId: string,
+  step: number,
+  status: string,
+): Promise<void> {
+  await db
+    .update(campaignTouches)
+    .set({ status })
+    .where(and(eq(campaignTouches.enrollmentId, enrollmentId), eq(campaignTouches.step, step)));
 }

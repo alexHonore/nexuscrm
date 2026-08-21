@@ -7,11 +7,14 @@ import {
   agentEvents,
   agentTurnTraces,
   assistants,
+  campaignEnrollments,
+  campaigns,
   conversations,
   messages,
 } from "@/db/schema-sms";
 import { assistantRowToConfig, type AssistantConfig } from "@/lib/assistants/schema";
 import { resolvedRulesFor } from "@/lib/assistants/service";
+import { campaignRowToConfig } from "@/lib/campaigns/schema";
 import { getInternalBookingProvider } from "@/lib/booking/internal";
 import { blockingFailures, evaluateOutputRules } from "@/lib/guardrails/filter";
 import { judgeWithLlm } from "@/lib/guardrails/judge";
@@ -79,6 +82,56 @@ export interface TurnResult {
   conversationId: string;
   traceId?: string;
   reason?: string;
+}
+
+/**
+ * Contexte d'un tour PROACTIF : un barreau de campagne sans texte, que
+ * l'assistant doit rédiger lui-même. Le tour n'a alors aucun entrant à
+ * traiter — c'est lui qui ouvre, ou qui relance.
+ */
+export interface OutreachContext {
+  enrollmentId: string;
+  step: number;
+}
+
+export interface TurnOptions {
+  outreach?: OutreachContext;
+}
+
+/**
+ * Consigne de tour quand l'assistant écrit EN PREMIER.
+ *
+ * Les fournisseurs exigent au moins un message ; « écris l'ouverture » est
+ * exactement ce que demande un barreau sans texte. Le nom et la description de
+ * la campagne donnent au modèle le POURQUOI du message (réactivation, nouveau
+ * lead…) — marqués « à ne pas citer » pour qu'il n'écrive pas « dans le cadre
+ * de notre campagne ». La consigne n'est jamais stockée comme message : le
+ * contact ne la voit pas et l'historique des tours suivants ne la contient pas.
+ */
+async function outreachInstruction(
+  outreach: OutreachContext,
+  historyLength: number,
+): Promise<string> {
+  const enrollment = await db.query.campaignEnrollments.findFirst({
+    where: eq(campaignEnrollments.id, outreach.enrollmentId),
+  });
+  const campaignRow = enrollment
+    ? await db.query.campaigns.findFirst({ where: eq(campaigns.id, enrollment.campaignId) })
+    : null;
+  const ladderLength = campaignRow ? campaignRowToConfig(campaignRow).ladder.length : 0;
+  const context = campaignRow
+    ? `Contexte interne (à ne pas citer) : ${campaignRow.name}${
+        campaignRow.description ? ` — ${campaignRow.description}` : ""
+      }.`
+    : "";
+
+  if (outreach.step === 0) {
+    return historyLength === 0
+      ? `Tu écris en premier : ce contact n'a encore reçu aucun message de ta part. ${context} Écris le PREMIER message de la conversation.`.trim()
+      : `Tu écris en premier dans ce fil : tiens compte des échanges précédents. ${context} Écris ton premier message.`.trim();
+  }
+  const total = Math.max(ladderLength - 1, outreach.step);
+  return `Tu relances : le contact n'a pas répondu à ton dernier message (relance ${outreach.step} sur ${total}). ${context} Écris une relance courte qui ne répète pas le message précédent et laisse une porte de sortie.`.trim();
 }
 
 /** Délai humanisé avant l'envoi (approach.reply_speed). */
@@ -286,7 +339,11 @@ async function evaluateAllRules(
 
 // ── Le tour ──────────────────────────────────────────────────────────────────
 
-export async function runTurn(conversationId: string): Promise<TurnResult> {
+export async function runTurn(
+  conversationId: string,
+  options: TurnOptions = {},
+): Promise<TurnResult> {
+  const outreach = options.outreach ?? null;
   // ═══ 1. LECTURE (hors transaction) ═══════════════════════════════════════
   const conversation = await db.query.conversations.findFirst({
     where: eq(conversations.id, conversationId),
@@ -307,7 +364,11 @@ export async function runTurn(conversationId: string): Promise<TurnResult> {
       ),
     )
     .orderBy(asc(messages.createdAt));
-  if (inbound.length === 0) return { outcome: "skipped_no_inbound", conversationId };
+  // Tour PROACTIF : aucun entrant, mais un barreau de campagne à rédiger.
+  // Si le contact a écrit entre-temps, ce n'est plus une ouverture — on
+  // répond à son message, et le barreau est considéré satisfait par la réponse.
+  const proactive = inbound.length === 0 && outreach !== null;
+  if (inbound.length === 0 && !proactive) return { outcome: "skipped_no_inbound", conversationId };
 
   if (!conversation.activeAssistantId) return { outcome: "skipped_no_assistant", conversationId };
   const assistantRow = await db.query.assistants.findFirst({
@@ -322,7 +383,17 @@ export async function runTurn(conversationId: string): Promise<TurnResult> {
   const rules = await resolvedRulesFor(assistantRow.id);
 
   const inboundIds = inbound.map((m) => m.id);
-  const userTurn = inbound.map((m) => m.body).join("\n");
+  const historyCount = proactive
+    ? ((
+        await db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(messages)
+          .where(eq(messages.conversationId, conversationId))
+      )[0]?.n ?? 0)
+    : 0;
+  const userTurn = proactive
+    ? await outreachInstruction(outreach as OutreachContext, historyCount)
+    : inbound.map((m) => m.body).join("\n");
   const inboundBatch = inbound.map((m) => ({
     id: m.id,
     body: m.body,
@@ -383,6 +454,10 @@ export async function runTurn(conversationId: string): Promise<TurnResult> {
       // Un autre tour a déjà consommé ces messages : on abandonne le nôtre
       // plutôt que de répondre deux fois.
       if (!inboundIds.every((id) => pendingIds.has(id))) return null;
+      // Ouverture proactive alors que le contact vient d'écrire : on s'efface.
+      // Le tour de réponse (déjà en file par le webhook) parlera à sa place —
+      // sinon le contact recevrait une ouverture APRÈS sa propre question.
+      if (proactive && stillPending.length > 0 && input.outcome === "sent") return null;
 
       const now = new Date();
       // On ne marque QUE les entrants que ce tour a réellement lus. Un message
@@ -439,7 +514,19 @@ export async function runTurn(conversationId: string): Promise<TurnResult> {
       return trace.id;
     });
 
-    if (traceId === null) return { outcome: "skipped_superseded", conversationId };
+    if (traceId === null) {
+      // Ouverture effacée par un entrant : on s'assure qu'un tour de RÉPONSE
+      // existe. Le webhook en a normalement posé un ; la clé absorbe le doublon.
+      if (proactive) {
+        await enqueueJob({
+          type: "agent_turn",
+          runAt: new Date(Date.now() + 5_000),
+          payload: { conversationId },
+          dedupeKey: `turn:${conversationId}`,
+        });
+      }
+      return { outcome: "skipped_superseded", conversationId };
+    }
 
     // Un message arrivé PENDANT le tour n'a pas été consommé : la clé de
     // dédoublonnage l'aurait absorbé dans le job en cours et il resterait sans
@@ -471,10 +558,21 @@ export async function runTurn(conversationId: string): Promise<TurnResult> {
 
   // ═══ 2. RÉFLEXION (hors transaction, hors verrou) ════════════════════════
 
-  const { classification: rawClassification, error: classifyError } = await classifyInbound(
-    userTurn,
-    classifierCall,
-  );
+  // Rien à classer quand c'est l'assistant qui ouvre : la consigne n'est pas
+  // un message du contact, et la passer au classifieur coûterait un appel pour
+  // un verdict sans objet.
+  const { classification: rawClassification, error: classifyError } = proactive
+    ? {
+        classification: {
+          optOut: false,
+          refusal: "none" as const,
+          qualification: {},
+          wantsHuman: false,
+          unintelligible: false,
+        },
+        error: undefined,
+      }
+    : await classifyInbound(userTurn, classifierCall);
   // Un STOP DANS une rafale : le détecteur exige que le message ENTIER soit le
   // mot-clé, donc « on se voit quand? » + « STOP » concaténés ne matchent pas.
   // On teste chaque entrant séparément — un STOP noyé reste un STOP.
@@ -705,7 +803,7 @@ export async function runTurn(conversationId: string): Promise<TurnResult> {
       rules,
       {
         toolCallNames: effects.filter((e) => e.ok).map((e) => e.name),
-        inbound: userTurn,
+        inbound: proactive ? "(ouverture — aucun message entrant)" : userTurn,
         // Aucun message de l'agent avant celui-ci = premier contact.
         isFirstOutbound: turnsUsed === 0,
       },
@@ -732,6 +830,12 @@ export async function runTurn(conversationId: string): Promise<TurnResult> {
       ...(effect.detail ? { error: effect.detail } : {}),
     },
   })));
+  if (proactive && outreach) {
+    events.push({
+      type: "outreach",
+      payload: { enrollmentId: outreach.enrollmentId, step: outreach.step },
+    });
+  }
   if (downgrade.downgraded) {
     events.push({
       type: "goal_downgrade",

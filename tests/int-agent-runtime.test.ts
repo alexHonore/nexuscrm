@@ -24,6 +24,9 @@ import {
   agentEvents,
   agentTurnTraces,
   assistants,
+  campaignEnrollments,
+  campaignTouches,
+  campaigns,
   conversations,
   messages,
   scheduledJobs,
@@ -49,7 +52,7 @@ const llm = vi.hoisted(() => ({
   generatorError: null as string | null,
   classifierJson: '{"refusal":"none","qualification":{}}',
   judgeJson: '{"passed":true,"reason":"conforme"}',
-  calls: [] as { model: string; system: string }[],
+  calls: [] as { model: string; system: string; messages?: unknown[] }[],
   /** Hook exécuté au premier appel générateur — sert à injecter une course. */
   onGenerate: null as null | (() => Promise<void>),
 }));
@@ -58,8 +61,8 @@ vi.mock("@/lib/llm-server", () => ({
   getLlmProvider: (id: string) => ({
     id,
     listModels: async () => [],
-    generate: async (input: { system: string; model: string }): Promise<LLMResult> => {
-      llm.calls.push({ model: input.model, system: input.system });
+    generate: async (input: { system: string; model: string; messages?: unknown[] }): Promise<LLMResult> => {
+      llm.calls.push({ model: input.model, system: input.system, messages: input.messages });
       // Le classifieur et le juge partagent le modèle « classifier » du test.
       if (input.model.includes("classifier")) {
         const isJudge = input.system.includes("évaluateur");
@@ -204,7 +207,6 @@ describe("runTurn", () => {
     llm.calls = [];
   });
   afterEach(() => vi.clearAllMocks());
-  afterAll(closeDb);
 
   it("chemin heureux : met UN envoi en file et écrit une trace complète", async () => {
     const { conversation, assistant } = await scene();
@@ -565,3 +567,168 @@ it("une réservation ÉCHOUÉE n'envoie AUCUNE confirmation au client", async ()
     expect(sup.map((s) => s.phoneE164)).toContain(client.phone);
   });
 });
+
+// ── Tour PROACTIF : un barreau de campagne sans texte ─────────────────────────
+
+const { handleAgentTurn } = await import("@/lib/jobs/handlers/agent-turn");
+
+/** Une campagne, une inscription et la trace « queued » de son barreau. */
+async function outreachScene(step = 0) {
+  const { conversation, assistant, client } = await scene();
+  const [campaign] = await testDb
+    .insert(campaigns)
+    .values({
+      name: "Réactivation 90 j",
+      description: "Vieux leads acheteurs sans nouvelles",
+      status: "active",
+      trigger: { kind: "manual" },
+      ladder: [
+        { delayHours: 0, body: null, label: "ouverture" },
+        { delayHours: 72, body: null, label: "relance" },
+      ],
+      assistantId: assistant.id,
+    })
+    .returning();
+  const [enrollment] = await testDb
+    .insert(campaignEnrollments)
+    .values({
+      campaignId: campaign.id,
+      clientId: client.id,
+      conversationId: conversation.id,
+      status: "active",
+      step,
+    })
+    .returning();
+  await testDb.insert(campaignTouches).values({
+    enrollmentId: enrollment.id,
+    step,
+    plannedAt: new Date(),
+    status: "queued",
+  });
+  const touchStatus = async () =>
+    (await testDb.query.campaignTouches.findFirst({
+      where: eq(campaignTouches.enrollmentId, enrollment.id),
+    }))!.status;
+  return { conversation, assistant, client, campaign, enrollment, touchStatus };
+}
+
+/** Le dernier message passé au générateur — là où vit la consigne d'ouverture. */
+function lastUserContent(): string {
+  const generatorCalls = llm.calls.filter((c) => c.model === "generator-model");
+  const last = generatorCalls[generatorCalls.length - 1]?.messages as
+    | { role: string; content: string }[]
+    | undefined;
+  return last?.[last.length - 1]?.content ?? "";
+}
+
+describe("tour proactif (barreau sans texte)", () => {
+  beforeEach(async () => {
+    await resetDb();
+    llm.generatorText = "Bonjour, ici l'équipe de Groupe Nexus. Toujours un projet immobilier?";
+    llm.generatorToolCalls = [];
+    llm.generatorSequence = [];
+    llm.onGenerate = null;
+    llm.generatorError = null;
+    llm.classifierJson = '{"refusal":"none","qualification":{}}';
+    llm.judgeJson = '{"passed":true,"reason":"conforme"}';
+    llm.calls = [];
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  it("sans entrant mais avec un barreau à rédiger, l'assistant ÉCRIT en premier", async () => {
+    // Le bogue d'origine : le tour cherchait un entrant, n'en trouvait pas et
+    // se terminait en « skipped ». L'échelle avançait, la trace disait
+    // « queued », aucun message ne partait — et rien ne le disait.
+    const { conversation, enrollment, touchStatus } = await outreachScene();
+
+    const outcome = await handleAgentTurn({
+      payload: { conversationId: conversation.id, outreach: { enrollmentId: enrollment.id, step: 0 } },
+    } as never);
+    expect(outcome.outcome).toBe("done");
+
+    const sends = (await jobsFor(conversation.id)).filter((j) => j.type === "send_sms");
+    expect(sends).toHaveLength(1);
+    expect((sends[0].payload as { source: string; aiGenerated: boolean }).source).toBe("agent");
+    expect((sends[0].payload as { aiGenerated: boolean }).aiGenerated).toBe(true);
+
+    // La consigne porte le POURQUOI (nom + description de la campagne) et
+    // demande explicitement le premier message…
+    const instruction = lastUserContent();
+    expect(instruction).toContain("Réactivation 90 j");
+    expect(instruction).toContain("PREMIER message");
+    // …mais n'est JAMAIS stockée : le contact ne la voit pas et les tours
+    // suivants ne la relisent pas comme un message du client.
+    const stored = await testDb.select().from(messages);
+    expect(stored.some((m) => m.body.includes("Contexte interne"))).toBe(false);
+
+    const [trace] = await testDb.select().from(agentTurnTraces);
+    expect(trace.outcome).toBe("sent");
+    expect((trace.inboundBatch as unknown[]).length).toBe(0);
+    expect(await eventsOf(conversation.id)).toContain("outreach");
+    // Le barreau sait maintenant qu'un message est parti.
+    expect(await touchStatus()).toBe("sent");
+    // Le classifieur n'a pas été appelé : rien à classer.
+    expect(llm.calls.filter((c) => c.model === "classifier-model" && !c.system.includes("évaluateur"))).toHaveLength(0);
+  });
+
+  it("une relance dit au modèle qu'il relance, et laquelle", async () => {
+    const { conversation, enrollment } = await outreachScene(1);
+    const result = await runTurn(conversation.id, { outreach: { enrollmentId: enrollment.id, step: 1 } });
+    expect(result.outcome).toBe("sent");
+    const instruction = lastUserContent();
+    expect(instruction).toContain("relance 1 sur 1");
+    expect(instruction).not.toContain("PREMIER");
+  });
+
+  it("si le contact écrit PENDANT l'ouverture, l'ouverture s'efface et un tour de réponse est posé", async () => {
+    // Sinon le contact recevrait notre ouverture APRÈS sa propre question.
+    const { conversation, enrollment, touchStatus } = await outreachScene();
+    llm.onGenerate = async () => {
+      await inbound(conversation.id, "Allo, c'est qui?");
+    };
+
+    const outcome = await handleAgentTurn({
+      payload: { conversationId: conversation.id, outreach: { enrollmentId: enrollment.id, step: 0 } },
+    } as never);
+    expect(outcome.outcome).toBe("skipped");
+
+    const jobs = await jobsFor(conversation.id);
+    expect(jobs.filter((j) => j.type === "send_sms")).toHaveLength(0);
+    // Un tour de RÉPONSE existe (clé `turn:`), l'entrant n'a pas été consommé.
+    expect(jobs.filter((j) => j.type === "agent_turn" && j.dedupeKey === `turn:${conversation.id}`)).toHaveLength(1);
+    const [row] = await testDb.select().from(messages).where(eq(messages.direction, "in"));
+    expect(row.processedAt).toBeNull();
+    expect(await touchStatus()).toBe("superseded");
+  });
+
+  it("avec un entrant en attente, le contexte de barreau ne change rien : on répond", async () => {
+    const { conversation, enrollment, touchStatus } = await outreachScene();
+    await inbound(conversation.id, "Oui, je cherche à acheter");
+
+    const outcome = await handleAgentTurn({
+      payload: { conversationId: conversation.id, outreach: { enrollmentId: enrollment.id, step: 0 } },
+    } as never);
+    expect(outcome.outcome).toBe("done");
+
+    const [trace] = await testDb.select().from(agentTurnTraces);
+    expect((trace.inboundBatch as unknown[]).length).toBe(1);
+    expect(await eventsOf(conversation.id)).not.toContain("outreach");
+    expect(lastUserContent()).toBe("Oui, je cherche à acheter");
+    // La réponse satisfait le barreau.
+    expect(await touchStatus()).toBe("sent");
+  });
+
+  it("un garde-fou bloquant laisse la trace du barreau à « blocked », rien ne part", async () => {
+    const { conversation, enrollment, touchStatus } = await outreachScene();
+    llm.judgeJson = '{"passed":false,"reason":"ne nomme pas l\'organisation"}';
+    const outcome = await handleAgentTurn({
+      payload: { conversationId: conversation.id, outreach: { enrollmentId: enrollment.id, step: 0 } },
+    } as never);
+    expect(outcome.outcome).toBe("done");
+    expect((await jobsFor(conversation.id)).filter((j) => j.type === "send_sms")).toHaveLength(0);
+    expect(await touchStatus()).toBe("blocked");
+  });
+});
+
+// La connexion se ferme APRÈS le dernier bloc — pas à la fin du premier.
+afterAll(closeDb);

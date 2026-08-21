@@ -294,6 +294,14 @@ describe("échelle de relances", () => {
 
     const jobs = await testDb.select().from(scheduledJobs);
     expect(jobs.map((j) => j.type)).toEqual(["agent_turn"]);
+    // Le CONTEXTE du barreau voyage avec le job : sans lui, le tour cherche un
+    // entrant à traiter, n'en trouve pas, et se termine en « skipped » — rien
+    // ne part, et rien ne le dit. Clé distincte de `turn:<conversation>` pour
+    // qu'un tour de réponse en vol n'absorbe pas l'ouverture.
+    expect(jobs[0].payload).toMatchObject({
+      outreach: { enrollmentId: enrolled.enrollmentId, step: 0 },
+    });
+    expect(jobs[0].dedupeKey).toBe(`outreach:${enrolled.enrollmentId}:0`);
   });
 });
 
