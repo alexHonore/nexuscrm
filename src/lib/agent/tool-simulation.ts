@@ -14,6 +14,24 @@
  * l'humain, à l'écran.
  */
 
+/** Résultat d'UN appel — rattaché à son identifiant par l'appelant. */
+export function simulatedToolResult(name: string, done: Set<string>): string {
+  if (done.has(name)) return `${name} : déjà exécuté à ce tour`;
+  done.add(name);
+  switch (name) {
+    case "get_slots":
+      return `${name} : jeudi 14 h, vendredi 10 h`;
+    case "book_meeting":
+      return `${name} : confirmé`;
+    case "update_qualification":
+      return `${name} : enregistré`;
+    case "schedule_followup":
+      return `${name} : relance programmée`;
+    default:
+      return `${name} : ok`;
+  }
+}
+
 export function simulatedToolResults(
   calls: { name: string }[],
   /** Outils déjà exécutés dans CE tour — même garde qu'en production. */

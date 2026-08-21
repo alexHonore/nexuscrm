@@ -44,7 +44,7 @@ export function createAnthropicProvider(options: AnthropicOptions): LLMProvider 
           max_tokens: input.maxTokens,
           temperature: input.temperature,
           system: input.system,
-          messages: input.messages,
+          messages: input.messages.map(toAnthropicMessage),
           tools: input.tools?.map((tool) => ({
             name: tool.name,
             description: tool.description,
@@ -105,4 +105,33 @@ export function createAnthropicProvider(options: AnthropicOptions): LLMProvider 
       });
     },
   };
+}
+
+/**
+ * Forme Anthropic : l'appel d'outil est un bloc `tool_use` dans le message de
+ * l'assistant, et le résultat un bloc `tool_result` dans un message `user`.
+ * Envoyer le résultat comme du texte libre laisse le modèle réémettre l'appel.
+ */
+function toAnthropicMessage(message: GenerateInput["messages"][number]): Record<string, unknown> {
+  if (message.role === "tool") {
+    return {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: message.toolCallId ?? "",
+          content: message.content,
+        },
+      ],
+    };
+  }
+  if (message.role === "assistant" && message.toolCalls && message.toolCalls.length > 0) {
+    const blocks: Record<string, unknown>[] = [];
+    if (message.content !== "") blocks.push({ type: "text", text: message.content });
+    for (const call of message.toolCalls) {
+      blocks.push({ type: "tool_use", id: call.id, name: call.name, input: call.arguments ?? {} });
+    }
+    return { role: "assistant", content: blocks };
+  }
+  return { role: message.role, content: message.content };
 }

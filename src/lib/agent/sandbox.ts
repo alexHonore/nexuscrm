@@ -9,6 +9,7 @@ import { blockingFailures, evaluateOutputRules } from "@/lib/guardrails/filter";
 import { judgeWithLlm } from "@/lib/guardrails/judge";
 import { enabledRules } from "@/lib/guardrails/resolve";
 import type { RuleVerdict } from "@/lib/guardrails/types";
+import type { LLMMessage } from "@/lib/llm/types";
 import { getLlmProvider } from "@/lib/llm-server";
 import { APP_TZ } from "@/components/clients/timezone";
 import { DEFAULT_QUIET_HOURS } from "@/lib/sms/quiet-hours";
@@ -16,7 +17,7 @@ import { classifyInbound } from "./classify";
 import { applyRefusal, requiredFieldsFor, resolveRung } from "./goal";
 import { renderTemplate } from "./render";
 import { DEFAULT_TURN_INSTRUCTIONS } from "./templates";
-import { isTerminalTool, simulatedToolResults } from "./tool-simulation";
+import { isTerminalTool, simulatedToolResult } from "./tool-simulation";
 import { toolDefsFor } from "./tools";
 
 /**
@@ -214,7 +215,7 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
       ? "Ce contact vient de changer d'étape dans le pipeline. Écris le PREMIER message de la conversation."
       : "Ce contact vient d'arriver comme nouveau lead. Écris le PREMIER message de la conversation.";
 
-  const turnMessages: { role: "assistant" | "user"; content: string }[] = [
+  const turnMessages: LLMMessage[] = [
     ...input.history,
     { role: "user", content: opening ? openingInstruction : input.inbound },
   ];
@@ -261,11 +262,18 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
     // Résultats SIMULÉS : aucun outil n'est exécuté. On répond au modèle de
     // façon plausible pour qu'il rédige, en disant clairement que les
     // disponibilités ne sont pas réelles.
-    turnMessages.push({ role: "assistant", content: out.text || "(appel d'outil)" });
-    turnMessages.push({
-      role: "user",
-      content: simulatedToolResults(out.toolCalls, sideEffectsDone),
-    });
+    // Vrai protocole d'outils : l'assistant DÉCLARE ses appels, puis chaque
+    // résultat revient rattaché à son identifiant. Maquillé en message `user`,
+    // le modèle ne relie pas le résultat à sa demande et la réémet.
+    turnMessages.push({ role: "assistant", content: out.text, toolCalls: out.toolCalls });
+    for (const call of out.toolCalls) {
+      turnMessages.push({
+        role: "tool",
+        toolCallId: call.id,
+        name: call.name,
+        content: simulatedToolResult(call.name, sideEffectsDone),
+      });
+    }
   }
 
   const draft = (out?.text ?? "").trim();

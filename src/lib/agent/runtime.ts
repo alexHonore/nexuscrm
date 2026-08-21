@@ -19,6 +19,7 @@ import { enabledRules } from "@/lib/guardrails/resolve";
 import type { RuleData, RuleVerdict } from "@/lib/guardrails/types";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { getLlmProvider } from "@/lib/llm-server";
+import type { LLMMessage } from "@/lib/llm/types";
 import type { LLMResult, ToolCall } from "@/lib/llm/types";
 import { suppressPhone } from "@/lib/sms-server";
 import { detectOptOut } from "@/lib/sms/optout";
@@ -106,6 +107,14 @@ interface ToolEffect {
 interface ToolRunResult {
   /** Ce que le modèle lit au tour suivant. */
   resultsForModel: string;
+  /**
+   * Un résultat PAR APPEL, rattaché à son identifiant.
+   *
+   * C'est ce qui permet de renvoyer de vrais messages `tool` : sans le lien
+   * avec `tool_call_id`, le modèle ne relie pas le résultat à sa demande, la
+   * réémet au tour suivant et n'écrit rien.
+   */
+  results: { id: string; name: string; content: string }[];
   terminated: "stop" | "handoff" | null;
   /** Vrai si une réservation a ÉCHOUÉ — le brouillon ne peut alors rien confirmer. */
   bookingFailed: boolean;
@@ -127,20 +136,23 @@ async function executeTools(input: {
   effects: ToolEffect[];
   sideEffectsDone: Set<string>;
 }): Promise<ToolRunResult> {
-  const lines: string[] = [];
+  const perCall: { id: string; name: string; content: string }[] = [];
   let terminated: "stop" | "handoff" | null = null;
   let bookingFailed = false;
 
   for (const call of input.calls) {
+    /** Consigne le résultat de CET appel, rattaché à son identifiant. */
+    const record = (content: string) =>
+      perCall.push({ id: call.id, name: call.name, content });
     const parsed = parseToolArgs(call.name, call.arguments);
     if (!parsed.ok) {
       input.effects.push({ name: call.name, ok: false, detail: parsed.error });
-      lines.push(`${call.name} : ${parsed.error}`);
+      record(`${call.name} : ${parsed.error}`);
       continue;
     }
     const name = parsed.name;
     if (SIDE_EFFECT_TOOLS.has(name) && input.sideEffectsDone.has(name)) {
-      lines.push(`${name} : déjà exécuté à ce tour`);
+      record(`${name} : déjà exécuté à ce tour`);
       continue;
     }
 
@@ -148,7 +160,7 @@ async function executeTools(input: {
       case "get_slots": {
         const { count } = parsed.args as { count: number };
         if (!input.rung.goal.appointmentType) {
-          lines.push("get_slots : ce cran d'objectif ne réserve pas de rencontre");
+          record("get_slots : ce cran d'objectif ne réserve pas de rencontre");
           break;
         }
         try {
@@ -156,13 +168,13 @@ async function executeTools(input: {
             type: input.rung.goal.appointmentType,
             count,
           });
-          lines.push(
+          record(
             googleConnected && slots.length > 0
               ? `get_slots : ${slots.map((s) => s.label).join(", ")}`
               : "get_slots : aucune disponibilité confirmée — ne propose AUCUNE heure précise.",
           );
         } catch {
-          lines.push("get_slots : agenda injoignable — ne propose aucune heure.");
+          record("get_slots : agenda injoignable — ne propose aucune heure.");
         }
         break;
       }
@@ -174,12 +186,12 @@ async function executeTools(input: {
           return typeof value !== "string" || value.trim() === "";
         });
         if (missing.length > 0) {
-          lines.push(missingFieldsError(missing));
+          record(missingFieldsError(missing));
           bookingFailed = true;
           break;
         }
         if (!input.rung.goal.appointmentType) {
-          lines.push("book_meeting : ce cran ne réserve pas de rencontre");
+          record("book_meeting : ce cran ne réserve pas de rencontre");
           bookingFailed = true;
           break;
         }
@@ -192,9 +204,9 @@ async function executeTools(input: {
         });
         input.sideEffectsDone.add(name);
         if (booked.ok) {
-          lines.push(`book_meeting : confirmé pour ${args.slotIso}`);
+          record(`book_meeting : confirmé pour ${args.slotIso}`);
         } else {
-          lines.push(
+          record(
             `book_meeting : ÉCHEC (${booked.error}) — ne confirme RIEN, propose autre chose.`,
           );
           bookingFailed = true;
@@ -215,7 +227,7 @@ async function executeTools(input: {
       default:
         // update_qualification, schedule_followup, transfer_assistant,
         // close_conversation : notés ici, effets complets en phase 6.
-        lines.push(`${name} : pris en compte`);
+        record(`${name} : pris en compte`);
         if (SIDE_EFFECT_TOOLS.has(name)) input.sideEffectsDone.add(name);
         break;
     }
@@ -224,7 +236,12 @@ async function executeTools(input: {
     if (terminated) break;
   }
 
-  return { resultsForModel: lines.join("\n") || "(aucun résultat)", terminated, bookingFailed };
+  return {
+    resultsForModel: perCall.map((r) => r.content).join("\n") || "(aucun résultat)",
+    results: perCall,
+    terminated,
+    bookingFailed,
+  };
 }
 
 // ── Garde-fous ───────────────────────────────────────────────────────────────
@@ -583,7 +600,7 @@ export async function runTurn(conversationId: string): Promise<TurnResult> {
     .where(eq(messages.conversationId, conversationId))
     .orderBy(asc(messages.createdAt));
   const consumed = new Set(inboundIds);
-  const messageArray = [
+  const messageArray: LLMMessage[] = [
     ...history
       .filter((m) => !consumed.has(m.id))
       .map((m) => ({
@@ -618,7 +635,7 @@ export async function runTurn(conversationId: string): Promise<TurnResult> {
             .map((v) => v.label)
             .join(" · ")}). Réécris-la en respectant strictement cette règle.`;
 
-    const turnMessages = [...messageArray];
+    const turnMessages: LLMMessage[] = [...messageArray];
 
     // Un aller-retour d'outils au maximum : assez pour « je consulte l'agenda
     // puis je propose », borné pour ne pas laisser un modèle boucler.
@@ -655,9 +672,19 @@ export async function runTurn(conversationId: string): Promise<TurnResult> {
         break;
       }
       if (round === 1) break;
-      // Le résultat des outils revient au modèle pour qu'il rédige avec.
-      turnMessages.push({ role: "assistant", content: result.text || "(appel d'outil)" });
-      turnMessages.push({ role: "user", content: ran.resultsForModel });
+      // VRAI protocole d'outils : l'assistant déclare ses appels, puis chaque
+      // résultat lui revient rattaché à son identifiant. Maquillé en message
+      // `user`, le modèle ne reliait pas le résultat à sa demande : il la
+      // réémettait et n'écrivait rien — le tour partait en escalade alors que
+      // l'assistant avait fait son travail.
+      turnMessages.push({
+        role: "assistant",
+        content: result.text,
+        toolCalls: result.toolCalls,
+      });
+      for (const r of ran.results) {
+        turnMessages.push({ role: "tool", toolCallId: r.id, name: r.name, content: r.content });
+      }
     }
 
     if (llmError !== null || terminatedByTool !== null || result === null) break;

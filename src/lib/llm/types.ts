@@ -53,9 +53,29 @@ export interface LLMResult {
   raw: unknown;
 }
 
+/**
+ * Un message du fil, y compris les RÉSULTATS D'OUTILS.
+ *
+ * Le rôle `tool` n'est pas un détail de confort : sans lui, un résultat d'outil
+ * doit être maquillé en message `user`, et le modèle ne voit jamais que son
+ * propre appel a abouti. Il le réémet alors au tour suivant et n'écrit rien —
+ * c'est exactement ce qui faisait répondre « (aucun texte) » après un
+ * `update_qualification`.
+ */
+export interface LLMMessage {
+  role: "user" | "assistant" | "tool";
+  content: string;
+  /** `assistant` : les appels que ce tour a émis. */
+  toolCalls?: ToolCall[];
+  /** `tool` : l'appel auquel ce résultat répond. */
+  toolCallId?: string;
+  /** `tool` : le nom de l'outil — exigé par certains fournisseurs. */
+  name?: string;
+}
+
 export interface GenerateInput {
   system: string;
-  messages: { role: "user" | "assistant"; content: string }[];
+  messages: LLMMessage[];
   tools?: ToolDef[];
   model: string;
   maxTokens: number;

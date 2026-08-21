@@ -1,4 +1,5 @@
-import { isTerminalTool, simulatedToolResults } from "@/lib/agent/tool-simulation";
+import { isTerminalTool, simulatedToolResult } from "@/lib/agent/tool-simulation";
+import type { LLMMessage } from "@/lib/llm/types";
 import { judgeWithLlm, type JudgeGenerate } from "./judge";
 import { evaluateOutputRules } from "./filter";
 import { enabledRules } from "./resolve";
@@ -19,15 +20,13 @@ import type { FixtureData, FixtureResult, RuleData } from "./types";
 
 export interface FixtureTurnOutput {
   text: string;
-  toolCalls: { name: string }[];
+  /** `id` sert à rattacher le résultat à l'appel (protocole d'outils). */
+  toolCalls: { id: string; name: string }[];
 }
 
 export interface RunnerDeps {
   /** Appel du générateur, déjà lié au modèle et aux outils de l'assistant. */
-  generate: (input: {
-    system: string;
-    messages: { role: "user" | "assistant"; content: string }[];
-  }) => Promise<FixtureTurnOutput>;
+  generate: (input: { system: string; messages: LLMMessage[] }) => Promise<FixtureTurnOutput>;
   /** Appel du classifieur pour les critères `judge`. */
   judge: JudgeGenerate;
   /** Règles résolues — permet d'appliquer AUSSI le filtre de sortie à la suite. */
@@ -99,17 +98,32 @@ export async function runFixture(
     // rejouerait l'appel avec les résultats et rédigerait normalement. C'est
     // ce qui faisait échouer « Refuse de donner une valeur » alors que
     // l'assistant se comportait correctement.
-    const turnMessages = fixtureMessages(fixture);
+    const turnMessages: LLMMessage[] = fixtureMessages(fixture);
     const done = new Set<string>();
-    const allCalls: { name: string }[] = [];
+    const allCalls: { id: string; name: string }[] = [];
     let last = await deps.generate({ system, messages: turnMessages });
     allCalls.push(...last.toolCalls);
 
     const wantsSecondRound =
       last.toolCalls.length > 0 && !last.toolCalls.some((c) => isTerminalTool(c.name));
     if (wantsSecondRound) {
-      turnMessages.push({ role: "assistant", content: last.text || "(appel d'outil)" });
-      turnMessages.push({ role: "user", content: simulatedToolResults(last.toolCalls, done) });
+      // Même protocole qu'en production : l'assistant déclare ses appels, les
+      // résultats reviennent rattachés à leur identifiant.
+      turnMessages.push({
+        role: "assistant",
+        content: last.text,
+        // La suite ne rejoue pas d'arguments : seul le couple id/nom compte
+        // pour que le modèle relie le résultat à son appel.
+        toolCalls: last.toolCalls.map((c) => ({ id: c.id, name: c.name, arguments: {} })),
+      });
+      for (const call of last.toolCalls) {
+        turnMessages.push({
+          role: "tool",
+          toolCallId: call.id,
+          name: call.name,
+          content: simulatedToolResult(call.name, done),
+        });
+      }
       last = await deps.generate({ system, messages: turnMessages });
       allCalls.push(...last.toolCalls);
     }

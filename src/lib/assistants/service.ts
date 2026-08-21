@@ -259,7 +259,11 @@ export async function runAssistantSuite(
             tools: toolDefsFor(config.tools),
           });
           // Outils SIMULÉS : on note les appels, aucun handler ne tourne.
-          return { text: out.text, toolCalls: out.toolCalls.map((c) => ({ name: c.name })) };
+          return {
+            text: out.text,
+            // `id` conservé : c'est lui qui rattache le résultat à l'appel.
+            toolCalls: out.toolCalls.map((c) => ({ id: c.id, name: c.name })),
+          };
         },
         judge: async ({ system, user }) => {
           const out = await classifier.generate({

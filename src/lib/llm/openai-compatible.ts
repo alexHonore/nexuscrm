@@ -22,12 +22,46 @@ export function toOpenAiTools(tools: ToolDef[] | undefined) {
   }));
 }
 
+/**
+ * Traduit un message maison vers la forme OpenAI.
+ *
+ * Un `tool` devient un vrai message `role: "tool"` porteur de son
+ * `tool_call_id`, et l'assistant qui a émis l'appel le déclare dans
+ * `tool_calls`. Sans ce couple, le modèle ne relie pas le résultat à sa
+ * demande : il redemande.
+ */
+function toOpenAiMessage(message: GenerateInput["messages"][number]): Record<string, unknown> {
+  if (message.role === "tool") {
+    return {
+      role: "tool",
+      tool_call_id: message.toolCallId ?? "",
+      content: message.content,
+    };
+  }
+  if (message.role === "assistant" && message.toolCalls && message.toolCalls.length > 0) {
+    return {
+      role: "assistant",
+      // OpenAI accepte un contenu vide quand des appels d'outils sont présents.
+      content: message.content === "" ? null : message.content,
+      tool_calls: message.toolCalls.map((call) => ({
+        id: call.id,
+        type: "function",
+        function: { name: call.name, arguments: JSON.stringify(call.arguments ?? {}) },
+      })),
+    };
+  }
+  return { role: message.role, content: message.content };
+}
+
 export function buildChatBody(input: GenerateInput): Record<string, unknown> {
   return {
     model: input.model,
     max_tokens: input.maxTokens,
     temperature: input.temperature,
-    messages: [{ role: "system", content: input.system }, ...input.messages],
+    messages: [
+      { role: "system", content: input.system },
+      ...input.messages.map(toOpenAiMessage),
+    ],
     tools: toOpenAiTools(input.tools),
   };
 }

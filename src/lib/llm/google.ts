@@ -40,8 +40,10 @@ export function createGoogleProvider(options: GoogleOptions): LLMProvider {
         body: {
           system_instruction: { parts: [{ text: input.system }] },
           contents: input.messages.map((message) => ({
+            // Google : « model » et « user » seulement ; un résultat d'outil
+            // est un `functionResponse` porté par un tour `user`.
             role: message.role === "assistant" ? "model" : "user",
-            parts: [{ text: message.content }],
+            parts: toGoogleParts(message),
           })),
           tools:
             input.tools && input.tools.length > 0
@@ -120,4 +122,30 @@ export function createGoogleProvider(options: GoogleOptions): LLMProvider {
       });
     },
   };
+}
+
+/**
+ * Parts Google. Un appel devient `functionCall`, un résultat
+ * `functionResponse` — le texte libre ne relie rien à rien.
+ */
+function toGoogleParts(message: GenerateInput["messages"][number]): Record<string, unknown>[] {
+  if (message.role === "tool") {
+    return [
+      {
+        functionResponse: {
+          name: message.name ?? message.toolCallId ?? "tool",
+          response: { result: message.content },
+        },
+      },
+    ];
+  }
+  if (message.role === "assistant" && message.toolCalls && message.toolCalls.length > 0) {
+    const parts: Record<string, unknown>[] = [];
+    if (message.content !== "") parts.push({ text: message.content });
+    for (const call of message.toolCalls) {
+      parts.push({ functionCall: { name: call.name, args: call.arguments ?? {} } });
+    }
+    return parts;
+  }
+  return [{ text: message.content }];
 }

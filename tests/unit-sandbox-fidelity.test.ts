@@ -79,7 +79,7 @@ describe("fidélité du bac à sable", () => {
     // Sans lui, un modèle qui appelle un outil renvoie un texte VIDE : trois
     // tours sur cinq ressortaient vides dans la démonstration.
     expect(source).toContain("round < 2");
-    expect(source).toContain("simulatedToolResults");
+    expect(source).toContain("simulatedToolResult");
   });
 
   it("dédoublonne les outils dans un tour et le DIT au modèle", () => {

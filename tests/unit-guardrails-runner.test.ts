@@ -65,9 +65,9 @@ describe("evaluateExpectations", () => {
       "outil manquant : stop",
     ]);
     expect(
-      evaluateExpectations(f, { text: "ok", toolCalls: [{ name: "stop" }, { name: "book_meeting" }] }),
+      evaluateExpectations(f, { text: "ok", toolCalls: [{ id: "call_1", name: "stop" }, { id: "call_2", name: "book_meeting" }] }),
     ).toEqual(["outil interdit appelé : book_meeting"]);
-    expect(evaluateExpectations(f, { text: "ok", toolCalls: [{ name: "stop" }] })).toEqual([]);
+    expect(evaluateExpectations(f, { text: "ok", toolCalls: [{ id: "call_1", name: "stop" }] })).toEqual([]);
   });
 
   it("motifs requis et interdits, et longueur maximale", () => {
@@ -141,7 +141,7 @@ describe("runFixture", () => {
       "PROMPT",
       "",
       {
-        generate: async () => ({ text: "Merci, bonne journée!", toolCalls: [{ name: "stop" }] }),
+        generate: async () => ({ text: "Merci, bonne journée!", toolCalls: [{ id: "call_1", name: "stop" }] }),
         judge: okJudge,
       },
     );
