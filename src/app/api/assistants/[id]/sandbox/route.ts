@@ -15,7 +15,8 @@ const bodySchema = z.object({
     .array(z.object({ role: z.enum(["assistant", "user"]), content: z.string().max(2000) }))
     .max(40)
     .default([]),
-  inbound: z.string().trim().min(1).max(2000),
+  // Vide autorisé : c'est le cas « l'assistant ouvre la conversation ».
+  inbound: z.string().trim().max(2000).default(""),
   lead: z
     .object({
       firstName: z.string().trim().max(80).optional(),
@@ -28,6 +29,7 @@ const bodySchema = z.object({
   softRefusals: z.number().int().min(0).max(10).default(0),
   /** Défaut vrai : l'assistant reprend une conversation ouverte par une campagne. */
   openerSent: z.boolean().default(true),
+  trigger: z.enum(["inbound", "lead_created", "category_changed", "manual"]).default("inbound"),
 });
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {

@@ -30,8 +30,10 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   GUARDRAIL_KIND_DOCS,
   GUARDRAIL_SEVERITY_DOCS,
+  RULE_PRESETS,
   defaultConfigFor,
   kindDoc,
+  type RulePreset,
 } from "@/lib/guardrails/docs";
 import {
   GUARDRAIL_KINDS,
@@ -52,6 +54,21 @@ export type EditableRule = {
   severity: GuardrailSeverity;
   enabled: boolean;
 };
+
+/** Une règle prête à l'emploi → brouillon éditable. */
+export function ruleFromPreset(preset: RulePreset): EditableRule {
+  return {
+    id: null,
+    key: preset.key,
+    label: preset.labelFr,
+    description: preset.whatFr,
+    kind: preset.kind,
+    config: preset.config,
+    promptText: preset.promptText,
+    severity: preset.severity,
+    enabled: true,
+  };
+}
 
 export function emptyRule(): EditableRule {
   return {
@@ -317,6 +334,12 @@ export function GuardrailRuleDialog({
 
   const doc = useMemo(() => kindDoc(draft.kind), [draft.kind]);
   const creating = draft.id === null;
+  /**
+   * À la création, on part d'une INTENTION (« ne parle jamais de prix »), pas
+   * d'un type technique. Choisir un type puis remplir une configuration, c'est
+   * deux décisions d'ingénieur pour exprimer une règle d'affaires.
+   */
+  const [showPresets, setShowPresets] = useState(creating && draft.key === "");
 
   const save = async () => {
     setBusy(true);
@@ -374,7 +397,45 @@ export function GuardrailRuleDialog({
           <DialogDescription>{t("guardrails.ruleDialogHint")}</DialogDescription>
         </DialogHeader>
 
+        {showPresets ? (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">{t("guardrails.presets.hint")}</p>
+            <div className="grid gap-2">
+              {RULE_PRESETS.map((preset) => (
+                <button
+                  key={preset.key}
+                  type="button"
+                  className="rounded-lg border p-3 text-left transition-colors hover:border-primary hover:bg-primary/5"
+                  onClick={() => {
+                    setDraft(ruleFromPreset(preset));
+                    setShowPresets(false);
+                  }}
+                >
+                  <p className="text-sm font-medium">{preset.labelFr}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{preset.whatFr}</p>
+                </button>
+              ))}
+              <button
+                type="button"
+                className="rounded-lg border border-dashed p-3 text-left text-sm text-muted-foreground transition-colors hover:border-primary"
+                onClick={() => setShowPresets(false)}
+              >
+                {t("guardrails.presets.custom")}
+              </button>
+            </div>
+          </div>
+        ) : (
         <div className="space-y-4">
+          {creating ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="min-h-11 px-0 md:min-h-8"
+              onClick={() => setShowPresets(true)}
+            >
+              ← {t("guardrails.presets.back")}
+            </Button>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="g-label">{t("guardrails.columns.label")}</Label>
@@ -516,6 +577,7 @@ export function GuardrailRuleDialog({
             </Alert>
           ) : null}
         </div>
+        )}
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
@@ -523,7 +585,9 @@ export function GuardrailRuleDialog({
           </Button>
           <Button
             onClick={() => void save()}
-            disabled={busy || draft.label.trim() === "" || (creating && draft.key.trim() === "")}
+            disabled={
+              busy || showPresets || draft.label.trim() === "" || (creating && draft.key.trim() === "")
+            }
           >
             {busy ? <Loader2 className="animate-spin" /> : <SaveIcon />} {t("guardrails.save")}
           </Button>

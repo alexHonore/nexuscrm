@@ -39,7 +39,17 @@ export interface SandboxTurnInput {
   assistantId: string;
   /** L'historique déjà échangé dans le bac à sable. */
   history: { role: "assistant" | "user"; content: string }[];
+  /**
+   * Ce que le client écrit. VIDE = c'est l'assistant qui ouvre.
+   *
+   * Un assistant ne répond pas seulement : il est aussi déclenché par un
+   * nouveau lead ou un changement de catégorie, et doit alors écrire le
+   * PREMIER message. Sans ce cas, l'essai attendait éternellement que le
+   * client parle — un comportement que la production n'a pas.
+   */
   inbound: string;
+  /** Ce qui a déclenché le tour — nourrit la couche d'exécution. */
+  trigger?: "inbound" | "lead_created" | "category_changed" | "manual";
   /** Contexte du faux client — ce que la couche d'exécution recevrait. */
   lead?: { firstName?: string; city?: string; budget?: string; projectType?: string };
   /** Qualification accumulée au fil de l'essai. */
@@ -123,11 +133,28 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
     qualification: input.qualification ?? {},
   };
 
+  const opening = input.inbound.trim() === "";
+
+  // Rien à classer quand personne n'a écrit : classer une chaîne vide
+  // renverrait un refus ou un désabonnement imaginaire.
   let classified;
-  try {
-    classified = await classifyInbound(input.inbound, classifierCall);
-  } catch (err) {
-    return { ...empty, error: err instanceof Error ? err.message : "classifier_failed" };
+  if (opening) {
+    classified = {
+      classification: {
+        optOut: false,
+        refusal: "none" as const,
+        wantsHuman: false,
+        qualification: {},
+        unintelligible: false,
+      },
+      modelUsed: false,
+    };
+  } else {
+    try {
+      classified = await classifyInbound(input.inbound, classifierCall);
+    } catch (err) {
+      return { ...empty, error: err instanceof Error ? err.message : "classifier_failed" };
+    }
   }
   const classification = {
     optOut: classified.classification.optOut,
@@ -176,9 +203,20 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
   const system =
     runtimeBlock === "" ? row.compiledPrompt : `${row.compiledPrompt}\n\n${runtimeBlock}`;
 
+  /**
+   * À l'ouverture, il n'y a pas de message entrant. On donne au modèle une
+   * consigne de tour explicite plutôt qu'un tour vide : les fournisseurs
+   * exigent au moins un message, et « écris l'ouverture » est exactement ce
+   * que la production demande quand un barreau de campagne n'a pas de texte.
+   */
+  const openingInstruction =
+    input.trigger === "category_changed"
+      ? "Ce contact vient de changer d'étape dans le pipeline. Écris le PREMIER message de la conversation."
+      : "Ce contact vient d'arriver comme nouveau lead. Écris le PREMIER message de la conversation.";
+
   const turnMessages: { role: "assistant" | "user"; content: string }[] = [
     ...input.history,
-    { role: "user", content: input.inbound },
+    { role: "user", content: opening ? openingInstruction : input.inbound },
   ];
   const tools = toolDefsFor(config.tools);
   const toolCalls: { name: string; args: unknown }[] = [];
@@ -260,11 +298,13 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
         {
           criterion,
           output: draft,
-          context: input.inbound,
+          context: opening ? "(ouverture — aucun message entrant)" : input.inbound,
           // Une ouverture supposée envoyée compte comme un sortant : sinon la
           // règle LCAP exige de nommer l'organisation à chaque essai.
+          // Une ouverture EST le premier sortant : la règle LCAP doit
+          // s'appliquer, c'est justement le message qui doit nommer l'organisation.
           isFirstOutbound:
-            input.openerSent === false && input.history.every((m) => m.role !== "assistant"),
+            opening || (input.openerSent === false && input.history.every((m) => m.role !== "assistant")),
         },
         classifierCall,
       );

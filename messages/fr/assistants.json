@@ -1,19 +1,19 @@
 {
   "guardrails": {
     "title": "Garde-fous",
-    "subtitle": "Règles globales, fixtures de test et noyau du prompt appliqués à tous les assistants IA",
+    "subtitle": "Ce que vos assistants n'ont jamais le droit de faire, et les mises en situation qui le vérifient.",
     "sections": {
       "rules": {
-        "title": "Règles globales",
-        "desc": "Chaque règle est une rangée modifiable — aucune n'est codée en dur."
+        "title": "Ce que l'assistant ne doit jamais faire",
+        "desc": "Chaque règle s'applique à TOUS vos assistants. Rien n'est figé : ajoutez, modifiez ou retirez."
       },
       "fixtures": {
-        "title": "Fixtures",
-        "desc": "Scénarios de test rejoués contre chaque assistant (lecture seule pour l'instant)."
+        "title": "Mises en situation",
+        "desc": "De vrais échanges rejoués contre l'assistant avant de l'activer — « et s'il écrit STOP? », « et s'il demande un prix? »."
       },
       "core": {
-        "title": "Noyau du prompt (L0)",
-        "desc": "Corps commun injecté dans le prompt compilé de chaque assistant.",
+        "title": "Instructions de base",
+        "desc": "Le texte commun donné à tous vos assistants : qui ils sont, ce qu'ils n'ont pas le droit de dire, comment ils écrivent.",
         "version": "Version {version}",
         "showBody": "Afficher le texte",
         "hideBody": "Masquer le texte"
@@ -107,7 +107,7 @@
       "customCannotBlock": "Une « consigne de prompt » n'analyse rien : marquée bloquante, elle s'affiche comme un garde-fou dur alors qu'elle ne peut rien refuser. Pour garantir le comportement, utilisez « Jugement par le modèle »."
     },
     "core": {
-      "editTitle": "Noyau du prompt — version {version}",
+      "editTitle": "Instructions de base — version {version}",
       "editHint": "Le texte commun injecté en L0 dans le prompt de chaque assistant.",
       "publishWarning": "Publier crée une NOUVELLE version : l'ancienne reste intacte pour que l'historique demeure lisible. Tous les assistants devront être recompilés et re-testés avant de pouvoir être activés.",
       "body": "Corps du noyau (L0)",
@@ -116,12 +116,12 @@
       "publish": "Publier la version {version}",
       "published": "Version {version} publiée — {count} assistant(s) à recompiler",
       "unchanged": "Le texte est identique à la version courante : publier périmerait tous les assistants sans rien changer.",
-      "edit": "Modifier le noyau"
+      "edit": "Modifier les instructions"
     },
     "fixtures": {
-      "newTitle": "Nouvelle fixture",
-      "editTitle": "Modifier la fixture",
-      "hint": "Un scénario rejoué contre le vrai modèle : un message entrant, et ce que la réponse doit — ou ne doit pas — faire.",
+      "newTitle": "Nouvelle mise en situation",
+      "editTitle": "Modifier la mise en situation",
+      "hint": "Un échange rejoué contre l'assistant : ce que le client écrit, et ce que la réponse doit — ou ne doit pas — faire.",
       "history": "Historique (out: / in:)",
       "inbound": "Message entrant",
       "mustCallTool": "Doit appeler l'outil",
@@ -131,7 +131,7 @@
       "judge": "Critère jugé par le modèle",
       "maxChars": "Longueur max",
       "firstOutboundWarning": "Aucun tour « out » : ce scénario teste un PREMIER message sortant. La règle d'identification LCAP exigera d'y nommer l'organisation, et la fixture échouera pour une raison qui n'a rien à voir avec ce qu'elle vérifie.",
-      "add": "Ajouter une fixture",
+      "add": "Ajouter une mise en situation",
       "delete": "Supprimer",
       "deleteConfirm": {
         "title": "Supprimer « {label} » ?",
@@ -140,7 +140,12 @@
       },
       "deleted": "Fixture supprimée"
     },
-    "helpExample": "Exemple"
+    "helpExample": "Exemple",
+    "presets": {
+      "hint": "Choisissez ce que la règle doit empêcher. La configuration est déjà écrite.",
+      "custom": "Écrire une règle personnalisée (avancé)",
+      "back": "Choisir dans la liste"
+    }
   },
   "list": {
     "title": "Assistants IA",
@@ -223,10 +228,10 @@
       "tools": "Outils",
       "guardrails": "Garde-fous",
       "model": "Modèle",
-      "prompt": "Prompt",
-      "test": "Test",
-      "json": "JSON",
-      "sandbox": "Bac à sable"
+      "prompt": "Texte final",
+      "test": "Vérification",
+      "json": "Avancé (JSON)",
+      "sandbox": "Essayer"
     },
     "help": {
       "what": "Ce que ça fait",
@@ -408,7 +413,19 @@
     },
     "compileNow": "Compiler maintenant",
     "compiling": "Compilation…",
-    "compileFailed": "La compilation a échoué."
+    "compileFailed": "La compilation a échoué.",
+    "triggerLabel": "Qu'est-ce qui déclenche la conversation ?",
+    "trigger": {
+      "inbound": "Le client écrit en premier",
+      "lead_created": "Un nouveau lead arrive",
+      "category_changed": "Le client change d'étape"
+    },
+    "triggerHint": {
+      "inbound": "Vous jouez le client : écrivez ce qu'il enverrait.",
+      "lead_created": "C'est l'assistant qui écrit le premier message, comme sur un lead entrant.",
+      "category_changed": "C'est l'assistant qui écrit le premier message, comme après un changement d'étape."
+    },
+    "startConversation": "Démarrer la conversation"
   },
   "goLive": {
     "title": "Mise en service",

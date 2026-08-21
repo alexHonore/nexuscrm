@@ -32,7 +32,7 @@ export interface GuardrailKindDoc {
 export const GUARDRAIL_KIND_DOCS: Record<GuardrailKind, GuardrailKindDoc> = {
   forbidden_regex: {
     kind: "forbidden_regex",
-    labelFr: "Motif interdit (expression régulière)",
+    labelFr: "Interdire une forme (montant, pourcentage, courriel…)",
     whatFr:
       "Bloque le message si l'un des motifs s'y trouve. Le motif est une expression régulière, donc il peut décrire une FORME plutôt qu'un mot précis.",
     whenFr:
@@ -47,7 +47,7 @@ export const GUARDRAIL_KIND_DOCS: Record<GuardrailKind, GuardrailKindDoc> = {
   },
   forbidden_terms: {
     kind: "forbidden_terms",
-    labelFr: "Termes interdits",
+    labelFr: "Interdire des mots précis",
     whatFr: "Bloque le message si l'un des termes de la liste y apparaît.",
     whenFr:
       "Quand ce qu'on veut interdire est un mot ou une expression précise, et qu'on ne veut pas écrire d'expression régulière.",
@@ -60,7 +60,7 @@ export const GUARDRAIL_KIND_DOCS: Record<GuardrailKind, GuardrailKindDoc> = {
   },
   max_chars: {
     kind: "max_chars",
-    labelFr: "Longueur maximale",
+    labelFr: "Limiter la longueur du message",
     whatFr: "Bloque un message plus long que la limite, en caractères.",
     whenFr:
       "Pour tenir le coût et la lisibilité. Au-delà de 160 caractères (70 avec un accent hors table GSM), le message est facturé en plusieurs segments.",
@@ -73,7 +73,7 @@ export const GUARDRAIL_KIND_DOCS: Record<GuardrailKind, GuardrailKindDoc> = {
   },
   max_questions: {
     kind: "max_questions",
-    labelFr: "Nombre de questions maximal",
+    labelFr: "Limiter le nombre de questions",
     whatFr: "Bloque un message qui pose plus de questions que la limite.",
     whenFr:
       "Un SMS qui pose trois questions n'obtient aucune réponse. Une seule question par message est la règle qui convertit.",
@@ -87,7 +87,7 @@ export const GUARDRAIL_KIND_DOCS: Record<GuardrailKind, GuardrailKindDoc> = {
   },
   link_policy: {
     kind: "link_policy",
-    labelFr: "Politique de liens",
+    labelFr: "Contrôler les liens",
     whatFr:
       "Bloque le message s'il contient un lien vers un domaine qui n'est pas dans la liste autorisée. Une liste VIDE interdit tout lien.",
     whenFr:
@@ -101,7 +101,7 @@ export const GUARDRAIL_KIND_DOCS: Record<GuardrailKind, GuardrailKindDoc> = {
   },
   required_tool_on_intent: {
     kind: "required_tool_on_intent",
-    labelFr: "Outil obligatoire sur une intention",
+    labelFr: "Exiger une action (arrêter, passer à un humain…)",
     whatFr:
       "Exige que l'assistant appelle un outil précis quand l'intention détectée correspond. Le message est bloqué si l'outil n'a pas été appelé.",
     whenFr:
@@ -116,7 +116,7 @@ export const GUARDRAIL_KIND_DOCS: Record<GuardrailKind, GuardrailKindDoc> = {
   },
   llm_judge: {
     kind: "llm_judge",
-    labelFr: "Jugement par le modèle",
+    labelFr: "Faire vérifier le sens par l'IA",
     whatFr:
       "Fait évaluer le brouillon par le modèle classifieur selon un critère écrit en français. Le message est bloqué si le critère n'est pas respecté.",
     whenFr:
@@ -131,7 +131,7 @@ export const GUARDRAIL_KIND_DOCS: Record<GuardrailKind, GuardrailKindDoc> = {
   },
   custom_instruction: {
     kind: "custom_instruction",
-    labelFr: "Consigne de prompt",
+    labelFr: "Simple consigne d'écriture (ne bloque rien)",
     whatFr:
       "N'analyse RIEN. Ajoute simplement son texte à la couche de garde-fous du prompt compilé.",
     whenFr:
@@ -154,19 +154,19 @@ export interface SeverityDoc {
 export const GUARDRAIL_SEVERITY_DOCS: Record<GuardrailSeverity, SeverityDoc> = {
   block: {
     severity: "block",
-    labelFr: "Bloquante",
+    labelFr: "Bloque le message",
     whatFr:
       "Le message ne part pas. L'assistant réécrit une fois ; s'il échoue encore, la conversation passe à un humain. C'est aussi ce qui rend une fixture rouge.",
   },
   warn: {
     severity: "warn",
-    labelFr: "Avertissement",
+    labelFr: "Laisse passer, mais le note",
     whatFr:
       "Le message PART quand même, mais l'écart est consigné dans la trace du tour. Utile pour observer une règle avant de la rendre bloquante.",
   },
   off: {
     severity: "off",
-    labelFr: "Inactive",
+    labelFr: "Désactivée",
     whatFr:
       "La règle n'est ni évaluée ni injectée dans le prompt. Elle reste en place pour être réactivée sans être réécrite.",
   },
@@ -278,7 +278,7 @@ export const FIXTURE_FIELD_DOCS: FixtureFieldDoc[] = [
   },
   {
     key: "maxChars",
-    labelFr: "Longueur maximale",
+    labelFr: "Limiter la longueur du message",
     whatFr: "La réponse ne doit pas dépasser cette longueur.",
     exampleFr: "200 pour vérifier qu'un accusé de réception reste bref.",
     pitfallFr: "Ne confondez pas avec la règle globale de longueur : ici c'est CE scénario qu'on borne.",
@@ -287,4 +287,121 @@ export const FIXTURE_FIELD_DOCS: FixtureFieldDoc[] = [
 
 export function fixtureFieldDoc(key: string): FixtureFieldDoc | undefined {
   return FIXTURE_FIELD_DOCS.find((d) => d.key === key);
+}
+
+
+// ── Règles prêtes à l'emploi ─────────────────────────────────────────────────
+
+/**
+ * Modèles de règles, décrits par ce qu'ils EMPÊCHENT.
+ *
+ * Créer un garde-fou demandait de choisir un type technique puis de remplir une
+ * configuration — deux décisions d'ingénieur pour exprimer une intention
+ * d'affaires (« ne parle jamais de prix »). On part donc de l'intention : on
+ * choisit dans une liste, et la configuration est déjà écrite. La règle
+ * personnalisée reste disponible pour les cas qui sortent du cadre.
+ */
+export interface RulePreset {
+  key: string;
+  labelFr: string;
+  /** Ce que la règle empêche, en une phrase, sans jargon. */
+  whatFr: string;
+  kind: GuardrailKind;
+  config: unknown;
+  promptText: string | null;
+  severity: GuardrailSeverity;
+}
+
+export const RULE_PRESETS: RulePreset[] = [
+  {
+    key: "aucun_prix",
+    labelFr: "Ne jamais donner de prix ni de valeur",
+    whatFr:
+      "Bloque tout message contenant un montant ou un pourcentage — estimer une propriété demande un permis.",
+    kind: "forbidden_regex",
+    config: { patterns: ["\\d[\\d\\s]{2,}\\s?\\$", "\\d+\\s?%"], flags: "iu" },
+    promptText:
+      "Tu ne donnes jamais de montant, de valeur, de prix ni de pourcentage. Tu réfères au courtier.",
+    severity: "block",
+  },
+  {
+    key: "aucune_commission",
+    labelFr: "Ne jamais parler de commission ni d'honoraires",
+    whatFr: "Bloque les messages qui mentionnent la commission, les honoraires ou les tarifs.",
+    kind: "forbidden_terms",
+    config: { terms: ["commission", "honoraires", "pourcentage de vente", "tarif"] },
+    promptText:
+      "Tu ne discutes jamais de commission, d'honoraires ni de tarifs. Tu laisses le courtier en parler.",
+    severity: "block",
+  },
+  {
+    key: "une_question",
+    labelFr: "Une seule question par message",
+    whatFr:
+      "Un SMS qui pose trois questions n'obtient aucune réponse. Bloque les messages qui en posent plus d'une.",
+    kind: "max_questions",
+    config: { max: 1 },
+    promptText: "Tu poses une seule question par message.",
+    severity: "block",
+  },
+  {
+    key: "message_court",
+    labelFr: "Garder les messages courts",
+    whatFr:
+      "Bloque au-delà de 300 caractères. Un message long se lit comme du publipostage et coûte plusieurs segments.",
+    kind: "max_chars",
+    config: { max: 300 },
+    promptText: "Tu écris des messages courts, sous 300 caractères.",
+    severity: "block",
+  },
+  {
+    key: "aucun_lien",
+    labelFr: "Aucun lien dans les messages",
+    whatFr:
+      "Un lien dans un premier SMS est le signal le plus fiable d'un message indésirable : les opérateurs filtrent là-dessus.",
+    kind: "link_policy",
+    config: { allowedDomains: [] },
+    promptText: "Tu n'envoies jamais de lien par SMS.",
+    severity: "block",
+  },
+  {
+    key: "respecter_stop",
+    labelFr: "Respecter un désabonnement",
+    whatFr:
+      "Exige que l'assistant arrête vraiment quand quelqu'un demande d'arrêter — répondre « d'accord » sans arrêter laisse la relance repartir.",
+    kind: "required_tool_on_intent",
+    config: { intent: "opt_out", tool: "stop" },
+    promptText: "Dès qu'une personne demande d'arrêter, tu arrêtes définitivement.",
+    severity: "block",
+  },
+  {
+    key: "rien_inventer",
+    labelFr: "Ne rien inventer",
+    whatFr:
+      "Fait relire chaque message par l'IA pour vérifier qu'il n'affirme aucun fait, chiffre ou promesse inventé.",
+    kind: "llm_judge",
+    config: {
+      criterion:
+        "La réponse n'affirme aucun fait, chiffre, statistique, délai ou promesse qui ne soit pas explicitement autorisé.",
+    },
+    promptText: "Tu n'inventes jamais un fait, un chiffre ni un délai.",
+    severity: "block",
+  },
+  {
+    key: "verite_ia",
+    labelFr: "Dire la vérité si on demande si c'est un robot",
+    whatFr: "Fait vérifier que l'assistant ne prétend jamais être un humain quand on le lui demande.",
+    kind: "llm_judge",
+    config: {
+      criterion:
+        "Si la personne demande si c'est un robot, une IA ou un humain, la réponse dit la vérité sans détour.",
+    },
+    promptText:
+      "Si on te demande si tu es un robot ou une IA, tu réponds la vérité immédiatement.",
+    severity: "block",
+  },
+];
+
+export function rulePreset(key: string): RulePreset | undefined {
+  return RULE_PRESETS.find((p) => p.key === key);
 }

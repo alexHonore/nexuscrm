@@ -174,8 +174,10 @@ describe("liste des assistants", () => {
 });
 
 describe("éditeur d'assistant", () => {
-  it("rend les onze onglets", () => {
+  it("rend tous les onglets, en vocabulaire d'affaires", () => {
     const html = renderEditor();
+    // « Prompt », « Test » et « JSON » ne disent rien à un courtier : les
+    // libellés décrivent ce qu'on y fait.
     for (const label of [
       "Identité",
       "Objectif",
@@ -185,9 +187,10 @@ describe("éditeur d'assistant", () => {
       "Outils",
       "Garde-fous",
       "Modèle",
-      "Prompt",
-      "Test",
-      "JSON",
+      "Texte final",
+      "Essayer",
+      "Vérification",
+      "Avancé (JSON)",
     ]) {
       expect(html, label).toContain(label);
     }

@@ -1,19 +1,19 @@
 {
   "guardrails": {
     "title": "Guardrails",
-    "subtitle": "Global rules, test fixtures and prompt core applied to every AI assistant",
+    "subtitle": "What your assistants may never do, and the scenarios that check it.",
     "sections": {
       "rules": {
-        "title": "Global rules",
-        "desc": "Every rule is an editable row — none of them are hardcoded."
+        "title": "What the assistant must never do",
+        "desc": "Every rule applies to ALL your assistants. Nothing is fixed: add, edit or remove."
       },
       "fixtures": {
-        "title": "Fixtures",
-        "desc": "Test scenarios replayed against every assistant (read-only for now)."
+        "title": "Scenarios",
+        "desc": "Real exchanges replayed against the assistant before activating it — \"what if they write STOP?\", \"what if they ask a price?\"."
       },
       "core": {
-        "title": "Prompt core (L0)",
-        "desc": "Shared body injected into every assistant's compiled prompt.",
+        "title": "Base instructions",
+        "desc": "The shared text given to all your assistants: who they are, what they may not say, how they write.",
         "version": "Version {version}",
         "showBody": "Show text",
         "hideBody": "Hide text"
@@ -107,7 +107,7 @@
       "customCannotBlock": "A “prompt instruction” analyses nothing: marked blocking, it shows as a hard guardrail while it can refuse nothing. To guarantee behaviour, use “Model judgement”."
     },
     "core": {
-      "editTitle": "Prompt core — version {version}",
+      "editTitle": "Base instructions — version {version}",
       "editHint": "The shared text injected as L0 into every assistant's prompt.",
       "publishWarning": "Publishing creates a NEW version: the old one stays intact so history remains readable. Every assistant will need recompiling and re-testing before it can be activated.",
       "body": "Core body (L0)",
@@ -116,12 +116,12 @@
       "publish": "Publish version {version}",
       "published": "Version {version} published — {count} assistant(s) to recompile",
       "unchanged": "The text is identical to the current version: publishing would stale every assistant without changing anything.",
-      "edit": "Edit the core"
+      "edit": "Edit the instructions"
     },
     "fixtures": {
-      "newTitle": "New fixture",
-      "editTitle": "Edit fixture",
-      "hint": "A scenario replayed against the real model: an inbound message, and what the reply must — or must not — do.",
+      "newTitle": "New scenario",
+      "editTitle": "Edit scenario",
+      "hint": "An exchange replayed against the assistant: what the client writes, and what the reply must — or must not — do.",
       "history": "History (out: / in:)",
       "inbound": "Inbound message",
       "mustCallTool": "Must call tool",
@@ -131,7 +131,7 @@
       "judge": "Model-judged criterion",
       "maxChars": "Max length",
       "firstOutboundWarning": "No \"out\" turn: this scenario tests a FIRST outbound message. The CASL identification rule will require naming the organisation in it, and the fixture will fail for a reason unrelated to what it checks.",
-      "add": "Add a fixture",
+      "add": "Add a scenario",
       "delete": "Delete",
       "deleteConfirm": {
         "title": "Delete “{label}”?",
@@ -140,7 +140,12 @@
       },
       "deleted": "Fixture deleted"
     },
-    "helpExample": "Example"
+    "helpExample": "Example",
+    "presets": {
+      "hint": "Pick what the rule should prevent. The configuration is already written.",
+      "custom": "Write a custom rule (advanced)",
+      "back": "Pick from the list"
+    }
   },
   "list": {
     "title": "AI assistants",
@@ -223,10 +228,10 @@
       "tools": "Tools",
       "guardrails": "Guardrails",
       "model": "Model",
-      "prompt": "Prompt",
-      "test": "Test",
-      "json": "JSON",
-      "sandbox": "Sandbox"
+      "prompt": "Final text",
+      "test": "Check",
+      "json": "Advanced (JSON)",
+      "sandbox": "Try it"
     },
     "help": {
       "what": "What it does",
@@ -408,7 +413,19 @@
     },
     "compileNow": "Compile now",
     "compiling": "Compiling…",
-    "compileFailed": "Compilation failed."
+    "compileFailed": "Compilation failed.",
+    "triggerLabel": "What starts the conversation?",
+    "trigger": {
+      "inbound": "The client writes first",
+      "lead_created": "A new lead arrives",
+      "category_changed": "The client changes stage"
+    },
+    "triggerHint": {
+      "inbound": "You play the client: write what they would send.",
+      "lead_created": "The assistant writes the first message, as on an incoming lead.",
+      "category_changed": "The assistant writes the first message, as after a stage change."
+    },
+    "startConversation": "Start the conversation"
   },
   "goLive": {
     "title": "Go live",

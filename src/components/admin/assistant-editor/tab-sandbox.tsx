@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Loader2,
   RotateCcw,
+  PlayIcon,
   SendIcon,
   WrenchIcon,
   XCircle,
@@ -17,6 +18,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { analyzeSms } from "@/lib/sms/segments";
 import { cn } from "@/lib/utils";
@@ -52,6 +60,8 @@ type TurnResult = {
 
 type Turn = { role: "assistant" | "user"; content: string; result?: TurnResult };
 
+const TRIGGERS = ["inbound", "lead_created", "category_changed"] as const;
+
 /**
  * Bac à sable — parler à l'assistant comme si on était le client.
  *
@@ -72,6 +82,17 @@ export function SandboxTab({ data }: TabProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lead, setLead] = useState({ firstName: "Marie", city: "Québec", projectType: "achat" });
+  /**
+   * Ce qui déclenche la conversation.
+   *
+   * « Le client écrit » n'est qu'un cas sur trois : un assistant part aussi sur
+   * un nouveau lead ou un changement d'étape, et c'est LUI qui écrit le premier
+   * message. L'essai attendait le client dans tous les cas — un comportement
+   * que la production n'a pas.
+   */
+  const [trigger, setTrigger] = useState<"inbound" | "lead_created" | "category_changed">(
+    "inbound",
+  );
   const stateRef = useRef({ qualification: {} as Record<string, unknown>, softRefusals: 0 });
 
   const notCompiled = data.compiledPrompt === null;
@@ -97,14 +118,13 @@ export function SandboxTab({ data }: TabProps) {
     }
   };
 
-  const send = async () => {
-    const text = inbound.trim();
-    if (text === "" || busy) return;
-
+  /** Un tour. `text` vide = l'assistant ouvre la conversation. */
+  const runTurn = async (text: string) => {
+    if (busy) return;
     setBusy(true);
     setError(null);
     const history = turns.map((x) => ({ role: x.role, content: x.content }));
-    setTurns((current) => [...current, { role: "user", content: text }]);
+    if (text !== "") setTurns((current) => [...current, { role: "user", content: text }]);
     setInbound("");
 
     try {
@@ -114,6 +134,10 @@ export function SandboxTab({ data }: TabProps) {
           history,
           inbound: text,
           lead,
+          trigger: text === "" ? trigger : "inbound",
+          // Une ouverture EST le premier message sortant : la règle
+          // d'identification doit s'appliquer.
+          openerSent: text !== "",
           qualification: stateRef.current.qualification,
           softRefusals: stateRef.current.softRefusals,
         }),
@@ -134,12 +158,16 @@ export function SandboxTab({ data }: TabProps) {
       setError(code === "not_compiled" ? t("sandbox.notCompiled") : t("sandbox.failed"));
       // Le tour n'a pas eu lieu : on retire la bulle du client pour que
       // l'historique reste le reflet exact de ce que le modèle a reçu.
-      setTurns((current) => current.slice(0, -1));
-      setInbound(text);
+      if (text !== "") {
+        setTurns((current) => current.slice(0, -1));
+        setInbound(text);
+      }
     } finally {
       setBusy(false);
     }
   };
+
+  const send = () => void runTurn(inbound.trim());
 
   const reset = () => {
     setTurns([]);
@@ -208,23 +236,59 @@ export function SandboxTab({ data }: TabProps) {
       </section>
 
       {turns.length === 0 ? (
-        <div className="space-y-2 rounded-lg border border-dashed p-4">
-          <p className="text-sm text-muted-foreground">{t("sandbox.start")}</p>
-          <div className="flex flex-wrap gap-2">
-            {["Oui, je cherche à acheter", "Pas cette semaine", "STOP", "Ça vaut combien ma maison?"].map(
-              (suggestion) => (
-                <Button
-                  key={suggestion}
-                  variant="outline"
-                  size="sm"
-                  className="min-h-11 md:min-h-8"
-                  onClick={() => setInbound(suggestion)}
-                >
-                  {suggestion}
-                </Button>
-              ),
-            )}
+        <div className="space-y-3 rounded-lg border border-dashed p-4">
+          <div className="space-y-1.5">
+            <Label>{t("sandbox.triggerLabel")}</Label>
+            <Select
+              items={TRIGGERS.map((k) => ({ value: k, label: t(`sandbox.trigger.${k}`) }))}
+              value={trigger}
+              onValueChange={(v) => setTrigger(String(v) as typeof trigger)}
+            >
+              <SelectTrigger className="min-h-11 w-full md:min-h-9 md:w-80">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TRIGGERS.map((k) => (
+                  <SelectItem key={k} value={k}>
+                    {t(`sandbox.trigger.${k}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">{t(`sandbox.triggerHint.${trigger}`)}</p>
           </div>
+
+          {trigger === "inbound" ? (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">{t("sandbox.start")}</p>
+              <div className="flex flex-wrap gap-2">
+                {["Oui, je cherche à acheter", "Pas cette semaine", "STOP", "Ça vaut combien ma maison?"].map(
+                  (suggestion) => (
+                    <Button
+                      key={suggestion}
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 md:min-h-8"
+                      onClick={() => setInbound(suggestion)}
+                    >
+                      {suggestion}
+                    </Button>
+                  ),
+                )}
+              </div>
+            </div>
+          ) : (
+            /* L'assistant ouvre : un seul bouton, et il écrit le premier
+               message sans qu'on ait à inventer ce que le client aurait dit. */
+            <Button
+              className="min-h-11 md:min-h-9"
+              disabled={busy || notCompiled}
+              onClick={() => void runTurn("")}
+            >
+              {busy ? <Loader2 className="animate-spin" /> : <PlayIcon />}
+              {busy ? t("sandbox.thinking") : t("sandbox.startConversation")}
+            </Button>
+          )}
         </div>
       ) : (
         <div className="max-h-[28rem] space-y-3 overflow-y-auto rounded-lg border p-3">
