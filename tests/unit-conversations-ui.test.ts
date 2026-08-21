@@ -18,6 +18,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: 
 // Les composants importent les actions serveur ; les simuler évite d'entraîner
 // toute la couche base dans un test de rendu.
 vi.mock("@/app/(app)/conversations/actions", () => ({
+  cancelOutboundSmsAction: vi.fn(),
   sendManualSmsAction: vi.fn(),
   setConversationAiAction: vi.fn(),
   markConversationHandledAction: vi.fn(),
@@ -42,6 +43,8 @@ function wrap(element: React.ReactElement): string {
 
 const THREAD: SmsThreadData = {
   conversationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  clientName: "Marie Tremblay",
+  clientPhone: "+14185551234",
   aiEnabled: true,
   pausedByName: null,
   pausedAt: null,
@@ -194,6 +197,46 @@ describe("fil SMS", () => {
     );
     expect(html).toContain("Nouveau message");
     expect(html).toContain("Marquer trait");
+  });
+
+  it("le DESTINATAIRE est affiché au-dessus de la zone de rédaction", () => {
+    // C'est ce qui distingue le plus sûrement une note interne (aucun
+    // destinataire) d'un SMS (quelqu'un le reçoit). Les deux cartes vivent
+    // l'une sous l'autre.
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    expect(html).toContain("part par SMS");
+    expect(html).toContain("Marie Tremblay");
+    expect(html).toContain("418");
+  });
+
+  it("la carte SMS ne ressemble PAS à la carte de commentaires", () => {
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    // Teinte et bordure propres : le signal doit être perçu du coin de l'œil,
+    // pas lu. Une note envoyée par erreur à un client ne se rattrape pas.
+    expect(html).toContain("border-primary/40");
+    expect(html).toContain("bg-primary/5");
+  });
+
+  it("un message ENCORE EN FILE peut être annulé", () => {
+    const queued = {
+      ...THREAD,
+      messages: [
+        {
+          id: "m9", direction: "out" as const, body: "Envoi imminent",
+          createdAt: "2026-08-21T15:00:00.000Z", status: "queued",
+          errorCode: null, source: "human", aiGenerated: false, sentByName: "Alex",
+        },
+      ],
+    };
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: queued }));
+    expect(html).toContain("Annuler l&#x27;envoi");
+  });
+
+  it("un message DÉJÀ LIVRÉ n'offre pas d'annulation", () => {
+    // Un SMS remis à l'opérateur ne se rappelle pas : offrir le bouton serait
+    // pire que ne rien offrir, parce que quelqu'un s'y fierait.
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    expect(html).not.toContain("Annuler l&#x27;envoi");
   });
 
   it("aucune clé i18n non résolue", () => {

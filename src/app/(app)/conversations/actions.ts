@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
-import { conversations, smsNumbers } from "@/db/schema-sms";
+import { conversations, messages, scheduledJobs, smsNumbers } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth/guards";
 import { enqueueJob } from "@/lib/jobs/queue";
@@ -26,7 +26,10 @@ import { analyzeSms } from "@/lib/sms/segments";
 
 export type SmsActionResult =
   | { ok: true; id?: string }
-  | { ok: false; error: "invalid" | "forbidden" | "notFound" | "suppressed" | "noNumber" };
+  | {
+      ok: false;
+      error: "invalid" | "forbidden" | "notFound" | "suppressed" | "noNumber" | "alreadySent";
+    };
 
 const INVALID = { ok: false, error: "invalid" } as const;
 const FORBIDDEN = { ok: false, error: "forbidden" } as const;
@@ -239,3 +242,69 @@ export async function assignConversationAction(input: {
   return { ok: true, id: input.conversationId };
 }
 
+/**
+ * Annuler un envoi — « unsend », dans la seule mesure où c'est honnête.
+ *
+ * Un SMS remis à l'opérateur ne se rappelle PAS. Ce que cette action fait, et
+ * la seule chose qu'elle puisse faire : intercepter le message tant qu'il est
+ * encore DANS LA FILE. Cette fenêtre existe vraiment et elle est souvent
+ * longue — le délai humanisé de l'assistant (30 à 90 s), le report par les
+ * heures de politesse (jusqu'au lendemain matin), les barreaux de campagne
+ * programmés à des jours d'intervalle.
+ *
+ * Dès que Twilio a accepté le message, on refuse plutôt que de faire semblant :
+ * afficher « annulé » sur un message déjà parti serait pire que ne rien offrir,
+ * parce que quelqu'un s'y fierait.
+ */
+export async function cancelOutboundSmsAction(messageId: string): Promise<SmsActionResult> {
+  const user = await getCurrentUser();
+  if (!user) return FORBIDDEN;
+  if (!z.uuid().safeParse(messageId).success) return INVALID;
+
+  const message = await db.query.messages.findFirst({ where: eq(messages.id, messageId) });
+  if (!message) return NOT_FOUND;
+  if (message.direction !== "out") return INVALID;
+
+  // `twilioSid` renseigné = l'opérateur l'a accepté : c'est parti.
+  const gone =
+    message.twilioSid !== null ||
+    ["sending", "sent", "delivered", "undelivered", "failed"].includes(message.status ?? "");
+  if (gone) return { ok: false, error: "alreadySent" };
+
+  const cancelled = await db.transaction(async (tx) => {
+    // Le job d'abord : tant qu'il est `pending`, personne ne l'a réclamé. S'il
+    // est déjà `running`, l'annulation arrive trop tard et on ne ment pas.
+    let jobCancelled = true;
+    if (message.jobId !== null) {
+      const rows = await tx
+        .update(scheduledJobs)
+        .set({ status: "cancelled" })
+        .where(and(eq(scheduledJobs.id, message.jobId), eq(scheduledJobs.status, "pending")))
+        .returning({ id: scheduledJobs.id });
+      jobCancelled = rows.length > 0;
+    }
+    if (!jobCancelled) return false;
+
+    await tx
+      .update(messages)
+      .set({ status: "cancelled", processedAt: new Date() })
+      .where(eq(messages.id, messageId));
+    return true;
+  });
+
+  if (!cancelled) return { ok: false, error: "alreadySent" };
+
+  await logAudit({
+    userId: user.id,
+    action: "sms.cancel",
+    entity: "conversation",
+    entityId: message.conversationId,
+    detail: { messageId, source: message.source },
+  });
+
+  const thread = await db.query.conversations.findFirst({
+    where: eq(conversations.id, message.conversationId),
+  });
+  if (thread?.clientId) revalidateFor(thread.clientId);
+  return { ok: true, id: messageId };
+}

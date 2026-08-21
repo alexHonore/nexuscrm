@@ -1,7 +1,7 @@
 "use client";
 
 import { enUS, fr } from "date-fns/locale";
-import { MessageSquareIcon, SendIcon } from "lucide-react";
+import { LockIcon, MessageSquareIcon, SendIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState, useTransition } from "react";
@@ -223,6 +223,14 @@ export function CommentsTimeline({
             submit();
           }}
         >
+          {/* Étiquette « interne » explicite : la carte SMS vit juste en
+              dessous, et la ressemblance des deux zones de saisie fait courir
+              le risque d'envoyer une note à un client. On dit donc, des deux
+              côtés, à qui le texte s'adresse. */}
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <LockIcon className="size-3.5" />
+            {t("comments.internalOnly")}
+          </p>
           <Textarea
             ref={textareaRef}
             value={body}

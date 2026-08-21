@@ -165,7 +165,8 @@
     "submit": "Post",
     "posted": "Comment posted",
     "empty": "No comments yet.",
-    "you": "You"
+    "you": "You",
+    "internalOnly": "Internal note — visible to the team only, never sent to the client."
   },
   "history": {
     "title": "History",

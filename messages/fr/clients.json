@@ -165,7 +165,8 @@
     "submit": "Publier",
     "posted": "Commentaire publié",
     "empty": "Aucun commentaire pour l'instant.",
-    "you": "Vous"
+    "you": "Vous",
+    "internalOnly": "Note interne — visible par l'équipe seulement, jamais envoyée au client."
   },
   "history": {
     "title": "Historique",

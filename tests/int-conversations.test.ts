@@ -20,7 +20,7 @@ import {
   resetDb,
   testDb,
 } from "./helpers/db";
-import { conversations, scheduledJobs, smsNumbers, suppressions } from "@/db/schema-sms";
+import { conversations, messages, scheduledJobs, smsNumbers, suppressions } from "@/db/schema-sms";
 
 const ctx = vi.hoisted(() => ({ cookies: new Map<string, string>() }));
 
@@ -39,6 +39,7 @@ vi.mock("next/headers", () => ({
 }));
 
 const {
+  cancelOutboundSmsAction,
   sendManualSmsAction,
   setConversationAiAction,
   markConversationHandledAction,
@@ -295,5 +296,100 @@ describe("prise en charge et assignation", () => {
       ok: false,
       error: "notFound",
     });
+  });
+});
+
+describe("annulation d'un envoi", () => {
+  /** Un message encore EN FILE, avec son job en attente. */
+  async function queuedMessage() {
+    const client = await makeClient();
+    const thread = await makeConversation({
+      clientId: client.id,
+      clientPhone: client.phone,
+      smsNumberId: numberId,
+    });
+    const [job] = await testDb
+      .insert(scheduledJobs)
+      .values({
+        type: "send_sms",
+        runAt: new Date(Date.now() + 60_000),
+        payload: { conversationId: thread.id, to: client.phone, body: "x", source: "human" },
+      })
+      .returning();
+    const [message] = await testDb
+      .insert(messages)
+      .values({
+        conversationId: thread.id,
+        direction: "out",
+        body: "Message pas encore parti",
+        source: "human",
+        status: "queued",
+        jobId: job.id,
+      })
+      .returning();
+    return { message, job };
+  }
+
+  it("un message encore en file est annulé, et son job avec", async () => {
+    const { message, job } = await queuedMessage();
+
+    expect((await cancelOutboundSmsAction(message.id)).ok).toBe(true);
+
+    const [msg] = await testDb.select().from(messages).where(eq(messages.id, message.id));
+    expect(msg.status).toBe("cancelled");
+    // Le job doit être annulé AUSSI : sinon le répartiteur l'exécute et le
+    // message part quand même, après qu'on ait dit « annulé ».
+    const [row] = await testDb.select().from(scheduledJobs).where(eq(scheduledJobs.id, job.id));
+    expect(row.status).toBe("cancelled");
+  });
+
+  it("un message DÉJÀ remis à l'opérateur est refusé, pas faussement annulé", async () => {
+    const { message } = await queuedMessage();
+    await testDb
+      .update(messages)
+      .set({ status: "sent", twilioSid: "SM_deja_parti" })
+      .where(eq(messages.id, message.id));
+
+    // Afficher « annulé » sur un message parti serait pire que ne rien
+    // offrir : quelqu'un s'y fierait.
+    expect(await cancelOutboundSmsAction(message.id)).toEqual({ ok: false, error: "alreadySent" });
+    const [msg] = await testDb.select().from(messages).where(eq(messages.id, message.id));
+    expect(msg.status).toBe("sent");
+  });
+
+  it("un job DÉJÀ réclamé par le répartiteur ne s'annule pas", async () => {
+    const { message, job } = await queuedMessage();
+    // `running` = un exécuteur l'a pris ; l'annulation arrive trop tard.
+    await testDb.update(scheduledJobs).set({ status: "running" }).where(eq(scheduledJobs.id, job.id));
+
+    expect(await cancelOutboundSmsAction(message.id)).toEqual({ ok: false, error: "alreadySent" });
+    const [msg] = await testDb.select().from(messages).where(eq(messages.id, message.id));
+    expect(msg.status).toBe("queued");
+  });
+
+  it("un message ENTRANT ne s'annule pas", async () => {
+    const client = await makeClient();
+    const thread = await makeConversation({
+      clientId: client.id,
+      clientPhone: client.phone,
+      smsNumberId: numberId,
+    });
+    const [inbound] = await testDb
+      .insert(messages)
+      .values({
+        conversationId: thread.id,
+        direction: "in",
+        body: "allo",
+        source: "human",
+        status: "received",
+      })
+      .returning();
+    expect(await cancelOutboundSmsAction(inbound.id)).toEqual({ ok: false, error: "invalid" });
+  });
+
+  it("sans session, on n'annule rien", async () => {
+    const { message } = await queuedMessage();
+    await loginAs(null);
+    expect(await cancelOutboundSmsAction(message.id)).toEqual({ ok: false, error: "forbidden" });
   });
 });

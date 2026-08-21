@@ -28,13 +28,18 @@
       "delivered": "Livré",
       "failed": "Échec",
       "undelivered": "Non livré",
-      "received": "Reçu"
+      "received": "Reçu",
+      "cancelled": "Annulé"
     },
     "failedHint": "Ce message n'est pas parti. Code {code}.",
     "noNumber": "Aucun numéro SMS actif n'est configuré.",
     "suppressed": "Ce numéro s'est désabonné : plus aucun message ne peut lui être envoyé.",
     "sent": "Message mis en file",
-    "error": "L'envoi a échoué"
+    "error": "L'envoi a échoué",
+    "sendsTo": "Ce message part par SMS à {name} · {phone}",
+    "cancel": "Annuler l'envoi",
+    "cancelled": "Envoi annulé — le message n'est jamais parti",
+    "tooLate": "Trop tard : le message a déjà été remis à l'opérateur. Un SMS parti ne se rappelle pas."
   },
   "ai": {
     "on": "IA active",

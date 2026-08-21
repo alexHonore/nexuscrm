@@ -82,6 +82,8 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
 
   const smsThread: SmsThreadData = {
     conversationId: thread?.id ?? null,
+    clientName: client.fullName,
+    clientPhone: client.phone,
     aiEnabled: thread?.aiEnabled ?? true,
     pausedByName: thread?.pausedBy?.name ?? null,
     pausedAt: thread?.pausedAt?.toISOString() ?? null,

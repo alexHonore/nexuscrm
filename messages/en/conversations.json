@@ -28,13 +28,18 @@
       "delivered": "Delivered",
       "failed": "Failed",
       "undelivered": "Undelivered",
-      "received": "Received"
+      "received": "Received",
+      "cancelled": "Cancelled"
     },
     "failedHint": "This message did not go out. Code {code}.",
     "noNumber": "No active SMS number is configured.",
     "suppressed": "This number unsubscribed: nothing more can be sent to it.",
     "sent": "Message queued",
-    "error": "Sending failed"
+    "error": "Sending failed",
+    "sendsTo": "This goes out by SMS to {name} · {phone}",
+    "cancel": "Cancel send",
+    "cancelled": "Send cancelled — the message never went out",
+    "tooLate": "Too late: the message was already handed to the carrier. A sent SMS cannot be recalled."
   },
   "ai": {
     "on": "AI on",

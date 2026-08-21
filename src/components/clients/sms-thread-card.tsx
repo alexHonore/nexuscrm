@@ -1,12 +1,20 @@
 "use client";
 
 import { enUS, fr } from "date-fns/locale";
-import { AlertTriangleIcon, BotIcon, HandIcon, MessageCircleIcon, SendIcon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  BotIcon,
+  HandIcon,
+  SmartphoneIcon,
+  Undo2Icon,
+  SendIcon,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
+  cancelOutboundSmsAction,
   markConversationHandledAction,
   sendManualSmsAction,
   setConversationAiAction,
@@ -16,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { formatPhone } from "@/lib/phone";
 import { analyzeSms } from "@/lib/sms/segments";
 import { emitDataChange, useDataChange, useVisiblePolling } from "@/lib/live";
 import { cn } from "@/lib/utils";
@@ -34,6 +43,9 @@ export type SmsMessageData = {
 
 export type SmsThreadData = {
   conversationId: string | null;
+  /** Destinataire — affiché en permanence au-dessus de la zone de rédaction. */
+  clientName: string;
+  clientPhone: string;
   aiEnabled: boolean;
   pausedByName: string | null;
   pausedAt: string | null;
@@ -167,6 +179,27 @@ export function SmsThreadCard({
     });
   };
 
+  /**
+   * Annuler un envoi encore EN FILE. Un message remis à l'opérateur ne se
+   * rappelle pas ; l'action refuse dans ce cas plutôt que de faire semblant.
+   */
+  const cancelSend = (messageId: string) => {
+    startTransition(async () => {
+      const result = await cancelOutboundSmsAction(messageId);
+      if (!result.ok) {
+        toast.error(result.error === "alreadySent" ? t("thread.tooLate") : t("error"));
+        router.refresh();
+        return;
+      }
+      setRows((current) =>
+        current.map((r) => (r.id === messageId ? { ...r, status: "cancelled" } : r)),
+      );
+      toast.success(t("thread.cancelled"));
+      emitDataChange("sms");
+      router.refresh();
+    });
+  };
+
   const markHandled = () => {
     if (!thread.conversationId) return;
     startTransition(async () => {
@@ -182,10 +215,14 @@ export function SmsThreadCard({
   };
 
   return (
-    <Card>
-      <CardHeader>
+    /* Identité visuelle DISTINCTE des commentaires : bordure teintée, icône de
+       téléphone (les commentaires ont une bulle), destinataire affiché. Les
+       deux cartes vivent l'une sous l'autre et se ressemblaient trop — une
+       note interne envoyée par SMS à un client ne se rattrape pas. */
+    <Card className="border-primary/40">
+      <CardHeader className="rounded-t-xl border-b border-primary/20 bg-primary/5">
         <CardTitle className="flex items-center gap-2">
-          <MessageCircleIcon className="size-4" />
+          <SmartphoneIcon className="size-4 text-primary" />
           {t("thread.title")}
         </CardTitle>
         <CardAction>
@@ -266,12 +303,27 @@ export function SmsThreadCard({
         ) : (
           <div ref={scrollRef} className="max-h-96 space-y-3 overflow-y-auto pr-1">
             {rows.map((message) => (
-              <MessageBubble key={message.id} message={message} dfnsLocale={dfnsLocale} />
+              <MessageBubble
+                key={message.id}
+                message={message}
+                dfnsLocale={dfnsLocale}
+                onCancel={cancelSend}
+                busy={pending}
+              />
             ))}
           </div>
         )}
 
-        <div className="space-y-1.5">
+        <div className="space-y-1.5 rounded-lg border-2 border-primary/40 bg-primary/5 p-3">
+          {/* Le destinataire est toujours visible : c'est ce qui distingue le
+              plus sûrement une note interne (personne) d'un SMS (quelqu'un). */}
+          <p className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-primary">
+            <SmartphoneIcon className="size-3.5" />
+            {t("thread.sendsTo", {
+              name: thread.clientName,
+              phone: formatPhone(thread.clientPhone),
+            })}
+          </p>
           <Textarea
             rows={2}
             value={body}
@@ -311,13 +363,21 @@ export function SmsThreadCard({
 function MessageBubble({
   message,
   dfnsLocale,
+  onCancel,
+  busy,
 }: {
   message: SmsMessageData;
   dfnsLocale: typeof fr;
+  onCancel: (id: string) => void;
+  busy: boolean;
 }) {
   const t = useTranslations("conversations");
   const outbound = message.direction === "out";
   const failed = message.status === "failed" || message.status === "undelivered";
+  const cancelled = message.status === "cancelled";
+  // Encore en file : la seule fenêtre où « annuler » veut dire quelque chose.
+  const cancellable =
+    outbound && message.status === "queued" && !message.id.startsWith(DRAFT_PREFIX);
 
   return (
     <div className={cn("flex flex-col gap-1", outbound ? "items-end" : "items-start")}>
@@ -327,7 +387,9 @@ function MessageBubble({
           outbound
             ? failed
               ? "bg-destructive/10 text-foreground ring-1 ring-destructive/40"
-              : "bg-primary text-primary-foreground"
+              : cancelled
+                ? "bg-muted text-muted-foreground line-through"
+                : "bg-primary text-primary-foreground"
             : "bg-muted",
         )}
       >
@@ -357,6 +419,18 @@ function MessageBubble({
         <p className="px-1 text-[11px] font-medium text-destructive">
           {t("thread.failedHint", { code: message.errorCode })}
         </p>
+      ) : null}
+
+      {cancellable ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-[11px] text-muted-foreground"
+          disabled={busy}
+          onClick={() => onCancel(message.id)}
+        >
+          <Undo2Icon className="size-3" /> {t("thread.cancel")}
+        </Button>
       ) : null}
     </div>
   );
