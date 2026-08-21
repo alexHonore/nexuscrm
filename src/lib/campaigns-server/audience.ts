@@ -1,7 +1,7 @@
 import "server-only";
 import { and, eq, gte, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { clients } from "@/db/schema";
-import { campaignEnrollments, campaigns, suppressions } from "@/db/schema-sms";
+import { campaignEnrollments, campaigns, consents, suppressions } from "@/db/schema-sms";
 import type { CampaignAudience, CampaignTrigger } from "@/lib/campaigns/schema";
 
 /**
@@ -13,19 +13,37 @@ import type { CampaignAudience, CampaignTrigger } from "@/lib/campaigns/schema";
  * finirait par différer de la population réellement inscrite, ce qui est
  * exactement le genre d'écart que personne ne remarque avant la facture.
  *
- * Les exclusions QUI ONT UN MOTIF (consentement, suppression) ne sont PAS
- * appliquées ici. L'audience dit qui est visé ; l'éligibilité dit pourquoi on
- * n'écrit pas. Les mélanger ferait disparaître les gens sans laisser de trace
- * du motif — et on ne saurait plus si une campagne vise trop peu de monde ou
- * n'a simplement pas le droit de leur écrire.
+ * Les exclusions QUI ONT UN MOTIF sont en principe laissées à l'éligibilité
+ * (`enroll.ts` + `eligibility.ts`) : l'audience dit qui est visé, l'éligibilité
+ * dit pourquoi on n'écrit pas. Deux exceptions, toutes deux parce qu'un motif
+ * PERMANENT qui resterait dans l'audience rendrait le balayage inutile :
+ *
+ *  · le numéro supprimé — rien ne partira jamais, compter la personne gonfle
+ *    l'aperçu ;
+ *  · l'absence de consentement quand la campagne l'exige — le balayage prend
+ *    les N plus anciens de l'audience et les refuse un à un ; si ces N-là
+ *    n'ont pas de consentement, il repêche les MÊMES à chaque cycle et la
+ *    campagne n'inscrit plus jamais personne, alors que l'aperçu annonce des
+ *    milliers de gens. Une base importée sans consentement (le cas réel) aurait
+ *    stoppé net toute réactivation, sans rien dire.
+ *
+ * Les autres motifs (déjà ailleurs, plafonds) restent hors audience : ils
+ * changent d'un jour à l'autre, donc ne peuvent pas empoisonner la tête de
+ * liste durablement.
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+export interface AudienceOptions {
+  campaignId?: string;
+  /** `campaign.requireConsent` — applique le filtre de consentement SMS valide. */
+  requireConsent?: boolean;
+}
+
 export function audienceConditions(
   audience: CampaignAudience,
   now: Date,
-  options: { campaignId?: string } = {},
+  options: AudienceOptions = {},
 ): SQL[] {
   const conditions: SQL[] = [];
 
@@ -76,13 +94,17 @@ export function audienceConditions(
   }
 
   if (audience.excludeActiveInOtherCampaign) {
+    // Une campagne EN PAUSE compte comme « ailleurs » : ses inscriptions sont
+    // toujours en vol et reprendront à la reprise. Ne compter que les campagnes
+    // actives ferait inscrire les mêmes gens ailleurs pendant la pause, puis
+    // deux échelles leur écriraient en même temps au retour.
     conditions.push(
       sql`not exists (
         select 1 from ${campaignEnrollments}
         join ${campaigns} on ${campaigns.id} = ${campaignEnrollments.campaignId}
         where ${campaignEnrollments.clientId} = ${clients.id}
           and ${campaignEnrollments.status} in ('pending', 'active')
-          and ${campaigns.status} = 'active'
+          and ${campaigns.status} in ('active', 'paused')
           ${options.campaignId === undefined ? sql`` : sql`and ${campaigns.id} <> ${options.campaignId}`}
       )`,
     );
@@ -97,6 +119,21 @@ export function audienceConditions(
       select 1 from ${suppressions} where ${suppressions.phoneE164} = ${clients.phone}
     )`,
   );
+
+  if (options.requireConsent) {
+    // Même définition que `consentedClientIds` (enroll.ts) : accordé, non
+    // révoqué, non expiré. Le constructeur drizzle et non un paramètre brut
+    // pour la date — dans un `sql` template, une Date part sans type.
+    conditions.push(
+      sql`exists (
+        select 1 from ${consents}
+        where ${consents.clientId} = ${clients.id}
+          and ${consents.channel} = 'sms'
+          and ${consents.revokedAt} is null
+          and ${or(isNull(consents.expiresAt), gte(consents.expiresAt, now))}
+      )`,
+    );
+  }
 
   return conditions;
 }
@@ -120,8 +157,7 @@ export function audienceWhere(
   audience: CampaignAudience,
   trigger: CampaignTrigger,
   now: Date,
-  options: { campaignId?: string } = {},
+  options: AudienceOptions = {},
 ): SQL {
   return and(...audienceConditions(audience, now, options), ...triggerConditions(trigger))!;
 }
-

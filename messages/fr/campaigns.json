@@ -237,16 +237,32 @@
         "suppressed": "Numéro désabonné",
         "do_not_call": "Ne pas appeler",
         "already_enrolled": "Déjà inscrit",
+        "live_conversation": "Conversation en cours",
         "active_elsewhere": "Actif dans une autre campagne",
         "daily_cap_reached": "Plafond du jour atteint",
         "total_cap_reached": "Plafond total atteint",
         "empty_ladder": "Échelle vide"
+      },
+      "refusalCount": "{label} : {count}",
+      "endReason": {
+        "replied": "A répondu",
+        "booked": "Rendez-vous pris",
+        "opted_out": "Désabonnement (STOP)",
+        "ladder_exhausted": "Échelle terminée",
+        "suppressed": "Numéro désabonné",
+        "consent_expired": "Consentement expiré",
+        "do_not_call": "Ne pas appeler",
+        "live_conversation": "Conversation déjà en cours",
+        "client_deleted": "Fiche supprimée",
+        "campaign_archived": "Campagne archivée"
       }
     },
     "errors": {
       "save": "Impossible d'enregistrer",
       "enroll": "Impossible d'inscrire",
-      "preview": "Impossible de calculer l'audience"
+      "preview": "Impossible de calculer l'audience",
+      "assistantInactive": "Un barreau laisse l'assistant rédiger : choisissez un assistant actif.",
+      "noSender": "Aucun numéro d'envoi actif — la campagne n'aurait rien pour écrire."
     },
     "export": "Exporter"
   },

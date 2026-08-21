@@ -16,8 +16,8 @@ import {
   sources,
   users,
 } from "@/db/schema";
-import { runAfterResponse } from "@/lib/after-response";
 import { getCurrentUser } from "@/lib/auth/guards";
+import { notifyCategoryChanged, notifyCategoryChanges } from "@/lib/campaigns-server/match";
 import { diffFields, getClientIp, logAudit, type AuditChanges } from "@/lib/audit";
 import { cancelEvent } from "@/lib/google";
 import { normalizePhone } from "@/lib/phone";
@@ -246,16 +246,9 @@ export async function setClientCategoryAction(
     detail: { from: existing.categoryId, to: categoryId, ...(changes ? { changes } : {}) },
   });
 
-  // Déclencheur « changement de catégorie ». Seulement si la catégorie a
-  // VRAIMENT changé : réenregistrer la même valeur ne doit pas relancer une
-  // campagne. L'inscription est idempotente de toute façon, mais faire le
-  // travail pour rien à chaque sauvegarde n'a pas de sens.
-  if (existing.categoryId !== categoryId && categoryId !== null) {
-    runAfterResponse(async () => {
-      const { matchCampaigns } = await import("@/lib/campaigns-server/match");
-      await matchCampaigns(clientId, { kind: "category_changed" });
-    });
-  }
+  // Déclencheur « changement de catégorie » — le point d'entrée commun décide
+  // lui-même si la catégorie a VRAIMENT changé et travaille après la réponse.
+  notifyCategoryChanged(clientId, existing.categoryId, categoryId);
 
   revalidateClient(clientId);
   return { ok: true, id: clientId };
@@ -521,6 +514,9 @@ export async function bulkSetClientsCategoryAction(
         },
       })),
     );
+    // Même déclencheur de campagne qu'un changement à l'unité : une mise en
+    // masse vers « chaud » est une arrivée dans « chaud » pour chaque fiche.
+    notifyCategoryChanges(changed.map((c) => ({ clientId: c.id, from: c.categoryId, to: categoryId })));
     revalidateClientLists();
   }
   return { ok: true, count: changed.length };

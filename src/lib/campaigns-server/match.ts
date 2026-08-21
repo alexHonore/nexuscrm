@@ -3,8 +3,11 @@ import { and, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
 import { campaignEnrollments, campaigns } from "@/db/schema-sms";
+import { runAfterResponse } from "@/lib/after-response";
+import { logAudit } from "@/lib/audit";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { campaignRowToConfig } from "@/lib/campaigns/schema";
+import { settingsSendGate } from "@/lib/sms-server";
 import { audienceWhere } from "./audience";
 import { audienceClientIds, enrollClients } from "./enroll";
 
@@ -52,7 +55,10 @@ export async function matchCampaigns(
       .where(
         and(
           eq(clients.id, clientId),
-          audienceWhere(config.audience, config.trigger, now, { campaignId: row.id }),
+          audienceWhere(config.audience, config.trigger, now, {
+            campaignId: row.id,
+            requireConsent: config.requireConsent,
+          }),
         ),
       )
       .limit(1);
@@ -74,6 +80,56 @@ export async function matchCampaigns(
   }
 
   return out;
+}
+
+export interface CategoryChange {
+  clientId: string;
+  from: number | null;
+  to: number | null;
+}
+
+/**
+ * LE point d'entrée du déclencheur « changement de catégorie ».
+ *
+ * Dans ce CRM, les boutons d'après-appel SONT le pipeline : classer un appel
+ * « chaud » déplace la fiche. Le déclencheur n'était branché que sur la liste
+ * déroulante de l'en-tête — le chemin principal (la disposition), les actions
+ * en masse et les réservations changeaient la catégorie sans que personne ne
+ * soit inscrit. Tout chemin qui écrit `clients.categoryId` passe par ici.
+ *
+ * Le travail part APRÈS la réponse : l'écran ne doit pas attendre l'évaluation
+ * des audiences. Seuls les vrais changements comptent — réenregistrer la même
+ * catégorie ne relance rien, et retirer la catégorie (null) n'est pas une
+ * « arrivée » quelque part. Une campagne qui échoue ne fait pas échouer la
+ * réponse déjà envoyée (garanti par `runAfterResponse`).
+ */
+export function notifyCategoryChanges(changes: CategoryChange[]): void {
+  const real = changes.filter((c) => c.to !== null && c.from !== c.to);
+  if (real.length === 0) return;
+
+  runAfterResponse(async () => {
+    for (const change of real) {
+      const matches = await matchCampaigns(change.clientId, { kind: "category_changed" });
+      const enrolled = matches.filter((m) => m.enrolled);
+      if (enrolled.length === 0) continue;
+      await logAudit({
+        userId: null,
+        action: "campaign.enroll",
+        entity: "client",
+        entityId: change.clientId,
+        detail: {
+          campaignIds: enrolled.map((m) => m.campaignId),
+          via: "category_changed",
+          from: change.from,
+          to: change.to,
+        },
+      });
+    }
+  });
+}
+
+export function notifyCategoryChanged(clientId: string, from: number | null, to: number | null): void {
+  notifyCategoryChanges([{ clientId, from, to }]);
 }
 
 /**
@@ -141,8 +197,17 @@ export async function queueTouch(enrollmentId: string, runAt: Date): Promise<voi
   });
 }
 
-/** Met en file tous les barreaux dus — appelé par le cycle de dispatch. */
+/**
+ * Met en file tous les barreaux dus — appelé par le cycle de dispatch.
+ *
+ * Sous interrupteur d'arrêt, on ne met RIEN en file : chaque barreau serait
+ * refusé à l'exécution et repoussé, pour rien. Les inscriptions restent dues
+ * (`next_touch_at` inchangé) et repartent au cycle qui suit la levée de
+ * l'interrupteur — c'est un report, pas une perte.
+ */
 export async function queueDueTouches(limit: number, now = new Date()): Promise<number> {
+  if (!(await settingsSendGate.isSendingAllowed())) return 0;
+
   const rows = await db
     .select({ id: campaignEnrollments.id, step: campaignEnrollments.step })
     .from(campaignEnrollments)
@@ -176,10 +241,16 @@ export async function queueDueTouches(limit: number, now = new Date()): Promise<
  * Sans cet appel, le déclencheur « balayage périodique » serait sélectionnable
  * à l'écran et n'inscrirait JAMAIS personne : une campagne d'apparence vivante
  * qui ne fait rien, et rien pour le dire.
+ *
+ * Sous interrupteur d'arrêt, aucun balayage : inscrire des gens pendant un
+ * incident, c'est empiler des barreaux qui partiraient tous d'un coup à la
+ * levée. L'intervalle n'avance pas, le balayage reprend au cycle suivant.
  */
 export async function sweepDueCampaigns(
   now = new Date(),
 ): Promise<{ campaignId: string; enrolled: number }[]> {
+  if (!(await settingsSendGate.isSendingAllowed())) return [];
+
   const rows = await db
     .select()
     .from(campaigns)
@@ -199,6 +270,19 @@ export async function sweepDueCampaigns(
     try {
       const result = await sweepCampaign(row.id, { now });
       out.push({ campaignId: row.id, enrolled: result.enrolled });
+      // Un balayage qui considère des gens et n'inscrit personne est la panne
+      // la plus silencieuse du déclencheur : on le dit dans les journaux.
+      if (result.considered > 0 && result.enrolled === 0) {
+        console.warn(
+          JSON.stringify({
+            at: "campaigns/sweep",
+            event: "sweep_enrolled_nobody",
+            campaignId: row.id,
+            considered: result.considered,
+            refusals: result.refusals,
+          }),
+        );
+      }
     } catch (err) {
       // Une campagne mal configurée ne doit pas empêcher les autres de tourner.
       console.error(

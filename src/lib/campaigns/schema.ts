@@ -26,6 +26,12 @@ export const triggerSchema = z.discriminatedUnion("kind", [
    * ici et non dans l'audience : c'est l'ÉVÉNEMENT qu'on restreint, pas la
    * population — une campagne peut viser des leads Facebook sans exclure de son
    * audience les gens venus d'ailleurs.
+   *
+   * L'événement est la SOUMISSION, pas la création de la fiche : un contact
+   * déjà connu qui remplit un nouveau formulaire vient de redemander qu'on le
+   * rappelle. Pour ne pas rouvrir un client déjà servi, c'est à l'audience de
+   * le dire (catégories visées, `createdWithinDays`) — et l'index unique
+   * empêche de toute façon une deuxième échelle dans la même campagne.
    */
   z.object({
     kind: z.literal("lead_created"),
@@ -84,8 +90,19 @@ export const ladderStepSchema = z.object({
    * Texte du message. `null` = laisser l'assistant rédiger. Un barreau écrit à
    * la main reste plus prévisible pour une ouverture ; les suivants gagnent
    * souvent à être générés, parce qu'ils doivent tenir compte de la réponse.
+   *
+   * Une chaîne vide (ou faite d'espaces) DEVIENT `null` : sans cette
+   * normalisation, « "   " » passait le schéma, n'était pas « l'assistant
+   * rédige », et partait en file comme un SMS vide que l'envoi refusait —
+   * le barreau était consommé sans qu'aucun message ne parte.
    */
-  body: z.string().trim().max(600).nullable().default(null),
+  body: z
+    .string()
+    .trim()
+    .max(600)
+    .nullable()
+    .default(null)
+    .transform((value) => (value === "" ? null : value)),
   /** Étiquette interne — n'apparaît jamais dans un message. */
   label: z.string().trim().max(80).default(""),
 });

@@ -3,6 +3,7 @@
 import { AlertTriangle, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,24 @@ import { TRIGGER_LOOK, TriggerIcon } from "../trigger-look";
 import type { CampaignTabProps } from "./types";
 
 const NONE = "__none__";
+
+/**
+ * Motifs de fin d'inscription qui ont une étiquette. Tout autre motif (une
+ * valeur écrite par un module futur) s'affiche tel quel plutôt que de faire
+ * fuir une clé i18n à l'écran.
+ */
+const END_REASONS = new Set([
+  "replied",
+  "booked",
+  "opted_out",
+  "ladder_exhausted",
+  "suppressed",
+  "consent_expired",
+  "do_not_call",
+  "live_conversation",
+  "client_deleted",
+  "campaign_archived",
+]);
 
 /** Cases à cocher d'une liste d'identifiants — le motif se répète 4 fois. */
 function MultiSelect<T extends string | number>({
@@ -358,13 +377,21 @@ export function AudienceTab({ config, update, data }: CampaignTabProps) {
   const [count, setCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // L'aperçu compte la configuration À L'ÉCRAN, enregistrée ou non : après
+  // avoir resserré un filtre, l'administrateur veut savoir ce que CE filtre
+  // vise — pas ce que la version en base visait. Un échec se dit : un compteur
+  // qui disparaît sans un mot ressemble à « personne ».
   const preview = async () => {
     setLoading(true);
     try {
-      const res = await api<{ count: number }>(`/api/campaigns/${data.id}/preview`);
+      const res = await api<{ count: number }>(`/api/campaigns/${data.id}/preview`, {
+        method: "POST",
+        body: JSON.stringify({ config }),
+      });
       setCount(res.count);
     } catch {
       setCount(null);
+      toast.error(t("editor.errors.preview"));
     } finally {
       setLoading(false);
     }
@@ -380,8 +407,8 @@ export function AudienceTab({ config, update, data }: CampaignTabProps) {
               ? t("editor.audience.title")
               : t("editor.audience.preview", { count })}
         </p>
-        {/* L'aperçu se demande, il ne se devine pas : il compte sur la config
-            ENREGISTRÉE, pas sur celle à l'écran. */}
+        {/* L'aperçu se demande, il ne se devine pas — et il compte la
+            configuration affichée, enregistrée ou non. */}
         <Button
           variant="outline"
           size="sm"
@@ -585,7 +612,14 @@ export function LadderTab({ config, update }: CampaignTabProps) {
                 rows={3}
                 placeholder={t("editor.ladder.bodyPlaceholder")}
                 value={step.body ?? ""}
-                onChange={(e) => update((d) => void (d.ladder[i].body = e.target.value || null))}
+                // Des espaces seuls ne sont pas un message : c'est « l'assistant
+                // rédige », comme le schéma serveur le normalise.
+                onChange={(e) =>
+                  update(
+                    (d) =>
+                      void (d.ladder[i].body = e.target.value.trim() === "" ? null : e.target.value),
+                  )
+                }
               />
               {step.body ? (
                 // Le nombre de segments décide du coût : un accent hors table
@@ -767,6 +801,7 @@ export function EnrollmentsTab({
                 <TableHead>{t("editor.enrollments.columns.status")}</TableHead>
                 <TableHead>{t("editor.enrollments.columns.step")}</TableHead>
                 <TableHead>{t("editor.enrollments.columns.next")}</TableHead>
+                <TableHead>{t("editor.enrollments.columns.ended")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -785,7 +820,23 @@ export function EnrollmentsTab({
                       ? new Date(row.nextTouchAt).toLocaleString("fr-CA", {
                           timeZone: "America/Toronto",
                         })
-                      : (row.endReason ?? "—")}
+                      : "—"}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {/* Le motif est une clé machine en base ; à l'écran, une phrase. */}
+                    {row.endReason
+                      ? END_REASONS.has(row.endReason)
+                        ? t(`editor.enrollments.endReason.${row.endReason}` as never)
+                        : row.endReason
+                      : "—"}
+                    {row.endedAt ? (
+                      <>
+                        {" · "}
+                        {new Date(row.endedAt).toLocaleDateString("fr-CA", {
+                          timeZone: "America/Toronto",
+                        })}
+                      </>
+                    ) : null}
                   </TableCell>
                 </TableRow>
               ))}

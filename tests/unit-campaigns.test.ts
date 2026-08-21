@@ -34,6 +34,7 @@ function enrollFacts(overrides: Partial<EnrollFacts> = {}): EnrollFacts {
     suppressed: false,
     doNotCall: false,
     alreadyEnrolled: false,
+    liveConversation: false,
     activeInOtherCampaign: false,
     enrolledTodayCount: 0,
     enrolledTotalCount: 0,
@@ -45,13 +46,19 @@ function touchFacts(overrides: Partial<TouchFacts> = {}): TouchFacts {
   return {
     campaignStatus: "active",
     enrollmentStatus: "active",
+    killSwitch: false,
     suppressed: false,
     hasValidConsent: true,
+    doNotCall: false,
+    excludeDoNotCall: true,
     aiEnabled: true,
     ladderLength: 2,
     step: 0,
     alreadySent: false,
     repliedSince: false,
+    liveConversation: false,
+    hasSender: true,
+    withinSendWindow: true,
     ...overrides,
   };
 }
@@ -377,5 +384,78 @@ describe("éligibilité d'un barreau", () => {
     for (const status of ["stopped", "booked", "completed", "excluded"]) {
       expect(canSendTouch(touchFacts({ enrollmentStatus: status })).allowed).toBe(false);
     }
+  });
+
+  it("« ne pas appeler » posé APRÈS l'inscription arrête l'échelle — si la campagne l'exclut", () => {
+    // Le téléphoniste entend « ne me recontactez plus » au jour 1 ; les barreaux
+    // des jours 3 et 6 ne doivent pas partir.
+    expect(canSendTouch(touchFacts({ doNotCall: true }))).toEqual({
+      allowed: false,
+      refusal: "do_not_call",
+    });
+    // `excludeDoNotCall` est un choix de campagne : « ne pas appeler » vaut
+    // pour la voix, l'étendre au SMS est délibéré.
+    expect(canSendTouch(touchFacts({ doNotCall: true, excludeDoNotCall: false }))).toEqual({
+      allowed: true,
+    });
+  });
+
+  it("un fil déjà vivant avant le premier barreau n'est pas ouvert à froid", () => {
+    expect(canSendTouch(touchFacts({ liveConversation: true }))).toEqual({
+      allowed: false,
+      refusal: "live_conversation",
+    });
+  });
+
+  it("l'interrupteur d'arrêt, un numéro manquant ou la nuit REPOUSSENT sans clore", () => {
+    expect(canSendTouch(touchFacts({ killSwitch: true }))).toEqual({
+      allowed: false,
+      refusal: "kill_switch",
+    });
+    expect(canSendTouch(touchFacts({ hasSender: false }))).toEqual({
+      allowed: false,
+      refusal: "no_sender",
+    });
+    expect(canSendTouch(touchFacts({ withinSendWindow: false }))).toEqual({
+      allowed: false,
+      refusal: "quiet_hours",
+    });
+  });
+
+  it("un « non » définitif passe AVANT un « pas maintenant »", () => {
+    // Une personne désabonnée sous interrupteur d'arrêt doit être CLOSE, pas
+    // repoussée au lendemain — sinon l'échelle repart à la levée de l'arrêt.
+    expect(canSendTouch(touchFacts({ suppressed: true, killSwitch: true }))).toEqual({
+      allowed: false,
+      refusal: "suppressed",
+    });
+    expect(canSendTouch(touchFacts({ doNotCall: true, withinSendWindow: false }))).toEqual({
+      allowed: false,
+      refusal: "do_not_call",
+    });
+  });
+});
+
+describe("éligibilité à l'inscription — conversation en cours", () => {
+  it("une personne en conversation n'est pas inscrite", () => {
+    expect(canEnroll(config(), enrollFacts({ liveConversation: true }))).toEqual({
+      allowed: false,
+      refusal: "live_conversation",
+    });
+  });
+});
+
+describe("schéma de campagne — corps de barreau", () => {
+  it("un corps fait d'espaces devient « l'assistant rédige », pas un SMS vide", () => {
+    // « "   " » passait le schéma sans être null : mis en file comme un SMS
+    // vide que l'envoi refusait — le barreau était consommé pour rien.
+    const c = config({ ladder: [{ delayHours: 0, body: "   ", label: "" }] });
+    expect(c.ladder[0].body).toBeNull();
+    expect(bodyForStep(c.ladder, 0, null)).toBeNull();
+  });
+
+  it("un vrai texte garde son contenu (nettoyé des espaces de bord)", () => {
+    const c = config({ ladder: [{ delayHours: 0, body: "  Bonjour  ", label: "" }] });
+    expect(c.ladder[0].body).toBe("Bonjour");
   });
 });

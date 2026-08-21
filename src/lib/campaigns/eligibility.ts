@@ -22,12 +22,37 @@ export const ENROLL_REFUSALS = [
   "suppressed",
   "do_not_call",
   "already_enrolled",
+  /** Un fil SMS est en cours avec cette personne : on ne l'ouvre pas à froid. */
+  "live_conversation",
   "active_elsewhere",
   "daily_cap_reached",
   "total_cap_reached",
   "empty_ladder",
 ] as const;
 export type EnrollRefusal = (typeof ENROLL_REFUSALS)[number];
+
+/**
+ * Fenêtre pendant laquelle un fil est considéré VIVANT après un message entrant.
+ *
+ * Une personne qui a écrit au numéro il y a trois jours est en conversation —
+ * l'assistant ou un humain lui répond. Lui envoyer l'ouverture froide d'une
+ * campagne par-dessus, c'est faire parler deux voix à la même personne :
+ * exactement ce que la règle « réponse = fin de l'échelle » sert à éviter,
+ * sauf qu'ici la réponse est arrivée AVANT le premier barreau. Au-delà de la
+ * fenêtre, le fil est dormant et une réactivation a de nouveau sa place.
+ */
+export const LIVE_CONVERSATION_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
+/**
+ * Fenêtre d'attribution d'une réponse APRÈS la fin de l'échelle.
+ *
+ * Le dernier barreau clôt l'inscription sur-le-champ (« completed ») ; la
+ * personne qui répond deux heures plus tard répond pourtant bien à ce barreau,
+ * et c'est précisément ce qu'un test A/B mesure. On lui attribue la réponse
+ * tant qu'elle arrive dans cette fenêtre après le dernier envoi ; au-delà, le
+ * lien est trop ténu pour créditer une variante.
+ */
+export const REPLY_ATTRIBUTION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface EnrollFacts {
   /** État de la campagne au moment de la décision. */
@@ -39,6 +64,8 @@ export interface EnrollFacts {
   suppressed: boolean;
   doNotCall: boolean;
   alreadyEnrolled: boolean;
+  /** Un message entrant récent sur un fil de ce numéro (LIVE_CONVERSATION_WINDOW_MS). */
+  liveConversation: boolean;
   activeInOtherCampaign: boolean;
   enrolledTodayCount: number;
   enrolledTotalCount: number;
@@ -69,6 +96,9 @@ export function canEnroll(config: CampaignConfig, facts: EnrollFacts): EnrollDec
   if (config.audience.excludeDoNotCall && facts.doNotCall) return deny("do_not_call");
 
   if (facts.alreadyEnrolled) return deny("already_enrolled");
+  // Une conversation en cours n'est pas une audience à ouvrir : l'ouverture
+  // froide arriverait au milieu d'un échange que quelqu'un mène déjà.
+  if (facts.liveConversation) return deny("live_conversation");
   if (config.audience.excludeActiveInOtherCampaign && facts.activeInOtherCampaign) {
     return deny("active_elsewhere");
   }
@@ -87,14 +117,24 @@ export function canEnroll(config: CampaignConfig, facts: EnrollFacts): EnrollDec
 // ── Envoi d'un barreau ───────────────────────────────────────────────────────
 
 export const TOUCH_REFUSALS = [
+  /** Interrupteur d'arrêt global levé — on attend, on n'avance pas l'échelle. */
+  "kill_switch",
   "campaign_not_active",
   "enrollment_ended",
   "suppressed",
   "consent_expired",
+  /** `clients.doNotCall` posé APRÈS l'inscription (disposition d'après-appel). */
+  "do_not_call",
   "ai_paused",
   "ladder_exhausted",
   "already_sent",
   "replied",
+  /** Un fil vivant existait déjà avant le premier barreau. */
+  "live_conversation",
+  /** Aucun numéro expéditeur actif : panne de configuration, pas une décision. */
+  "no_sender",
+  /** Hors heures de politesse — le barreau attend l'ouverture de la fenêtre. */
+  "quiet_hours",
   /** Pas encore l'heure — un rejeu ne doit pas avancer l'échelle. */
   "not_due",
 ] as const;
@@ -103,8 +143,14 @@ export type TouchRefusal = (typeof TOUCH_REFUSALS)[number];
 export interface TouchFacts {
   campaignStatus: string;
   enrollmentStatus: string;
+  /** Interrupteur d'arrêt global (`sms.killSwitch`). */
+  killSwitch: boolean;
   suppressed: boolean;
   hasValidConsent: boolean;
+  /** `clients.doNotCall` au moment du barreau, pas à l'inscription. */
+  doNotCall: boolean;
+  /** `audience.excludeDoNotCall` de la campagne. */
+  excludeDoNotCall: boolean;
   /** conversations.aiEnabled — un humain a repris la main. */
   aiEnabled: boolean;
   ladderLength: number;
@@ -113,6 +159,12 @@ export interface TouchFacts {
   alreadySent: boolean;
   /** Le client a répondu depuis le dernier barreau. */
   repliedSince: boolean;
+  /** Rien n'est encore parti, mais un fil vivant existe déjà (message entrant récent). */
+  liveConversation: boolean;
+  /** Un numéro expéditeur actif est disponible. */
+  hasSender: boolean;
+  /** L'instant courant tombe dans la fenêtre d'envoi (heures de politesse). */
+  withinSendWindow: boolean;
 }
 
 export type TouchDecision = { allowed: true } | { allowed: false; refusal: TouchRefusal };
@@ -122,12 +174,18 @@ export type TouchDecision = { allowed: true } | { allowed: false; refusal: Touch
  * l'inscription. Une échelle de trois semaines part avec un consentement valide
  * et peut très bien atteindre son dernier barreau après un désabonnement : la
  * décision d'inscrire ne vaut pas autorisation permanente d'écrire.
+ *
+ * L'ordre compte : les « non » définitifs (désabonnement, consentement, ne pas
+ * appeler, réponse) passent AVANT les « pas maintenant » (interrupteur, numéro
+ * manquant, heures de politesse). Sinon une personne désabonnée verrait son
+ * inscription simplement repoussée au lendemain matin au lieu d'être close.
  */
 export function canSendTouch(facts: TouchFacts): TouchDecision {
   const deny = (refusal: TouchRefusal): TouchDecision => ({ allowed: false, refusal });
 
   if (facts.suppressed) return deny("suppressed");
   if (!facts.hasValidConsent) return deny("consent_expired");
+  if (facts.excludeDoNotCall && facts.doNotCall) return deny("do_not_call");
   if (facts.campaignStatus !== "active") return deny("campaign_not_active");
 
   if (facts.enrollmentStatus !== "pending" && facts.enrollmentStatus !== "active") {
@@ -136,9 +194,15 @@ export function canSendTouch(facts: TouchFacts): TouchDecision {
   // Une réponse rend la main à l'assistant : continuer l'échelle par-dessus une
   // conversation en cours ferait parler deux voix à la même personne.
   if (facts.repliedSince) return deny("replied");
+  if (facts.liveConversation) return deny("live_conversation");
   if (!facts.aiEnabled) return deny("ai_paused");
   if (facts.step >= facts.ladderLength) return deny("ladder_exhausted");
   if (facts.alreadySent) return deny("already_sent");
+
+  // « Pas maintenant » — rien n'est décidé sur la personne, on attend.
+  if (facts.killSwitch) return deny("kill_switch");
+  if (!facts.hasSender) return deny("no_sender");
+  if (!facts.withinSendWindow) return deny("quiet_hours");
 
   return { allowed: true };
 }

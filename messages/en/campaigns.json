@@ -237,16 +237,32 @@
         "suppressed": "Unsubscribed number",
         "do_not_call": "Do not call",
         "already_enrolled": "Already enrolled",
+        "live_conversation": "Conversation in progress",
         "active_elsewhere": "Active in another campaign",
         "daily_cap_reached": "Daily cap reached",
         "total_cap_reached": "Total cap reached",
         "empty_ladder": "Empty ladder"
+      },
+      "refusalCount": "{label}: {count}",
+      "endReason": {
+        "replied": "Replied",
+        "booked": "Appointment booked",
+        "opted_out": "Opted out (STOP)",
+        "ladder_exhausted": "Ladder finished",
+        "suppressed": "Unsubscribed number",
+        "consent_expired": "Consent expired",
+        "do_not_call": "Do not call",
+        "live_conversation": "Conversation already in progress",
+        "client_deleted": "Client deleted",
+        "campaign_archived": "Campaign archived"
       }
     },
     "errors": {
       "save": "Could not save",
       "enroll": "Could not enroll",
-      "preview": "Could not compute the audience"
+      "preview": "Could not compute the audience",
+      "assistantInactive": "A rung lets the assistant write: pick an active assistant.",
+      "noSender": "No active sending number — the campaign would have nothing to write from."
     },
     "export": "Export"
   },

@@ -11,12 +11,13 @@ import { and, eq, sql } from "drizzle-orm";
 import {
   closeDb,
   makeClient,
+  makeConversation,
   makeSmsNumber,
   makeUser,
   resetDb,
   testDb,
 } from "./helpers/db";
-import { categories, clients, webhookKeys } from "@/db/schema";
+import { categories, clients, settings, webhookKeys } from "@/db/schema";
 import { encryptSecret, sha256Hex } from "@/lib/crypto";
 import {
   campaignEnrollments,
@@ -26,6 +27,7 @@ import {
   conversations,
   messages,
   scheduledJobs,
+  smsNumbers,
   suppressions,
 } from "@/db/schema-sms";
 import { campaignConfigSchema } from "@/lib/campaigns/schema";
@@ -44,9 +46,10 @@ const { runTouch } = await import("@/lib/campaigns-server/touch");
 const { matchCampaigns, sweepCampaign, queueDueTouches, sweepDueCampaigns } = await import(
   "@/lib/campaigns-server/match"
 );
-const { markEnrollmentsReplied, markEnrollmentsStopped } = await import(
+const { markEnrollmentsBooked, markEnrollmentsReplied, markEnrollmentsStopped } = await import(
   "@/lib/campaigns-server/inbound"
 );
+const { closeCampaignEnrollments } = await import("@/lib/campaigns-server/lifecycle");
 const { flushAfterResponse } = await import("@/lib/after-response");
 const leadsWebhook = await import("@/app/api/webhooks/leads/route");
 
@@ -729,9 +732,10 @@ describe("déclencheurs qui doivent VRAIMENT s'exécuter", () => {
 });
 
 describe("effet d'un message entrant sur les inscriptions", () => {
-  it("une réponse est enregistrée TOUT DE SUITE, pas au prochain barreau", async () => {
-    // Sans ça, une échelle terminée avant la réponse resterait « completed » et
-    // la réponse ne compterait dans aucune variante.
+  it("une réponse APRÈS le dernier barreau compte quand même — c'est ce qu'un A/B mesure", async () => {
+    // Le dernier barreau clôt l'inscription sur-le-champ. Un test A/B à un seul
+    // barreau était donc « completed » avant la moindre réponse, et aucune
+    // réponse ne comptait jamais : la comparaison donnait 0 contre 0.
     const campaign = await makeCampaign({
       ladder: [{ delayHours: 0, body: "Un seul message.", label: "" }],
       variants: [{ key: "a", weight: 100, body: "" }],
@@ -745,15 +749,53 @@ describe("effet d'un message entrant sur les inscriptions", () => {
     });
     expect(done!.status).toBe("completed");
 
-    // La personne répond après la fin de l'échelle : rien ne repassera plus.
+    // La personne répond quatre jours après la fin de l'échelle.
     await markEnrollmentsReplied(done!.conversationId!, new Date("2026-08-25T10:00:00Z"));
 
     const after = await testDb.query.campaignEnrollments.findFirst({
       where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
     });
-    // « completed » est une issue finale : on ne la réécrit pas — mais une
-    // inscription ENCORE en vol, elle, doit basculer.
+    expect(after!.status).toBe("replied");
+    expect(after!.endReason).toBe("replied");
+  });
+
+  it("une réponse des mois plus tard ne crédite plus le barreau", async () => {
+    const campaign = await makeCampaign({
+      ladder: [{ delayHours: 0, body: "Un seul message.", label: "" }],
+    });
+    const client = await makeReachableClient();
+    const [enrolled] = await enrollClients(campaign.id, [client.id], { now: NOW });
+    await runTouch(enrolled.enrollmentId!, NOW);
+    const done = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+
+    // Hors fenêtre d'attribution : le lien avec le barreau est trop ténu.
+    await markEnrollmentsReplied(done!.conversationId!, new Date("2026-12-01T10:00:00Z"));
+    const after = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
     expect(after!.status).toBe("completed");
+  });
+
+  it("un rendez-vous pris dans le fil marque l'inscription « booked » — même déjà « replied »", async () => {
+    const campaign = await makeCampaign();
+    const client = await makeReachableClient();
+    const [enrolled] = await enrollClients(campaign.id, [client.id], { now: NOW });
+    await runTouch(enrolled.enrollmentId!, NOW);
+    const row = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+
+    await markEnrollmentsReplied(row!.conversationId!, new Date("2026-08-22T10:00:00Z"));
+    await markEnrollmentsBooked(row!.conversationId!, new Date("2026-08-22T10:30:00Z"));
+
+    const after = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+    expect(after!.status).toBe("booked");
+    expect(after!.endReason).toBe("booked");
+    expect(after!.nextTouchAt).toBeNull();
   });
 
   it("une réponse en cours d'échelle bascule l'inscription immédiatement", async () => {
@@ -792,6 +834,305 @@ describe("effet d'un message entrant sur les inscriptions", () => {
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.status === "stopped")).toBe(true);
     expect(rows.every((r) => r.endReason === "opted_out")).toBe(true);
+  });
+});
+
+describe("le barreau n'avance QUE si l'envoi peut vraiment partir", () => {
+  it("sous interrupteur d'arrêt : pas de trace, pas d'avance, reprise à la levée", async () => {
+    // Avancer d'abord et laisser l'envoi se faire refuser consommait le
+    // barreau pour rien : après un incident d'une heure, des centaines
+    // d'échelles disaient « envoyé » sans qu'un SMS ne soit parti.
+    const campaign = await makeCampaign({ trigger: { kind: "scheduled", everyHours: 24 } });
+    const client = await makeReachableClient();
+    const [enrolled] = await enrollClients(campaign.id, [client.id], { now: NOW });
+    await testDb.insert(settings).values({ key: "sms", value: { killSwitch: true } });
+
+    const result = await runTouch(enrolled.enrollmentId!, NOW);
+    expect(result).toMatchObject({ sent: false, refusal: "kill_switch" });
+    expect(await testDb.select().from(campaignTouches)).toHaveLength(0);
+    expect(await testDb.select().from(scheduledJobs)).toHaveLength(0);
+
+    const row = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+    expect(row!.step).toBe(0);
+    expect(row!.status).toBe("pending");
+    // Repoussée, pas laissée due : la file ne la représente pas chaque minute.
+    expect(row!.nextTouchAt!.getTime()).toBeGreaterThan(NOW.getTime());
+
+    // Et la file elle-même ne met rien en attente tant que l'arrêt dure.
+    expect(await queueDueTouches(50, new Date(NOW.getTime() + 60 * 60 * 1000))).toBe(0);
+    expect(await sweepDueCampaigns(NOW)).toEqual([]);
+
+    // Levée de l'interrupteur : le barreau part, rien n'a été perdu.
+    await testDb.update(settings).set({ value: { killSwitch: false } }).where(eq(settings.key, "sms"));
+    const retry = await runTouch(enrolled.enrollmentId!, new Date(NOW.getTime() + 20 * 60 * 1000));
+    expect(retry.sent).toBe(true);
+    expect(await testDb.select().from(campaignTouches)).toHaveLength(1);
+  });
+
+  it("la nuit, le barreau ATTEND le matin — et l'espacement se mesure depuis l'envoi réel", async () => {
+    // Reporter l'ENVOI (et non le barreau) aux heures de politesse faisait
+    // partir deux barreaux la même matinée : l'espacement se comptait depuis la
+    // mise en file du soir, pas depuis l'envoi réel du lendemain.
+    const campaign = await makeCampaign(); // [0 h, 48 h]
+    const client = await makeReachableClient();
+    // Vendredi 20 h 30 à Toronto : hors fenêtre [9, 20).
+    const evening = new Date("2026-08-22T00:30:00.000Z");
+    const [enrolled] = await enrollClients(campaign.id, [client.id], { now: evening });
+
+    const result = await runTouch(enrolled.enrollmentId!, evening);
+    expect(result).toMatchObject({ sent: false, refusal: "quiet_hours" });
+    expect(await testDb.select().from(campaignTouches)).toHaveLength(0);
+    expect(await testDb.select().from(scheduledJobs)).toHaveLength(0);
+
+    const row = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+    // Samedi 10 h (la fenêtre du samedi), étalé sur dix minutes de jitter.
+    expect(row!.nextTouchAt!.getTime()).toBeGreaterThanOrEqual(Date.parse("2026-08-22T14:00:00Z"));
+    expect(row!.nextTouchAt!.getTime()).toBeLessThan(Date.parse("2026-08-22T14:11:00Z"));
+
+    const morning = new Date("2026-08-22T14:15:00.000Z");
+    const sent = await runTouch(enrolled.enrollmentId!, morning);
+    expect(sent.sent).toBe(true);
+
+    const after = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+    // 48 h après l'envoi du SAMEDI MATIN, pas après la mise en file du vendredi soir.
+    expect(after!.nextTouchAt!.toISOString()).toBe("2026-08-24T14:15:00.000Z");
+  });
+
+  it("un fil mis en pause par un humain REPOUSSE le barreau au lieu de le représenter chaque minute", async () => {
+    const campaign = await makeCampaign();
+    const client = await makeReachableClient();
+    const [enrolled] = await enrollClients(campaign.id, [client.id], { now: NOW });
+    await runTouch(enrolled.enrollmentId!, NOW);
+
+    const row = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+    await testDb
+      .update(conversations)
+      .set({ aiEnabled: false })
+      .where(eq(conversations.id, row!.conversationId!));
+
+    const due = new Date("2026-08-23T15:00:00Z");
+    const result = await runTouch(enrolled.enrollmentId!, due);
+    expect(result).toMatchObject({ sent: false, refusal: "ai_paused" });
+
+    const after = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+    expect(after!.status).toBe("active");
+    expect(after!.nextTouchAt!.getTime()).toBeGreaterThan(due.getTime());
+    // Une minute plus tard, la file ne la re-présente PAS — sinon 1 440 jobs
+    // par jour et par inscription, jusqu'à ce qu'un humain y pense.
+    expect(await queueDueTouches(50, new Date(due.getTime() + 60_000))).toBe(0);
+    const touchJobs = await testDb
+      .select()
+      .from(scheduledJobs)
+      .where(eq(scheduledJobs.type, "campaign_touch"));
+    expect(touchJobs).toHaveLength(0);
+  });
+
+  it("sans numéro expéditeur actif, le barreau est repoussé — pas une boucle, pas une clôture", async () => {
+    const campaign = await makeCampaign();
+    const client = await makeReachableClient();
+    const [enrolled] = await enrollClients(campaign.id, [client.id], { now: NOW });
+    await testDb.update(smsNumbers).set({ active: false }).where(eq(smsNumbers.id, numberId));
+
+    const result = await runTouch(enrolled.enrollmentId!, NOW);
+    expect(result).toMatchObject({ sent: false, refusal: "no_sender" });
+
+    const row = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+    expect(row!.status).toBe("pending");
+    expect(row!.nextTouchAt!.getTime()).toBeGreaterThan(NOW.getTime());
+    expect(await queueDueTouches(50, new Date(NOW.getTime() + 60_000))).toBe(0);
+  });
+
+  it("« ne pas appeler » posé en cours d'échelle arrête les barreaux restants", async () => {
+    const campaign = await makeCampaign();
+    const client = await makeReachableClient();
+    const [enrolled] = await enrollClients(campaign.id, [client.id], { now: NOW });
+    await runTouch(enrolled.enrollmentId!, NOW);
+
+    // Jour 1 : « ne me recontactez plus » au téléphone → disposition DNCL.
+    await testDb.update(clients).set({ doNotCall: true }).where(eq(clients.id, client.id));
+
+    const result = await runTouch(enrolled.enrollmentId!, new Date("2026-08-23T15:00:00Z"));
+    expect(result).toMatchObject({ sent: false, refusal: "do_not_call" });
+
+    const after = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+    expect(after!.status).toBe("stopped");
+    expect(after!.endReason).toBe("do_not_call");
+    const sends = await testDb.select().from(scheduledJobs).where(eq(scheduledJobs.type, "send_sms"));
+    expect(sends).toHaveLength(1);
+  });
+});
+
+describe("un fil déjà vivant n'est pas ouvert à froid", () => {
+  it("une personne en conversation n'est pas inscrite", async () => {
+    const campaign = await makeCampaign();
+    const client = await makeReachableClient();
+    await makeConversation({
+      clientId: client.id,
+      clientPhone: client.phone,
+      smsNumberId: numberId,
+      lastInboundAt: new Date("2026-08-20T15:00:00Z"),
+    });
+
+    const [result] = await enrollClients(campaign.id, [client.id], { now: NOW });
+    expect(result).toMatchObject({ enrolled: false, refusal: "live_conversation" });
+  });
+
+  it("si le fil s'anime ENTRE l'inscription et l'ouverture, l'ouverture ne part pas", async () => {
+    // Avant le premier barreau, l'inscription ne connaît aucun fil ; le fil
+    // réel (téléphone + numéro) existe pourtant, et l'assistant y répond déjà.
+    const campaign = await makeCampaign();
+    const client = await makeReachableClient();
+    const [enrolled] = await enrollClients(campaign.id, [client.id], { now: NOW });
+    await makeConversation({
+      clientId: client.id,
+      clientPhone: client.phone,
+      smsNumberId: numberId,
+      lastInboundAt: new Date("2026-08-22T10:00:00Z"),
+    });
+
+    const result = await runTouch(enrolled.enrollmentId!, new Date("2026-08-22T15:00:00Z"));
+    expect(result).toMatchObject({ sent: false, refusal: "live_conversation" });
+
+    const after = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+    // Rien n'est parti : « écartée », pas « arrêtée ».
+    expect(after!.status).toBe("excluded");
+    expect(after!.endReason).toBe("live_conversation");
+    expect(await testDb.select().from(scheduledJobs)).toHaveLength(0);
+  });
+
+  it("un fil dormant depuis des mois n'empêche pas une réactivation", async () => {
+    const campaign = await makeCampaign();
+    const client = await makeReachableClient();
+    await makeConversation({
+      clientId: client.id,
+      clientPhone: client.phone,
+      smsNumberId: numberId,
+      lastInboundAt: new Date("2026-02-01T10:00:00Z"),
+    });
+
+    const [enrolled] = await enrollClients(campaign.id, [client.id], { now: NOW });
+    expect(enrolled.enrolled).toBe(true);
+    expect((await runTouch(enrolled.enrollmentId!, NOW)).sent).toBe(true);
+  });
+
+  it("un humain qui tient déjà le fil bloque l'ouverture, dès le barreau 0", async () => {
+    const campaign = await makeCampaign();
+    const client = await makeReachableClient();
+    await makeConversation({
+      clientId: client.id,
+      clientPhone: client.phone,
+      smsNumberId: numberId,
+      aiEnabled: false,
+    });
+
+    const [enrolled] = await enrollClients(campaign.id, [client.id], { now: NOW });
+    const result = await runTouch(enrolled.enrollmentId!, NOW);
+    expect(result).toMatchObject({ sent: false, refusal: "ai_paused" });
+    expect(await testDb.select().from(campaignTouches)).toHaveLength(0);
+  });
+});
+
+describe("audience, consentement, plafonds", () => {
+  it("le balayage ne s'enlise pas sur une tête de liste sans consentement", async () => {
+    // 60 fiches importées sans consentement, plus ANCIENNES que 10 fiches
+    // consentantes, plafond 50 : sans filtre, le balayage repêchait les 50
+    // mêmes à chaque cycle, en refusait 50, et n'inscrivait plus jamais
+    // personne — alors que l'aperçu annonçait 70.
+    const campaign = await makeCampaign({
+      trigger: { kind: "scheduled", everyHours: 24 },
+      dailyEnrollmentCap: 50,
+    });
+    for (let i = 0; i < 60; i += 1) {
+      await makeClient({ createdAt: new Date(`2025-01-${String((i % 28) + 1).padStart(2, "0")}T00:00:00Z`) });
+    }
+    for (let i = 0; i < 10; i += 1) {
+      await makeReachableClient({ createdAt: new Date("2026-06-01T00:00:00Z") });
+    }
+
+    // L'aperçu dit ce que le balayage inscrira : 10, pas 70.
+    expect(await audienceCount(campaign.id, NOW)).toBe(10);
+    const swept = await sweepCampaign(campaign.id, { now: NOW });
+    expect(swept.enrolled).toBe(10);
+  });
+
+  it("sans exigence de consentement, l'audience reste entière", async () => {
+    const campaign = await makeCampaign({ requireConsent: false, dailyEnrollmentCap: 100 });
+    for (let i = 0; i < 3; i += 1) await makeClient();
+    expect(await audienceCount(campaign.id, NOW)).toBe(3);
+    expect((await sweepCampaign(campaign.id, { now: NOW })).enrolled).toBe(3);
+  });
+
+  it("une campagne EN PAUSE compte comme « ailleurs »", async () => {
+    // Ses inscriptions reprendront : inscrire les mêmes gens ailleurs pendant
+    // la pause, c'est deux échelles sur la même personne au retour.
+    const a = await makeCampaign({ name: "A" });
+    const b = await makeCampaign({ name: "B" });
+    const client = await makeReachableClient();
+    await enrollClients(a.id, [client.id], { now: NOW });
+    await testDb.update(campaigns).set({ status: "paused" }).where(eq(campaigns.id, a.id));
+
+    const [result] = await enrollClients(b.id, [client.id], { now: NOW });
+    expect(result).toMatchObject({ enrolled: false, refusal: "active_elsewhere" });
+    expect(await audienceCount(b.id, NOW)).toBe(0);
+  });
+
+  it("§ le plafond quotidien tient même sous dix inscriptions CONCURRENTES", async () => {
+    // Dix leads Facebook dans la même minute, chacun dans sa propre fonction :
+    // tous lisaient « 0 inscrit aujourd'hui » et entraient tous.
+    const campaign = await makeCampaign({ dailyEnrollmentCap: 3 });
+    const list = [];
+    for (let i = 0; i < 10; i += 1) list.push(await makeReachableClient());
+
+    const results = await Promise.all(
+      list.map((c) => enrollClients(campaign.id, [c.id], { now: NOW })),
+    );
+    expect(results.flat().filter((r) => r.enrolled)).toHaveLength(3);
+    expect(results.flat().filter((r) => r.refusal === "daily_cap_reached")).toHaveLength(7);
+    expect(await testDb.select().from(campaignEnrollments)).toHaveLength(3);
+  });
+});
+
+describe("fin de vie d'une campagne", () => {
+  it("archiver clôt les inscriptions en vol et annule leurs jobs de barreau", async () => {
+    const campaign = await makeCampaign({ dailyEnrollmentCap: 100 });
+    for (let i = 0; i < 3; i += 1) await makeReachableClient();
+    await sweepCampaign(campaign.id, { now: NOW }); // 3 inscriptions, 3 jobs `ctouch:`
+
+    const result = await closeCampaignEnrollments(campaign.id, NOW);
+    expect(result).toEqual({ closed: 3, cancelledJobs: 3 });
+
+    const rows = await testDb.select().from(campaignEnrollments);
+    expect(rows.every((r) => r.status === "completed")).toBe(true);
+    expect(rows.every((r) => r.endReason === "campaign_archived")).toBe(true);
+    expect(rows.every((r) => r.nextTouchAt === null)).toBe(true);
+
+    const jobs = await testDb.select().from(scheduledJobs);
+    expect(jobs).toHaveLength(3);
+    expect(jobs.every((j) => j.status === "cancelled")).toBe(true);
+
+    // Et la file n'y revient plus.
+    expect(await queueDueTouches(50, new Date("2026-08-30T15:00:00Z"))).toBe(0);
+  });
+
+  it("archiver une campagne sans inscription en vol ne touche à rien", async () => {
+    const campaign = await makeCampaign();
+    expect(await closeCampaignEnrollments(campaign.id, NOW)).toEqual({ closed: 0, cancelledJobs: 0 });
   });
 });
 
