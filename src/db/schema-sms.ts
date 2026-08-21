@@ -95,6 +95,17 @@ export const conversations = pgTable(
     assistantHistory: jsonb("assistant_history").notNull().default([]),
     /** 'primary' | 'fallback:0' | 'fallback:1' … — current goal rung. */
     goalRung: text("goal_rung").notNull().default("primary"),
+    /**
+     * Qualification extraite par l'agent au fil des tours. Colonne DEDIEE et
+     * non `clients.qualification` : le formulaire de reservation humain ecrase
+     * cette derniere en entier, avec des cles camelCase et des enums — melanger
+     * les deux ferait disparaitre sans trace ce que l'assistant a appris.
+     * La reconciliation vers la fiche client est une decision d'operateur
+     * (phase 8), pas un ecrasement silencieux.
+     */
+    qualification: jsonb("qualification").notNull().default({}),
+    /** Refus mous encaisses — pilote la chaine de reculs (voir lib/agent/goal). */
+    softRefusals: integer("soft_refusals").notNull().default(0),
     /** false = a human has taken over; every automated path must exit. */
     aiEnabled: boolean("ai_enabled").notNull().default(true),
     pausedById: uuid("paused_by_id").references(() => users.id, { onDelete: "set null" }),
@@ -394,6 +405,85 @@ export const guardrailAudit = pgTable("guardrail_audit", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Journal des évènements d'une conversation (§5.4) — ce que l'opérateur voit
+ * inséré dans le fil : outil appelé, sortie bloquée, escalade, transfert,
+ * rétrogradation d'objectif, reprise humaine. Aucune donnée personnelle au-delà
+ * de ce que la conversation contient déjà.
+ */
+export const agentEvents = pgTable(
+  "agent_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    /**
+     * tool_call | blocked_output | escalation | transfer | goal_downgrade |
+     * llm_error | takeover | resume | stop | hard_refusal | max_turns
+     */
+    type: text("type").notNull(),
+    payload: jsonb("payload").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("agent_events_conversation_idx").on(t.conversationId, t.createdAt)],
+);
+
+/**
+ * Trace complète d'UN tour d'agent (§5.5) — écrite même (surtout) quand le tour
+ * finit bloqué, escaladé ou en erreur. C'est la pièce qui permet de répondre à
+ * « pourquoi a-t-il écrit ça » : le prompt EXACT envoyé et le modèle qui a
+ * VRAIMENT répondu (sur un routeur, ce n'est pas la même question que « lequel
+ * ai-je demandé »).
+ *
+ * Contient des renseignements personnels : purgée après TRACE_RETENTION_DAYS
+ * par le dispatcher, et supprimée avec le client (cascade via conversations).
+ */
+export const agentTurnTraces = pgTable(
+  "agent_turn_traces",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    messageId: uuid("message_id").references(() => messages.id, { onDelete: "set null" }),
+    assistantId: uuid("assistant_id").references(() => assistants.id, { onDelete: "set null" }),
+    assistantVersion: integer("assistant_version"),
+    coreVersion: integer("core_version"),
+    /** Les messages entrants consommés comme UN seul tour (rafale débouncée). */
+    inboundBatch: jsonb("inbound_batch").notNull().default([]),
+    /** Exactement ce qui a été envoyé, L0-L6. */
+    systemPrompt: text("system_prompt").notNull(),
+    /** L7 tel que rendu pour ce tour. */
+    runtimeBlock: text("runtime_block").notNull().default(""),
+    messageArray: jsonb("message_array").notNull().default([]),
+    toolsOffered: jsonb("tools_offered").notNull().default([]),
+    provider: text("provider").notNull(),
+    modelRequested: text("model_requested").notNull(),
+    /** Ce que le routeur a réellement servi — diverge du demandé sur OpenRouter. */
+    modelServed: text("model_served"),
+    upstreamProvider: text("upstream_provider"),
+    rawResponse: jsonb("raw_response").notNull().default({}),
+    toolCalls: jsonb("tool_calls").notNull().default([]),
+    /** Par règle : key, severity, passed, reason. */
+    guardrailResults: jsonb("guardrail_results").notNull().default([]),
+    regenerations: integer("regenerations").notNull().default(0),
+    /** sent | blocked | handoff | stopped | error | skipped */
+    outcome: text("outcome").notNull(),
+    latencyMs: integer("latency_ms"),
+    tokensIn: integer("tokens_in"),
+    tokensOut: integer("tokens_out"),
+    costUsd: numeric("cost_usd", { precision: 10, scale: 5 }),
+    isReplay: boolean("is_replay").notNull().default(false),
+    replayOf: uuid("replay_of"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("agent_turn_traces_conversation_idx").on(t.conversationId, t.createdAt),
+    index("agent_turn_traces_created_idx").on(t.createdAt),
+  ],
+);
+
 // ── Relations ────────────────────────────────────────────────────────────────
 
 export const smsNumbersRelations = relations(smsNumbers, ({ one, many }) => ({
@@ -445,6 +535,24 @@ export const guardrailRulesRelations = relations(guardrailRules, ({ one }) => ({
 export const guardrailFixturesRelations = relations(guardrailFixtures, ({ one }) => ({
   assistant: one(assistants, {
     fields: [guardrailFixtures.assistantId],
+    references: [assistants.id],
+  }),
+}));
+
+export const agentEventsRelations = relations(agentEvents, ({ one }) => ({
+  conversation: one(conversations, {
+    fields: [agentEvents.conversationId],
+    references: [conversations.id],
+  }),
+}));
+
+export const agentTurnTracesRelations = relations(agentTurnTraces, ({ one }) => ({
+  conversation: one(conversations, {
+    fields: [agentTurnTraces.conversationId],
+    references: [conversations.id],
+  }),
+  assistant: one(assistants, {
+    fields: [agentTurnTraces.assistantId],
     references: [assistants.id],
   }),
 }));

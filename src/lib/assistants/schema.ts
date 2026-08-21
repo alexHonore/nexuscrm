@@ -159,7 +159,10 @@ export const modelConfigSchema = z.object({
   maxTokens: z.number().int().min(50).max(2000).default(300),
   /** Classifieur séparé — le duo classifieur-économique + générateur-fort est
    * la configuration NORMALE, pas un cas limite. */
-  classifier: modelRefSchema.default({ provider: "openrouter", model: "google/gemini-flash-latest" }),
+  // Identifiant EPINGLE, pas un alias « -latest » : `google/gemini-flash-latest`
+  // (valeur litterale du cahier) n'existe pas chez OpenRouter et faisait echouer
+  // tous les appels classifieur et juge — donc tout bloquer.
+  classifier: modelRefSchema.default({ provider: "openrouter", model: "google/gemini-2.5-flash" }),
   fallback: modelRefSchema.nullable().default({ provider: "anthropic", model: "claude-sonnet-5" }),
   /** OpenRouter uniquement — ignoré par les fournisseurs directs. Défauts non
    * négociables pour ces données (noms, numéros, projets de Québécois) :

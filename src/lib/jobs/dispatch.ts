@@ -1,6 +1,7 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 import { db } from "@/db";
-import { scheduledJobs } from "@/db/schema-sms";
+import { agentTurnTraces, scheduledJobs } from "@/db/schema-sms";
+import { handleAgentTurn } from "./handlers/agent-turn";
 import { handleSendSms } from "./handlers/send-sms";
 import {
   claimDueJobs,
@@ -60,6 +61,25 @@ function logExecuted(job: ScheduledJob, outcome: string, ms: number): void {
   );
 }
 
+
+/**
+ * Purge des traces de tours (TRACE_RETENTION_DAYS, defaut 30). Elles
+ * contiennent des renseignements personnels : nom, projet, budget, ce que la
+ * personne a ecrit. Une retention indefinie serait un passif, pas une
+ * fonctionnalite. Best-effort : une purge qui echoue ne doit pas faire tomber
+ * le cycle du dispatcher.
+ */
+async function pruneTraces(now: Date): Promise<void> {
+  const days = Number(process.env.TRACE_RETENTION_DAYS ?? 30);
+  if (!Number.isFinite(days) || days <= 0) return;
+  const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+  try {
+    await db.delete(agentTurnTraces).where(lt(agentTurnTraces.createdAt, cutoff));
+  } catch {
+    // journalise par le cycle appelant ; jamais bloquant
+  }
+}
+
 export async function runDispatchCycle(
   opts: { limit?: number; now?: () => Date } = {},
 ): Promise<DispatchCounts> {
@@ -67,6 +87,7 @@ export async function runDispatchCycle(
   // The registry binds the cycle's clock so handlers stay injectable.
   const registry: Record<string, JobHandler> = {
     send_sms: (job) => handleSendSms(job, now),
+    agent_turn: (job) => handleAgentTurn(job),
   };
 
   const counts: DispatchCounts = {
@@ -79,6 +100,7 @@ export async function runDispatchCycle(
   };
 
   counts.requeued = await requeueStaleJobs(undefined, now());
+  await pruneTraces(now());
 
   const jobs = await claimDueJobs(opts.limit ?? 50, now());
   counts.claimed = jobs.length;

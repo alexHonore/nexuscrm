@@ -19,7 +19,15 @@ import {
   testDb,
 } from "./helpers/db";
 import { auditLogs, notifications } from "@/db/schema";
-import { consents, conversations, messages, smsNumbers, suppressions } from "@/db/schema-sms";
+import {
+  assistants,
+  consents,
+  conversations,
+  messages,
+  scheduledJobs,
+  smsNumbers,
+  suppressions,
+} from "@/db/schema-sms";
 
 // ── Stubs d'environnement Next (aucune logique produit n'est simulée) ────────
 vi.mock("server-only", () => ({}));
@@ -155,6 +163,72 @@ describe("POST /api/webhooks/twilio/inbound", () => {
     const notifs = await testDb.select().from(notifications);
     expect(notifs).toHaveLength(1);
     expect(notifs[0].userId).toBe(admin.id);
+  });
+
+  it("§21 — RAFALE : trois entrants en quatre secondes ne programment QU'UN tour", async () => {
+    await makeUser({ role: "admin", locale: "fr" });
+    const client = await makeClient({ phone: FROM });
+    await makeSmsNumber({ e164: TO });
+    // Un assistant actif sur la conversation : sans lui, aucun tour n'est
+    // programme (le runtime sortirait de toute facon).
+    const [assistant] = await testDb
+      .insert(assistants)
+      .values({
+        name: "Assistant rafale",
+        identity: {},
+        goal: { primary: { type: "qualify_only" }, fallbacks: [] },
+        approach: {},
+        model: {},
+      })
+      .returning();
+
+    // Premier message : cree la conversation, puis on y attache l'assistant.
+    await POST(inboundRequest(inboundForm({ MessageSid: SID + "a", Body: "Allo" })));
+    const [conv] = await testDb.select().from(conversations);
+    await testDb
+      .update(conversations)
+      .set({ activeAssistantId: assistant.id })
+      .where(eq(conversations.id, conv.id));
+
+    // Deux autres dans la foulee.
+    await POST(inboundRequest(inboundForm({ MessageSid: SID + "b", Body: "c'est Marie" })));
+    await POST(inboundRequest(inboundForm({ MessageSid: SID + "c", Body: "je veux vendre" })));
+
+    // Trois messages recus…
+    expect(await testDb.select().from(messages)).toHaveLength(3);
+    // …mais UN SEUL job de tour : la cle de dedoublonnage `turn:<id>` a
+    // repousse le meme job au lieu d'en creer trois.
+    const turns = (await testDb.select().from(scheduledJobs)).filter((j) => j.type === "agent_turn");
+    expect(turns).toHaveLength(1);
+    expect(turns[0].dedupeKey).toBe(`turn:${conv.id}`);
+  });
+
+  it("un fil en pause (ai_enabled=false) ne programme AUCUN tour", async () => {
+    await makeUser({ role: "admin", locale: "fr" });
+    await makeClient({ phone: FROM });
+    await makeSmsNumber({ e164: TO });
+    const [assistant] = await testDb
+      .insert(assistants)
+      .values({
+        name: "Assistant en pause",
+        identity: {},
+        goal: { primary: { type: "qualify_only" }, fallbacks: [] },
+        approach: {},
+        model: {},
+      })
+      .returning();
+
+    await POST(inboundRequest(inboundForm({ MessageSid: SID + "d", Body: "Allo" })));
+    const [conv] = await testDb.select().from(conversations);
+    await testDb
+      .update(conversations)
+      .set({ activeAssistantId: assistant.id, aiEnabled: false })
+      .where(eq(conversations.id, conv.id));
+
+    await POST(inboundRequest(inboundForm({ MessageSid: SID + "e", Body: "encore la?" })));
+
+    const turns = (await testDb.select().from(scheduledJobs)).filter((j) => j.type === "agent_turn");
+    expect(turns).toHaveLength(0);
   });
 
   it("une relivraison ne re-signale pas une conversation qu'un humain a traitée", async () => {

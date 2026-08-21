@@ -3,6 +3,9 @@ import { db } from "@/db";
 import { scheduledJobs } from "@/db/schema-sms";
 import { MAX_ATTEMPTS, RETRY_BACKOFF_MS, type ScheduledJob } from "./types";
 
+/** `db` ou une transaction en cours — meme surface pour nos besoins. */
+type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 /**
  * Durable queue core — the storage layer every dispatcher cycle goes through.
  * Invariant: two concurrent dispatchers can NEVER claim the same job
@@ -26,9 +29,18 @@ export interface EnqueueJobInput {
  * key: the same enqueue then creates a fresh job — sans quoi l'interrupteur
  * d'arrêt empoisonnerait pour toujours les clés stables des relances.
  */
-export async function enqueueJob(input: EnqueueJobInput): Promise<{ id: string; deduped: boolean }> {
+export async function enqueueJob(
+  input: EnqueueJobInput,
+  /**
+   * Executeur : passer la transaction en cours quand la mise en file doit
+   * VIVRE OU MOURIR avec elle. Un tour d'agent en depend — une mise en file
+   * validee hors transaction survivrait a un rollback, et le client recevrait
+   * une reponse dont l'etat a ete annule (puis une deuxieme a la reprise).
+   */
+  executor: Executor = db,
+): Promise<{ id: string; deduped: boolean }> {
   if (input.dedupeKey === undefined) {
-    const [row] = await db
+    const [row] = await executor
       .insert(scheduledJobs)
       .values({ type: input.type, runAt: input.runAt, payload: input.payload })
       .returning({ id: scheduledJobs.id });
@@ -38,7 +50,7 @@ export async function enqueueJob(input: EnqueueJobInput): Promise<{ id: string; 
   // Pre-generated id: on conflict the existing row keeps its own id, which is
   // how we know the insert was absorbed rather than created.
   const freshId = crypto.randomUUID();
-  const [row] = await db
+  const [row] = await executor
     .insert(scheduledJobs)
     .values({
       id: freshId,

@@ -10,6 +10,8 @@ import { normalizePhone, phoneMatchKey } from "@/lib/phone";
 import { detectOptOut } from "@/lib/sms/optout";
 import { analyzeSms } from "@/lib/sms/segments";
 import { isValidTwilioSignature, publicWebhookUrl } from "@/lib/sms-server/twilio-signature";
+import { enqueueJob } from "@/lib/jobs/queue";
+import { kickDispatch } from "@/lib/jobs/kick";
 
 /**
  * POST /api/webhooks/twilio/inbound — SMS entrant appelé PAR LES SERVEURS
@@ -28,6 +30,9 @@ import { isValidTwilioSignature, publicWebhookUrl } from "@/lib/sms-server/twili
  * via la signature X-Twilio-Signature. Toutes les écritures sont idempotentes ;
  * une vraie erreur BD remonte en 500 exprès pour que Twilio retente.
  */
+
+/** Fenetre de debounce d'une rafale de SMS entrants. */
+const AGENT_TURN_DEBOUNCE_MS = 10_000;
 
 const inboundSchema = z.object({
   MessageSid: z.string().min(1),
@@ -224,6 +229,24 @@ export async function POST(req: NextRequest) {
           };
         }),
       );
+    }
+
+    // -- Tour d'agent, debounce --------------------------------------------
+    // La cle de dedoublonnage `turn:<conversation>` fait que trois SMS en
+    // quatre secondes REPOUSSENT le meme job au lieu d'en creer trois : une
+    // rafale = une seule reponse. Les 10 s laissent le temps a la suite d'une
+    // pensee d'arriver. Un fil mis en pause par un humain n'en programme pas :
+    // le runtime sortirait de toute facon, autant ne pas creer le job.
+    if (!optOut.optOut && conversation.aiEnabled && conversation.activeAssistantId) {
+      await enqueueJob({
+        type: "agent_turn",
+        runAt: new Date(now.getTime() + AGENT_TURN_DEBOUNCE_MS),
+        payload: { conversationId: conversation.id },
+        dedupeKey: `turn:${conversation.id}`,
+      });
+      // Chemin rapide : le tour part des la reponse envoyee, sans attendre le
+      // cron de la minute (qui reste le filet de securite).
+      kickDispatch();
     }
   }
 

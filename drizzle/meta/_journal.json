@@ -29,6 +29,13 @@
       "when": 1787245753115,
       "tag": "0003_phase3-assistants",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787275701363,
+      "tag": "0004_phase4-agent-runtime",
+      "breakpoints": true
     }
   ]
 }
