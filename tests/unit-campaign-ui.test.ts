@@ -176,7 +176,11 @@ describe("onglets rendus isolément", () => {
     );
     expect(html).toContain("Marie Tremblay");
     expect(html).toContain("Arrêtée");
-    expect(html).toContain("suppressed");
+    // Le motif est TRADUIT : « suppressed » nu à l'écran n'explique rien.
+    expect(html).toContain("Numéro désabonné");
+    expect(html).not.toContain(">suppressed<");
+    // Et la colonne « Terminé » existe vraiment (la clé existait, pas la colonne).
+    expect(html).toContain("Terminé");
   });
 
   it("Déclencheur : les QUATRE options sont visibles, chacune expliquée", () => {

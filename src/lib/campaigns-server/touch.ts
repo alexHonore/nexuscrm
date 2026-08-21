@@ -13,9 +13,15 @@ import {
 } from "@/db/schema-sms";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { campaignRowToConfig } from "@/lib/campaigns/schema";
-import { canSendTouch, type TouchRefusal } from "@/lib/campaigns/eligibility";
+import {
+  canSendTouch,
+  LIVE_CONVERSATION_WINDOW_MS,
+  type TouchRefusal,
+} from "@/lib/campaigns/eligibility";
 import { bodyForStep, ladderExhausted, nextTouchAt } from "@/lib/campaigns/ladder";
 import { variantBody } from "@/lib/campaigns/variants";
+import { DEFAULT_QUIET_HOURS, isWithinSendWindow, nextSendTime } from "@/lib/sms/quiet-hours";
+import { settingsSendGate } from "@/lib/sms-server";
 
 /**
  * Envoi d'un barreau d'échelle.
@@ -31,6 +37,16 @@ import { variantBody } from "@/lib/campaigns/variants";
  *
  * L'éligibilité est re-vérifiée ici et pas seulement à l'inscription : une
  * échelle de trois semaines peut très bien traverser un STOP.
+ *
+ * Le barreau n'est écrit et l'échelle n'avance QUE si l'envoi peut vraiment
+ * partir maintenant : interrupteur d'arrêt baissé, numéro expéditeur actif,
+ * heures de politesse respectées. Avancer d'abord et laisser l'envoi se faire
+ * refuser plus loin consommait le barreau pour rien — après un incident d'une
+ * heure sous interrupteur, des centaines d'échelles disaient « envoyé » sans
+ * qu'un seul SMS ne soit parti. Et reporter l'envoi (plutôt que le barreau)
+ * aux heures de politesse faisait partir deux barreaux dans la même matinée :
+ * l'espacement se mesurait depuis la mise en file du soir, pas depuis l'envoi
+ * réel du lendemain.
  */
 
 export interface TouchResult {
@@ -43,6 +59,14 @@ export interface TouchResult {
 
 /** L'assistant rédige : on ne pose pas de texte, on lui passe la main. */
 const AGENT_WRITES = null;
+
+/**
+ * Délais de reprise des refus « pas maintenant ». Sans eux, une inscription
+ * refusée reste due et la file la re-présente À CHAQUE CYCLE — 1 440 jobs par
+ * jour et par inscription pour un fil mis en pause par un humain.
+ */
+const KILL_SWITCH_RETRY_MS = 15 * 60 * 1000;
+const RETRY_MS = 60 * 60 * 1000;
 
 export async function runTouch(enrollmentId: string, now = new Date()): Promise<TouchResult> {
   const enrollment = await db.query.campaignEnrollments.findFirst({
@@ -60,6 +84,17 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
   if (!client) return finish(enrollment.id, "excluded", "client_deleted", { sent: false, step: enrollment.step });
 
   const step = enrollment.step;
+
+  // ── Numéro expéditeur ────────────────────────────────────────────────────
+  // Résolu AVANT la décision : c'est lui qui permet de retrouver le fil existant
+  // (unique sur téléphone + numéro) quand l'inscription n'en connaît pas encore.
+  // Un numéro épinglé mais désactivé ne sert plus — on n'écrit pas depuis une
+  // ligne qu'un administrateur vient de fermer.
+  const smsNumber = campaignRow.smsNumberId
+    ? await db.query.smsNumbers.findFirst({
+        where: and(eq(smsNumbers.id, campaignRow.smsNumberId), eq(smsNumbers.active, true)),
+      })
+    : await db.query.smsNumbers.findFirst({ where: eq(smsNumbers.active, true) });
 
   // ── Faits ────────────────────────────────────────────────────────────────
   const [suppressedRow] = await db
@@ -81,18 +116,38 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
     )
     .limit(1);
 
+  // Le fil : celui de l'inscription, sinon celui qui existe DÉJÀ pour ce
+  // téléphone sur ce numéro. Avant le premier barreau l'inscription n'en connaît
+  // aucun — mais la personne peut très bien être en pleine conversation avec
+  // l'assistant, ou un humain peut avoir repris la main. Ignorer ce fil-là
+  // faisait partir l'ouverture froide au milieu d'un échange en cours.
   const conversation = enrollment.conversationId
     ? await db.query.conversations.findFirst({
         where: eq(conversations.id, enrollment.conversationId),
       })
-    : null;
+    : smsNumber
+      ? await db.query.conversations.findFirst({
+          where: and(
+            eq(conversations.clientPhone, client.phone),
+            eq(conversations.smsNumberId, smsNumber.id),
+          ),
+        })
+      : undefined;
+  const lastInboundAt = conversation?.lastInboundAt ?? null;
 
   // Une réponse APRÈS notre dernier barreau rend la main à l'assistant.
   const repliedSince =
-    conversation !== null &&
-    conversation !== undefined &&
-    conversation.lastInboundAt !== null &&
-    (enrollment.lastTouchAt === null || conversation.lastInboundAt > enrollment.lastTouchAt);
+    lastInboundAt !== null &&
+    enrollment.lastTouchAt !== null &&
+    lastInboundAt > enrollment.lastTouchAt;
+
+  // Rien n'est encore parti : un entrant récent veut dire que le fil est vivant.
+  // Sans fenêtre, un message vieux d'un an ferait passer toute réactivation
+  // pour une « réponse ».
+  const liveConversation =
+    enrollment.lastTouchAt === null &&
+    lastInboundAt !== null &&
+    lastInboundAt.getTime() >= now.getTime() - LIVE_CONVERSATION_WINDOW_MS;
 
   const [existingTouch] = await db
     .select({ id: campaignTouches.id })
@@ -103,18 +158,28 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
   const decision = canSendTouch({
     campaignStatus: campaignRow.status,
     enrollmentStatus: enrollment.status,
+    // La MÊME porte que le fournisseur (`settingsSendGate`) : elle échoue fermée
+    // sur un réglage illisible, comme l'envoi lui-même.
+    killSwitch: !(await settingsSendGate.isSendingAllowed()),
     suppressed: suppressedRow !== undefined,
     hasValidConsent: config.requireConsent ? consentRow !== undefined : true,
+    doNotCall: client.doNotCall,
+    excludeDoNotCall: config.audience.excludeDoNotCall,
     aiEnabled: conversation?.aiEnabled ?? true,
     ladderLength: config.ladder.length,
     step,
     alreadySent: existingTouch !== undefined,
     repliedSince,
+    liveConversation,
+    hasSender: smsNumber !== undefined,
+    withinSendWindow: isWithinSendWindow(now, DEFAULT_QUIET_HOURS),
   });
 
   if (!decision.allowed) {
-    return handleRefusal(enrollment.id, step, decision.refusal);
+    return handleRefusal(enrollment, decision.refusal, now);
   }
+  // Le garde-type : `hasSender` vient d'être vérifié par la décision.
+  if (!smsNumber) return handleRefusal(enrollment, "no_sender", now);
 
   // Le barreau est-il DÛ? Sans cette question, un job rejoué juste après un
   // envoi réussi trouve l'inscription déjà avancée d'un cran et expédie le
@@ -124,20 +189,12 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
     return { sent: false, step, refusal: "not_due", nextAt: enrollment.nextTouchAt };
   }
 
-  // ── Numéro expéditeur ────────────────────────────────────────────────────
-  const smsNumber = campaignRow.smsNumberId
-    ? await db.query.smsNumbers.findFirst({ where: eq(smsNumbers.id, campaignRow.smsNumberId) })
-    : await db.query.smsNumbers.findFirst({ where: eq(smsNumbers.active, true) });
-  if (!smsNumber) {
-    // Pas de DID configuré : c'est une panne de configuration, pas une décision
-    // sur la personne. On ne clôt pas l'inscription, on repousse.
-    return { sent: false, step, refusal: "campaign_not_active" };
-  }
-
   const opener = variantBody(config.variants, enrollment.variant);
   const body = bodyForStep(config.ladder, step, opener);
 
   const nextStep = step + 1;
+  // `now` est bien l'instant d'envoi : on n'arrive ici que dans la fenêtre
+  // d'envoi, donc l'espacement du barreau suivant se mesure depuis l'envoi réel.
   const plannedNext = ladderExhausted(config.ladder, nextStep)
     ? null
     : nextTouchAt(config.ladder, nextStep, enrollment.enrolledAt, now);
@@ -245,24 +302,74 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
   return { sent: true, step, nextAt: plannedNext };
 }
 
+type EnrollmentRow = typeof campaignEnrollments.$inferSelect;
+
 /**
- * Un refus n'a pas toujours la même conséquence. Un désabonnement CLÔT
- * l'inscription ; une pause de campagne la laisse en attente, pour qu'elle
- * reprenne quand la campagne repart.
+ * Un refus n'a pas toujours la même conséquence.
+ *
+ *  · Un « non » définitif (désabonnement, consentement expiré, ne pas appeler,
+ *    réponse, échelle finie, fil déjà vivant) CLÔT l'inscription.
+ *  · Un « pas maintenant » (interrupteur, numéro manquant, fil en pause, heures
+ *    de politesse) la REPOUSSE : `next_touch_at` avance, sinon la file la
+ *    représenterait à chaque cycle — un job par minute et par inscription,
+ *    pour toujours.
+ *  · Une campagne en pause ne touche à rien : la file ne sélectionne déjà pas
+ *    ses inscriptions, et elles doivent repartir sans délai à la reprise.
+ *  · « Pas dû » non plus : la date déjà posée est la bonne.
  */
 async function handleRefusal(
-  enrollmentId: string,
-  step: number,
+  enrollment: EnrollmentRow,
   refusal: TouchRefusal,
+  now: Date,
 ): Promise<TouchResult> {
-  const terminal: TouchRefusal[] = ["suppressed", "consent_expired", "ladder_exhausted", "replied"];
-  if (!terminal.includes(refusal)) {
-    return { sent: false, step, refusal };
-  }
+  const step = enrollment.step;
+  const result: TouchResult = { sent: false, step, refusal };
 
-  const status =
-    refusal === "replied" ? "replied" : refusal === "ladder_exhausted" ? "completed" : "stopped";
-  return finish(enrollmentId, status, refusal, { sent: false, step, refusal });
+  switch (refusal) {
+    case "replied":
+      return finish(enrollment.id, "replied", refusal, result);
+    case "ladder_exhausted":
+      return finish(enrollment.id, "completed", refusal, result);
+    case "live_conversation":
+      // Rien n'est parti : « écartée », pas « arrêtée » — l'échelle n'a jamais
+      // commencé, et les statistiques ne doivent pas y voir un refus exprimé.
+      return finish(enrollment.id, "excluded", refusal, result);
+    case "suppressed":
+    case "consent_expired":
+    case "do_not_call":
+      return finish(enrollment.id, "stopped", refusal, result);
+
+    case "quiet_hours":
+      // Prochaine ouverture de la fenêtre, avec le jitter de `nextSendTime` :
+      // un lot reporté pendant la nuit part étalé le matin, pas en rafale.
+      return defer(enrollment, nextSendTime(now, DEFAULT_QUIET_HOURS), result);
+    case "kill_switch":
+      return defer(enrollment, new Date(now.getTime() + KILL_SWITCH_RETRY_MS), result);
+    case "ai_paused":
+    case "no_sender":
+    case "already_sent":
+      return defer(enrollment, new Date(now.getTime() + RETRY_MS), result);
+
+    case "campaign_not_active":
+    case "enrollment_ended":
+    case "not_due":
+      return result;
+  }
+}
+
+/** Repousse le prochain barreau — jamais plus tôt que ce qui était déjà prévu. */
+async function defer(
+  enrollment: EnrollmentRow,
+  until: Date,
+  result: TouchResult,
+): Promise<TouchResult> {
+  const planned = enrollment.nextTouchAt;
+  const nextAt = planned !== null && planned > until ? planned : until;
+  await db
+    .update(campaignEnrollments)
+    .set({ nextTouchAt: nextAt, updatedAt: new Date() })
+    .where(eq(campaignEnrollments.id, enrollment.id));
+  return { ...result, nextAt };
 }
 
 async function finish(

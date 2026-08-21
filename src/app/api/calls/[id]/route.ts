@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { DISPOSITIONS, calls, categories, clients, followups, notifications } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import { apiUser } from "@/lib/auth/guards";
+import { notifyCategoryChanged } from "@/lib/campaigns-server/match";
 
 const patchCallSchema = z.object({
   answeredAt: z.coerce.date().nullish(),
@@ -84,6 +85,11 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       ? Math.max(0, Math.round((endedAt.getTime() - answeredAt.getTime()) / 1000))
       : undefined);
 
+  // Changement de catégorie réellement appliqué — notifié APRÈS la transaction.
+  // (`as` et non une annotation : TypeScript ne voit pas l'affectation dans la
+  // fermeture et croirait la variable encore nulle après la transaction.)
+  let categoryChange = null as { clientId: string; from: number | null; to: number } | null;
+
   await db.transaction(async (tx) => {
     await tx
       .update(calls)
@@ -116,6 +122,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
             ...(targetCategory?.key === "dncl" ? { doNotCall: true } : {}),
           })
           .where(eq(clients.id, client.id));
+        if (targetCategory && client.categoryId !== targetCategory.id) {
+          categoryChange = { clientId: client.id, from: client.categoryId, to: targetCategory.id };
+        }
 
         if (body.followupDueAt) {
           await tx.insert(followups).values({
@@ -135,6 +144,14 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       }
     }
   });
+
+  // Les boutons d'après-appel SONT le pipeline : c'est ICI que le déclencheur
+  // « changement de catégorie » des campagnes SMS doit partir, pas seulement
+  // depuis la liste déroulante de l'en-tête. Après la transaction — une
+  // campagne ne peut pas faire échouer le classement d'un appel.
+  if (categoryChange !== null) {
+    notifyCategoryChanged(categoryChange.clientId, categoryChange.from, categoryChange.to);
+  }
 
   // Entrant qui DEVIENT manqué à la finalisation : décroché au moment même où
   // l'appelant raccrochait — le POST du décroché semblait répondu, c'est donc

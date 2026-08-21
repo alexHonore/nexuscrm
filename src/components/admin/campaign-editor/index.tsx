@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ENROLL_REFUSALS } from "@/lib/campaigns/eligibility";
 import type { CampaignConfig } from "@/lib/campaigns/schema";
 import { ApiError, api } from "../api";
 import {
@@ -23,6 +24,9 @@ import {
 import type { CampaignEditorData } from "./types";
 
 const TAB_IDS = ["basics", "trigger", "audience", "ladder", "variants", "enrollments"] as const;
+
+/** Motifs de refus connus — seuls ceux-là ont une étiquette traduite. */
+const ENROLL_REFUSAL_KEYS = new Set<string>(ENROLL_REFUSALS);
 
 /**
  * Éditeur de campagne.
@@ -86,8 +90,18 @@ export function CampaignEditor({ data }: { data: CampaignEditorData }) {
       toast.success(status === "active" ? t("editor.activated") : t("editor.paused"));
       router.refresh();
     } catch (err) {
+      // Chaque refus d'activation a sa phrase : « impossible d'enregistrer »
+      // ne dit pas à l'administrateur ce qu'il doit corriger.
       const code = err instanceof ApiError ? err.code : "";
-      toast.error(code === "empty_ladder" ? t("editor.ladder.empty") : t("editor.errors.save"));
+      toast.error(
+        code === "empty_ladder"
+          ? t("editor.ladder.empty")
+          : code === "assistant_inactive"
+            ? t("editor.errors.assistantInactive")
+            : code === "no_sender"
+              ? t("editor.errors.noSender")
+              : t("editor.errors.save"),
+      );
     } finally {
       setBusy(null);
     }
@@ -96,15 +110,27 @@ export function CampaignEditor({ data }: { data: CampaignEditorData }) {
   const enroll = async () => {
     setBusy("enroll");
     try {
-      const result = await api<{ enrolled: number; considered: number }>(
-        `/api/campaigns/${data.id}/enroll`,
-        { method: "POST" },
-      );
+      const result = await api<{
+        enrolled: number;
+        considered: number;
+        refusals?: Record<string, number>;
+      }>(`/api/campaigns/${data.id}/enroll`, { method: "POST" });
+      // Le détail PAR MOTIF : « 3 inscrits, 197 écartés » ne dit pas s'il
+      // faut relever un plafond ou constater que personne n'a consenti.
+      const breakdown = Object.entries(result.refusals ?? {})
+        .filter(([reason, n]) => n > 0 && ENROLL_REFUSAL_KEYS.has(reason))
+        .map(([reason, n]) =>
+          t("editor.enrollments.refusalCount", {
+            label: t(`editor.enrollments.refusal.${reason}` as never),
+            count: n,
+          }),
+        );
       toast.success(
         t("editor.enrollments.enrolled", {
           count: result.enrolled,
           skipped: result.considered - result.enrolled,
         }),
+        breakdown.length > 0 ? { description: breakdown.join(" · ") } : undefined,
       );
       router.refresh();
     } catch {

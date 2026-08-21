@@ -7,10 +7,16 @@ import {
   campaignEnrollments,
   campaigns,
   consents,
+  conversations,
   suppressions,
 } from "@/db/schema-sms";
 import { campaignRowToConfig, type CampaignConfig } from "@/lib/campaigns/schema";
-import { canEnroll, type EnrollRefusal } from "@/lib/campaigns/eligibility";
+import {
+  canEnroll,
+  LIVE_CONVERSATION_WINDOW_MS,
+  type EnrollFacts,
+  type EnrollRefusal,
+} from "@/lib/campaigns/eligibility";
 import { nextTouchAt } from "@/lib/campaigns/ladder";
 import { pickVariant } from "@/lib/campaigns/variants";
 import { audienceWhere } from "./audience";
@@ -28,6 +34,9 @@ import { audienceWhere } from "./audience";
  * `eligibility` : ce partage permet d'écrire les règles une fois et de les
  * tester sans base.
  */
+
+/** `db` ou une transaction en cours — même surface pour nos besoins. */
+type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export interface EnrollResult {
   clientId: string;
@@ -75,6 +84,23 @@ async function suppressedPhones(phones: string[]): Promise<Set<string>> {
   return new Set(rows.map((r) => r.phone));
 }
 
+/**
+ * Numéros dont un fil a reçu un message entrant récemment — la personne est en
+ * conversation avec nous (assistant ou humain). Sur N'IMPORTE QUEL numéro
+ * expéditeur : c'est la personne qui est occupée, pas la ligne.
+ */
+async function livePhones(phones: string[], now: Date): Promise<Set<string>> {
+  if (phones.length === 0) return new Set();
+  const cutoff = new Date(now.getTime() - LIVE_CONVERSATION_WINDOW_MS);
+  const rows = await db
+    .select({ phone: conversations.clientPhone })
+    .from(conversations)
+    .where(
+      and(inArray(conversations.clientPhone, phones), gte(conversations.lastInboundAt, cutoff)),
+    );
+  return new Set(rows.map((r) => r.phone));
+}
+
 async function activeElsewhere(clientIds: string[], campaignId: string): Promise<Set<string>> {
   if (clientIds.length === 0) return new Set();
   const rows = await db
@@ -85,7 +111,9 @@ async function activeElsewhere(clientIds: string[], campaignId: string): Promise
       and(
         inArray(campaignEnrollments.clientId, clientIds),
         inArray(campaignEnrollments.status, ["pending", "active"]),
-        eq(campaigns.status, "active"),
+        // En pause compte : ces inscriptions reprendront, et deux échelles
+        // écriraient alors à la même personne (voir audience.ts).
+        inArray(campaigns.status, ["active", "paused"]),
         sql`${campaigns.id} <> ${campaignId}`,
       ),
     );
@@ -118,10 +146,12 @@ export async function enrollClients(
     .from(clients)
     .where(inArray(clients.id, clientIds));
   const byId = new Map(clientRows.map((c) => [c.id, c]));
+  const phones = clientRows.map((c) => c.phone);
 
-  const [consented, suppressed, elsewhere, alreadyIn, counts] = await Promise.all([
+  const [consented, suppressed, live, elsewhere, alreadyIn, counts] = await Promise.all([
     consentedClientIds(clientIds, now),
-    suppressedPhones(clientRows.map((c) => c.phone)),
+    suppressedPhones(phones),
+    livePhones(phones, now),
     config.audience.excludeActiveInOtherCampaign
       ? activeElsewhere(clientIds, campaignId)
       : Promise.resolve(new Set<string>()),
@@ -149,7 +179,7 @@ export async function enrollClients(
       continue;
     }
 
-    const decision = canEnroll(config, {
+    const facts: EnrollFacts = {
       status: row.status,
       now,
       hasPhone: client.phone.trim() !== "",
@@ -157,20 +187,24 @@ export async function enrollClients(
       suppressed: suppressed.has(client.phone),
       doNotCall: client.doNotCall,
       alreadyEnrolled: alreadyIn.has(clientId),
+      liveConversation: live.has(client.phone),
       activeInOtherCampaign: elsewhere.has(clientId),
       enrolledTodayCount: today,
       enrolledTotalCount: total,
-    });
+    };
 
+    // Première passe sur des compteurs lus une fois : écarte sans transaction
+    // ce qui n'a aucune chance. La décision FINALE sur les plafonds est reprise
+    // sous verrou dans `insertEnrollment`.
+    const decision = canEnroll(config, facts);
     if (!decision.allowed) {
       results.push({ clientId, enrolled: false, refusal: decision.refusal });
       continue;
     }
 
-    const written = await insertEnrollment(campaignId, clientId, config, now);
-    if (written === null) {
-      // L'index unique a tranché : un autre déclencheur est passé le premier.
-      results.push({ clientId, enrolled: false, refusal: "already_enrolled" });
+    const written = await insertEnrollment(campaignId, clientId, config, facts, now);
+    if ("refusal" in written) {
+      results.push({ clientId, enrolled: false, refusal: written.refusal });
       continue;
     }
 
@@ -190,38 +224,64 @@ export async function enrollClients(
   return results;
 }
 
+/**
+ * Écrit l'inscription sous un verrou consultatif PAR CAMPAGNE.
+ *
+ * Sans lui, dix leads Facebook qui arrivent dans la même minute — chacun dans
+ * sa propre fonction serverless — lisent tous « 45 inscrits aujourd'hui »,
+ * concluent tous qu'il reste de la place sous un plafond de 50, et le plafond
+ * finit à 55. Le verrou est transactionnel (`pg_advisory_xact_lock`) : il tombe
+ * avec la transaction, y compris sur un pooler en mode transaction, et ne
+ * sérialise que les inscriptions d'UNE campagne.
+ */
 async function insertEnrollment(
   campaignId: string,
   clientId: string,
   config: CampaignConfig,
+  facts: EnrollFacts,
   now: Date,
-): Promise<{ id: string; variant: string } | null> {
+): Promise<{ id: string; variant: string } | { refusal: EnrollRefusal }> {
   const variant = pickVariant(config.variants, campaignId, clientId);
   const due = nextTouchAt(config.ladder, 0, now, null);
 
-  const [inserted] = await db
-    .insert(campaignEnrollments)
-    .values({
-      campaignId,
-      clientId,
-      variant,
-      status: "pending",
-      step: 0,
-      nextTouchAt: due,
-      enrolledAt: now,
-    })
-    .onConflictDoNothing({ target: [campaignEnrollments.campaignId, campaignEnrollments.clientId] })
-    .returning({ id: campaignEnrollments.id, variant: campaignEnrollments.variant });
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${campaignId}::text))`);
 
-  return inserted ?? null;
+    // Les plafonds se relisent SOUS le verrou : c'est cette lecture-là qui fait foi.
+    const counts = await enrollmentCounts(campaignId, now, tx);
+    const decision = canEnroll(config, {
+      ...facts,
+      enrolledTodayCount: counts.today,
+      enrolledTotalCount: counts.total,
+    });
+    if (!decision.allowed) return { refusal: decision.refusal };
+
+    const [inserted] = await tx
+      .insert(campaignEnrollments)
+      .values({
+        campaignId,
+        clientId,
+        variant,
+        status: "pending",
+        step: 0,
+        nextTouchAt: due,
+        enrolledAt: now,
+      })
+      .onConflictDoNothing({ target: [campaignEnrollments.campaignId, campaignEnrollments.clientId] })
+      .returning({ id: campaignEnrollments.id, variant: campaignEnrollments.variant });
+
+    // L'index unique a tranché : un autre déclencheur est passé le premier.
+    return inserted ?? { refusal: "already_enrolled" };
+  });
 }
 
 export async function enrollmentCounts(
   campaignId: string,
   now: Date,
+  executor: Executor = db,
 ): Promise<{ today: number; total: number }> {
   const dayStart = startOfTorontoDay(now);
-  const [row] = await db
+  const [row] = await executor
     .select({
       total: sql<number>`count(*)::int`,
       // Parenthèses obligatoires : `count(*) filter (…)::int` est une erreur de
@@ -236,16 +296,33 @@ export async function enrollmentCounts(
   return { today: row?.today ?? 0, total: row?.total ?? 0 };
 }
 
-/** Combien de clients l'audience vise-t-elle aujourd'hui? Sert à l'aperçu. */
-export async function audienceCount(campaignId: string, now = new Date()): Promise<number> {
-  const row = await db.query.campaigns.findFirst({ where: eq(campaigns.id, campaignId) });
-  if (!row) throw new Error("campaign_not_found");
-  const config = campaignRowToConfig(row);
+/**
+ * Combien de clients une configuration vise-t-elle aujourd'hui? Sert à
+ * l'aperçu — y compris pour une configuration PAS ENCORE enregistrée : l'écran
+ * d'édition recalcule ce qu'il affiche, pas ce qui dort en base.
+ */
+export async function audienceCountFor(
+  config: CampaignConfig,
+  opts: { campaignId?: string; now?: Date } = {},
+): Promise<number> {
+  const now = opts.now ?? new Date();
   const [result] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(clients)
-    .where(audienceWhere(config.audience, config.trigger, now, { campaignId }));
+    .where(
+      audienceWhere(config.audience, config.trigger, now, {
+        campaignId: opts.campaignId,
+        requireConsent: config.requireConsent,
+      }),
+    );
   return result?.n ?? 0;
+}
+
+/** Combien de clients l'audience ENREGISTRÉE vise-t-elle aujourd'hui? */
+export async function audienceCount(campaignId: string, now = new Date()): Promise<number> {
+  const row = await db.query.campaigns.findFirst({ where: eq(campaigns.id, campaignId) });
+  if (!row) throw new Error("campaign_not_found");
+  return audienceCountFor(campaignRowToConfig(row), { campaignId, now });
 }
 
 /** Les clients que l'audience vise, plafonnés — pour un balayage ou un envoi manuel. */
@@ -260,7 +337,12 @@ export async function audienceClientIds(
   const rows = await db
     .select({ id: clients.id })
     .from(clients)
-    .where(audienceWhere(config.audience, config.trigger, now, { campaignId }))
+    .where(
+      audienceWhere(config.audience, config.trigger, now, {
+        campaignId,
+        requireConsent: config.requireConsent,
+      }),
+    )
     // Les plus anciens d'abord : une réactivation doit commencer par les leads
     // qui dorment depuis le plus longtemps, pas par les derniers arrivés.
     .orderBy(clients.createdAt)

@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { campaignEnrollments, campaigns } from "@/db/schema-sms";
+import { assistants, campaignEnrollments, campaigns, smsNumbers } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { campaignConfigSchema, campaignRowToConfig } from "@/lib/campaigns/schema";
+import { closeCampaignEnrollments } from "@/lib/campaigns-server/lifecycle";
 
 const CAMPAIGN_STATUSES = ["draft", "active", "paused", "archived"] as const;
 
@@ -29,11 +30,58 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
 }
 
 /**
+ * Ce qu'il faut pour qu'une campagne ACTIVE fasse vraiment quelque chose.
+ *
+ * Activer est refusé ICI, côté serveur, dès qu'un élément manque : une
+ * campagne active qui inscrit des gens sans jamais leur écrire paraît vivante,
+ * et rien à l'écran ne dit pourquoi il ne se passe rien.
+ *
+ *  · `empty_ladder` — aucun barreau.
+ *  · `assistant_inactive` — un barreau « l'assistant rédige » (corps vide) sans
+ *    assistant ACTIF : le tour d'agent se terminerait « pas d'assistant » à
+ *    chaque barreau, l'échelle avancerait, rien ne partirait.
+ *  · `no_sender` — numéro épinglé inactif, ou aucun numéro actif quand la
+ *    campagne s'en remet au premier disponible : chaque barreau serait repoussé
+ *    d'heure en heure, indéfiniment.
+ */
+async function activationProblem(config: {
+  ladder: { body: string | null }[];
+  assistantId: string | null;
+  smsNumberId: string | null;
+}): Promise<string | null> {
+  if (config.ladder.length === 0) return "empty_ladder";
+
+  if (config.ladder.some((rung) => rung.body === null)) {
+    const assistant = config.assistantId
+      ? await db.query.assistants.findFirst({
+          where: eq(assistants.id, config.assistantId),
+          columns: { status: true },
+        })
+      : undefined;
+    if (!assistant || assistant.status !== "active") return "assistant_inactive";
+  }
+
+  const sender = config.smsNumberId
+    ? await db.query.smsNumbers.findFirst({
+        where: eq(smsNumbers.id, config.smsNumberId),
+        columns: { active: true },
+      })
+    : await db.query.smsNumbers.findFirst({
+        where: eq(smsNumbers.active, true),
+        columns: { active: true },
+      });
+  if (!sender?.active) return "no_sender";
+
+  return null;
+}
+
+/**
  * PATCH /api/campaigns/:id — configuration et/ou état.
  *
- * Activer une campagne dont l'échelle est vide est refusé ICI : elle
- * inscrirait des gens sans jamais leur écrire, et rien à l'écran ne dirait
- * pourquoi il ne se passe rien.
+ * Archiver clôt les inscriptions en vol (voir `lifecycle.ts`) : sinon elles
+ * resteraient « actives » pour toujours, comptées en cours et bloquant
+ * d'autres campagnes. Mettre en pause ne clôt rien — la file ignore déjà les
+ * campagnes en pause, et les inscriptions doivent repartir à la reprise.
  */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const admin = await apiAdmin();
@@ -61,10 +109,22 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   const config = parsed.data.config;
   const nextStatus = parsed.data.status ?? row.status;
-  const ladder = config ? config.ladder : (row.ladder as unknown[]);
 
-  if (nextStatus === "active" && ladder.length === 0) {
-    return NextResponse.json({ error: "empty_ladder" }, { status: 409 });
+  // Un assistant inconnu passe zod (c'est un UUID) et ferait sauter la clé
+  // étrangère : on le dit proprement au lieu d'un 500.
+  if (config?.assistantId) {
+    const exists = await db.query.assistants.findFirst({
+      where: eq(assistants.id, config.assistantId),
+      columns: { id: true },
+    });
+    if (!exists) return NextResponse.json({ error: "assistant_not_found" }, { status: 409 });
+  }
+
+  if (nextStatus === "active") {
+    // La configuration qui sera ACTIVE : celle envoyée, sinon celle en base.
+    const effective = config ?? campaignRowToConfig(row);
+    const problem = await activationProblem(effective);
+    if (problem) return NextResponse.json({ error: problem }, { status: 409 });
   }
 
   await db
@@ -92,12 +152,17 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     })
     .where(eq(campaigns.id, id));
 
+  const closed =
+    parsed.data.status === "archived" && row.status !== "archived"
+      ? await closeCampaignEnrollments(id)
+      : null;
+
   await logAudit({
     userId: admin.id,
     action: parsed.data.status ? `campaign.${parsed.data.status}` : "campaign.update",
     entity: "campaign",
     entityId: id,
-    detail: { name: config?.name ?? row.name },
+    detail: { name: config?.name ?? row.name, ...(closed ? { closedEnrollments: closed.closed } : {}) },
   });
 
   return NextResponse.json({ saved: true, status: nextStatus });
@@ -130,12 +195,13 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
       .update(campaigns)
       .set({ status: "archived", updatedAt: new Date() })
       .where(eq(campaigns.id, id));
+    const closed = await closeCampaignEnrollments(id);
     await logAudit({
       userId: admin.id,
       action: "campaign.archive",
       entity: "campaign",
       entityId: id,
-      detail: { name: row.name, reason: "has_enrollments" },
+      detail: { name: row.name, reason: "has_enrollments", closedEnrollments: closed.closed },
     });
     return NextResponse.json({ archived: true, deleted: false });
   }
