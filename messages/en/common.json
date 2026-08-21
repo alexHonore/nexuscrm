@@ -28,7 +28,8 @@
     "groupData": "Data and access",
     "groupInsights": "Activity and reporting",
     "groupSystem": "System",
-    "goLive": "Go live"
+    "goLive": "Go live",
+    "docs": "Documentation"
   },
   "actions": {
     "save": "Save",

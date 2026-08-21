@@ -625,5 +625,214 @@
       "persistence": "Persistance",
       "none": "Aucun"
     }
+  },
+  "docs": {
+    "title": "Documentation — SMS & assistants IA",
+    "subtitle": "Comment le moteur décide qui reçoit quoi, ce que chaque réglage change, et comment partager un assistant ou une campagne en JSON.",
+    "toc": "Sommaire",
+    "onThisPage": "Sur cette page",
+    "copy": "Copier",
+    "copied": "Copié",
+    "download": "Télécharger l'exemple",
+    "frOnlyNote": "Les fiches de référence (paramètres, garde-fous, champs de campagne) sont rédigées en français : ce sont les mêmes textes que l'aide en ligne à côté de chaque champ.",
+    "columns": {
+      "path": "Chemin JSON",
+      "type": "Type",
+      "default": "Par défaut",
+      "allowed": "Valeurs permises",
+      "what": "Ce que c'est",
+      "why": "Pourquoi",
+      "effect": "Effet",
+      "pitfalls": "Piège",
+      "binding": "Liaison",
+      "when": "Quand la choisir",
+      "config": "À remplir",
+      "passes": "Passe",
+      "caught": "Attrapé",
+      "cost": "Appel au modèle",
+      "yes": "oui",
+      "no": "non",
+      "none": "—",
+      "field": "Champ",
+      "example": "Exemple",
+      "tool": "Outil",
+      "modelSees": "Ce que le modèle lit"
+    },
+    "overview": {
+      "title": "Comment ça marche",
+      "p1": "Une CAMPAGNE décide qui est inscrit et quand on lui écrit. Un ASSISTANT décide quoi répondre — et, quand un barreau de l'échelle n'a pas de texte, quoi écrire en premier. Les GARDE-FOUS relisent chaque message avant qu'il parte. Rien ne part si le contact n'a pas de consentement SMS valide, s'il a écrit STOP, hors des heures de politesse, ou si l'interrupteur d'arrêt est baissé.",
+      "p2": "Chaque envoi est un travail dans une file durable : il est repris après une panne, jamais envoyé deux fois (clé de dédoublonnage), et décalé au matin suivant s'il tombe la nuit. Chaque tour d'assistant laisse une trace complète — prompt, outils appelés, verdicts des garde-fous, coût.",
+      "steps": {
+        "title": "Le chemin d'un message",
+        "items": [
+          "Déclencheur : un nouveau lead arrive, un contact change de catégorie, un balayage périodique trouve des gens sans nouvelles, ou vous inscrivez à la main.",
+          "Éligibilité : consentement valide, pas de STOP, pas « ne pas appeler », pas déjà dans une autre campagne active, plafond du jour non atteint. Chaque refus a un code, visible dans les inscriptions.",
+          "Échelle : le barreau 0 part tout de suite (heures de politesse respectées), les suivants après le délai indiqué — cumulatif. Une réponse du contact arrête l'échelle.",
+          "Rédaction : un barreau avec texte part tel quel ; un barreau vide réveille l'assistant, qui écrit en premier avec le contexte de la campagne.",
+          "Garde-fous : règles déterministes (termes, formes, longueur, liens, outils requis) puis juges IA. Un refus bloquant déclenche UNE réécriture ; un second refus passe la main à un humain.",
+          "Envoi : via Twilio en mode réel, ou enregistré comme « simulation » en mode dry_run. Le statut de livraison revient par webhook.",
+          "Réponse : le contact écrit ; l'assistant classe le message (refus, qualification, demande d'humain), appelle ses outils (agenda, qualification, rappel, arrêt, passage humain) et répond — un seul message par tour.",
+          "Humain : à tout moment, un téléphoniste peut mettre l'IA en pause, écrire lui-même, annuler un message en file, ou marquer le fil comme traité."
+        ]
+      }
+    },
+    "create": {
+      "title": "Créer un assistant ou une campagne",
+      "p1": "Trois portes mènent au même objet : décrire son besoin (le créateur pose deux ou trois questions, puis prépare une configuration complète à relire), la configuration simple (trois ou quatre choix), ou la configuration complète (tous les onglets). Dans les trois cas, rien n'est activé : on relit, on teste dans le bac à sable, puis on active.",
+      "p2": "Un assistant ne peut être activé que s'il est compilé contre le noyau de prompt courant et — sauf si vous rendez la porte consultative — si sa suite de garde-fous est verte. Une campagne ne peut être activée que si son échelle a au moins un barreau."
+    },
+    "triggers": {
+      "title": "Déclencheurs, audience, échelle",
+      "p1": "Le déclencheur décide QUAND un contact est inscrit ; l'audience décide QUI est admissible ; l'échelle décide QUOI part et à quel rythme ; les variantes A/B décident de la FORMULATION de l'ouverture.",
+      "kinds": {
+        "manual": "Manuelle — vous inscrivez les gens vous-même, depuis l'onglet Inscriptions (ou par balayage ponctuel de l'audience).",
+        "lead_created": "Nouveau lead — chaque lead reçu par le webhook (n8n, Facebook Lead Ads) est inscrit dès son arrivée, avec un consentement implicite d'enquête au dossier.",
+        "category_changed": "Changement de catégorie — quand un contact ENTRE dans l'une des catégories choisies (« À rappeler » → « Chaud »).",
+        "scheduled": "Balayage périodique — l'audience est réexaminée toutes les N heures ; les nouveaux admissibles sont inscrits, dans la limite du plafond quotidien."
+      },
+      "ladder": "Les délais sont CUMULATIFS : « 72 h » sur trois barreaux veut dire trois jours entre chacun, donc le dernier part le neuvième jour. La frise de l'aperçu de création montre les jours absolus.",
+      "ab": "Seule l'ouverture varie. Le tirage est déterministe par (campagne, contact) : le même contact retombe toujours sur la même variante, et les réponses sont comptées par variante.",
+      "caps": "Le plafond quotidien compte des PERSONNES inscrites par jour (jour de Toronto), pas des messages. Un plafond à 1 donne une campagne qui paraît active et n'écrit presque à personne."
+    },
+    "assistants": {
+      "title": "Assistants — référence des paramètres",
+      "p1": "Chaque paramètre de la configuration d'un assistant est documenté ici avec son chemin JSON exact — le même que dans un fichier exporté. Les textes peuvent être réécrits par un administrateur depuis l'éditeur (bouton « ? ») ; la fiche dit alors « modifiée ».",
+      "overridden": "modifiée",
+      "sections": {
+        "identity": "Identité et signature",
+        "goal": "Objectif",
+        "approach": "Approche",
+        "knowledge": "Connaissances",
+        "objections": "Objections",
+        "tools": "Outils",
+        "guardrails": "Garde-fous",
+        "model": "Modèle",
+        "prompt": "Prompt",
+        "campaign": "Campagne"
+      }
+    },
+    "guardrails": {
+      "title": "Garde-fous, fixtures, suite",
+      "p1": "Un garde-fou est une RÈGLE appliquée à chaque message de l'assistant avant l'envoi. Les règles du noyau valent pour tous les assistants ; une règle propre à un assistant peut en ajouter ou en surcharger une. Les règles déterministes ne coûtent rien ; un juge IA coûte un appel au modèle par message.",
+      "p2": "Une FIXTURE est un scénario de test : un message entrant, un contexte, et ce qu'on attend (un outil appelé, un outil jamais appelé, des mots interdits, un critère jugé). La SUITE exécute toutes les fixtures contre l'assistant réel, avec des outils simulés. Elle n'est pas parfaitement déterministe (température du modèle) : deux exécutions identiques peuvent différer d'une fixture.",
+      "p3": "La porte d'activation exige une suite verte. Vous pouvez la rendre consultative sur un assistant précis (« Exiger la suite » décoché) : l'activation passe, mais le contournement est journalisé.",
+      "kindsTitle": "Types de règles",
+      "severitiesTitle": "Sévérités",
+      "fixturesTitle": "Champs d'une fixture"
+    },
+    "tools": {
+      "title": "Outils de l'assistant",
+      "p1": "Un outil est une action que le modèle peut demander pendant un tour. Les descriptions ci-dessous sont celles que le modèle lit — en français, rédigées comme des consignes. Les outils à effet irréversible (réserver, arrêter, passer la main, planifier un rappel) ne sont joués qu'une fois par tour ; un seul aller-retour d'outils est permis par tour.",
+      "gloss": {
+        "get_slots": "Va chercher 2 ou 3 vraies disponibilités dans l'agenda du courtier. Sans cet appel, l'assistant n'a pas le droit de proposer une heure.",
+        "book_meeting": "Réserve le rendez-vous sur un créneau obtenu par get_slots, une fois les champs de qualification requis recueillis. Crée l'événement et le rendez-vous dans le CRM.",
+        "update_qualification": "Enregistre ce que le contact révèle (type de projet, délai, budget, secteur…) sur la conversation — même partiel.",
+        "schedule_followup": "Pose un rappel à une date donnée quand le contact demande à être recontacté plus tard.",
+        "stop": "Arrête la conversation sans résultat précis (refus clair). Le numéro est mis sous suppression : rien ne repart jamais.",
+        "handoff": "Passe immédiatement la main à un humain : le fil est marqué « à traiter », l'IA se tait.",
+        "transfer_assistant": "Confie le fil à un autre assistant configuré (identifiant fourni dans le contexte).",
+        "close_conversation": "Clôt le fil avec un résultat précis : objectif atteint, disqualifié, pas intéressé."
+      }
+    },
+    "sending": {
+      "title": "Règles d'envoi",
+      "consent": {
+        "title": "Consentement (Loi canadienne anti-pourriel)",
+        "p": "Par défaut, une campagne n'écrit qu'aux contacts qui ont un consentement SMS valide au dossier. Un lead reçu par webhook reçoit un consentement implicite d'enquête ; la durée de validité se règle dans les réglages SMS (6 mois, 1 an, 2 ans, 3 ans, illimité) avec rattrapage rétroactif journalisé. Un STOP révoque le consentement et met le numéro sous suppression."
+      },
+      "optout": {
+        "title": "Désabonnement",
+        "p": "Un message entrant qui est exactement l'un de ces mots-clés met le numéro sous suppression — avant tout autre traitement, même sans fiche client. Une suppression survit à la suppression du client et à une réimportation : rien ne repart jamais vers ce numéro.",
+        "keywords": "Mots-clés reconnus"
+      },
+      "quiet": {
+        "title": "Heures de politesse",
+        "p": "Les envois automatisés (campagnes, assistant) sont décalés au prochain créneau permis. Un message tapé à la main par un téléphoniste part tout de suite — c'est un humain qui décide.",
+        "weekday": "Semaine",
+        "saturday": "Samedi",
+        "sunday": "Dimanche"
+      },
+      "modes": {
+        "title": "Modes et interrupteur",
+        "p": "En mode dry_run, rien ne part : le message est enregistré comme « simulation » et visible dans le fil. Le mode réel exige DEUX drapeaux (SMS_MODE=live et SMS_LIVE_CONFIRMED=true) pour qu'un déploiement qui hérite d'une variable ne se mette pas à écrire. TEST_PHONE_ALLOWLIST restreint les envois réels à quelques numéros pendant les essais. L'interrupteur d'arrêt (réglages SMS) coupe tout envoi, quel que soit le mode, et se relève à la main."
+      },
+      "segments": {
+        "title": "Longueur et coût",
+        "p": "Un SMS compte 160 caractères en GSM-7 ; un seul caractère hors de ce jeu (certains accents, emoji) bascule le message en UCS-2 et la limite tombe à 70 par segment. Le fil affiche le nombre de segments de chaque message ; les garde-fous « Limiter la longueur » servent à rester sous un segment."
+      }
+    },
+    "operator": {
+      "title": "Côté téléphonistes : l'inbox et le fil",
+      "p1": "L'inbox « Conversations » liste les fils qui demandent une attention (réponse reçue, passage humain, message bloqué, désabonnement) avec la raison. Sur la fiche client, le fil SMS est un encadré distinct des notes internes : le destinataire y est toujours affiché, pour ne pas envoyer une note à un client par erreur.",
+      "actions": [
+        "Écrire à la main : part tout de suite, même pendant une pause de l'IA et hors des heures de politesse ; efface la pastille « à traiter ».",
+        "Mettre l'IA en pause / la reprendre : en pause, aucun tour automatisé ne parle sur ce fil, et les barreaux de campagne sont retenus.",
+        "Annuler un message en file : possible tant que le répartiteur ne l'a pas pris.",
+        "Marquer comme traité : retire la pastille sans rien envoyer.",
+        "Assigner le fil à un collègue : c'est lui qui sera notifié des prochaines réponses."
+      ]
+    },
+    "json": {
+      "title": "Fichiers JSON — exporter, partager, importer",
+      "p1": "Un assistant et une campagne s'exportent en un fichier JSON lisible, annoté, que n'importe quel membre de l'équipe peut relire, modifier et réimporter — dans cette installation ou dans une autre. Le format est stable et versionné : « nexus.assistant/v1 » et « nexus.campaign/v1 ». Un fichier est relu par les mêmes schémas que l'éditeur : ce que l'éditeur refuse, l'import le refuse aussi.",
+      "rule": {
+        "title": "La règle qui explique tout le reste : aucun identifiant local ne voyage",
+        "p": "Un identifiant d'utilisateur, d'assistant, de numéro, de catégorie ou de source n'a de sens que dans SA base. Ces champs sortent donc de la configuration et deviennent des LIAISONS (« bindings ») : chemin, genre, étiquette reconnaissable (nom, courriel, numéro E.164). À l'import, ce qui porte le même nom est relié tout seul, ce qui est ambigu vous est proposé, et ce qui ne se résout pas reste vide avec un avertissement — jamais un rendez-vous chez la mauvaise personne."
+      },
+      "never": {
+        "title": "Ce qui ne voyage jamais",
+        "items": [
+          "Les règles du NOYAU (elles appartiennent à l'installation) — seules les règles propres à l'assistant voyagent.",
+          "Le prompt compilé, le résultat de suite, le statut « actif » : un import est TOUJOURS un brouillon, recompilé et retesté ici.",
+          "Les identifiants locaux (voir ci-dessus) et les conversations, inscriptions, statistiques."
+        ]
+      },
+      "structure": {
+        "title": "Structure d'un fichier",
+        "rows": {
+          "format": "Identifiant du format. Refusé s'il ne correspond pas.",
+          "exportedAt": "Date d'export ISO 8601 — informative.",
+          "sourceOrg": "Nom de l'installation d'origine — informatif.",
+          "assistant": "La configuration complète de l'assistant, mêmes chemins que la référence ci-dessus, champs d'identifiants vidés.",
+          "campaign": "La configuration complète de la campagne (nom, déclencheur, audience, échelle, variantes, plafonds, consentement), champs d'identifiants vidés.",
+          "bindings": "Les liaisons : { path, kind, sourceValue, label, hint }. sourceValue est la valeur d'origine — jamais réutilisée telle quelle.",
+          "guardrails": "Règles propres à l'assistant (scope « assistant »). Les règles « core » sont retirées à l'import.",
+          "fixtures": "Scénarios de test propres à l'assistant.",
+          "objectionPacks": "Paquets d'objections référencés ; un paquet absent localement est créé depuis le fichier (jamais marqué intégré).",
+          "_docs": "Annotations lisibles (quoi / pourquoi / piège) pour chaque chemin présent. Ignorées à l'import : la documentation vient de l'installation qui relit."
+        }
+      },
+      "howExport": {
+        "title": "Exporter",
+        "items": [
+          "Assistant : liste des assistants → menu « … » → Exporter, ou onglet Avancé de l'éditeur. Ajoutez ?annotate=0 à l'adresse pour le fichier nu.",
+          "Campagne : liste des campagnes → menu « … » → Exporter (JSON), ou bouton Exporter dans l'éditeur.",
+          "Chaque export est journalisé dans le journal d'audit (sortie de données)."
+        ]
+      },
+      "howImport": {
+        "title": "Importer",
+        "items": [
+          "Bouton « Importer » en haut de la liste des assistants ou des campagnes.",
+          "Le fichier est d'abord relu SANS rien écrire : vous voyez les liaisons (reliées automatiquement ou à choisir) et les avertissements.",
+          "À la confirmation, l'objet est créé en BROUILLON, nommé comme dans le fichier (suffixé « (2) » s'il existe déjà). Un assistant est compilé contre le noyau local ; lancez sa suite, testez-le, puis activez."
+        ]
+      },
+      "team": {
+        "title": "Partager avec l'équipe",
+        "p": "Le cycle habituel : une personne configure et teste dans le bac à sable, exporte, envoie le fichier (ou le dépose dans un dossier partagé ou un dépôt Git — la sérialisation est déterministe, donc les différences entre versions sont lisibles) ; l'autre importe, relie, relit, et active. Les fichiers d'exemple ci-dessous sont générés par le vrai exportateur : ils sont toujours valides."
+      },
+      "exampleAssistant": "Exemple — assistant",
+      "exampleCampaign": "Exemple — campagne",
+      "campaignFields": {
+        "title": "Champs d'une campagne",
+        "p": "Ces fiches sont les annotations « _docs » d'un export de campagne."
+      }
+    },
+    "golive": {
+      "title": "Mise en service",
+      "p1": "La page « Mise en service » énumère toutes les raisons pour lesquelles rien ne partirait, en séparant les blocages (rien ne part) des avertissements (ça part, mais mal) et des informations. Voici ce qu'elle vérifie et comment corriger chaque point.",
+      "checks": "Vérifications"
+    }
   }
 }

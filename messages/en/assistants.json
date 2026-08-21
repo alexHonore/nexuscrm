@@ -625,5 +625,214 @@
       "persistence": "Persistence",
       "none": "None"
     }
+  },
+  "docs": {
+    "title": "Documentation — SMS & AI assistants",
+    "subtitle": "How the engine decides who gets what, what each setting changes, and how to share an assistant or a campaign as JSON.",
+    "toc": "Contents",
+    "onThisPage": "On this page",
+    "copy": "Copy",
+    "copied": "Copied",
+    "download": "Download the example",
+    "frOnlyNote": "The reference sheets (parameters, guardrails, campaign fields) are written in French: they are the same texts as the inline help next to each field.",
+    "columns": {
+      "path": "JSON path",
+      "type": "Type",
+      "default": "Default",
+      "allowed": "Allowed values",
+      "what": "What it is",
+      "why": "Why",
+      "effect": "Effect",
+      "pitfalls": "Pitfall",
+      "binding": "Binding",
+      "when": "When to choose it",
+      "config": "To fill in",
+      "passes": "Passes",
+      "caught": "Caught",
+      "cost": "Model call",
+      "yes": "yes",
+      "no": "no",
+      "none": "—",
+      "field": "Field",
+      "example": "Example",
+      "tool": "Tool",
+      "modelSees": "What the model reads"
+    },
+    "overview": {
+      "title": "How it works",
+      "p1": "A CAMPAIGN decides who gets enrolled and when they are written to. An ASSISTANT decides what to reply — and, when a ladder rung has no text, what to write first. GUARDRAILS re-read every message before it leaves. Nothing leaves if the contact has no valid SMS consent, if they wrote STOP, outside quiet hours, or if the kill switch is down.",
+      "p2": "Every send is a job in a durable queue: resumed after an outage, never sent twice (dedupe key), and pushed to the next morning if it falls at night. Every assistant turn leaves a full trace — prompt, tool calls, guardrail verdicts, cost.",
+      "steps": {
+        "title": "The path of a message",
+        "items": [
+          "Trigger: a new lead arrives, a contact changes category, a periodic sweep finds people without contact, or you enrol by hand.",
+          "Eligibility: valid consent, no STOP, no \"do not call\", not already in another active campaign, daily cap not reached. Every refusal has a code, visible in the enrolments.",
+          "Ladder: rung 0 leaves right away (quiet hours respected), the next ones after the given delay — cumulative. A reply from the contact stops the ladder.",
+          "Writing: a rung with text leaves as is; an empty rung wakes the assistant, which writes first with the campaign's context.",
+          "Guardrails: deterministic rules (terms, shapes, length, links, required tools) then AI judges. A blocking refusal triggers ONE rewrite; a second refusal hands over to a human.",
+          "Sending: via Twilio in live mode, or recorded as a \"simulation\" in dry_run mode. Delivery status comes back by webhook.",
+          "Reply: the contact writes; the assistant classifies the message (refusal, qualification, asks for a human), calls its tools (calendar, qualification, reminder, stop, handoff) and replies — one message per turn.",
+          "Human: at any time, a caller can pause the AI, write themselves, cancel a queued message, or mark the thread handled."
+        ]
+      }
+    },
+    "create": {
+      "title": "Creating an assistant or a campaign",
+      "p1": "Three doors lead to the same object: describe your need (the creator asks two or three questions, then prepares a complete configuration to review), the simple setup (three or four choices), or the full setup (every tab). In all three cases nothing is activated: you review, test in the sandbox, then activate.",
+      "p2": "An assistant can only be activated if it is compiled against the current prompt core and — unless you make the gate advisory — if its guardrail suite is green. A campaign can only be activated if its ladder has at least one rung."
+    },
+    "triggers": {
+      "title": "Triggers, audience, ladder",
+      "p1": "The trigger decides WHEN a contact is enrolled; the audience decides WHO is eligible; the ladder decides WHAT leaves and at what pace; A/B variants decide the WORDING of the opener.",
+      "kinds": {
+        "manual": "Manual — you enrol people yourself, from the Enrolments tab (or with a one-off sweep of the audience).",
+        "lead_created": "New lead — every lead received by the webhook (n8n, Facebook Lead Ads) is enrolled on arrival, with an implied inquiry consent on file.",
+        "category_changed": "Category change — when a contact ENTERS one of the chosen categories (\"Callback\" → \"Hot\").",
+        "scheduled": "Periodic sweep — the audience is re-examined every N hours; newly eligible people are enrolled, within the daily cap."
+      },
+      "ladder": "Delays are CUMULATIVE: \"72 h\" on three rungs means three days between each, so the last one leaves on day nine. The creation preview's timeline shows absolute days.",
+      "ab": "Only the opener varies. The draw is deterministic per (campaign, contact): the same contact always lands on the same variant, and replies are counted per variant.",
+      "caps": "The daily cap counts PEOPLE enrolled per day (Toronto day), not messages. A cap of 1 gives a campaign that looks active and writes to almost nobody."
+    },
+    "assistants": {
+      "title": "Assistants — parameter reference",
+      "p1": "Every parameter of an assistant's configuration is documented here with its exact JSON path — the same as in an exported file. Texts can be rewritten by an administrator from the editor (\"?\" button); the sheet then says \"modified\".",
+      "overridden": "modified",
+      "sections": {
+        "identity": "Identity and signature",
+        "goal": "Goal",
+        "approach": "Approach",
+        "knowledge": "Knowledge",
+        "objections": "Objections",
+        "tools": "Tools",
+        "guardrails": "Guardrails",
+        "model": "Model",
+        "prompt": "Prompt",
+        "campaign": "Campaign"
+      }
+    },
+    "guardrails": {
+      "title": "Guardrails, fixtures, suite",
+      "p1": "A guardrail is a RULE applied to every assistant message before sending. Core rules apply to all assistants; an assistant-specific rule can add or override one. Deterministic rules cost nothing; an AI judge costs one model call per message.",
+      "p2": "A FIXTURE is a test scenario: an inbound message, a context, and what is expected (a tool called, a tool never called, forbidden words, a judged criterion). The SUITE runs every fixture against the real assistant, with simulated tools. It is not perfectly deterministic (model temperature): two identical runs can differ by one fixture.",
+      "p3": "The activation gate requires a green suite. You can make it advisory on a given assistant (\"Require suite\" unchecked): activation passes, but the bypass is logged.",
+      "kindsTitle": "Rule types",
+      "severitiesTitle": "Severities",
+      "fixturesTitle": "Fields of a fixture"
+    },
+    "tools": {
+      "title": "Assistant tools",
+      "p1": "A tool is an action the model can request during a turn. The descriptions below are the ones the model reads — in French, written as instructions. Tools with irreversible effects (book, stop, handoff, schedule a reminder) run only once per turn; a single tool round-trip is allowed per turn.",
+      "gloss": {
+        "get_slots": "Fetches 2 or 3 real availabilities from the broker's calendar. Without this call the assistant may not propose a time.",
+        "book_meeting": "Books the meeting on a slot obtained from get_slots, once the required qualification fields are collected. Creates the event and the appointment in the CRM.",
+        "update_qualification": "Records what the contact reveals (project type, timing, budget, area…) on the conversation — even partially.",
+        "schedule_followup": "Sets a reminder at a given date when the contact asks to be contacted later.",
+        "stop": "Stops the conversation with no specific outcome (clear refusal). The number is suppressed: nothing ever leaves again.",
+        "handoff": "Hands over to a human immediately: the thread is flagged \"needs attention\", the AI goes quiet.",
+        "transfer_assistant": "Hands the thread to another configured assistant (id provided in context).",
+        "close_conversation": "Closes the thread with a specific outcome: goal reached, disqualified, not interested."
+      }
+    },
+    "sending": {
+      "title": "Sending rules",
+      "consent": {
+        "title": "Consent (Canada's anti-spam law)",
+        "p": "By default a campaign only writes to contacts with a valid SMS consent on file. A lead received by webhook gets an implied inquiry consent; the validity period is set in SMS settings (6 months, 1, 2, 3 years, unlimited) with an audited retroactive backfill. A STOP revokes consent and suppresses the number."
+      },
+      "optout": {
+        "title": "Opt-out",
+        "p": "An inbound message that is exactly one of these keywords suppresses the number — before anything else, even with no client record. A suppression survives client deletion and re-import: nothing ever leaves to that number again.",
+        "keywords": "Recognised keywords"
+      },
+      "quiet": {
+        "title": "Quiet hours",
+        "p": "Automated sends (campaigns, assistant) are pushed to the next allowed slot. A message typed by hand by a caller leaves right away — a human decided.",
+        "weekday": "Weekdays",
+        "saturday": "Saturday",
+        "sunday": "Sunday"
+      },
+      "modes": {
+        "title": "Modes and kill switch",
+        "p": "In dry_run mode nothing leaves: the message is recorded as a \"simulation\" and visible in the thread. Live mode requires TWO flags (SMS_MODE=live and SMS_LIVE_CONFIRMED=true) so a deployment inheriting one variable doesn't start writing. TEST_PHONE_ALLOWLIST restricts live sends to a few numbers during trials. The kill switch (SMS settings) stops every send whatever the mode, and is lifted by hand."
+      },
+      "segments": {
+        "title": "Length and cost",
+        "p": "An SMS holds 160 characters in GSM-7; a single character outside that set (some accents, emoji) switches the message to UCS-2 and the limit drops to 70 per segment. The thread shows each message's segment count; \"Limit length\" guardrails help stay under one segment."
+      }
+    },
+    "operator": {
+      "title": "For callers: the inbox and the thread",
+      "p1": "The \"Conversations\" inbox lists threads needing attention (reply received, handoff, blocked message, opt-out) with the reason. On the client page, the SMS thread is a box distinct from internal notes: the recipient is always shown, so a note isn't sent to a client by mistake.",
+      "actions": [
+        "Write by hand: leaves right away, even while the AI is paused and outside quiet hours; clears the \"needs attention\" flag.",
+        "Pause / resume the AI: while paused, no automated turn speaks on this thread, and campaign rungs are held.",
+        "Cancel a queued message: possible as long as the dispatcher hasn't picked it up.",
+        "Mark as handled: clears the flag without sending anything.",
+        "Assign the thread to a colleague: they get notified of the next replies."
+      ]
+    },
+    "json": {
+      "title": "JSON files — export, share, import",
+      "p1": "An assistant and a campaign export to a readable, annotated JSON file that any team member can review, edit and re-import — in this installation or another. The format is stable and versioned: \"nexus.assistant/v1\" and \"nexus.campaign/v1\". A file is re-read by the same schemas as the editor: what the editor refuses, import refuses too.",
+      "rule": {
+        "title": "The rule that explains everything else: no local id travels",
+        "p": "A user, assistant, number, category or source id only means something in ITS database. Those fields leave the configuration and become BINDINGS: path, kind, recognisable label (name, e-mail, E.164 number). On import, what bears the same name is linked by itself, what is ambiguous is offered to you, and what doesn't resolve stays empty with a warning — never a meeting with the wrong person."
+      },
+      "never": {
+        "title": "What never travels",
+        "items": [
+          "CORE rules (they belong to the installation) — only the assistant's own rules travel.",
+          "The compiled prompt, the suite result, the \"active\" status: an import is ALWAYS a draft, recompiled and retested here.",
+          "Local ids (see above) and conversations, enrolments, statistics."
+        ]
+      },
+      "structure": {
+        "title": "Structure of a file",
+        "rows": {
+          "format": "Format identifier. Refused if it doesn't match.",
+          "exportedAt": "ISO 8601 export date — informative.",
+          "sourceOrg": "Name of the source installation — informative.",
+          "assistant": "The assistant's full configuration, same paths as the reference above, id fields emptied.",
+          "campaign": "The campaign's full configuration (name, trigger, audience, ladder, variants, caps, consent), id fields emptied.",
+          "bindings": "Bindings: { path, kind, sourceValue, label, hint }. sourceValue is the original value — never reused as is.",
+          "guardrails": "Assistant-specific rules (scope \"assistant\"). \"core\" rules are stripped on import.",
+          "fixtures": "Assistant-specific test scenarios.",
+          "objectionPacks": "Referenced objection packs; a pack missing locally is created from the file (never marked built-in).",
+          "_docs": "Readable annotations (what / why / pitfall) for every path present. Ignored on import: documentation comes from the reading installation."
+        }
+      },
+      "howExport": {
+        "title": "Export",
+        "items": [
+          "Assistant: assistants list → \"…\" menu → Export, or the editor's Advanced tab. Add ?annotate=0 to the address for the bare file.",
+          "Campaign: campaigns list → \"…\" menu → Export (JSON), or the Export button in the editor.",
+          "Every export is logged in the audit log (data export)."
+        ]
+      },
+      "howImport": {
+        "title": "Import",
+        "items": [
+          "\"Import\" button at the top of the assistants or campaigns list.",
+          "The file is first re-read WITHOUT writing anything: you see the bindings (auto-linked or to choose) and the warnings.",
+          "On confirmation the object is created as a DRAFT, named as in the file (suffixed \"(2)\" if it already exists). An assistant is compiled against the local core; run its suite, test it, then activate."
+        ]
+      },
+      "team": {
+        "title": "Sharing with the team",
+        "p": "The usual cycle: one person configures and tests in the sandbox, exports, sends the file (or drops it in a shared folder or a Git repo — serialisation is deterministic, so diffs between versions are readable); the other imports, links, reviews, and activates. The example files below are generated by the real exporter: they are always valid."
+      },
+      "exampleAssistant": "Example — assistant",
+      "exampleCampaign": "Example — campaign",
+      "campaignFields": {
+        "title": "Campaign fields",
+        "p": "These sheets are the \"_docs\" annotations of a campaign export."
+      }
+    },
+    "golive": {
+      "title": "Going live",
+      "p1": "The \"Go live\" page lists every reason nothing would leave, separating blockers (nothing leaves) from warnings (it leaves, but badly) and information. Here is what it checks and how to fix each point.",
+      "checks": "Checks"
+    }
   }
 }

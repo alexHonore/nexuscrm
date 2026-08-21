@@ -28,7 +28,8 @@
     "groupData": "Données et accès",
     "groupInsights": "Suivi et activité",
     "groupSystem": "Système",
-    "goLive": "Mise en service"
+    "goLive": "Mise en service",
+    "docs": "Documentation"
   },
   "actions": {
     "save": "Enregistrer",
