@@ -4,6 +4,7 @@ import { enUS, fr } from "date-fns/locale";
 import {
   AlertTriangleIcon,
   BotIcon,
+  FileCheck2Icon,
   HandIcon,
   SmartphoneIcon,
   Undo2Icon,
@@ -19,11 +20,15 @@ import {
   sendManualSmsAction,
   setConversationAiAction,
 } from "@/app/(app)/conversations/actions";
+import { grantSmsConsentAction, revokeSmsConsentAction } from "@/app/(app)/clients/consent-actions";
+import { CONSENT_SOURCES, type ConsentSource, type SmsConsentState } from "@/lib/sms/consent-sources";
 import { RelativeTime } from "@/components/relative-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { formatPhone } from "@/lib/phone";
 import { analyzeSms } from "@/lib/sms/segments";
 import { emitDataChange, useDataChange, useVisiblePolling } from "@/lib/live";
@@ -54,6 +59,8 @@ export type SmsThreadData = {
   attentionReason: string | null;
   suppressed: boolean;
   hasActiveNumber: boolean;
+  /** Consentement SMS au dossier — sans lui, aucune campagne n'écrira. */
+  consent: SmsConsentState;
   messages: SmsMessageData[];
 };
 
@@ -276,6 +283,8 @@ export function SmsThreadCard({
           </div>
         ) : null}
 
+        <ConsentPanel clientId={clientId} consent={thread.consent} suppressed={thread.suppressed} />
+
         {thread.needsAttention && thread.conversationId ? (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
             <Badge variant="secondary">
@@ -431,6 +440,174 @@ function MessageBubble({
         >
           <Undo2Icon className="size-3" /> {t("thread.cancel")}
         </Button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Consentement SMS : l'état au dossier et, pour le téléphoniste, le geste de
+ * l'enregistrer quand il vient de l'obtenir — ou de le révoquer. Sans
+ * consentement valide, une campagne n'écrit pas ; le dire ICI, sur le fil,
+ * évite de chercher pourquoi « la campagne ne fait rien » sur cette personne.
+ */
+function ConsentPanel({
+  clientId,
+  consent,
+  suppressed,
+}: {
+  clientId: string;
+  consent: SmsConsentState;
+  suppressed: boolean;
+}) {
+  const t = useTranslations("conversations");
+  const locale = useLocale();
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState<"express" | "implied_inquiry">("express");
+  const [source, setSource] = useState<ConsentSource>("phone_call");
+  const [note, setNote] = useState("");
+  const [pending, startTransition] = useTransition();
+
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleDateString(locale === "en" ? "en-CA" : "fr-CA", {
+      timeZone: "America/Toronto",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+
+  const grant = () =>
+    startTransition(async () => {
+      const res = await grantSmsConsentAction({ clientId, kind, source, note });
+      if (res.ok) {
+        toast.success(t("consent.granted"));
+        setOpen(false);
+        setNote("");
+        emitDataChange("sms");
+        router.refresh();
+      } else {
+        toast.error(t("consent.failed"));
+      }
+    });
+
+  const revoke = () =>
+    startTransition(async () => {
+      const res = await revokeSmsConsentAction(clientId);
+      if (res.ok) {
+        toast.success(t("consent.revoked"));
+        emitDataChange("sms");
+        router.refresh();
+      } else {
+        toast.error(t("consent.failed"));
+      }
+    });
+
+  return (
+    <div className="rounded-lg border px-3 py-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <FileCheck2Icon
+          className={cn(
+            "size-4 shrink-0",
+            consent.status === "valid" ? "text-emerald-600" : "text-muted-foreground",
+          )}
+        />
+        <span className="font-medium">{t("consent.title")}</span>
+        <Badge variant={consent.status === "valid" ? "default" : "secondary"}>
+          {t(`consent.status.${consent.status}`)}
+        </Badge>
+        {consent.status !== "none" && consent.kind ? (
+          <span className="text-xs text-muted-foreground">
+            {t(`consent.kind.${consent.kind}`)}
+            {consent.grantedAt ? ` · ${fmt(consent.grantedAt)}` : ""}
+            {consent.expiresAt ? ` → ${fmt(consent.expiresAt)}` : ""}
+          </span>
+        ) : null}
+        <span className="flex-1" />
+        {!suppressed ? (
+          <Button
+            variant={consent.status === "valid" ? "ghost" : "outline"}
+            size="sm"
+            className="min-h-11 md:min-h-7"
+            disabled={pending}
+            onClick={() => setOpen((o) => !o)}
+          >
+            {t("consent.record")}
+          </Button>
+        ) : null}
+        {consent.status !== "none" ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="min-h-11 text-destructive md:min-h-7"
+            disabled={pending}
+            onClick={revoke}
+          >
+            {t("consent.revoke")}
+          </Button>
+        ) : null}
+      </div>
+      {suppressed ? <p className="mt-1 text-xs text-muted-foreground">{t("consent.suppressedHint")}</p> : null}
+
+      {open ? (
+        <div className="mt-3 grid gap-3 border-t pt-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label>{t("consent.kindLabel")}</Label>
+            <div className="grid gap-1.5">
+              {(["express", "implied_inquiry"] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setKind(k)}
+                  className={cn(
+                    "min-h-11 rounded-md border px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-muted md:min-h-9",
+                    kind === k && "border-primary bg-primary/5",
+                  )}
+                >
+                  <span className="font-medium">{t(`consent.kind.${k}`)}</span>
+                  <span className="block text-xs text-muted-foreground">{t(`consent.kindHint.${k}`)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t("consent.sourceLabel")}</Label>
+            <div className="grid gap-1.5">
+              {CONSENT_SOURCES.map((src) => (
+                <button
+                  key={src}
+                  type="button"
+                  onClick={() => setSource(src)}
+                  className={cn(
+                    "min-h-11 rounded-md border px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-muted md:min-h-8",
+                    source === src && "border-primary bg-primary/5",
+                  )}
+                >
+                  {t(`consent.source.${src}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor={`consent-note-${clientId}`}>{t("consent.note")}</Label>
+            <Input
+              id={`consent-note-${clientId}`}
+              className="min-h-11 md:min-h-9"
+              maxLength={300}
+              placeholder={t("consent.notePlaceholder")}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </div>
+          <div className="flex justify-end gap-2 sm:col-span-2">
+            <Button variant="ghost" size="sm" className="min-h-11 md:min-h-8" disabled={pending} onClick={() => setOpen(false)}>
+              {t("consent.cancel")}
+            </Button>
+            <Button size="sm" className="min-h-11 md:min-h-8" disabled={pending} onClick={grant}>
+              <FileCheck2Icon /> {t("consent.confirm")}
+            </Button>
+          </div>
+        </div>
       ) : null}
     </div>
   );

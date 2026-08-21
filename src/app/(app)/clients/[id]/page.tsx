@@ -18,6 +18,7 @@ import { CommentsTimeline } from "@/components/clients/comments-timeline";
 import { DeleteClientButton } from "@/components/clients/delete-client-button";
 import { FollowupsCard } from "@/components/clients/followups-card";
 import { SmsThreadCard, type SmsThreadData } from "@/components/clients/sms-thread-card";
+import { readSmsConsent } from "@/lib/sms-server/consent-state";
 import type { FilterOption } from "@/components/clients/clients-filters";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -52,7 +53,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
       })
     : undefined;
 
-  const [threadMessages, suppressedRow, activeNumber] = await Promise.all([
+  const [threadMessages, suppressedRow, activeNumber, consent] = await Promise.all([
     thread
       ? db
           .select({
@@ -78,6 +79,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
         })
       : Promise.resolve(undefined),
     db.query.smsNumbers.findFirst({ where: eq(smsNumbers.active, true) }),
+    readSmsConsent(client.id),
   ]);
 
   const smsThread: SmsThreadData = {
@@ -92,6 +94,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
     attentionReason: thread?.attentionReason ?? null,
     suppressed: suppressedRow !== undefined,
     hasActiveNumber: activeNumber !== undefined,
+    consent,
     messages: threadMessages.map((m) => ({
       id: m.id,
       direction: m.direction,

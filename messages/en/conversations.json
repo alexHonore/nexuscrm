@@ -29,7 +29,9 @@
       "failed": "Failed",
       "undelivered": "Undelivered",
       "received": "Received",
-      "cancelled": "Cancelled"
+      "cancelled": "Cancelled",
+      "dry_run": "Simulation (test mode)",
+      "sending": "Sending"
     },
     "failedHint": "This message did not go out. Code {code}.",
     "noNumber": "No active SMS number is configured.",
@@ -108,5 +110,40 @@
     "suppressed": "{count} unsubscribed",
     "attention": "{count} to handle"
   },
-  "error": "Something went wrong"
+  "error": "Something went wrong",
+  "consent": {
+    "title": "SMS consent",
+    "status": {
+      "valid": "Valid",
+      "expired": "Expired",
+      "none": "None on file"
+    },
+    "kind": {
+      "express": "Express",
+      "implied_inquiry": "Implied (inquiry)"
+    },
+    "kindHint": {
+      "express": "The person clearly agreed to receive texts (by phone, in person, in writing).",
+      "implied_inquiry": "The person made an inquiry (form, inbound call): implied consent, time-limited under CASL."
+    },
+    "kindLabel": "Consent type",
+    "sourceLabel": "How was it obtained?",
+    "source": {
+      "phone_call": "By phone",
+      "in_person": "In person",
+      "form": "Form",
+      "email": "By e-mail",
+      "other": "Other"
+    },
+    "note": "Note (optional)",
+    "notePlaceholder": "E.g. “said yes to texts during the Aug 21 call”",
+    "record": "Record a consent",
+    "revoke": "Revoke",
+    "confirm": "Save",
+    "cancel": "Cancel",
+    "granted": "Consent recorded",
+    "revoked": "Consent revoked",
+    "failed": "Could not save",
+    "suppressedHint": "This number opted out: recording a consent would reopen nothing — the suppression is permanent."
+  }
 }

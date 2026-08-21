@@ -17,6 +17,10 @@ import type { EngineHealth, InboxRow } from "@/components/conversations/conversa
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 // Les composants importent les actions serveur ; les simuler évite d'entraîner
 // toute la couche base dans un test de rendu.
+vi.mock("@/app/(app)/clients/consent-actions", () => ({
+  grantSmsConsentAction: vi.fn(),
+  revokeSmsConsentAction: vi.fn(),
+}));
 vi.mock("@/app/(app)/conversations/actions", () => ({
   cancelOutboundSmsAction: vi.fn(),
   sendManualSmsAction: vi.fn(),
@@ -52,6 +56,7 @@ const THREAD: SmsThreadData = {
   needsAttention: false,
   attentionReason: null,
   suppressed: false,
+  consent: { status: "valid", kind: "express", source: "manual:phone_call", grantedAt: "2026-08-01T12:00:00.000Z", expiresAt: null },
   hasActiveNumber: true,
   messages: [
     {
@@ -332,5 +337,43 @@ describe("boîte de réception", () => {
     expect(html).not.toContain("MISSING_MESSAGE");
     expect(html).not.toMatch(/inbox\.[a-zA-Z]+\./);
     expect(html).not.toMatch(/health\.[a-zA-Z]+\./);
+  });
+});
+
+describe("consentement dans le fil", () => {
+  it("l'état du consentement est affiché, avec le geste de l'enregistrer ou de le révoquer", () => {
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    expect(html).toContain("Consentement SMS");
+    expect(html).toContain(">Valide<");
+    expect(html).toContain("Révoquer");
+    const none = wrap(
+      createElement(SmsThreadCard, {
+        clientId: "x",
+        thread: { ...THREAD, consent: { status: "none", kind: null, source: null, grantedAt: null, expiresAt: null } },
+      }),
+    );
+    expect(none).toContain("Aucun au dossier");
+    expect(none).toContain("Enregistrer un consentement");
+    expect(none).not.toContain("Révoquer");
+  });
+
+  it("un message en simulation (dry_run) a un libellé, pas une clé brute", () => {
+    // Trouvé en essai local : le fil affichait « thread.status.dry_run ».
+    const html = wrap(
+      createElement(SmsThreadCard, {
+        clientId: "x",
+        thread: {
+          ...THREAD,
+          messages: [
+            {
+              id: "m-dry", direction: "out", body: "Bonjour", createdAt: "2026-08-21T15:00:00.000Z",
+              status: "dry_run", errorCode: null, source: "agent", aiGenerated: true, sentByName: null,
+            },
+          ],
+        },
+      }),
+    );
+    expect(html).toContain("Simulation");
+    expect(html).not.toContain("thread.status.");
   });
 });
