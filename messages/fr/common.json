@@ -85,5 +85,28 @@
     "passwordChanged": "Mot de passe modifié",
     "wrongPassword": "Mot de passe actuel incorrect",
     "passwordMismatch": "Les deux nouveaux mots de passe ne correspondent pas"
+  },
+  "importIssues": {
+    "title": "{count, plural, one {Le fichier a été refusé : # problème} other {Le fichier a été refusé : # problèmes}}",
+    "intro": "Corrigez le fichier, puis réessayez. Chaque ligne dit où regarder et ce qui était attendu.",
+    "line": "ligne {line}",
+    "allowed": "Valeurs permises :",
+    "found": "Trouvé dans le fichier :",
+    "code": {
+      "missing": "Ce champ est absent du fichier : ajoutez-le.",
+      "wrong_type": "Mauvais type : {expected} attendu, {received} trouvé.",
+      "not_allowed": "Cette valeur n'est pas acceptée ici.",
+      "too_small": "Trop court, trop petit ou trop peu d'éléments — minimum : {limit}.",
+      "too_big": "Trop long, trop grand ou trop d'éléments — maximum : {limit}.",
+      "wrong_format": "Le format de cette valeur ne convient pas (date, courriel, identifiant…).",
+      "other": ""
+    },
+    "syntax": {
+      "title": "Ce fichier n'est pas du JSON lisible.",
+      "where": "Ligne {line}, colonne {column}.",
+      "hint": "Le plus souvent : une virgule en trop avant une accolade ou un crochet fermant, un guillemet oublié, ou un commentaire — le JSON n'en accepte pas."
+    },
+    "expected": "Valeur attendue :",
+    "root": "racine du document"
   }
 }

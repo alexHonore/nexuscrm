@@ -291,6 +291,8 @@
       "unresolved_binding_cleared": "\"{target}\" ({kind}) does not exist here: the field stays empty.",
       "unresolved_binding_removed": "\"{target}\" ({kind}) does not exist here: removed from the list.",
       "docs_ignored": "The file's \"_docs\" annotations are ignored: the documentation comes from this installation, not from the imported file."
-    }
+    },
+    "needExample": "Need a starting point?",
+    "downloadExample": "Download a valid example"
   }
 }

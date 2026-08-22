@@ -379,8 +379,12 @@
       "pack_kept_local": "Un paquet d'objections du même nom existe déjà ici : c'est le vôtre qui est utilisé.",
       "named_person_without_user": "L'assistant écrit au nom d'une personne sans compte rattaché : les rendez-vous retomberaient sur un administrateur.",
       "unknown_tool": "Un outil du fichier n'existe pas dans cette installation : il a été retiré.",
-      "docs_ignored": "Les annotations du fichier sont ignorées : la documentation vient de cette installation."
-    }
+      "docs_ignored": "Les annotations du fichier sont ignorées : la documentation vient de cette installation.",
+      "model_defaulted": "Le fichier ne nomme aucun modèle : celui par défaut est appliqué. Vérifiez l'onglet Modèle avant d'activer l'assistant — c'est lui qui décide du coût de chaque message.",
+      "blocks_defaulted": "Des blocs de configuration manquaient dans le fichier : les valeurs par défaut s'appliquent. Relisez l'identité (organisation, courtier) avant d'activer — ce sont les noms qui partent dans les SMS."
+    },
+    "needExample": "Besoin d'un point de départ ?",
+    "downloadExample": "Télécharger un exemple valide"
   },
   "goalType": {
     "video_meeting": "Rencontre vidéo",

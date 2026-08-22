@@ -52,7 +52,12 @@ const docBlockSchema = z.object({
  */
 export const campaignBundleSchema = z.object({
   format: z.literal(CAMPAIGN_EXPORT_FORMAT),
-  exportedAt: z.string(),
+  /**
+   * Date d'export — informative, donc FACULTATIVE. Exigée, elle était la seule
+   * chose qui manquait à un fichier écrit à la main : le document entier était
+   * refusé pour une ligne que personne ne relit.
+   */
+  exportedAt: z.string().default(""),
   sourceOrg: z.string().default(""),
   campaign: campaignConfigSchema,
   bindings: z.array(campaignBindingSchema).default([]),

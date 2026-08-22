@@ -85,5 +85,28 @@
     "passwordChanged": "Password changed",
     "wrongPassword": "Current password is incorrect",
     "passwordMismatch": "The two new passwords do not match"
+  },
+  "importIssues": {
+    "title": "{count, plural, one {The file was refused: # problem} other {The file was refused: # problems}}",
+    "intro": "Fix the file, then try again. Each line says where to look and what was expected.",
+    "line": "line {line}",
+    "allowed": "Allowed values:",
+    "found": "Found in the file:",
+    "code": {
+      "missing": "This field is missing from the file: add it.",
+      "wrong_type": "Wrong type: expected {expected}, found {received}.",
+      "not_allowed": "This value is not accepted here.",
+      "too_small": "Too short, too small, or too few items — minimum: {limit}.",
+      "too_big": "Too long, too large, or too many items — maximum: {limit}.",
+      "wrong_format": "The format of this value is wrong (date, e-mail, identifier…).",
+      "other": ""
+    },
+    "syntax": {
+      "title": "This file is not readable JSON.",
+      "where": "Line {line}, column {column}.",
+      "hint": "Most often: a trailing comma before a closing brace or bracket, a missing quote, or a comment — JSON does not allow those."
+    },
+    "expected": "Expected value:",
+    "root": "document root"
   }
 }

@@ -24,7 +24,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api } from "./api";
+import {
+  describeJsonSyntaxError,
+  locateIssues,
+  type ImportIssue,
+  type JsonSyntaxProblem,
+} from "@/lib/import-diagnostics";
+import { ApiError, api } from "./api";
+import { ImportIssues } from "./import-issues";
 
 type Binding = { path: string; kind: string; sourceValue: string | null; label: string; hint: string };
 type Warning = {
@@ -61,6 +68,11 @@ export function CampaignImportDialog({ trigger }: { trigger: React.ReactNode }) 
 
   const [open, setOpen] = useState(false);
   const [bundle, setBundle] = useState<unknown>(null);
+  // Le TEXTE du fichier, gardé pour situer chaque objection à sa ligne :
+  // le serveur voit la forme, lui seul voit la mise en page.
+  const [source, setSource] = useState("");
+  const [issues, setIssues] = useState<ImportIssue[]>([]);
+  const [syntax, setSyntax] = useState<JsonSyntaxProblem | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [resolution, setResolution] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -69,13 +81,36 @@ export function CampaignImportDialog({ trigger }: { trigger: React.ReactNode }) 
     setBundle(null);
     setPreview(null);
     setResolution({});
+    setSource("");
+    setIssues([]);
+    setSyntax(null);
     if (fileRef.current) fileRef.current.value = "";
   };
 
   const pick = async (file: File) => {
     setBusy(true);
+    setIssues([]);
+    setSyntax(null);
+    const text = await file.text();
+    setSource(text);
+    // Le champ est vidé TOUT DE SUITE : on lit le diagnostic, on corrige le
+    // fichier, on le reprend — et un navigateur ne renvoie pas d'évènement
+    // quand on rechoisit le même nom de fichier. Sans ça, la deuxième
+    // tentative ne se passait tout simplement rien.
+    if (fileRef.current) fileRef.current.value = "";
+
+    let parsed: unknown;
     try {
-      const parsed: unknown = JSON.parse(await file.text());
+      parsed = JSON.parse(text);
+    } catch (err) {
+      // Pas même du JSON : ce n'est pas un problème de contenu, et le dire
+      // évite de chercher un champ fautif qui n'existe pas.
+      setSyntax(describeJsonSyntaxError(text, err));
+      setBusy(false);
+      return;
+    }
+
+    try {
       const result = await api<Preview>("/api/campaigns/import", {
         method: "POST",
         body: JSON.stringify({ mode: "preview", bundle: parsed }),
@@ -89,9 +124,15 @@ export function CampaignImportDialog({ trigger }: { trigger: React.ReactNode }) 
           Object.entries(result.resolved).map(([k, v]) => [k, v ?? UNBOUND]),
         ),
       );
-    } catch {
-      toast.error(t("import.invalid"));
-      reset();
+    } catch (err) {
+      // Le serveur renvoie CHAQUE objection avec son chemin ; c'est ici qu'on
+      // y ajoute la ligne, parce que le texte du fichier ne quitte pas le
+      // navigateur.
+      const raised = err instanceof ApiError ? (err.data.issues as ImportIssue[] | undefined) : undefined;
+      if (raised?.length) setIssues(locateIssues(raised, text));
+      else toast.error(t("import.invalid"));
+      setBundle(null);
+      setPreview(null);
     } finally {
       setBusy(false);
     }
@@ -115,8 +156,10 @@ export function CampaignImportDialog({ trigger }: { trigger: React.ReactNode }) 
       setOpen(false);
       reset();
       router.push(`/admin/campaigns/${result.campaignId}`);
-    } catch {
-      toast.error(t("import.invalid"));
+    } catch (err) {
+      const raised = err instanceof ApiError ? (err.data.issues as ImportIssue[] | undefined) : undefined;
+      if (raised?.length) setIssues(locateIssues(raised, source));
+      else toast.error(t("import.invalid"));
     } finally {
       setBusy(false);
     }
@@ -183,6 +226,19 @@ export function CampaignImportDialog({ trigger }: { trigger: React.ReactNode }) 
                 <Loader2 className="size-4 animate-spin" /> {t("import.importing")}
               </p>
             ) : null}
+
+            {/* Un fichier rédigé à la main se corrige beaucoup plus vite à côté
+                d'un vrai : c'est le même que celui de la documentation. */}
+            <p className="text-xs text-muted-foreground">
+              {t("import.needExample")}{" "}
+              <a
+                href="/api/docs/examples/campaign"
+                className="font-medium underline underline-offset-2"
+                download
+              >
+                {t("import.downloadExample")}
+              </a>
+            </p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -260,8 +316,22 @@ export function CampaignImportDialog({ trigger }: { trigger: React.ReactNode }) 
           </div>
         )}
 
+        {/* Hors des deux états : la prévisualisation ET l'écriture peuvent
+            échouer, et le diagnostic se lit au même endroit dans les deux cas. */}
+        <ImportIssues issues={issues} syntax={syntax} />
+
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
+          {/* `setOpen(false)` NE passe pas par `onOpenChange` : sans le reset
+              explicite, rouvrir le dialogue montrait l'erreur du fichier
+              précédent au-dessus d'un sélecteur vide. */}
+          <Button
+            variant="outline"
+            onClick={() => {
+              setOpen(false);
+              reset();
+            }}
+            disabled={busy}
+          >
             {t("cancel")}
           </Button>
           <Button onClick={() => void commit()} disabled={busy || !preview}>

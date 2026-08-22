@@ -1,7 +1,10 @@
 import { z } from "zod";
 import {
   ASSISTANT_TOOLS,
+  approachSchema,
   assistantConfigSchema,
+  identitySchema,
+  modelConfigSchema,
   type AssistantConfig,
 } from "./schema";
 import {
@@ -137,12 +140,28 @@ const docBlockSchema = z.object({
  */
 const portableAssistantSchema = assistantConfigSchema.extend({
   tools: z.array(z.string()).default([...ASSISTANT_TOOLS]),
+  // Ces trois blocs n'ont que des champs à valeur par défaut : les exiger
+  // faisait refuser un fichier écrit à la main pour n'avoir pas répété des
+  // valeurs que l'éditeur aurait affichées de toute façon. Un export en
+  // contient toujours ; une fiche rédigée à partir de la documentation, non.
+  // `prefault` et non `default` : la valeur absente est remplacée par `{}` À
+  // L'ENTRÉE, puis traversée par le schéma — chaque champ reçoit donc son
+  // propre défaut au lieu qu'on réécrive ici une copie qui dériverait.
+  identity: identitySchema.prefault({}),
+  approach: approachSchema.prefault({}),
+  model: modelConfigSchema.prefault({}),
 });
 
 export const bundleSchema = z
   .object({
     format: z.literal(EXPORT_FORMAT),
-    exportedAt: z.string(),
+    /**
+     * Date d'export — purement informative, donc FACULTATIVE. Elle était
+     * exigée, et c'est la seule chose qui manquait à un fichier rédigé à la
+     * main : le document était refusé en bloc pour une ligne de tenue de
+     * livres qu'aucun code ne relit.
+     */
+    exportedAt: z.string().default(""),
     /** Nom de l'installation d'origine — purement informatif. */
     sourceOrg: z.string().default(""),
     assistant: portableAssistantSchema,
@@ -383,6 +402,8 @@ export interface ImportWarning {
     | "unresolved_user"
     | "unresolved_pack"
     | "named_person_without_user"
+    | "model_defaulted"
+    | "blocks_defaulted"
     | "unknown_tool"
     | "docs_ignored";
   messageFr: string;
@@ -417,6 +438,35 @@ export interface ParseResult {
 export function parseBundle(raw: unknown): ParseResult {
   const bundle = bundleSchema.parse(raw);
   const warnings: ImportWarning[] = [];
+
+  // Ce que le fichier ne disait PAS, et que le schéma a complété.
+  //
+  // Le transport tolère l'absence de ces blocs — un fichier écrit à la main
+  // n'a pas à répéter des valeurs par défaut. Mais « toléré » n'est pas
+  // « invisible » : `identity` par défaut fait signer les SMS « Groupe Nexus,
+  // Alex-Honoré », et le modèle par défaut décide du prix de chaque message.
+  // On complète, et on le dit.
+  const named = raw as
+    | { assistant?: { model?: { model?: unknown }; identity?: unknown; approach?: unknown } }
+    | null;
+  if (typeof named?.assistant?.model?.model !== "string") {
+    warnings.push({
+      code: "model_defaulted",
+      path: "assistant.model.model",
+      messageFr: `Le fichier ne nomme aucun modèle : « ${bundle.assistant.model.model} » est appliqué par défaut. Vérifiez l'onglet Modèle avant d'activer l'assistant.`,
+    });
+  }
+  const defaulted = (["identity", "approach"] as const).filter(
+    (block) => named?.assistant?.[block] === undefined,
+  );
+  if (defaulted.length > 0) {
+    warnings.push({
+      code: "blocks_defaulted",
+      path: defaulted.map((block) => `assistant.${block}`).join(", "),
+      messageFr: `Le fichier ne contient pas « ${defaulted.join(" » ni « ")} » : les valeurs par défaut s'appliquent (organisation « ${bundle.assistant.identity.orgName} », courtier « ${bundle.assistant.identity.brokerName} »). Relisez-les — elles partent dans les SMS.`,
+    });
+  }
+
   if (bundle._docs) {
     warnings.push({
       code: "docs_ignored",

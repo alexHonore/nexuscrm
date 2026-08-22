@@ -379,8 +379,12 @@
       "pack_kept_local": "An objection pack with the same name already exists here: yours is used.",
       "named_person_without_user": "The assistant writes on behalf of a person with no linked account: meetings would fall back to an administrator.",
       "unknown_tool": "A tool in the file does not exist in this installation: it was removed.",
-      "docs_ignored": "The file's annotations are ignored: documentation comes from this installation."
-    }
+      "docs_ignored": "The file's annotations are ignored: documentation comes from this installation.",
+      "model_defaulted": "The file names no model: the default one is applied. Check the Model tab before activating the assistant — it is what decides the cost of every message.",
+      "blocks_defaulted": "Some configuration blocks were missing from the file: the defaults apply. Check the identity (organization, broker) before activating — those are the names that go out in the SMS."
+    },
+    "needExample": "Need a starting point?",
+    "downloadExample": "Download a valid example"
   },
   "goalType": {
     "video_meeting": "Video meeting",
