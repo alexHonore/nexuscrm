@@ -885,7 +885,8 @@
         "stop": "Stops the conversation with no specific outcome (clear refusal). The number is suppressed: nothing ever leaves again.",
         "handoff": "Hands over to a human immediately: the thread is flagged \"needs attention\", the AI goes quiet.",
         "transfer_assistant": "Hands the thread to another configured assistant (id provided in context).",
-        "close_conversation": "Closes the thread with a specific outcome: goal reached, disqualified, not interested."
+        "close_conversation": "Closes the thread with a specific outcome: goal reached, disqualified, not interested.",
+        "set_category": "Files the record into a pipeline category (Long term, Not qualified…) according to your classification rules."
       }
     },
     "sending": {

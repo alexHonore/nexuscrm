@@ -49,6 +49,21 @@ export interface ObjectionPack {
   items: ObjectionItem[];
 }
 
+/**
+ * Une règle de classement, DÉJÀ résolue par l'appelant.
+ *
+ * Le module reste pur : il ne lit ni les réglages ni la table des catégories.
+ * L'appelant a donc traduit chaque règle en trois chaînes — la condition, la
+ * valeur de catégorie que l'outil attend, et le nom lisible que le modèle
+ * verra. Sans le nom, le prompt dirait « range dans cat:14 », ce qu'aucun
+ * modèle ne peut juger.
+ */
+export interface ClassificationRuleInput {
+  when: string;
+  categoryValue: string;
+  categoryLabel: string;
+}
+
 /** Une règle de garde-fou (table `guardrail_rules`) — core ou assistant. */
 export interface GuardRuleInput {
   key: string;
@@ -167,7 +182,34 @@ function describeGoalStep(step: GoalStep): string {
   return GOAL_TYPE_DESCRIPTIONS[step.type](step);
 }
 
-function buildGoalLayer(config: AssistantConfig): string {
+/**
+ * Le classement — dans L2 parce que c'est une conclusion sur l'objectif.
+ *
+ * Ranger quelqu'un dans « Long terme » ou « Non qualifié », c'est décider que
+ * l'objectif courant ne s'applique pas à cette personne-là. Cela n'a sa place
+ * ni dans les faits (L4), ni dans le ton (L3), ni dans les garde-fous (L6) qui
+ * interdisent : ici on demande une ACTION, sous condition.
+ *
+ * Les règles sont numérotées et la liste est FERMÉE — l'outil refuse toute
+ * catégorie qui n'y figure pas, et le dire au modèle évite qu'il essaie.
+ */
+function buildClassificationLines(rules: ClassificationRuleInput[]): string[] {
+  if (rules.length === 0) return [];
+  const lines = [
+    "",
+    "## CLASSEMENT",
+    "Dès que la conversation te permet de trancher l'un des cas ci-dessous, appelle `set_category` avec la clé indiquée, sans attendre la fin de l'échange.",
+  ];
+  rules.forEach((rule, i) => {
+    lines.push(`${i + 1}. Si ${rule.when} → « ${rule.categoryLabel} » (clé : ${rule.categoryValue})`);
+  });
+  lines.push(
+    "Tu ne ranges JAMAIS une fiche dans une catégorie absente de cette liste, et tu ne classes pas sur une supposition : il te faut une phrase de la personne qui le dise.",
+  );
+  return lines;
+}
+
+function buildGoalLayer(config: AssistantConfig, classification: ClassificationRuleInput[]): string {
   const { primary, fallbacks } = config.goal;
   const lines: string[] = ["# OBJECTIF"];
 
@@ -201,6 +243,8 @@ function buildGoalLayer(config: AssistantConfig): string {
       "En cas de refus mou : aucun repli configuré — termine poliment plutôt que d'insister.",
     );
   }
+
+  lines.push(...buildClassificationLines(classification));
 
   lines.push("Le palier (rung) actuellement actif est fourni dans le bloc d'exécution (runtime).");
 
@@ -435,6 +479,8 @@ export function compileAssistantPrompt(
   core: CoreDoc,
   packs: ObjectionPack[],
   rules: GuardRuleInput[],
+  /** Règles de classement déjà résolues — vide = l'assistant ne classe pas. */
+  classification: ClassificationRuleInput[] = [],
 ): CompiledPrompt {
   if (config.promptMode === "raw") {
     return { prompt: config.systemPromptOverride ?? "", coreVersion: core.version, layers: [] };
@@ -443,7 +489,7 @@ export function compileAssistantPrompt(
   const generated: Record<LayerId, string> = {
     L0: substituteCoreTokens(core.body, config.identity.orgName, config.identity.brokerName),
     L1: buildIdentityLayer(config),
-    L2: buildGoalLayer(config),
+    L2: buildGoalLayer(config, classification),
     L3: buildApproachLayer(config),
     L4: buildKnowledgeLayer(config),
     L5: buildObjectionsLayer(config, packs),

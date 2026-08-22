@@ -17,8 +17,10 @@ import {
   makeClient,
   makeConversation,
   makeSmsNumber,
+  makeCategory,
   makeUser,
   resetDb,
+  seedSystemCategories,
   testDb,
 } from "./helpers/db";
 import {
@@ -33,7 +35,8 @@ import {
   scheduledJobs,
   suppressions,
 } from "@/db/schema-sms";
-import { clients, followups, notifications } from "@/db/schema";
+import { auditLogs, categories, clients, followups, notifications } from "@/db/schema";
+import { setSetting } from "@/lib/settings";
 import { assistantConfigSchema } from "@/lib/assistants/schema";
 import type { LLMResult } from "@/lib/llm/types";
 
@@ -1008,5 +1011,149 @@ describe("câblage inter-domaines (revue)", () => {
     expect(outcome.outcome).toBe("reschedule");
     expect(llm.calls).toHaveLength(0);
     await setSetting("sms", { ...current, killSwitch: false });
+  });
+});
+
+describe("set_category — l'assistant range la fiche", () => {
+  // Ce bloc est frère de « runTurn » : il ne profite pas de son `beforeEach`,
+  // et sans remise à zéro les tests s'empilent sur la base du précédent.
+  beforeEach(async () => {
+    await resetDb();
+    llm.generatorText = "Entendu.";
+    llm.generatorToolCalls = [];
+    llm.generatorSequence = [];
+    llm.onGenerate = null;
+    llm.generatorError = null;
+    llm.truncated = false;
+    llm.classifierJson = '{"refusal":"none","qualification":{}}';
+    llm.judgeJson = '{"passed":true,"reason":"conforme"}';
+    llm.calls = [];
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  /** Le pipeline réel plus les règles qu'Alex a décrites. */
+  async function withRules() {
+    await seedSystemCategories();
+    // « Long terme » n'est pas une catégorie SYSTÈME : elle vient de la
+    // semence étendue, comme chez Alex. On la crée donc explicitement.
+    const longTerm = await makeCategory({ key: "long_term", nameFr: "Long terme", nameEn: "Long term" });
+    const rows = await testDb.select().from(categories);
+    const notQualified = rows.find((c) => c.key === "not_qualified")!;
+    await setSetting("classification", {
+      rules: [
+        { id: "r1", when: "le projet est à plus de six mois", category: "long_term", enabled: true },
+        {
+          id: "r2",
+          when: "la personne est hors de Grand Québec, Grand Lévis ou Grand Montréal",
+          category: "not_qualified",
+          enabled: true,
+        },
+      ],
+    });
+    return { longTerm, notQualified };
+  }
+
+  it("« je veux acheter mais l'année prochaine » → Long terme", async () => {
+    const { longTerm } = await withRules();
+    const { conversation, client } = await scene();
+    llm.generatorToolCalls = [
+      {
+        id: "t1",
+        name: "set_category",
+        arguments: { categoryKey: "long_term", reason: "elle achète l'année prochaine" },
+      },
+    ];
+    llm.generatorText = "Parfait, je vous relance au printemps alors.";
+    await inbound(conversation.id, "je veux acheter mais l'année prochaine");
+    await runTurn(conversation.id);
+
+    const [row] = await testDb.select().from(clients).where(eq(clients.id, client.id));
+    expect(row.categoryId).toBe(longTerm.id);
+
+    // « qui » est null — personne n'a cliqué — mais « pourquoi » est écrit.
+    const logs = await testDb.select().from(auditLogs);
+    const entry = logs.find((l) => l.action === "client.category");
+    expect(entry?.userId).toBeNull();
+    expect((entry?.detail as { reason: string; via: string }).via).toBe("assistant");
+    expect((entry?.detail as { reason: string }).reason).toBe("elle achète l'année prochaine");
+  });
+
+  it("« je suis au saguenay » → Non qualifié", async () => {
+    const { notQualified } = await withRules();
+    const { conversation, client } = await scene();
+    llm.generatorToolCalls = [
+      {
+        id: "t1",
+        name: "set_category",
+        arguments: { categoryKey: "not_qualified", reason: "elle est au Saguenay" },
+      },
+    ];
+    await inbound(conversation.id, "je suis au saguenay");
+    await runTurn(conversation.id);
+
+    const [row] = await testDb.select().from(clients).where(eq(clients.id, client.id));
+    expect(row.categoryId).toBe(notQualified.id);
+  });
+
+  it("une clé HORS des règles est refusée, et le refus dit lesquelles sont permises", async () => {
+    // « Ne pas appeler » sort quelqu'un du pipeline : aucune règle n'y mène,
+    // donc l'assistant ne peut pas l'y mettre. Le refus doit être exploitable
+    // au même tour, sinon le modèle réessaie la même clé indéfiniment.
+    await withRules();
+    const { conversation, client } = await scene();
+    const before = (await testDb.select().from(clients).where(eq(clients.id, client.id)))[0];
+    llm.generatorToolCalls = [
+      { id: "t1", name: "set_category", arguments: { categoryKey: "dncl", reason: "au cas où" } },
+    ];
+    await inbound(conversation.id, "bonjour");
+    await runTurn(conversation.id);
+
+    const [row] = await testDb.select().from(clients).where(eq(clients.id, client.id));
+    expect(row.categoryId).toBe(before.categoryId);
+    expect(await testDb.select().from(auditLogs)).toHaveLength(0);
+
+    // Le modèle a reçu la liste des clés permises, pas un « erreur » sec.
+    const toolMessage = llm.calls
+      .flatMap((c) => (c.messages ?? []) as { role: string; content: string }[])
+      .find((m) => m.role === "tool" && m.content.includes("set_category"));
+    expect(toolMessage?.content).toContain("long_term");
+    expect(toolMessage?.content).toContain("not_qualified");
+  });
+
+  it("sans AUCUNE règle configurée, l'assistant ne classe rien", async () => {
+    await seedSystemCategories();
+    const { conversation, client } = await scene();
+    const before = (await testDb.select().from(clients).where(eq(clients.id, client.id)))[0];
+    llm.generatorToolCalls = [
+      {
+        id: "t1",
+        name: "set_category",
+        arguments: { categoryKey: "long_term", reason: "peu importe" },
+      },
+    ];
+    await inbound(conversation.id, "bonjour");
+    await runTurn(conversation.id);
+
+    const [row] = await testDb.select().from(clients).where(eq(clients.id, client.id));
+    expect(row.categoryId).toBe(before.categoryId);
+  });
+
+  it("reclasser au MÊME endroit ne réécrit rien", async () => {
+    // Sinon chaque tour relancerait les campagnes « changement de catégorie ».
+    const { longTerm } = await withRules();
+    const { conversation, client } = await scene();
+    await testDb.update(clients).set({ categoryId: longTerm.id }).where(eq(clients.id, client.id));
+
+    llm.generatorToolCalls = [
+      {
+        id: "t1",
+        name: "set_category",
+        arguments: { categoryKey: "long_term", reason: "encore" },
+      },
+    ];
+    await inbound(conversation.id, "toujours l'an prochain");
+    await runTurn(conversation.id);
+
+    expect(await testDb.select().from(auditLogs)).toHaveLength(0);
   });
 });

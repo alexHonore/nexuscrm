@@ -50,6 +50,17 @@ const scheduleFollowupArgsSchema = z.object({
   note: z.string().max(300).optional(),
 });
 
+/**
+ * Le classement. La CLÉ, pas un nom : « Long terme » se retape de dix façons,
+ * et la même valeur sert déjà aux dispositions d'après-appel — un classement
+ * de l'assistant et un classement du téléphoniste restent donc comparables.
+ */
+const setCategoryArgsSchema = z.object({
+  categoryKey: z.string().min(1).max(80),
+  /** Ce qu'a dit la personne. Sans citation, le classement est invérifiable. */
+  reason: z.string().min(1).max(300),
+});
+
 const stopArgsSchema = z.object({
   reason: z.string().max(200).optional(),
 });
@@ -77,6 +88,7 @@ export const TOOL_ARG_SCHEMAS: Record<AssistantTool, z.ZodType> = {
   book_meeting: bookMeetingArgsSchema,
   update_qualification: updateQualificationArgsSchema,
   schedule_followup: scheduleFollowupArgsSchema,
+  set_category: setCategoryArgsSchema,
   stop: stopArgsSchema,
   handoff: handoffArgsSchema,
   transfer_assistant: transferAssistantArgsSchema,
@@ -88,7 +100,7 @@ export const TOOL_ARG_SCHEMAS: Record<AssistantTool, z.ZodType> = {
 const QUALIFICATION_FIELDS_LIST = QUALIFICATION_FIELDS.join(", ");
 
 /**
- * Les 8 définitions d'outils. Les descriptions sont en FRANÇAIS et rédigées
+ * Les 9 définitions d'outils. Les descriptions sont en FRANÇAIS et rédigées
  * comme des consignes au modèle (QUAND appeler, pas seulement CE QUE ça
  * fait) — c'est ce texte qui pilote réellement le comportement.
  */
@@ -185,6 +197,30 @@ export const TOOL_DEFS: Record<AssistantTool, ToolDef> = {
     },
   },
 
+  set_category: {
+    name: "set_category",
+    description:
+      "Range la fiche du contact dans une catégorie du pipeline, selon les règles de CLASSEMENT données dans ta consigne d'objectif. Appelle-le dès qu'une phrase de la personne tranche l'un de ces cas — n'attends pas la fin de l'échange, et ne classe jamais sur une supposition. Les seules clés acceptées sont celles que les règles nomment : toute autre valeur est refusée. Classer ne remplace ni update_qualification (qui enregistre les faits) ni stop (qui arrête tout) ; on peut classer et continuer la conversation.",
+    parameters: {
+      type: "object",
+      properties: {
+        categoryKey: {
+          type: "string",
+          minLength: 1,
+          description:
+            "La clé EXACTE indiquée par la règle qui s'applique, telle qu'elle est écrite entre parenthèses dans la liste de classement.",
+        },
+        reason: {
+          type: "string",
+          minLength: 1,
+          description:
+            "Ce que la personne a dit qui justifie ce classement, en une phrase et si possible dans ses mots. C'est ce que le courtier lira sur la fiche.",
+        },
+      },
+      required: ["categoryKey", "reason"],
+      additionalProperties: false,
+    },
+  },
   stop: {
     name: "stop",
     description:

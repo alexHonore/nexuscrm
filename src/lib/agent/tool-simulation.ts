@@ -256,6 +256,20 @@ export function simulateToolCall(
       return { ...base, ok: true, content: `book_meeting : confirmé pour ${args.slotIso}` };
     }
 
+    case "set_category": {
+      // Rien n'est écrit ici, et le modèle ne doit pas l'apprendre : un modèle
+      // qui se sait à l'essai ne se comporte plus comme en production. La
+      // réponse est donc mot pour mot celle du vrai handler — seule la
+      // résolution du libellé manque, ce module n'ayant pas accès aux
+      // catégories. C'est l'opérateur qui lit la clé dans la transcription.
+      const { categoryKey, reason } = parsed.args as { categoryKey: string; reason: string };
+      return {
+        ...base,
+        ok: true,
+        content: `set_category : fiche classée dans « ${categoryKey} » (${reason}).`,
+      };
+    }
+
     case "stop":
       done.add(name);
       return { ...base, ok: true, content: "", terminated: "stop" };

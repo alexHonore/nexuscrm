@@ -1,23 +1,42 @@
+import { asc } from "drizzle-orm";
 import { Settings2 } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { BookingCard, GoogleCard, KillSwitchCard, TelephonyCard } from "@/components/admin/settings-client";
+import { ClassificationCard } from "@/components/admin/classification-card";
 import { SmsNumbersCard } from "@/components/admin/sms-numbers-card";
 import { listSmsNumbersForAdmin } from "@/lib/sms-server/numbers";
 import { PageHeader } from "@/components/shell/page-header";
+import { db } from "@/db";
+import { categories } from "@/db/schema";
 import { requireAdmin } from "@/lib/auth/guards";
+import { categoryDispositionValue } from "@/lib/dispositions";
+import { docLocale } from "@/lib/docs/types";
 import { getSetting } from "@/lib/settings";
 
 export default async function AdminSettingsPage() {
   await requireAdmin();
   const t = await getTranslations("admin");
 
-  const [google, booking, telephony, sms, numbers] = await Promise.all([
-    getSetting("google"),
-    getSetting("booking"),
-    getSetting("telephony"),
-    getSetting("sms"),
-    listSmsNumbersForAdmin(),
-  ]);
+  const locale = docLocale(await getLocale());
+  const [google, booking, telephony, sms, numbers, classification, categoryRows] =
+    await Promise.all([
+      getSetting("google"),
+      getSetting("booking"),
+      getSetting("telephony"),
+      getSetting("sms"),
+      listSmsNumbersForAdmin(),
+      getSetting("classification"),
+      db.select().from(categories).orderBy(asc(categories.sortOrder)),
+    ]);
+
+  // La MÊME valeur que les dispositions d'après-appel (`key` ou « cat:<id> ») :
+  // un classement posé par l'assistant et un posé par un téléphoniste restent
+  // ainsi comparables dans les statistiques.
+  const categoryChoices = categoryRows.map((row) => ({
+    value: categoryDispositionValue(row),
+    label: locale === "en" ? row.nameEn : row.nameFr,
+    color: row.color,
+  }));
 
   const voipmsHints = {
     sipWss: Boolean(process.env.NEXT_PUBLIC_SIP_WSS_URL),
@@ -54,6 +73,11 @@ export default async function AdminSettingsPage() {
           inPersonDefaultLocation: booking.inPersonDefaultLocation,
           brokerEmail: booking.brokerEmail,
         }}
+      />
+
+      <ClassificationCard
+        initial={classification.rules}
+        categories={categoryChoices}
       />
 
       <KillSwitchCard

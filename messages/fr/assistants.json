@@ -885,7 +885,8 @@
         "stop": "Arrête la conversation sans résultat précis (refus clair). Le numéro est mis sous suppression : rien ne repart jamais.",
         "handoff": "Passe immédiatement la main à un humain : le fil est marqué « à traiter », l'IA se tait.",
         "transfer_assistant": "Confie le fil à un autre assistant configuré (identifiant fourni dans le contexte).",
-        "close_conversation": "Clôt le fil avec un résultat précis : objectif atteint, disqualifié, pas intéressé."
+        "close_conversation": "Clôt le fil avec un résultat précis : objectif atteint, disqualifié, pas intéressé.",
+        "set_category": "Range la fiche dans une catégorie du pipeline (Long terme, Non qualifié…) selon vos règles de classement."
       }
     },
     "sending": {

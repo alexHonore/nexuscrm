@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { assistants, assistantVersions, guardrailRuns, objectionPacks } from "@/db/schema-sms";
+import { resolveClassification } from "@/lib/classification-server";
 import { compileAssistantPrompt, type ObjectionPack } from "@/lib/agent/compile";
 import { DEFAULT_TURN_INSTRUCTIONS } from "@/lib/agent/templates";
 import { toolDefsFor } from "@/lib/agent/tools";
@@ -113,6 +114,12 @@ export async function compileAssistant(
   const core = await currentCore();
   const packs = await loadPacks(config.objectionPacks);
   const rules = await resolvedRulesFor(assistantId);
+  // Les règles de classement ne sont compilées QUE si l'assistant a le droit
+  // de classer : lui décrire des catégories qu'il ne peut pas poser lui ferait
+  // essayer un outil absent, tour après tour.
+  const classification = config.tools.includes("set_category")
+    ? (await resolveClassification()).forPrompt
+    : [];
 
   const compiled = compileAssistantPrompt(
     config,
@@ -128,6 +135,7 @@ export async function compileAssistant(
       overridesKey: rule.overridesKey ?? null,
       orderIndex: rule.orderIndex,
     })),
+    classification,
   );
 
   // Un prompt vide (mode libre sans texte) n'est pas un prompt : on refuse

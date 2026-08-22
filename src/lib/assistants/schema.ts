@@ -63,6 +63,18 @@ export const ASSISTANT_TOOLS = [
   "book_meeting",
   "update_qualification",
   "schedule_followup",
+  /**
+   * Ranger la fiche dans une catégorie du pipeline.
+   *
+   * L'assistant apprend en deux messages ce qu'un téléphoniste met un appel à
+   * découvrir — « je veux acheter, mais l'an prochain », « je suis au
+   * Saguenay ». Sans cet outil, l'information restait dans le fil et la fiche
+   * dormait dans « Non contacté » jusqu'à ce que quelqu'un la relise.
+   *
+   * Les catégories qu'il a le droit de poser sont celles que nomment les
+   * règles de classement — voir `classificationSettingsSchema`.
+   */
+  "set_category",
   "stop",
   "handoff",
   "transfer_assistant",

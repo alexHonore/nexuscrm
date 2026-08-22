@@ -706,5 +706,18 @@
     "didNotOwned": "This number is no longer on the voip.ms account — the list was stale.",
     "confirmMismatch": "The digits you typed do not match the number.",
     "recurringNote": "Monthly number rental is not shown here: only the period's calls are priced."
+  },
+  "classification": {
+    "title": "Automatic classification",
+    "subtitle": "What the assistant may conclude from a sentence, and where it then files the record.",
+    "empty": "No rule: the assistant files nothing.",
+    "noCategories": "No pipeline category exists yet — create some under Pipeline before writing a rule.",
+    "when": "When…",
+    "whenPlaceholder": "the project is more than six months away",
+    "then": "…file under",
+    "active": "Active",
+    "add": "Add a rule",
+    "remove": "Delete rule {index}",
+    "toolHint": "These rules only apply to assistants whose \"File the record\" tool is ticked in the Tools tab. The list is also the allow-list: a category absent from here cannot be set by the assistant."
   }
 }

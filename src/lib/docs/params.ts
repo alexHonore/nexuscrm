@@ -596,6 +596,14 @@ const TOOL_DOCS: { name: string; whatFr: string; whyFr: string; pitfallsFr: stri
     pitfallsFr: "Sans lui, les reports lointains sont perdus.",
   },
   {
+    name: "set_category",
+    whatFr: "Range la fiche dans une catégorie du pipeline, selon les règles de classement.",
+    whyFr:
+      "L'assistant apprend en deux messages ce qu'un téléphoniste met un appel à découvrir — « je veux acheter, mais l'an prochain », « je suis au Saguenay ». Sans cet outil, l'information reste dans le fil et la fiche dort dans « Non contacté » jusqu'à ce que quelqu'un la relise.",
+    pitfallsFr:
+      "Sans règle de classement configurée, l'outil n'a AUCUNE catégorie permise et n'est jamais appelé — il ne sert à rien tant que les règles ne sont pas écrites. Une règle vers « Ne pas appeler » donnerait à l'assistant le pouvoir de sortir quelqu'un du pipeline sur une phrase mal comprise : cette catégorie-là se pose à la main.",
+  },
+  {
     name: "stop",
     whatFr: "Arrête définitivement et supprime le numéro.",
     whyFr:

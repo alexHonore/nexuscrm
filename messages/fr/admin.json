@@ -706,5 +706,18 @@
     "didNotOwned": "Ce numéro n'est plus sur le compte voip.ms — la liste était périmée.",
     "confirmMismatch": "Les chiffres saisis ne correspondent pas au numéro.",
     "recurringNote": "La location mensuelle des numéros n'apparaît pas ici : seuls les appels de la période sont chiffrés."
+  },
+  "classification": {
+    "title": "Classement automatique",
+    "subtitle": "Ce que l'assistant a le droit de conclure d'une phrase, et où il range alors la fiche.",
+    "empty": "Aucune règle : l'assistant ne classe aucune fiche.",
+    "noCategories": "Aucune catégorie de pipeline n'existe encore — créez-en dans Pipeline avant d'écrire une règle.",
+    "when": "Quand…",
+    "whenPlaceholder": "le projet est à plus de six mois",
+    "then": "…ranger dans",
+    "active": "Active",
+    "add": "Ajouter une règle",
+    "remove": "Supprimer la règle {index}",
+    "toolHint": "Ces règles ne s'appliquent qu'aux assistants dont l'outil « Classer la fiche » est coché dans l'onglet Outils. La liste sert aussi de liste blanche : une catégorie absente d'ici ne peut pas être posée par l'assistant."
   }
 }

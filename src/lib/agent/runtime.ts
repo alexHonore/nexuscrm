@@ -13,6 +13,9 @@ import {
   messages,
 } from "@/db/schema-sms";
 import { assistantRowToConfig, type AssistantConfig } from "@/lib/assistants/schema";
+import { logAudit } from "@/lib/audit";
+import { notifyCategoryChanged } from "@/lib/campaigns-server/match";
+import { resolveClassification } from "@/lib/classification-server";
 import { resolvedRulesFor } from "@/lib/assistants/service";
 import { campaignRowToConfig } from "@/lib/campaigns/schema";
 import { getInternalBookingProvider } from "@/lib/booking/internal";
@@ -200,6 +203,12 @@ async function executeTools(input: {
   conversationId: string;
   currentAssistantId: string;
   qualification: Record<string, unknown>;
+  /**
+   * Les catégories que l'assistant a le droit de poser — la MÊME liste que
+   * celle décrite dans son prompt (voir `resolveClassification`). Vide =
+   * il ne classe pas, et l'outil refuse tout.
+   */
+  allowedCategories: Map<string, { id: number; label: string }>;
   effects: ToolEffect[];
   sideEffectsDone: Set<string>;
 }): Promise<ToolRunResult> {
@@ -292,6 +301,64 @@ async function executeTools(input: {
           );
           bookingFailed = true;
         }
+        break;
+      }
+
+      case "set_category": {
+        const args = parsed.args as { categoryKey: string; reason: string };
+        const target = input.allowedCategories.get(args.categoryKey);
+        // Refus PARLANT : le modèle doit pouvoir se corriger au même tour.
+        // Un « erreur » sec le ferait réessayer la même clé indéfiniment.
+        if (!target) {
+          const keys = [...input.allowedCategories.keys()];
+          input.effects.push({ name, ok: false, detail: "unknown_category" });
+          record(
+            keys.length === 0
+              ? "set_category : aucune règle de classement n'est configurée — tu ne peux pas classer cette fiche."
+              : `set_category : « ${args.categoryKey} » n'est pas une clé permise. Les seules acceptées : ${keys.join(", ")}.`,
+          );
+          continue;
+        }
+
+        const previous = await db.query.clients.findFirst({
+          where: eq(clients.id, input.clientId),
+          columns: { categoryId: true },
+        });
+        // Reclasser au même endroit n'est pas un changement : l'écrire
+        // relancerait les campagnes « changement de catégorie » à chaque tour.
+        if (previous?.categoryId === target.id) {
+          record(`set_category : la fiche est déjà dans « ${target.label} ».`);
+          break;
+        }
+
+        await db
+          .update(clients)
+          .set({ categoryId: target.id, updatedAt: new Date() })
+          .where(eq(clients.id, input.clientId));
+
+        // `userId: null` — personne n'a cliqué. Le motif cité par le modèle
+        // est la seule trace de POURQUOI, et c'est ce que le courtier lira.
+        await logAudit({
+          userId: null,
+          action: "client.category",
+          entity: "client",
+          entityId: input.clientId,
+          detail: {
+            from: previous?.categoryId ?? null,
+            to: target.id,
+            via: "assistant",
+            assistantId: input.currentAssistantId,
+            conversationId: input.conversationId,
+            reason: args.reason,
+          },
+        });
+
+        // Le MÊME point d'entrée que le classement à la main : une campagne
+        // déclenchée par « changement de catégorie » doit partir que le geste
+        // vienne d'un téléphoniste ou de l'assistant.
+        notifyCategoryChanged(input.clientId, previous?.categoryId ?? null, target.id);
+
+        record(`set_category : fiche classée dans « ${target.label} » (${args.reason}).`);
         break;
       }
 
@@ -1002,6 +1069,13 @@ export async function runTurn(
         conversationId,
         currentAssistantId: assistantRow.id,
         qualification,
+        // La MÊME liste que celle décrite dans le prompt : la résoudre ici
+        // plutôt qu'au compilage suit un changement de règles sans attendre
+        // une recompilation, et l'outil ne peut donc jamais être plus permissif
+        // que ce que l'administrateur a écrit à l'instant.
+        allowedCategories: config.tools.includes("set_category")
+          ? (await resolveClassification()).allowed
+          : new Map(),
         effects,
         sideEffectsDone,
       });

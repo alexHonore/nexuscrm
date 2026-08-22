@@ -35,6 +35,43 @@ export const googleSettingsSchema = z.object({
 });
 export type GoogleSettings = z.infer<typeof googleSettingsSchema>;
 
+/**
+ * Le CLASSEMENT automatique : ce que l'assistant a le droit de conclure d'une
+ * phrase, et où il doit alors ranger la fiche.
+ *
+ * Une règle est une condition en toutes lettres et une catégorie du pipeline —
+ * « projet à plus de six mois » → « Long terme », « hors de Grand Québec,
+ * Grand Lévis ou Grand Montréal » → « Non qualifié ». C'est du texte parce que
+ * la condition est un jugement, pas un test : « l'année prochaine » ne se
+ * compare à rien, il faut le comprendre.
+ *
+ * Les règles servent AUSSI de liste blanche : l'assistant ne peut ranger une
+ * fiche que dans une catégorie nommée par une règle active. Aucune règle vers
+ * « Ne pas appeler » ⇒ il ne peut pas y toucher, et il n'y a pas de second
+ * réglage à tenir d'accord avec le premier.
+ *
+ * Ces règles valent pour toute l'entreprise, pas par assistant : le territoire
+ * desservi et le seuil du « long terme » ne changent pas selon le robot qui
+ * écrit. Ce qui reste par assistant, c'est le DROIT de classer — l'outil
+ * `set_category` dans sa liste d'outils.
+ */
+export const classificationSettingsSchema = z.object({
+  rules: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        /** La condition, en toutes lettres, telle que le modèle la lira. */
+        when: z.string().trim().min(3).max(300),
+        /** Valeur de catégorie — `key` ou « cat:<id> », comme les dispositions. */
+        category: z.string().trim().min(1).max(80),
+        enabled: z.boolean().default(true),
+      }),
+    )
+    .max(30)
+    .default([]),
+});
+export type ClassificationSettings = z.infer<typeof classificationSettingsSchema>;
+
 export const telephonySettingsSchema = z.object({
   provider: z.enum(["voipms", "twilio"]).default("voipms"),
 });
@@ -65,6 +102,7 @@ const SCHEMAS = {
   google: googleSettingsSchema,
   telephony: telephonySettingsSchema,
   sms: smsSettingsSchema,
+  classification: classificationSettingsSchema,
 } as const;
 
 export type SettingKey = keyof typeof SCHEMAS;

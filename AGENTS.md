@@ -44,6 +44,7 @@ CRM de centre d'appels pour un courtier immobilier québécois. Interface **fran
 | `src/components/shell/app-shell.tsx` | Coquille (sidebar desktop + nav basse mobile) |
 | `src/lib/settings.ts` | Réglages typés (booking / google / telephony) |
 | `src/components/look.tsx` | Vocabulaire visuel : un pictogramme et une couleur par concept |
+| `src/lib/classification-server/` | Règles de classement : la MÊME liste pour le prompt et pour l'outil |
 | `src/app/api/objection-packs/` | CRUD des paquets d'objections — ressource PARTAGÉE entre assistants |
 
 ## Routes de l'app

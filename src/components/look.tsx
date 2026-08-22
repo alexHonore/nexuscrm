@@ -18,6 +18,7 @@ import {
   FileCheckIcon,
   FilterIcon,
   FlaskConicalIcon,
+  FolderTreeIcon,
   HandIcon,
   HourglassIcon,
   IdCardIcon,
@@ -165,6 +166,8 @@ export const TOOL_LOOK: Record<string, Look> = {
   book_meeting: { color: "#3B82F6", Icon: CalendarCheckIcon },
   update_qualification: { color: "#10B981", Icon: ListChecksIcon },
   schedule_followup: { color: "#14B8A6", Icon: CalendarClockIcon },
+  // Ranger une fiche : le même geste que déplacer une carte dans le pipeline.
+  set_category: { color: "#0EA5E9", Icon: FolderTreeIcon },
   stop: { color: "#EF4444", Icon: XOctagonIcon },
   handoff: { color: "#F59E0B", Icon: HandIcon },
   transfer_assistant: { color: "#8B5CF6", Icon: SquareArrowOutUpRightIcon },

@@ -387,6 +387,12 @@ export const PARAM_DOCS_EN: Record<string, ParamDocText> = {
     why: "\"Call me back in June\" is only worth something if something remembers in June.",
     pitfalls: "Without it, far-off postponements are lost.",
   },
+  "tools.set_category": {
+    label: "Tool \"set_category\"",
+    what: "Files the record into a pipeline category, according to the classification rules.",
+    why: "The assistant learns in two messages what takes a caller a whole call to find out — \"I want to buy, but next year\", \"I'm in Saguenay\". Without this tool the information stays in the thread and the record sleeps in \"Not contacted\" until someone re-reads it.",
+    pitfalls: "With no classification rule configured the tool has NO permitted category and is never called — it does nothing until the rules are written. A rule pointing at \"Do not call\" would let the assistant remove someone from the pipeline on a misread sentence: set that category by hand.",
+  },
   "tools.stop": {
     label: "\"stop\" tool",
     what: "Stops for good and deletes the number.",
