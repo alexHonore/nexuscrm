@@ -12,7 +12,18 @@ export type AssistantEditorData = {
   compiledPrompt: string | null;
   compiledAt: string | null;
   users: { id: string; name: string; email: string; role: string }[];
-  packs: { id: string; label: string; itemCount: number }[];
+  /**
+   * Les paquets AVEC leur contenu : l'onglet ne se contente plus de cocher, il
+   * ouvre, corrige et complète. Une objection est ce qu'un courtier entend
+   * tous les jours — la matière la plus vivante de la configuration.
+   */
+  packs: {
+    id: string;
+    label: string;
+    language: string;
+    isBuiltin: boolean;
+    items: { key: string; triggerHint: string; acknowledge: string; reframe: string; ask: string }[];
+  }[];
   coreRules: EditorRule[];
   ownRules: EditorRule[];
   lastRun: EditorRun | null;

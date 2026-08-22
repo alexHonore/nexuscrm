@@ -142,7 +142,7 @@ export function signatureFor(identity: IdentityConfig): string | null {
 
 // ── L2 — OBJECTIF ────────────────────────────────────────────────────────────
 
-const FIELD_LABELS: Record<QualificationField, string> = {
+const FIELD_LABELS: Partial<Record<string, string>> & Record<QualificationField, string> = {
   project_type: "type de projet",
   timing: "échéancier",
   budget: "budget",
@@ -172,16 +172,29 @@ function buildGoalLayer(config: AssistantConfig): string {
   const lines: string[] = ["# OBJECTIF"];
 
   lines.push(`Objectif actuel : ${describeGoalStep(primary)}.`);
+  // La consigne du cran passe juste après ce que le cran cherche : c'est le
+  // COMMENT de ce QUOI, et les séparer les rendait tous deux abstraits.
+  if (primary.instruction) lines.push(`Pour ce cran : ${primary.instruction}`);
 
   if (primary.requiredFields.length > 0) {
     lines.push("Informations requises avant de réserver :");
-    for (const field of primary.requiredFields) lines.push(`- ${FIELD_LABELS[field]}`);
+    // Une exigence libre (« nombre de chambres ») n'a pas de libellé au
+    // catalogue : on la rend TELLE QUELLE. C'est la personne qui l'a écrite
+    // qui sait ce qu'elle veut dire — la traduire serait la déformer.
+    for (const field of primary.requiredFields) lines.push(`- ${FIELD_LABELS[field] ?? field}`);
   } else {
     lines.push("Informations requises avant de réserver : aucune.");
   }
 
   if (fallbacks.length > 0) {
-    const chain = fallbacks.map((step, index) => `${index + 1}) ${describeGoalStep(step)}`).join(" ");
+    const chain = fallbacks
+      .map((step, index) => {
+        const rung = `${index + 1}) ${describeGoalStep(step)}`;
+        // La consigne suit SON cran, entre parenthèses : posée en bloc à la
+        // fin, on ne savait plus à quel repli elle s'appliquait.
+        return step.instruction ? `${rung} — ${step.instruction}` : rung;
+      })
+      .join(" ");
     lines.push(`En cas de refus mou, replis dans l'ordre : ${chain}`);
   } else {
     lines.push(
@@ -257,8 +270,12 @@ function buildApproachLayer(config: AssistantConfig): string {
       : "Tutoie la personne (« tu »).",
   );
   lines.push(`Persistance : ${PERSISTENCE_PHRASES[approach.persistence]}.`);
+  // Un plafond ABSOLU, pas « avant la première proposition » : l'ancienne
+  // formulation laissait l'assistant relancer un interrogatoire après un
+  // premier refus, comme si le compteur repartait de zéro.
   lines.push(
-    `Au plus ${approach.questionBudget} questions de qualification avant ta première proposition.`,
+    `Tu disposes de ${approach.questionBudget} questions de qualification EN TOUT, pour toute la conversation. ` +
+      `Sers-t'en pour obtenir les informations requises ; une fois ce nombre atteint, tu ne poses plus de question de qualification et tu proposes avec ce que tu as.`,
   );
   lines.push(`Jamais plus de ${approach.maxChars} caractères.`);
   lines.push(`Chaleur : ${styleLevelPhrase(approach.warmth)}.`);
@@ -268,7 +285,9 @@ function buildApproachLayer(config: AssistantConfig): string {
       ? "Émoji : aucun émoji."
       : approach.emoji === "rare"
         ? "Émoji : au plus un émoji, rarement."
-        : "Émoji : au plus un émoji par message, quand le ton s'y prête.",
+        : approach.emoji === "moderate"
+          ? "Émoji : au plus un émoji par message, quand le ton s'y prête."
+          : "Émoji : deux ou trois par message, le ton est franchement familier.",
   );
 
   return lines.join("\n");

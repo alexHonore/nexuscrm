@@ -130,12 +130,18 @@ export function defaultAppointmentTypeFor(type: GoalType): "meet" | "inperson" |
   return null;
 }
 
-/** Champs requis complétés des champs que le type impose (ordre conservé). */
+/**
+ * Champs requis complétés des champs que le type impose (ordre conservé).
+ *
+ * `string[]` et non `QualificationField[]` : la liste accepte des exigences
+ * libres (« nombre de chambres »). Les clés imposées par le type restent, elles,
+ * prises dans le vocabulaire connu.
+ */
 export function withMandatedFields(
   type: GoalType,
-  fields: readonly QualificationField[],
-): QualificationField[] {
-  const out = [...fields];
+  fields: readonly string[],
+): string[] {
+  const out: string[] = [...fields];
   for (const field of TYPE_MANDATED_FIELDS[type]) if (!out.includes(field)) out.push(field);
   return out;
 }
@@ -149,12 +155,31 @@ export const goalStepSchema = z
     appointmentType: z.enum(["meet", "inperson"]).nullable().default(null),
     /** Broker the meeting is booked with — binding remapped at import. */
     withUserId: z.uuid().nullable().default(null),
-    /** Qualification fields required before book_meeting accepts. */
-    requiredFields: z.array(z.enum(QUALIFICATION_FIELDS)).default([]),
+    /**
+     * Ce qu'il faut avoir recueilli avant que `book_meeting` accepte.
+     *
+     * Des chaînes LIBRES, pas une énumération fermée : les huit clés connues
+     * (`QUALIFICATION_FIELDS`) ont un libellé traduit et des cases à cocher,
+     * mais un courtier a le droit d'exiger « nombre de chambres » ou « budget
+     * de rénovation » sans qu'on ait prévu la clé. Une valeur inconnue est
+     * rendue telle quelle dans le prompt — c'est la personne qui l'a écrite
+     * qui sait ce qu'elle veut dire.
+     */
+    requiredFields: z.array(z.string().trim().min(1).max(80)).default([]),
     /** Real slots offered per ask (brief: 2-3). */
     slotOfferCount: z.number().int().min(1).max(3).default(2),
     /** Confirmation copy with {{variables}} — falls back to a built-in default. */
     confirmationTemplate: z.string().max(600).nullable().default(null),
+    /**
+     * Comment DIRE ce cran, en toutes lettres.
+     *
+     * L'objectif dit ce qu'on cherche à obtenir ; il ne dit pas comment le
+     * demander. « Propose l'appel comme un dépannage de quinze minutes, pas
+     * comme une rencontre » est le genre de consigne qui change tout et qui
+     * n'entrait dans aucun réglage — il fallait réécrire une couche entière
+     * du prompt pour l'exprimer.
+     */
+    instruction: z.string().trim().max(400).nullable().default(null),
   })
   // Normalisation à la frontière, PAS un rejet : des configurations déjà en
   // base (et des tests) décrivent un appel sans type de rendez-vous ou un
@@ -188,13 +213,20 @@ export const approachSchema = z.object({
   formality: z.enum(["vous", "tu"]).default("vous"),
   /** 1 = une seule demande, 5 = insiste. Pilote aussi l'échelle de relances. */
   persistence: z.number().int().min(1).max(5).default(3),
-  /** Questions de qualification avant la PREMIÈRE demande de rendez-vous. */
-  questionBudget: z.number().int().min(1).max(6).default(3),
+  /**
+   * Le nombre TOTAL de questions de qualification que l'assistant a le droit
+   * de poser — pas « avant la première demande », comme c'était le cas.
+   *
+   * L'ancienne lecture laissait l'assistant reprendre son interrogatoire après
+   * un premier refus : le budget était consommé, puis repartait de zéro. Le
+   * plafond est maintenant absolu — au-delà, il propose avec ce qu'il a.
+   */
+  questionBudget: z.number().int().min(1).max(10).default(3),
   /** Longueur maximale d'un SMS sortant (caractères). */
   maxChars: z.number().int().min(120).max(480).default(300),
   proactivity: z.number().int().min(1).max(5).default(3),
   warmth: z.number().int().min(1).max(5).default(3),
-  emoji: z.enum(["none", "rare", "moderate"]).default("none"),
+  emoji: z.enum(["none", "rare", "moderate", "lots"]).default("none"),
   /** Délai humanisé avant l'envoi d'une réponse de l'agent. */
   replySpeed: z.enum(["instant", "natural", "deliberate"]).default("natural"),
   /** Budget total de messages sortants de l'agent — au-delà : handoff (§12.5). */

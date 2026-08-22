@@ -2,6 +2,7 @@
 
 import { AlertTriangle, ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,7 @@ import {
   TYPE_MANDATED_FIELDS,
   defaultAppointmentTypeFor,
   withMandatedFields,
+  type AssistantConfig,
   type AssistantLanguage,
   type AssistantTool,
   type GoalStep,
@@ -43,6 +45,7 @@ import { Label } from "@/components/ui/label";
 import { signatureFor } from "@/lib/agent/compile";
 import { cn } from "@/lib/utils";
 import { FieldLabel, useParamDoc } from "./param-help";
+import { ObjectionPacksEditor } from "./objection-packs";
 import type { TabProps } from "./types";
 
 const NONE = "__none__";
@@ -368,6 +371,86 @@ export function IdentityTab({ config, update, data }: TabProps) {
 
 // ── Objectif ─────────────────────────────────────────────────────────────────
 
+/** Les huit clés du catalogue — tout le reste est une exigence libre. */
+const KNOWN_FIELDS = new Set<string>(QUALIFICATION_FIELDS);
+
+/**
+ * Les exigences que le catalogue n'a pas prévues.
+ *
+ * Elles vivent dans LA MÊME liste que les huit clés connues (`requiredFields`),
+ * pas dans un champ à part : pour l'outil de réservation, « type de projet » et
+ * « nombre de chambres » sont deux exigences de même nature, et les séparer
+ * aurait produit deux portes à franchir au lieu d'une.
+ */
+function CustomRequirements({
+  values,
+  onChange,
+}: {
+  values: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const t = useTranslations("assistants");
+  const [draft, setDraft] = useState("");
+
+  const add = () => {
+    const text = draft.trim();
+    // Pas de doublon, et jamais une clé du catalogue saisie à la main : elle
+    // apparaîtrait deux fois, une fois cochée et une fois en texte libre.
+    if (text === "" || values.includes(text) || KNOWN_FIELDS.has(text)) return;
+    onChange([...values, text]);
+    setDraft("");
+  };
+
+  return (
+    <div className="space-y-2">
+      {values.length > 0 ? (
+        <ul className="flex flex-wrap gap-2">
+          {values.map((value) => (
+            <li
+              key={value}
+              className="flex min-h-9 items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm"
+            >
+              <span className="break-words">{value}</span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 shrink-0 text-destructive"
+                aria-label={t("editor.goal.removeRequirement", { name: value })}
+                onClick={() => onChange(values.filter((v) => v !== value))}
+              >
+                <Trash2 />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="flex gap-2">
+        <Input
+          className="min-h-11 md:min-h-9"
+          maxLength={80}
+          placeholder={t("editor.goal.customRequirementPlaceholder")}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        <Button
+          variant="outline"
+          className="min-h-11 shrink-0 md:min-h-9"
+          disabled={draft.trim() === ""}
+          onClick={add}
+        >
+          <Plus /> {t("editor.goal.addRequirement")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function GoalStepFields({
   step,
   prefix,
@@ -494,31 +577,6 @@ function GoalStepFields({
           </div>
 
           <div className="space-y-1.5">
-            <FieldLabel path={`${prefix}.appointmentType`}>
-              {t("editor.goal.calendarSlot")}
-            </FieldLabel>
-            <Select
-              items={[
-                { value: "meet", label: t("editor.goal.calendarMeet") },
-                { value: "inperson", label: t("editor.goal.calendarInperson") },
-              ]}
-              value={step.appointmentType ?? "meet"}
-              onValueChange={(v) =>
-                onChange((s) => void (s.appointmentType = String(v) as "meet" | "inperson"))
-              }
-            >
-              <SelectTrigger className="min-h-11 w-full md:min-h-9">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="meet">{t("editor.goal.calendarMeet")}</SelectItem>
-                <SelectItem value="inperson">{t("editor.goal.calendarInperson")}</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">{t("editor.goal.calendarHint")}</p>
-          </div>
-
-          <div className="space-y-1.5">
             <FieldLabel path={`${prefix}.slotOfferCount`} htmlFor={`${prefix}-slots`} />
             <Input
               id={`${prefix}-slots`}
@@ -595,6 +653,35 @@ function GoalStepFields({
             );
           })}
         </div>
+
+        {/* Les huit clés connues ne couvrent pas tout : « nombre de chambres »,
+            « budget de rénovation », « adresse à évaluer » sont des exigences
+            légitimes qu'on ne pouvait pas exprimer. Une exigence libre part
+            telle quelle dans le prompt — c'est celui qui l'écrit qui sait ce
+            qu'elle veut dire. */}
+        <CustomRequirements
+          values={step.requiredFields.filter((f) => !KNOWN_FIELDS.has(f))}
+          onChange={(next) =>
+            onChange((s) => {
+              s.requiredFields = [...s.requiredFields.filter((f) => KNOWN_FIELDS.has(f)), ...next];
+            })
+          }
+        />
+      </div>
+
+      {/* L'objectif dit CE QU'ON CHERCHE ; il ne dit pas comment le demander.
+          « Propose l'appel comme un dépannage de quinze minutes » n'entrait
+          dans aucun réglage — il fallait réécrire une couche du prompt. */}
+      <div className="space-y-1.5 md:col-span-2">
+        <FieldLabel path={`${prefix}.instruction`} htmlFor={`${prefix}-instruction`} />
+        <Textarea
+          id={`${prefix}-instruction`}
+          rows={2}
+          maxLength={400}
+          placeholder={t("editor.goal.instructionPlaceholder")}
+          value={step.instruction ?? ""}
+          onChange={(e) => onChange((s) => void (s.instruction = e.target.value || null))}
+        />
       </div>
 
       <div className="space-y-1.5 md:col-span-2">
@@ -657,6 +744,7 @@ export function GoalTab({ config, update, data }: TabProps) {
         requiredFields: withMandatedFields("phone_call", []),
         slotOfferCount: 2,
         confirmationTemplate: null,
+        instruction: null,
       });
     });
 
@@ -745,7 +833,7 @@ export function ApproachTab({ config, update }: TabProps) {
         path="approach.questionBudget"
         value={config.approach.questionBudget}
         min={1}
-        max={6}
+        max={10}
         onChange={(v) => update((d) => void (d.approach.questionBudget = v))}
       />
       <NumberField
@@ -768,7 +856,7 @@ export function ApproachTab({ config, update }: TabProps) {
       <EnumField
         path="approach.emoji"
         value={config.approach.emoji}
-        onChange={(v) => update((d) => void (d.approach.emoji = v as "none" | "rare"))}
+        onChange={(v) => update((d) => void (d.approach.emoji = v as AssistantConfig["approach"]["emoji"]))}
       />
       <EnumField
         path="approach.replySpeed"
@@ -931,59 +1019,26 @@ function ExampleLine({ kind, text }: { kind: "fact" | "rule"; text: string }) {
 
 // ── Objections ───────────────────────────────────────────────────────────────
 
-/** Les paquets sont tous la même matière : ils portent le pictogramme de l'onglet. */
-const OBJECTIONS_LOOK = EDITOR_TAB_LOOK.objections;
-const OBJECTIONS_TINT = lookTint(OBJECTIONS_LOOK);
-
 export function ObjectionsTab({ config, update, data }: TabProps) {
   const t = useTranslations("assistants");
-  if (data.packs.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t("editor.objections.none")}</p>;
-  }
   return (
     <div className="space-y-3">
       <FieldLabel path="objectionPacks" />
-      <div className="grid gap-2 sm:grid-cols-2">
-        {data.packs.map((pack) => {
-          const checked = config.objectionPacks.includes(pack.id);
-          // Une grille de cases identiques : le pictogramme dit de quelle
-          // matière il s'agit, et la teinte des paquets retenus les fait
-          // ressortir sans qu'on relise chaque case — laquelle reste, elle,
-          // le seul indicateur d'état qui compte.
-          return (
-            <label
-              key={pack.id}
-              className="flex min-h-11 items-center gap-3 rounded-md border px-3 py-2 text-sm"
-              style={
-                checked
-                  ? {
-                      borderColor: OBJECTIONS_TINT.borderColor,
-                      backgroundColor: OBJECTIONS_TINT.backgroundColor,
-                    }
-                  : undefined
-              }
-            >
-              <Checkbox
-                checked={checked}
-                onCheckedChange={(next) =>
-                  update((d) => {
-                    d.objectionPacks = next
-                      ? [...d.objectionPacks, pack.id]
-                      : d.objectionPacks.filter((p) => p !== pack.id);
-                  })
-                }
-              />
-              <LookIcon look={OBJECTIONS_LOOK} size="sm" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate">{pack.label}</span>
-                <span className="text-xs text-muted-foreground">
-                  {t("editor.objections.items", { count: pack.itemCount })}
-                </span>
-              </span>
-            </label>
-          );
-        })}
-      </div>
+      <p className="text-sm text-muted-foreground">{t("editor.objections.intro")}</p>
+      {/* Cocher règle CET assistant ; ouvrir et corriger règle le paquet pour
+          tous ceux qui s'en servent. Les deux gestes vivent au même endroit
+          parce qu'on les enchaîne — mais ils s'enregistrent séparément. */}
+      <ObjectionPacksEditor
+        packs={data.packs}
+        selected={config.objectionPacks}
+        onToggle={(id, next) =>
+          update((d) => {
+            d.objectionPacks = next
+              ? [...d.objectionPacks, id]
+              : d.objectionPacks.filter((p) => p !== id);
+          })
+        }
+      />
     </div>
   );
 }

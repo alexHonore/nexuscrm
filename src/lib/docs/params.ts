@@ -249,7 +249,7 @@ const goalStepDocs = (prefix: string, label: string, section = "goal" as const):
     defaultValue: [],
     allowed: QUALIFICATION_FIELDS.map((value) => ({ value, labelFr: value })),
     whatFr:
-      "Les informations que l'assistant doit avoir recueillies AVANT de pouvoir réserver.",
+      "Les informations que l'assistant doit avoir recueillies AVANT de pouvoir réserver. Les huit clés ci-dessous sont proposées avec leur libellé ; tout autre texte est accepté tel quel (« nombre de chambres », « adresse à évaluer ») et part mot pour mot dans le prompt.",
     whyFr:
       "Sans cette barrière, un modèle réserve dès que la personne dit oui, et le courtier arrive en rencontre sans savoir si c'est un achat ou une vente.",
     effectFr:
@@ -257,7 +257,7 @@ const goalStepDocs = (prefix: string, label: string, section = "goal" as const):
     pitfallsFr:
       "Trop de champs requis : la conversation devient un formulaire et la personne décroche. Deux suffisent presque toujours. Symptôme : beaucoup de conversations longues sans rendez-vous.",
     related: ["approach.questionBudget", `${prefix}.type`],
-    example: ["project_type", "timing"],
+    example: ["project_type", "timing", "nombre de chambres"],
   }),
   doc({
     path: `${prefix}.slotOfferCount`,
@@ -279,6 +279,24 @@ const goalStepDocs = (prefix: string, label: string, section = "goal" as const):
       "Trois créneaux dans un SMS allongent le message et diluent la question.",
     related: ["approach.maxChars"],
     example: 2,
+  }),
+  doc({
+    path: `${prefix}.instruction`,
+    section,
+    labelFr: `${label} — comment le demander`,
+    type: "text",
+    required: false,
+    defaultValue: null,
+    whatFr:
+      "Une consigne libre sur la FAÇON de présenter ce cran : « propose l'appel comme un dépannage de quinze minutes, pas comme une rencontre ».",
+    whyFr:
+      "Le type d'objectif dit ce qu'on cherche à obtenir ; il ne dit rien de la manière de le demander. C'est pourtant la manière qui fait accepter ou refuser — et elle n'entrait dans aucun réglage : il fallait réécrire une couche entière du prompt.",
+    effectFr:
+      "Rendue en L2 juste après le cran qu'elle concerne — pas en bloc à la fin, sinon on ne sait plus à quel repli elle s'applique.",
+    pitfallsFr:
+      "Une consigne qui contredit un garde-fou (« promets une évaluation gratuite ») sera bloquée à l'envoi sans que le modèle comprenne pourquoi. Elle décrit un TON, pas une permission.",
+    related: [`${prefix}.type`, "layerOverrides.text"],
+    example: "Présente-le comme un appel court, sans engagement.",
   }),
   doc({
     path: `${prefix}.confirmationTemplate`,
@@ -380,12 +398,13 @@ const approach: ParamDoc[] = [
     required: true,
     defaultValue: 3,
     whatFr:
-      "Nombre de questions de qualification posées avant la première proposition de rendez-vous.",
+      "Le nombre TOTAL de questions de qualification que l'assistant a le droit de poser dans toute la conversation. Il doit obtenir les informations requises dans ce budget ; une fois épuisé, il propose avec ce qu'il a.",
     whyFr:
       "Chaque question est une occasion de ne pas répondre. Qualifier suffisamment sans transformer l'échange en interrogatoire est l'arbitrage central d'un assistant SMS.",
-    effectFr: "Consigne chiffrée en L3.",
+    effectFr:
+      "Consigne chiffrée en L3. C'est un plafond ABSOLU depuis le 2026-08-22 : la formulation précédente (« avant la première proposition ») laissait l'assistant relancer un interrogatoire après un premier refus, comme si le compteur repartait de zéro.",
     pitfallsFr:
-      "Au-delà de 3, le taux d'abandon en cours de conversation monte nettement. Symptôme : des fils qui s'arrêtent après la deuxième ou troisième question.",
+      "Au-delà de 3, le taux d'abandon en cours de conversation monte nettement. Symptôme : des fils qui s'arrêtent après la deuxième ou troisième question. Un budget plus petit que le nombre d'informations requises est contradictoire : l'assistant n'aura jamais le droit de réserver.",
     related: ["goal.primary.requiredFields", "approach.persistence"],
     example: 3,
   }),
@@ -449,13 +468,14 @@ const approach: ParamDoc[] = [
       { value: "none", labelFr: "Aucun — capacité maximale, coût minimal" },
       { value: "rare", labelFr: "Rare — au plus un, occasionnellement" },
       { value: "moderate", labelFr: "Modéré — un par message quand le ton s'y prête" },
+      { value: "lots", labelFr: "Beaucoup — deux ou trois par message, ton franchement familier" },
     ],
     whatFr: "Autorise ou non les émojis.",
     whyFr:
       "Au-delà du ton, un émoji fait basculer tout le message en encodage UCS-2 : la capacité tombe de 160 à 70 caractères et le coût d'envoi augmente.",
     effectFr: "Consigne en L3 ; l'analyseur de segments mesure l'effet réel.",
     pitfallsFr:
-      "Un seul émoji peut doubler le nombre de segments d'un message déjà long — un coût invisible jusqu'à la facture.",
+      "Un seul émoji peut doubler le nombre de segments d'un message déjà long — un coût invisible jusqu'à la facture. « Beaucoup » double donc le coût de presque tous les envois, et un ton très familier au premier contact fait signaler le message comme indésirable.",
     related: ["approach.maxChars"],
     example: "none",
   }),

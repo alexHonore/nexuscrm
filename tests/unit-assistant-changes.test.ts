@@ -80,7 +80,7 @@ describe("diffConfig", () => {
   it("un chemin de repli ajouté est signalé — immédiat ET en attente", () => {
     const after = base();
     after.goal.fallbacks = [
-      { type: "phone_call", durationMin: 15, appointmentType: "meet", withUserId: null, requiredFields: ["project_type"], slotOfferCount: 2, confirmationTemplate: null },
+      { type: "phone_call", durationMin: 15, appointmentType: "meet", withUserId: null, requiredFields: ["project_type"], slotOfferCount: 2, confirmationTemplate: null, instruction: null },
     ];
     const d = diffConfig(base(), after);
     expect(d.changed).toContain("goal.fallbacks");

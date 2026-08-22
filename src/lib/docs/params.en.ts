@@ -124,7 +124,7 @@ export const PARAM_DOCS_EN: Record<string, ParamDocText> = {
   },
   "goal.primary.requiredFields": {
     label: "Primary goal — required information",
-    what: "The information the assistant must have collected BEFORE it is allowed to book.",
+    what: "The information the assistant must have collected BEFORE it is allowed to book. The eight keys below are offered with a label; any other text is accepted as-is (\"number of bedrooms\", \"address to appraise\") and goes into the prompt word for word.",
     why: "Without that barrier, a model books as soon as the person says yes, and the broker walks into the meeting not knowing whether it is a purchase or a sale.",
     effect: "The booking tool REFUSES as long as a field is missing and returns an error the model has to read: it then asks the question instead of booking.",
     pitfalls: "Too many required fields: the conversation turns into a form and the person drops off. Two is almost always enough. Symptom: plenty of long conversations with no appointment.",
@@ -150,6 +150,13 @@ export const PARAM_DOCS_EN: Record<string, ParamDocText> = {
       "2": "2 — recommended",
       "3": "3 — maximum",
     },
+  },
+  "goal.primary.instruction": {
+    label: "Primary goal — how to ask for it",
+    what: "A free instruction on HOW to present this rung: \"offer the call as a quick fifteen-minute check-in, not as a meeting\".",
+    why: "The goal type says what you are trying to obtain; it says nothing about how to ask for it. Yet the manner is what gets a yes or a no — and it fitted in no setting: you had to rewrite a whole prompt layer to express it.",
+    effect: "Rendered in L2 right after the rung it belongs to — not in a block at the end, where you can no longer tell which fallback it applies to.",
+    pitfalls: "An instruction that contradicts a guardrail (\"promise a free valuation\") will be blocked on send without the model understanding why. It describes a TONE, not a permission.",
   },
   "goal.primary.confirmationTemplate": {
     label: "Primary goal — confirmation message",
@@ -209,7 +216,7 @@ export const PARAM_DOCS_EN: Record<string, ParamDocText> = {
   },
   "goal.fallbacks[].requiredFields": {
     label: "Fallback — required information",
-    what: "The information the assistant must have collected BEFORE it is allowed to book.",
+    what: "The information the assistant must have collected BEFORE it is allowed to book. The eight keys below are offered with a label; any other text is accepted as-is (\"number of bedrooms\", \"address to appraise\") and goes into the prompt word for word.",
     why: "Without that barrier, a model books as soon as the person says yes, and the broker walks into the meeting not knowing whether it is a purchase or a sale.",
     effect: "The booking tool REFUSES as long as a field is missing and returns an error the model has to read: it then asks the question instead of booking.",
     pitfalls: "Too many required fields: the conversation turns into a form and the person drops off. Two is almost always enough. Symptom: plenty of long conversations with no appointment.",
@@ -235,6 +242,13 @@ export const PARAM_DOCS_EN: Record<string, ParamDocText> = {
       "2": "2 — recommended",
       "3": "3 — maximum",
     },
+  },
+  "goal.fallbacks[].instruction": {
+    label: "Fallback — how to ask for it",
+    what: "A free instruction on HOW to present this rung: \"offer the call as a quick fifteen-minute check-in, not as a meeting\".",
+    why: "The goal type says what you are trying to obtain; it says nothing about how to ask for it. Yet the manner is what gets a yes or a no — and it fitted in no setting: you had to rewrite a whole prompt layer to express it.",
+    effect: "Rendered in L2 right after the rung it belongs to — not in a block at the end, where you can no longer tell which fallback it applies to.",
+    pitfalls: "An instruction that contradicts a guardrail (\"promise a free valuation\") will be blocked on send without the model understanding why. It describes a TONE, not a permission.",
   },
   "goal.fallbacks[].confirmationTemplate": {
     label: "Fallback — confirmation message",
@@ -270,9 +284,9 @@ export const PARAM_DOCS_EN: Record<string, ParamDocText> = {
   },
   "approach.questionBudget": {
     label: "Question budget",
-    what: "The number of qualification questions asked before the first appointment offer.",
+    what: "The TOTAL number of qualification questions the assistant may ask in the whole conversation. It has to obtain the required information within that budget; once spent, it offers with what it has.",
     why: "Every question is one more chance for the person not to answer. Qualifying enough without turning the exchange into an interrogation is the central trade-off of an SMS assistant.",
-    effect: "A numeric instruction in L3.",
+    effect: "A numeric instruction in L3. It is an ABSOLUTE ceiling since 2026-08-22: the previous wording (\"before the first offer\") let the assistant restart an interrogation after a first refusal, as if the counter reset.",
     pitfalls: "Beyond 3, the mid-conversation drop-off rate rises noticeably. Symptom: threads that stop after the second or third question.",
   },
   "approach.maxChars": {
@@ -301,11 +315,12 @@ export const PARAM_DOCS_EN: Record<string, ParamDocText> = {
     what: "Whether emoji are allowed.",
     why: "Beyond tone, one emoji flips the whole message into UCS-2 encoding: capacity drops from 160 to 70 characters and the sending cost goes up.",
     effect: "An instruction in L3; the segment analyser measures the real effect.",
-    pitfalls: "A single emoji can double the segment count of an already long message — a cost that stays invisible until the bill.",
+    pitfalls: "A single emoji can double the segment count of an already long message — a cost that stays invisible until the bill. \"A lot\" therefore doubles the cost of nearly every send, and a very casual tone on first contact gets the message reported as spam.",
     allowed: {
       "none": "None — maximum capacity, minimum cost",
       "rare": "Rare — at most one, occasionally",
       "moderate": "Moderate — one per message when the tone calls for it",
+      "lots": "A lot — two or three per message, decidedly casual",
     },
   },
   "approach.replySpeed": {

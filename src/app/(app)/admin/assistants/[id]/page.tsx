@@ -9,6 +9,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { assistants, guardrailRules, guardrailRuns, objectionPacks } from "@/db/schema-sms";
 import { requireAdmin } from "@/lib/auth/guards";
+import { objectionItemSchema } from "@/lib/guardrails/types";
 import { assistantRowToConfig } from "@/lib/assistants/schema";
 import { getParamDocs } from "@/lib/docs-server";
 import { docLocale } from "@/lib/docs/locale";
@@ -101,7 +102,9 @@ export default async function AssistantEditorPage({
     packs: packRows.map((p) => ({
       id: p.id,
       label: p.label,
-      itemCount: Array.isArray(p.items) ? p.items.length : 0,
+      language: p.language,
+      isBuiltin: p.isBuiltin,
+      items: objectionItemSchema.array().catch([]).parse(p.items),
     })),
     coreRules: coreRuleRows.map(toRule),
     ownRules: ownRuleRows.map(toRule),

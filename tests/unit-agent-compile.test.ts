@@ -474,3 +474,69 @@ describe("DEFAULT_TURN_INSTRUCTIONS", () => {
     }
   });
 });
+
+describe("compileAssistantPrompt — objectif et approche, révision 2026-08-22", () => {
+  it("L2 : la consigne d'un cran suit SON cran", () => {
+    // Posée en bloc à la fin, on ne savait plus à quel repli elle s'applique.
+    const config = buildConfig({
+      goal: {
+        primary: { type: "video_meeting", durationMin: 30, instruction: "Reste bref." },
+        fallbacks: [
+          { type: "phone_call", durationMin: 15, instruction: "Propose-le comme un dépannage." },
+          { type: "collect_email" },
+        ],
+      },
+    });
+    const l2 = compileAssistantPrompt(config, core, packs, rules).layers.find((l) => l.id === "L2")!
+      .text;
+
+    expect(l2).toContain("Pour ce cran : Reste bref.");
+    expect(l2).toMatch(/1\).*— Propose-le comme un dépannage\./);
+    // Le cran sans consigne n'en invente pas une.
+    expect(l2).not.toMatch(/2\).*—/);
+  });
+
+  it("L2 : une exigence LIBRE part telle quelle, sans traduction", () => {
+    const config = buildConfig({
+      goal: {
+        primary: {
+          type: "video_meeting",
+          requiredFields: ["project_type", "nombre de chambres"],
+        },
+        fallbacks: [],
+      },
+    });
+    const l2 = compileAssistantPrompt(config, core, packs, rules).layers.find((l) => l.id === "L2")!
+      .text;
+
+    expect(l2).toContain("- type de projet");
+    // C'est la personne qui l'a écrite qui sait ce qu'elle veut dire.
+    expect(l2).toContain("- nombre de chambres");
+  });
+
+  it("L3 : le budget de questions est un plafond ABSOLU, pas « avant la première demande »", () => {
+    // L'ancienne formulation laissait l'assistant relancer un interrogatoire
+    // après un premier refus, comme si le compteur repartait de zéro.
+    const l3 = compileAssistantPrompt(
+      buildConfig({ approach: { questionBudget: 4 } }),
+      core,
+      packs,
+      rules,
+    ).layers.find((l) => l.id === "L3")!.text;
+
+    expect(l3).toContain("4 questions de qualification EN TOUT");
+    expect(l3).not.toContain("avant ta première proposition");
+  });
+
+  it("L3 : « beaucoup » d'émojis est un quatrième cran, distinct de « modéré »", () => {
+    const phrase = (emoji: string) =>
+      compileAssistantPrompt(buildConfig({ approach: { emoji } }), core, packs, rules)
+        .layers.find((l) => l.id === "L3")!
+        .text.split("\n")
+        .find((line) => line.startsWith("Émoji :"));
+
+    expect(phrase("moderate")).not.toBe(phrase("lots"));
+    expect(phrase("lots")).toMatch(/deux ou trois/);
+    expect(phrase("none")).toBe("Émoji : aucun émoji.");
+  });
+});

@@ -24,7 +24,7 @@ vi.mock("next/navigation", () => ({
 const { AssistantEditor } = await import("@/components/admin/assistant-editor");
 const { AssistantsListClient } = await import("@/components/admin/assistants-list-client");
 const { ParamDocsProvider } = await import("@/components/admin/assistant-editor/param-help");
-const { ApproachTab, KnowledgeTab, ToolsTab } = await import(
+const { ApproachTab, KnowledgeTab, ObjectionsTab, ToolsTab } = await import(
   "@/components/admin/assistant-editor/tabs-basic"
 );
 const { PromptTab, TestTab } = await import("@/components/admin/assistant-editor/tabs-advanced");
@@ -69,7 +69,23 @@ const DATA: AssistantEditorData = {
   users: [
     { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Alex-Honoré", email: "a@nexus.test", role: "admin" },
   ],
-  packs: [{ id: "buyer_fr", label: "Objections acheteur", itemCount: 4 }],
+  packs: [
+    {
+      id: "buyer_fr",
+      label: "Objections acheteur",
+      language: "fr-CA",
+      isBuiltin: true,
+      items: [
+        {
+          key: "deja_courtier",
+          triggerHint: "j'ai déjà un courtier",
+          acknowledge: "c'est correct de commencer par regarder",
+          reframe: "un deuxième avis ne vous engage à rien",
+          ask: "quinze minutes cette semaine?",
+        },
+      ],
+    },
+  ],
   coreRules: [
     {
       id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -381,23 +397,41 @@ describe("onglets rendus isolément", () => {
     expect(renderTab(createElement(GoalTab, qualify))).toContain("Ne propose JAMAIS");
   });
 
-  it("Objectif : « où la rencontre a lieu » n'apparaît QUE si l'objectif réserve", () => {
-    const booking = renderTab(createElement(GoalTab, tabProps));
-    expect(booking).toContain("Où la rencontre a lieu");
+  it("Objectif : on ne demande PLUS où la rencontre a lieu — le type le dit déjà", () => {
+    // « Rencontre vidéo » et « Rencontre en personne » sont déjà la réponse à
+    // « où ». Poser la question à côté du type, c'était demander deux fois la
+    // même chose et permettre de se contredire. La valeur reste dérivée du
+    // type dans le schéma ; c'est le CHAMP qui disparaît.
+    const html = renderTab(createElement(GoalTab, tabProps));
+    expect(html).not.toContain("Où la rencontre a lieu");
+    expect(html).not.toContain("En visioconférence");
+  });
 
-    // Sans repli : un repli « appel téléphonique » réserve, lui, et ferait
-    // légitimement réapparaître le champ.
-    const noBooking = {
+  it("Objectif : une exigence LIBRE s'ajoute à côté des huit connues", () => {
+    // Les huit clés ne couvrent pas « nombre de chambres ».
+    const custom = {
       ...tabProps,
       config: {
         ...CONFIG,
-        goal: { primary: { ...CONFIG.goal.primary, type: "qualify_only" as const }, fallbacks: [] },
+        goal: {
+          ...CONFIG.goal,
+          primary: {
+            ...CONFIG.goal.primary,
+            requiredFields: ["project_type", "nombre de chambres"],
+          },
+        },
       },
     };
-    const html = renderTab(createElement(GoalTab, noBooking));
-    // C'était la confusion : « type » et « type de rendez-vous » côte à côte
-    // sur un objectif qui ne réserve rien.
-    expect(html).not.toContain("Où la rencontre a lieu");
+    const html = renderTab(createElement(GoalTab, custom));
+    expect(html).toContain("nombre de chambres");
+    // …et le champ pour en ajouter une est là.
+    expect(html).toContain("Autre information à obtenir");
+  });
+
+  it("Objectif : chaque cran porte sa consigne de formulation", () => {
+    // L'objectif dit CE QU'ON CHERCHE ; la consigne dit COMMENT le demander.
+    const html = renderTab(createElement(GoalTab, tabProps));
+    expect(html).toContain("présente-le comme un appel court");
   });
 
   it("Identité : choisir un compte remplit le nom, et l'aperçu de signature se voit", () => {
@@ -482,5 +516,33 @@ describe("onglets rendus isolément", () => {
     );
     expect(fresh).not.toContain("Résultat périmé");
     expect(fresh).toContain("Dernière exécution");
+  });
+});
+
+describe("paquets d'objections — un éditeur, pas des cases", () => {
+  it("ouvre le contenu : les quatre temps d'une objection sont éditables", () => {
+    // C'était le manque : on cochait un paquet écrit par quelqu'un d'autre
+    // sans pouvoir en lire une ligne, alors qu'une objection est ce qu'un
+    // courtier reformule sans arrêt.
+    const html = renderTab(createElement(ObjectionsTab, tabProps));
+    expect(html).toContain("Objections acheteur");
+    // La case reste : elle décide de ce que CET assistant mobilise.
+    expect(html).toContain('type="checkbox"');
+    // …et le paquet s'ouvre pour être corrigé.
+    expect(html).toContain("Nouveau paquet");
+    expect(html).toContain("1 objection");
+  });
+
+  it("dit que le contenu est PARTAGÉ — cocher et corriger ne font pas la même chose", () => {
+    // Corriger un paquet change ce que répondent tous les assistants qui
+    // l'utilisent ; le laisser croire local serait le piège.
+    const html = renderTab(createElement(ObjectionsTab, tabProps));
+    expect(html).toContain("partagé");
+  });
+
+  it("aucune clé de traduction ne fuit", () => {
+    const html = renderTab(createElement(ObjectionsTab, tabProps));
+    expect(html).not.toContain("editor.objections.");
+    expect(html).not.toContain("MISSING_MESSAGE");
   });
 });
