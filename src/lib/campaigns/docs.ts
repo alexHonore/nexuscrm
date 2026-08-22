@@ -207,13 +207,6 @@ export const CAMPAIGN_FIELD_DOCS: CampaignFieldDoc[] = [
     whatFr: "Date après laquelle la campagne n'inscrit plus personne. Vide = sans fin.",
     whyFr: "Les inscriptions déjà en cours terminent leur échelle ; seules les nouvelles s'arrêtent.",
   },
-  {
-    path: "requireConsent",
-    labelFr: "Consentement requis",
-    whatFr: "Oui par défaut : n'écrire qu'aux contacts ayant un consentement SMS valide au dossier.",
-    whyFr: "Loi canadienne anti-pourriel. Décocher n'est défendable que pour une campagne dont le texte est lui-même une demande de consentement.",
-    pitfallsFr: "Décocher ne contourne pas les désabonnements : un numéro sous « STOP » ne reçoit jamais rien.",
-  },
 ];
 
 export function getCampaignFieldDoc(path: string): CampaignFieldDoc | undefined {

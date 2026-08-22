@@ -2,8 +2,19 @@
 
 import { AlertTriangle, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { toast } from "sonner";
+import {
+  CAMPAIGN_RUNG_LOOK,
+  CAMPAIGN_STAT_LOOK,
+  CAMPAIGN_TAB_LOOK,
+  ENROLLMENT_STATUS_LOOK,
+  LookGlyph,
+  LookIcon,
+  lookTint,
+  type Look,
+} from "@/components/look";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,6 +49,46 @@ import type { CampaignTabProps } from "./types";
 const NONE = "__none__";
 
 /**
+ * Pastille teintée aux couleurs d'un concept.
+ *
+ * Le motif — pictogramme, libellé, teinte du vocabulaire — revient à chaque
+ * état et à chaque mesure de cet éditeur ; groupé ici, il ne peut pas dériver
+ * d'un écran à l'autre, et la règle tient au même endroit : le libellé RESTE,
+ * la couleur ne le remplace jamais.
+ *
+ * La teinte prend le FOND et la BORDURE, jamais le texte : un « En pause »
+ * ambre de douze pixels sur fond clair ne se lit pas. Le pictogramme porte la
+ * couleur, le libellé garde son contraste — même règle que la liste des
+ * assistants, où la teinte a déjà quitté le texte pour cette raison.
+ */
+function LookBadge({
+  look,
+  filled = false,
+  className,
+  children,
+}: {
+  look: Look;
+  filled?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  const tint = lookTint(look);
+  return (
+    <Badge
+      variant="outline"
+      className={cn("gap-1 pl-1.5 font-normal", className)}
+      style={{
+        borderColor: tint.borderColor,
+        backgroundColor: filled ? tint.backgroundColor : undefined,
+      }}
+    >
+      <LookGlyph look={look} />
+      {children}
+    </Badge>
+  );
+}
+
+/**
  * Motifs de fin d'inscription qui ont une étiquette. Tout autre motif (une
  * valeur écrite par un module futur) s'affiche tel quel plutôt que de faire
  * fuir une clé i18n à l'écran.
@@ -48,7 +99,6 @@ const END_REASONS = new Set([
   "opted_out",
   "ladder_exhausted",
   "suppressed",
-  "consent_expired",
   "do_not_call",
   "live_conversation",
   "client_deleted",
@@ -58,6 +108,7 @@ const END_REASONS = new Set([
 /** Cases à cocher d'une liste d'identifiants — le motif se répète 4 fois. */
 function MultiSelect<T extends string | number>({
   label,
+  icon,
   hint,
   options,
   selected,
@@ -65,6 +116,8 @@ function MultiSelect<T extends string | number>({
   emptyLabel,
 }: {
   label: string;
+  /** Pictogramme du concept que la liste filtre — il DOUBLE l'étiquette. */
+  icon?: ReactNode;
   hint?: string;
   options: { value: T; label: string }[];
   selected: T[];
@@ -73,7 +126,10 @@ function MultiSelect<T extends string | number>({
 }) {
   return (
     <div className="space-y-2">
-      <Label>{label}</Label>
+      <Label>
+        {icon}
+        {label}
+      </Label>
       {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
       {options.length === 0 ? (
         <p className="text-sm text-muted-foreground">{emptyLabel}</p>
@@ -240,24 +296,6 @@ export function BasicsTab({ config, update, data }: CampaignTabProps) {
           className="min-h-11 md:min-h-9"
         />
       </div>
-
-      <div className="space-y-2 rounded-md border p-3 md:col-span-2">
-        <div className="flex items-center justify-between gap-3">
-          <Label htmlFor="c-consent">{t("editor.basics.requireConsent")}</Label>
-          <Switch
-            id="c-consent"
-            checked={config.requireConsent}
-            onCheckedChange={(next) => update((d) => void (d.requireConsent = next))}
-          />
-        </div>
-        <p className="text-xs text-muted-foreground">{t("editor.basics.requireConsentHint")}</p>
-        {!config.requireConsent ? (
-          <Alert variant="destructive">
-            <AlertTriangle />
-            <AlertDescription>{t("editor.basics.requireConsentHint")}</AlertDescription>
-          </Alert>
-        ) : null}
-      </div>
     </div>
   );
 }
@@ -271,7 +309,10 @@ export function TriggerTab({ config, update, data }: CampaignTabProps) {
   return (
     <div className="space-y-4">
       <div className="space-y-1.5">
-        <Label>{t("editor.trigger.kind")}</Label>
+        <Label>
+          <LookGlyph look={CAMPAIGN_TAB_LOOK.trigger} className="size-3.5" />
+          {t("editor.trigger.kind")}
+        </Label>
         {/* Quatre tuiles plutôt qu'une liste déroulante : elle cachait trois
             options sur quatre et n'expliquait le choix qu'une fois fait. Même
             pastille et même couleur qu'à la création. */}
@@ -322,6 +363,9 @@ export function TriggerTab({ config, update, data }: CampaignTabProps) {
       {config.trigger.kind === "lead_created" ? (
         <MultiSelect
           label={t("editor.trigger.sources")}
+          // Le réglage appartient au déclencheur choisi : la même pastille le
+          // rattache à sa tuile, sinon la liste flotte sans propriétaire.
+          icon={<TriggerIcon kind="lead_created" size="sm" />}
           options={data.sources.map((s) => ({ value: s.id, label: s.name }))}
           selected={config.trigger.sourceIds}
           emptyLabel={t("editor.trigger.allSources")}
@@ -336,6 +380,7 @@ export function TriggerTab({ config, update, data }: CampaignTabProps) {
       {config.trigger.kind === "category_changed" ? (
         <MultiSelect
           label={t("editor.trigger.categories")}
+          icon={<TriggerIcon kind="category_changed" size="sm" />}
           options={data.categories.map((c) => ({ value: c.id, label: c.name }))}
           selected={config.trigger.toCategoryIds}
           emptyLabel={t("editor.trigger.allCategories")}
@@ -349,7 +394,10 @@ export function TriggerTab({ config, update, data }: CampaignTabProps) {
 
       {config.trigger.kind === "scheduled" ? (
         <div className="space-y-1.5">
-          <Label htmlFor="c-every">{t("editor.trigger.everyHours")}</Label>
+          <Label htmlFor="c-every">
+            <TriggerIcon kind="scheduled" size="sm" />
+            {t("editor.trigger.everyHours")}
+          </Label>
           <Input
             id="c-every"
             type="number"
@@ -400,7 +448,8 @@ export function AudienceTab({ config, update, data }: CampaignTabProps) {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
-        <p className="text-sm">
+        <p className="flex min-w-0 items-center gap-2 text-sm">
+          <LookIcon look={CAMPAIGN_TAB_LOOK.audience} size="sm" />
           {loading
             ? t("editor.audience.previewing")
             : count === null
@@ -538,7 +587,16 @@ export function AudienceTab({ config, update, data }: CampaignTabProps) {
 
 export function LadderTab({ config, update }: CampaignTabProps) {
   const t = useTranslations("campaigns");
-  const plan = planLadder(config.ladder, new Date());
+  const now = new Date();
+  const plan = planLadder(config.ladder, now);
+  // Le délai affiché en tête de barreau est CUMULÉ depuis l'inscription : le
+  // champ, lui, se saisit relativement au barreau précédent. C'est le cumul
+  // qu'on cherche en parcourant l'échelle — « ce message part le jour 5 ».
+  // Même arrondi qu'au résumé de création, pour que les deux écrans concordent.
+  const dayOf = plan.map((touch) =>
+    Math.round((touch.dueAt.getTime() - now.getTime()) / 86_400_000),
+  );
+  const when = CAMPAIGN_RUNG_LOOK.when;
 
   return (
     <div className="space-y-4">
@@ -551,92 +609,139 @@ export function LadderTab({ config, update }: CampaignTabProps) {
         </Alert>
       ) : null}
 
-      {config.ladder.map((step, i) => {
-        const analysis = analyzeSms(step.body ?? "");
-        return (
-          <div key={i} className="space-y-3 rounded-lg border p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Badge variant={i === 0 ? "default" : "secondary"}>
-                {i === 0 ? t("editor.ladder.opener") : t("editor.ladder.step", { n: i + 1 })}
-              </Badge>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="min-h-11 text-destructive md:min-h-9"
-                onClick={() => update((d) => void d.ladder.splice(i, 1))}
-              >
-                <Trash2 /> {t("editor.ladder.remove")}
-              </Button>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor={`l-delay-${i}`}>{t("editor.ladder.delayHours")}</Label>
-                <Input
-                  id={`l-delay-${i}`}
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  value={step.delayHours}
-                  onChange={(e) =>
-                    update((d) => void (d.ladder[i].delayHours = Number(e.target.value)))
-                  }
-                  className="min-h-11 md:min-h-9"
-                />
-                <p className="text-xs text-muted-foreground">
-                  {i === 0
-                    ? t("editor.ladder.delayFromEnroll")
-                    : t("editor.ladder.delayFromPrevious")}
-                  {" · "}
-                  {t("editor.ladder.schedule", {
-                    when: plan[i]?.dueAt.toLocaleString("fr-CA", { timeZone: "America/Toronto" }) ?? "",
-                  })}
-                </p>
+      {/* Une SÉQUENCE, pas une pile de cartes identiques. Le rang tient dans
+          la pastille, un fil relie les barreaux entre eux, et le départ cumulé
+          se lit en tête : c'est ce couple rang/délai qu'on parcourt du regard
+          avant de lire un seul mot de message. */}
+      {/* Aucun espacement entre les <li> : le fil du rail traverse d'un
+          barreau à l'autre, une gouttière le couperait. */}
+      <ol className="space-y-0">
+        {config.ladder.map((step, i) => {
+          const analysis = analyzeSms(step.body ?? "");
+          const last = i === config.ladder.length - 1;
+          return (
+            <li key={i} className="flex gap-3">
+              {/* Le rail double le badge « Barreau n » : muet pour un lecteur
+                  d'écran, qui entendrait sinon un « 1 » sans contexte.
+                  Exactement le rail du résumé de création — même pastille,
+                  même fil, même teinte de thème : c'est la même échelle vue
+                  deux fois, et le bleu clair du vocabulaire ne se lirait pas à
+                  cette taille. */}
+              <div aria-hidden className="flex w-8 shrink-0 flex-col items-center">
+                <span className="flex size-8 items-center justify-center rounded-full bg-primary/15 text-sm font-semibold text-primary">
+                  {i + 1}
+                </span>
+                {last ? null : <span className="my-1 w-px flex-1 rounded-full bg-primary/25" />}
               </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor={`l-label-${i}`}>{t("editor.ladder.label")}</Label>
-                <Input
-                  id={`l-label-${i}`}
-                  value={step.label}
-                  onChange={(e) => update((d) => void (d.ladder[i].label = e.target.value))}
-                  className="min-h-11 md:min-h-9"
-                />
-              </div>
-            </div>
+              <div className="mb-4 min-w-0 flex-1 space-y-3 rounded-lg border p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={i === 0 ? "default" : "secondary"}>
+                    {i === 0 ? t("editor.ladder.opener") : t("editor.ladder.step", { n: i + 1 })}
+                  </Badge>
+                  {/* Le départ cumulé, dans les mots déjà employés au résumé de
+                      création : l'échelle se lit pareil des deux côtés. */}
+                  <LookBadge look={when}>
+                    {dayOf[i] === 0
+                      ? t("create.summary.now")
+                      : t("create.summary.dayN", { days: dayOf[i] })}
+                  </LookBadge>
+                  <span className="flex-1" />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="min-h-11 text-destructive md:min-h-9"
+                    onClick={() => update((d) => void d.ladder.splice(i, 1))}
+                  >
+                    <Trash2 /> {t("editor.ladder.remove")}
+                  </Button>
+                </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor={`l-body-${i}`}>{t("editor.ladder.body")}</Label>
-              <Textarea
-                id={`l-body-${i}`}
-                rows={3}
-                placeholder={t("editor.ladder.bodyPlaceholder")}
-                value={step.body ?? ""}
-                // Des espaces seuls ne sont pas un message : c'est « l'assistant
-                // rédige », comme le schéma serveur le normalise.
-                onChange={(e) =>
-                  update(
-                    (d) =>
-                      void (d.ladder[i].body = e.target.value.trim() === "" ? null : e.target.value),
-                  )
-                }
-              />
-              {step.body ? (
-                // Le nombre de segments décide du coût : un accent hors table
-                // GSM fait tomber la capacité de 160 à 70 caractères.
-                <p className="text-xs text-muted-foreground">
-                  {t("editor.ladder.segments", {
-                    chars: analysis.units,
-                    segments: analysis.segments,
-                  })}
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">{t("editor.ladder.bodyAgent")}</p>
-              )}
-            </div>
-          </div>
-        );
-      })}
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`l-delay-${i}`}>
+                      <LookGlyph look={when} className="size-3.5" />
+                      {t("editor.ladder.delayHours")}
+                    </Label>
+                    <Input
+                      id={`l-delay-${i}`}
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      value={step.delayHours}
+                      onChange={(e) =>
+                        update((d) => void (d.ladder[i].delayHours = Number(e.target.value)))
+                      }
+                      className="min-h-11 md:min-h-9"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {i === 0
+                        ? t("editor.ladder.delayFromEnroll")
+                        : t("editor.ladder.delayFromPrevious")}
+                      {" · "}
+                      {t("editor.ladder.schedule", {
+                        when: plan[i]?.dueAt.toLocaleString("fr-CA", { timeZone: "America/Toronto" }) ?? "",
+                      })}
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`l-label-${i}`}>{t("editor.ladder.label")}</Label>
+                    <Input
+                      id={`l-label-${i}`}
+                      value={step.label}
+                      onChange={(e) => update((d) => void (d.ladder[i].label = e.target.value))}
+                      className="min-h-11 md:min-h-9"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  {/* Un barreau au message vide n'est pas muet : c'est l'assistant
+                      qui rédigera. Deux pictogrammes différents, parce que ce
+                      n'est pas la même chose et que ça ne se voyait nulle part. */}
+                  <Label htmlFor={`l-body-${i}`}>
+                    <LookGlyph
+                      look={step.body ? CAMPAIGN_RUNG_LOOK.written : CAMPAIGN_RUNG_LOOK.byAssistant}
+                      className="size-3.5"
+                    />
+                    {t("editor.ladder.body")}
+                  </Label>
+                  <Textarea
+                    id={`l-body-${i}`}
+                    rows={3}
+                    placeholder={t("editor.ladder.bodyPlaceholder")}
+                    value={step.body ?? ""}
+                    // Des espaces seuls ne sont pas un message : c'est « l'assistant
+                    // rédige », comme le schéma serveur le normalise.
+                    onChange={(e) =>
+                      update(
+                        (d) =>
+                          void (d.ladder[i].body = e.target.value.trim() === "" ? null : e.target.value),
+                      )
+                    }
+                  />
+                  {step.body ? (
+                    // Le nombre de segments décide du coût : un accent hors table
+                    // GSM fait tomber la capacité de 160 à 70 caractères.
+                    <p className="text-xs text-muted-foreground">
+                      {t("editor.ladder.segments", {
+                        chars: analysis.units,
+                        segments: analysis.segments,
+                      })}
+                    </p>
+                  ) : (
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <LookGlyph look={CAMPAIGN_RUNG_LOOK.byAssistant} className="size-3.5" />
+                      {t("editor.ladder.bodyAgent")}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
 
       <Button
         variant="outline"
@@ -659,6 +764,7 @@ export function LadderTab({ config, update }: CampaignTabProps) {
 export function VariantsTab({ config, update, data }: CampaignTabProps) {
   const t = useTranslations("campaigns");
   const totalWeight = config.variants.reduce((sum, v) => sum + v.weight, 0);
+  const split = CAMPAIGN_TAB_LOOK.variants;
 
   return (
     <div className="space-y-4">
@@ -695,13 +801,15 @@ export function VariantsTab({ config, update, data }: CampaignTabProps) {
                 className="min-h-11 md:min-h-9 md:w-28"
               />
             </div>
-            <p className="pb-2 text-sm text-muted-foreground">
-              {totalWeight > 0
-                ? t("editor.variants.share", {
-                    percent: Math.round((variant.weight / totalWeight) * 100),
-                  })
-                : null}
-            </p>
+            {/* La part est le résultat du poids, pas un réglage : en pastille
+                teintée, elle se distingue du champ qu'on vient de saisir. */}
+            {totalWeight > 0 ? (
+              <LookBadge look={split} className="mb-2">
+                {t("editor.variants.share", {
+                  percent: Math.round((variant.weight / totalWeight) * 100),
+                })}
+              </LookBadge>
+            ) : null}
             <span className="flex-1" />
             <Button
               variant="ghost"
@@ -740,14 +848,25 @@ export function VariantsTab({ config, update, data }: CampaignTabProps) {
 
       {data.variantStats.length > 0 ? (
         <section className="space-y-2">
-          <h3 className="font-medium">{t("editor.variants.results")}</h3>
+          <h3 className="flex items-center gap-1.5 font-medium">
+            <LookGlyph look={split} />
+            {t("editor.variants.results")}
+          </h3>
+          {/* Les MÊMES pictogrammes que les compteurs de la liste : trois
+              colonnes de chiffres se distinguent par leur en-tête, pas par
+              leur position. */}
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>{t("editor.variants.key")}</TableHead>
-                <TableHead>{t("list.stats.enrolled", { count: "" }).trim()}</TableHead>
-                <TableHead>{t("list.stats.replied", { count: "" }).trim()}</TableHead>
-                <TableHead>{t("list.stats.stopped", { count: "" }).trim()}</TableHead>
+                {(["enrolled", "replied", "stopped"] as const).map((key) => (
+                  <TableHead key={key}>
+                    <span className="flex items-center gap-1.5">
+                      <LookGlyph look={CAMPAIGN_STAT_LOOK[key]} className="size-3.5" />
+                      {t(`list.stats.${key}`, { count: "" }).trim()}
+                    </span>
+                  </TableHead>
+                ))}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -810,9 +929,18 @@ export function EnrollmentsTab({
                   <TableCell className="max-w-40 truncate">{row.clientName}</TableCell>
                   <TableCell>{row.variant || "—"}</TableCell>
                   <TableCell>
-                    <Badge variant={row.status === "stopped" ? "destructive" : "secondary"}>
+                    {/* « En cours » et « Arrêtée » sont opposés — l'un reçoit
+                        encore des SMS, l'autre n'en recevra plus jamais — et se
+                        ressemblaient en badges gris identiques. */}
+                    <LookBadge
+                      filled
+                      className="font-medium"
+                      // Un état inconnu (valeur écrite par un module futur)
+                      // reste lisible plutôt que de perdre sa pastille.
+                      look={ENROLLMENT_STATUS_LOOK[row.status] ?? ENROLLMENT_STATUS_LOOK.pending}
+                    >
                       {t(`editor.enrollments.status.${row.status}` as never)}
-                    </Badge>
+                    </LookBadge>
                   </TableCell>
                   <TableCell>{row.step}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">

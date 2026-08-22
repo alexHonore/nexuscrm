@@ -5,7 +5,16 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import {
+  GUARDRAIL_KIND_LOOK,
+  LookGlyph,
+  LookIcon,
+  RESULT_LOOK,
+  SEVERITY_LOOK,
+  lookTint,
+} from "@/components/look";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -100,6 +109,30 @@ export function emptyRule(): EditableRule {
 }
 
 /**
+ * Puce de sévérité du dialogue.
+ *
+ * Elle lit le REGISTRE de documentation (« Bloque le message ») et non les
+ * messages d'écran (« Bloque l'envoi ») : dans ce dialogue, le sélecteur juste
+ * en dessous vient du même registre, et deux formulations différentes pour la
+ * même valeur, côte à côte, se lisent comme deux réglages.
+ */
+function DocSeverityBadge({
+  severity,
+  locale,
+}: {
+  severity: GuardrailSeverity;
+  locale: ReturnType<typeof docLocale>;
+}) {
+  const look = SEVERITY_LOOK[severity];
+  return (
+    <Badge variant="outline" className="gap-1" style={lookTint(look)}>
+      <LookGlyph look={look} className="size-3" />
+      {severityText(GUARDRAIL_SEVERITY_DOCS[severity], locale).label}
+    </Badge>
+  );
+}
+
+/**
  * Aide d'un type de règle — le (?) à côté du sélecteur.
  *
  * Les exemples « passe / attrapé » ne sont pas décoratifs : « motif interdit »
@@ -128,26 +161,39 @@ export function KindHelp({ kind }: { kind: GuardrailKind }) {
       >
         <HelpCircleIcon className="size-3.5" />
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-96 space-y-3 text-sm">
-        <div>
-          <p className="font-medium">{text.label}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{text.what}</p>
+      {/* `w-96` fait 384 px : sur un téléphone de 360 px l'aide dépassait
+          l'écran. Le plafond ne mord qu'en dessous de 416 px de large. */}
+      <PopoverContent align="start" className="w-96 max-w-[calc(100vw-2rem)] space-y-3 text-sm">
+        <div className="flex items-start gap-2">
+          <LookIcon look={GUARDRAIL_KIND_LOOK[kind]} />
+          <div className="min-w-0">
+            <p className="font-medium break-words">{text.label}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{text.what}</p>
+          </div>
         </div>
 
         <Block title={t("guardrails.helpWhen")} body={text.when} />
         <Block title={t("guardrails.helpConfig")} body={text.config} />
 
+        {/* « Passe » et « Attrapé » sont deux paragraphes de même longueur : la
+            coche et la croix disent lequel est lequel avant la lecture. */}
         <div className="space-y-1.5">
-          <p className="rounded-md bg-emerald-500/10 p-2 text-xs">
-            <span className="font-medium text-emerald-700 dark:text-emerald-400">
-              {t("guardrails.helpPasses")} :
-            </span>{" "}
-            <span className="text-muted-foreground">{text.passes}</span>
-          </p>
-          <p className="rounded-md bg-destructive/10 p-2 text-xs">
-            <span className="font-medium text-destructive">{t("guardrails.helpCaught")} :</span>{" "}
-            <span className="text-muted-foreground">{text.caught}</span>
-          </p>
+          <div className="flex items-start gap-1.5 rounded-md bg-emerald-500/10 p-2 text-xs">
+            <LookGlyph look={RESULT_LOOK.pass} className="mt-px size-3.5" />
+            <p className="min-w-0 break-words">
+              <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                {t("guardrails.helpPasses")} :
+              </span>{" "}
+              <span className="text-muted-foreground">{text.passes}</span>
+            </p>
+          </div>
+          <div className="flex items-start gap-1.5 rounded-md bg-destructive/10 p-2 text-xs">
+            <LookGlyph look={RESULT_LOOK.fail} className="mt-px size-3.5" />
+            <p className="min-w-0 break-words">
+              <span className="font-medium text-destructive">{t("guardrails.helpCaught")} :</span>{" "}
+              <span className="text-muted-foreground">{text.caught}</span>
+            </p>
+          </div>
         </div>
 
         <div className="rounded-md bg-amber-500/10 p-2">
@@ -428,20 +474,31 @@ export function GuardrailRuleDialog({
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">{t("guardrails.presets.hint")}</p>
             <div className="grid gap-2">
+              {/* On choisit ici une INTENTION, mais chaque intention arrive
+                  avec un type et une sévérité déjà écrits : les montrer
+                  maintenant évite la surprise à l'écran suivant. */}
               {RULE_PRESETS.map((preset) => (
                 <button
                   key={preset.key}
                   type="button"
-                  className="rounded-lg border p-3 text-left transition-colors hover:border-primary hover:bg-primary/5"
+                  className="flex min-h-11 items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:border-primary hover:bg-primary/5"
                   onClick={() => {
                     setDraft(ruleFromPreset(preset));
                     setShowPresets(false);
                   }}
                 >
-                  <p className="text-sm font-medium">{presetText(preset, locale).label}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {presetText(preset, locale).what}
-                  </p>
+                  <LookIcon look={GUARDRAIL_KIND_LOOK[preset.kind]} />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-sm font-medium break-words">
+                        {presetText(preset, locale).label}
+                      </span>
+                      <DocSeverityBadge severity={preset.severity} locale={locale} />
+                    </span>
+                    <span className="mt-0.5 block text-xs break-words text-muted-foreground">
+                      {presetText(preset, locale).what}
+                    </span>
+                  </span>
                 </button>
               ))}
               <button
@@ -522,18 +579,22 @@ export function GuardrailRuleDialog({
               }}
             >
               <SelectTrigger className="min-h-11 w-full md:min-h-9">
+                <LookGlyph look={GUARDRAIL_KIND_LOOK[draft.kind]} className="size-3.5" />
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {GUARDRAIL_KINDS.map((k) => (
                   <SelectItem key={k} value={k}>
+                    <LookGlyph look={GUARDRAIL_KIND_LOOK[k]} className="size-3.5" />
                     {kindText(GUARDRAIL_KIND_DOCS[k], locale).label}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
             {doc ? (
-              <p className="text-xs text-muted-foreground">{kindText(doc, locale).what}</p>
+              <p className="text-xs break-words text-muted-foreground">
+                {kindText(doc, locale).what}
+              </p>
             ) : null}
             {!creating ? (
               <p className="text-xs text-muted-foreground">{t("guardrails.kindImmutable")}</p>
@@ -569,18 +630,23 @@ export function GuardrailRuleDialog({
                 value={draft.severity}
                 onValueChange={(v) => setDraft({ ...draft, severity: String(v) as GuardrailSeverity })}
               >
+                {/* Le champ le plus lourd de conséquence du dialogue : il dit
+                    si un message part ou non. Trois libellés gris ne le
+                    montraient pas ; un feu de circulation, oui. */}
                 <SelectTrigger className="min-h-11 w-full md:min-h-9">
+                  <LookGlyph look={SEVERITY_LOOK[draft.severity]} className="size-3.5" />
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {GUARDRAIL_SEVERITIES.map((s) => (
                     <SelectItem key={s} value={s}>
+                      <LookGlyph look={SEVERITY_LOOK[s]} className="size-3.5" />
                       {severityText(GUARDRAIL_SEVERITY_DOCS[s], locale).label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs break-words text-muted-foreground">
                 {severityText(GUARDRAIL_SEVERITY_DOCS[draft.severity], locale).what}
               </p>
             </div>

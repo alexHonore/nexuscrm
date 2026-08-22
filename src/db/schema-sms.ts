@@ -261,7 +261,17 @@ export const assistants = pgTable("assistants", {
   description: text("description"),
   status: assistantStatusEnum("status").notNull().default("draft"),
   version: integer("version").notNull().default(1),
+  /** Langue de rédaction principale — celle dans laquelle l'assistant écrit. */
   language: text("language").notNull().default("fr-CA"),
+  /**
+   * Seconde langue, facultative.
+   *
+   * Un courtier de Québec reçoit des leads anglophones : sans ce champ,
+   * l'assistant répondait en français à quelqu'un qui venait d'écrire en
+   * anglais. Renseignée, elle autorise l'assistant à BASCULER quand la
+   * personne écrit dans cette langue — jamais à ouvrir avec.
+   */
+  secondaryLanguage: text("secondary_language"),
   /** Config structurée — formes zod dans src/lib/assistants/schema.ts. */
   identity: jsonb("identity").notNull(),
   goal: jsonb("goal").notNull(),

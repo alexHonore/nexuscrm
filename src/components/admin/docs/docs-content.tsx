@@ -54,7 +54,6 @@ export interface DocsLabels {
   tools: { title: string; p1: string; gloss: Record<string, string> };
   sending: {
     title: string;
-    consent: { title: string; p: string };
     optout: { title: string; p: string; keywords: string };
     quiet: { title: string; p: string; weekday: string; saturday: string; sunday: string };
     modes: { title: string; p: string };
@@ -64,7 +63,7 @@ export interface DocsLabels {
     title: string;
     p1: string;
     actions: string[];
-    admin: { title: string; numbers: string; killSwitch: string; consentPolicy: string };
+    admin: { title: string; numbers: string; killSwitch: string };
   };
   json: {
     title: string;
@@ -303,7 +302,6 @@ export function DocsContent({ labels: L, data }: { labels: DocsLabels; data: Doc
 
         {/* ── 7. Règles d'envoi ───────────────────────────────────────── */}
         <Section id="sending" title={L.sending.title} index={7}>
-          <Sub title={L.sending.consent.title}>{L.sending.consent.p}</Sub>
           <Sub title={L.sending.optout.title}>
             {L.sending.optout.p}
             <p className="mt-2 text-xs font-medium text-muted-foreground">{L.sending.optout.keywords}</p>
@@ -349,7 +347,6 @@ export function DocsContent({ labels: L, data }: { labels: DocsLabels; data: Doc
             <ul className="list-disc space-y-1.5 pl-5">
               <li>{L.operator.admin.numbers}</li>
               <li>{L.operator.admin.killSwitch}</li>
-              <li>{L.operator.admin.consentPolicy}</li>
             </ul>
           </Sub>
         </Section>

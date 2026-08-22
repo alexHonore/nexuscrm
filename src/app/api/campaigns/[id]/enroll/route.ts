@@ -10,7 +10,7 @@ import { sweepCampaign } from "@/lib/campaigns-server/match";
  * La réponse détaille les refus PAR MOTIF. Un simple « 37 inscrits sur 200 »
  * laisserait l'administrateur sans moyen de savoir s'il doit relever un
  * plafond, élargir une audience, ou constater que 160 personnes n'ont jamais
- * donné leur consentement.
+ * un numéro joignable et non désabonné.
  */
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const admin = await apiAdmin();

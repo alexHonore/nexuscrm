@@ -1,11 +1,11 @@
 "use server";
 
-import { and, desc, eq, gte, isNull, or } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
-import { assistants, consents, conversations, messages, scheduledJobs, smsNumbers } from "@/db/schema-sms";
+import { assistants, conversations, messages, scheduledJobs, smsNumbers } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth/guards";
 import { cancelPendingJobs, enqueueJob } from "@/lib/jobs/queue";
@@ -36,7 +36,6 @@ export type SmsActionResult =
         | "suppressed"
         | "noNumber"
         | "alreadySent"
-        | "noConsent"
         | "assistantUnavailable";
     };
 
@@ -92,29 +91,6 @@ export async function sendManualSmsAction(input: {
     ? await db.query.smsNumbers.findFirst({ where: eq(smsNumbers.id, existing.smsNumberId) })
     : await db.query.smsNumbers.findFirst({ where: eq(smsNumbers.active, true) });
   if (!number) return { ok: false, error: "noNumber" };
-
-  // Loi anti-pourriel : un texto commercial exige un consentement — ou une
-  // conversation que la personne a ELLE-MÊME engagée. Un téléphoniste qui
-  // vient d'obtenir le oui au téléphone l'enregistre d'abord sur la fiche.
-  const nowTs = new Date();
-  const [consent, priorInbound] = await Promise.all([
-    db.query.consents.findFirst({
-      where: and(
-        eq(consents.clientId, client.id),
-        eq(consents.channel, "sms"),
-        isNull(consents.revokedAt),
-        or(isNull(consents.expiresAt), gte(consents.expiresAt, nowTs)),
-      ),
-      columns: { id: true },
-    }),
-    existing
-      ? db.query.messages.findFirst({
-          where: and(eq(messages.conversationId, existing.id), eq(messages.direction, "in")),
-          columns: { id: true },
-        })
-      : Promise.resolve(undefined),
-  ]);
-  if (!consent && !priorInbound) return { ok: false, error: "noConsent" };
 
   const analysis = analyzeSms(parsed.data.body);
 

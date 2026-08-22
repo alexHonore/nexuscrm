@@ -170,6 +170,84 @@ describe("liste des assistants", () => {
     expect(html).toContain("Rencontre vidéo");
   });
 
+  it("chaque pastille de la carte porte un pictogramme À CÔTÉ de son libellé", () => {
+    // Cinq lectures — objectif, service, compilation, suite — et pas une qui
+    // repose sur la seule teinte du texte : chacune est un dessin distinct
+    // doublé du mot. Le compte tombe si quelqu'un enlève un `LookIcon` ou
+    // recycle le même sur deux lectures.
+    const html = renderList([
+      {
+        id: DATA.id,
+        name: "Acheteur FB",
+        description: null,
+        status: "active",
+        version: 3,
+        goalType: "in_person_meeting",
+        suitePassed: false,
+        needsRecompile: true,
+        everCompiled: true,
+        hasWritten: true,
+        updatedAt: "2026-08-19T15:00:00.000Z",
+      },
+    ]);
+    // Les libellés arrivent ENTIERS : rien n'est remplacé par une pastille.
+    for (const label of ["Rencontre en personne", "Actif", "À recompiler", "Suite rouge"]) {
+      expect(html, label).toContain(label);
+    }
+    // …et chaque pastille est muette pour un lecteur d'écran, qui entend déjà
+    // le libellé juste à côté.
+    const glyphs = html.match(/<svg[^>]*/g) ?? [];
+    expect(glyphs.filter((g) => !g.includes('aria-hidden="true"')), "pictogramme annoncé").toEqual(
+      [],
+    );
+    // Quatre dessins DIFFÉRENTS : les quatre lectures ne se confondent pas.
+    const paths = new Set((html.match(/<path d="[^"]+"/g) ?? []).map((p) => p));
+    expect(paths.size).toBeGreaterThanOrEqual(4);
+  });
+
+  it("un objectif inconnu venu de la base n'abat pas la page", () => {
+    // `goalType` est un cast, pas une validation : la colonne `goal` est du
+    // JSON libre. Un type qu'aucun pictogramme ne connaît doit dégrader la
+    // pastille, pas faire tomber toute la liste des assistants.
+    const html = renderList([
+      {
+        id: DATA.id,
+        name: "Acheteur FB",
+        description: null,
+        status: "active",
+        version: 1,
+        goalType: "objectif_venu_du_futur" as never,
+        suitePassed: true,
+        needsRecompile: false,
+        everCompiled: true,
+        hasWritten: false,
+        updatedAt: "2026-08-19T15:00:00.000Z",
+      },
+    ]);
+    expect(html).toContain("Acheteur FB");
+    expect(html).toContain("Actif");
+  });
+
+  it("un statut inconnu venu de la base reste une pastille lisible", () => {
+    const html = renderList([
+      {
+        id: DATA.id,
+        name: "Acheteur FB",
+        description: null,
+        status: "statut_venu_du_futur",
+        version: 1,
+        goalType: "video_meeting",
+        suitePassed: true,
+        needsRecompile: false,
+        everCompiled: true,
+        hasWritten: false,
+        updatedAt: "2026-08-19T15:00:00.000Z",
+      },
+    ]);
+    expect(html).toContain("Acheteur FB");
+    expect(html).toContain("Rencontre vidéo");
+  });
+
   it("un état vide reste lisible", () => {
     const html = renderList([]);
     expect(html).toContain("Aucun assistant");

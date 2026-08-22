@@ -21,7 +21,6 @@ import {
 import { auditLogs, notifications } from "@/db/schema";
 import {
   assistants,
-  consents,
   conversations,
   messages,
   scheduledJobs,
@@ -252,19 +251,12 @@ describe("POST /api/webhooks/twilio/inbound", () => {
     expect(after.attentionReason).toBeNull();
   });
 
-  it("STOP : supprime le numéro, révoque le consentement SMS et garde le message", async () => {
+  it("STOP : supprime le numéro et garde le message", async () => {
+    // Le consentement n'est plus une notion du produit ; le REFUS, si. La
+    // suppression est ce qui arrête tout, et elle s'écrit avant même d'avoir
+    // rattaché une fiche.
     const client = await makeClient({ phone: FROM });
     await makeSmsNumber({ e164: TO });
-    const [consent] = await testDb
-      .insert(consents)
-      .values({
-        clientId: client.id,
-        channel: "sms",
-        kind: "implied_inquiry",
-        source: "test",
-      })
-      .returning();
-    expect(consent.revokedAt).toBeNull();
 
     const res = await POST(inboundRequest(inboundForm({ Body: "STOP" })));
     expect(res.status).toBe(200);
@@ -272,9 +264,6 @@ describe("POST /api/webhooks/twilio/inbound", () => {
     const sup = await testDb.select().from(suppressions);
     expect(sup).toHaveLength(1);
     expect(sup[0]).toMatchObject({ phoneE164: FROM, reason: "sms_stop", note: "STOP" });
-
-    const [revoked] = await testDb.select().from(consents).where(eq(consents.id, consent.id));
-    expect(revoked.revokedAt).toBeInstanceOf(Date);
 
     // Le registre garde la trace du STOP lui-même.
     const rows = await testDb.select().from(messages).where(eq(messages.twilioSid, SID));

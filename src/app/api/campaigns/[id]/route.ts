@@ -144,7 +144,6 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
             totalEnrollmentCap: config.totalEnrollmentCap,
             startsAt: config.startsAt,
             endsAt: config.endsAt,
-            requireConsent: config.requireConsent,
           }
         : {}),
       ...(parsed.data.status ? { status: parsed.data.status } : {}),

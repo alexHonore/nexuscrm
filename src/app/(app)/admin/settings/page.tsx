@@ -1,6 +1,6 @@
 import { Settings2 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { BookingCard, GoogleCard, KillSwitchCard, SmsCard, TelephonyCard } from "@/components/admin/settings-client";
+import { BookingCard, GoogleCard, KillSwitchCard, TelephonyCard } from "@/components/admin/settings-client";
 import { SmsNumbersCard } from "@/components/admin/sms-numbers-card";
 import { listSmsNumbersForAdmin } from "@/lib/sms-server/numbers";
 import { PageHeader } from "@/components/shell/page-header";
@@ -60,7 +60,6 @@ export default async function AdminSettingsPage() {
         initial={{ enabled: sms.killSwitch, reason: sms.killSwitchReason, at: sms.killSwitchAt }}
       />
       <SmsNumbersCard initial={numbers} twilioConfigured={twilioHints.TWILIO_ACCOUNT_SID} />
-      <SmsCard initialValidity={sms.consentValidity} />
 
       <TelephonyCard initialProvider={telephony.provider} voipms={voipmsHints} twilio={twilioHints} />
     </div>

@@ -30,7 +30,6 @@ function enrollFacts(overrides: Partial<EnrollFacts> = {}): EnrollFacts {
     status: "active",
     now: NOW,
     hasPhone: true,
-    hasValidConsent: true,
     suppressed: false,
     doNotCall: false,
     alreadyEnrolled: false,
@@ -48,7 +47,6 @@ function touchFacts(overrides: Partial<TouchFacts> = {}): TouchFacts {
     enrollmentStatus: "active",
     killSwitch: false,
     suppressed: false,
-    hasValidConsent: true,
     doNotCall: false,
     excludeDoNotCall: true,
     aiEnabled: true,
@@ -239,16 +237,18 @@ describe("éligibilité à l'inscription", () => {
     expect(decision).toEqual({ allowed: false, refusal: "suppressed" });
   });
 
-  it("sans consentement valide, rien ne part", () => {
-    expect(canEnroll(config(), enrollFacts({ hasValidConsent: false }))).toEqual({
+  it("un désabonnement passe AVANT tout le reste", () => {
+    // Le consentement n'est plus une condition (toute fiche entrée ici est
+    // joignable) ; un refus exprimé, lui, reste absolu.
+    expect(canEnroll(config(), enrollFacts({ suppressed: true }))).toEqual({
       allowed: false,
-      refusal: "no_consent",
+      refusal: "suppressed",
     });
   });
 
-  it("le consentement peut être désactivé, délibérément", () => {
+  it("une fiche joignable et non désabonnée est inscrite", () => {
     expect(
-      canEnroll(config({ requireConsent: false }), enrollFacts({ hasValidConsent: false })),
+      canEnroll(config(), enrollFacts({})),
     ).toEqual({ allowed: true });
   });
 
@@ -334,13 +334,6 @@ describe("éligibilité d'un barreau", () => {
     expect(canSendTouch(touchFacts({ suppressed: true }))).toEqual({
       allowed: false,
       refusal: "suppressed",
-    });
-  });
-
-  it("un consentement expiré en cours d'échelle arrête l'échelle", () => {
-    expect(canSendTouch(touchFacts({ hasValidConsent: false }))).toEqual({
-      allowed: false,
-      refusal: "consent_expired",
     });
   });
 

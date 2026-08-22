@@ -33,7 +33,7 @@ export async function POST(req: Request) {
   const { enabled, reason } = parsed.data;
 
   // Fusion avec l'état courant : le réglage `sms` porte aussi d'autres champs
-  // (consentValidity…) que le basculement de l'interrupteur ne doit pas remettre
+  // que le basculement de l'interrupteur ne doit pas remettre
   // à leurs défauts.
   const current = await getSetting("sms");
   await setSetting("sms", {

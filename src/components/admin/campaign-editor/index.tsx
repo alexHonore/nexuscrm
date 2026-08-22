@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { CAMPAIGN_STATUS_LOOK, CAMPAIGN_TAB_LOOK, LookGlyph, lookTint } from "@/components/look";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ENROLL_REFUSALS } from "@/lib/campaigns/eligibility";
 import type { CampaignConfig } from "@/lib/campaigns/schema";
 import { ApiError, api } from "../api";
+import { TriggerIcon } from "../trigger-look";
 import {
   AudienceTab,
   BasicsTab,
@@ -116,7 +118,7 @@ export function CampaignEditor({ data }: { data: CampaignEditorData }) {
         refusals?: Record<string, number>;
       }>(`/api/campaigns/${data.id}/enroll`, { method: "POST" });
       // Le détail PAR MOTIF : « 3 inscrits, 197 écartés » ne dit pas s'il
-      // faut relever un plafond ou constater que personne n'a consenti.
+      // faut relever un plafond ou constater que l'audience est vide.
       const breakdown = Object.entries(result.refusals ?? {})
         .filter(([reason, n]) => n > 0 && ENROLL_REFUSAL_KEYS.has(reason))
         .map(([reason, n]) =>
@@ -142,6 +144,10 @@ export function CampaignEditor({ data }: { data: CampaignEditorData }) {
 
   const tabProps = { config, update, data };
   const emptyLadder = config.ladder.length === 0;
+  // Un état inconnu (valeur écrite par un module futur) reste lisible plutôt
+  // que de faire disparaître la pastille : il se présente en brouillon.
+  const statusLook = CAMPAIGN_STATUS_LOOK[data.status] ?? CAMPAIGN_STATUS_LOOK.draft;
+  const statusTint = lookTint(statusLook);
 
   return (
     <div className="space-y-4">
@@ -156,8 +162,28 @@ export function CampaignEditor({ data }: { data: CampaignEditorData }) {
         </Button>
         <span className="flex-1" />
         {dirty ? <Badge variant="secondary">{t("editor.unsaved")}</Badge> : null}
-        <Badge variant={data.status === "active" ? "default" : "secondary"}>
+        {/* L'état est la seule chose à l'écran qui dise si des SMS partent en
+            ce moment : il porte son pictogramme et sa couleur, comme dans la
+            liste. Le libellé reste — la couleur ne porte jamais le sens seule,
+            et elle vit sur le fond et le pictogramme, jamais sur le texte : un
+            libellé ambre de douze pixels ne se lit pas. */}
+        <Badge
+          variant="outline"
+          className="gap-1 pl-1.5 font-medium"
+          style={{
+            borderColor: statusTint.borderColor,
+            backgroundColor: statusTint.backgroundColor,
+          }}
+        >
+          <LookGlyph look={statusLook} />
           {t(`list.status.${data.status}` as never)}
+        </Badge>
+        {/* Le déclencheur porte la pastille de la création et de la liste :
+            savoir ce qui fait partir la campagne ne devrait pas coûter un
+            détour par un onglet. */}
+        <Badge variant="outline" className="gap-1 pl-1 font-normal">
+          <TriggerIcon kind={config.trigger.kind} size="sm" />
+          {t(`list.trigger.${config.trigger.kind}`)}
         </Badge>
         <Button
           variant="outline"
@@ -205,9 +231,14 @@ export function CampaignEditor({ data }: { data: CampaignEditorData }) {
 
       <Tabs defaultValue="basics">
         <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
+          {/* Chaque onglet porte son pictogramme : six libellés gris de la
+              même taille se relisent un par un, une forme se reconnaît. La
+              COULEUR, elle, groupe — ce que la campagne dit / la mécanique qui
+              la déclenche / ce qui la vérifie une fois lancée. */}
           <TabsList className="w-max">
             {TAB_IDS.map((id) => (
-              <TabsTrigger key={id} value={id} className="min-h-11 md:min-h-8">
+              <TabsTrigger key={id} value={id} className="min-h-11 gap-1.5 md:min-h-8">
+                <LookGlyph look={CAMPAIGN_TAB_LOOK[id]} className="size-3.5" />
                 {t(`editor.tabs.${id}`)}
               </TabsTrigger>
             ))}

@@ -1,15 +1,9 @@
 import "server-only";
-import { and, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
-import {
-  campaignEnrollments,
-  campaigns,
-  consents,
-  conversations,
-  suppressions,
-} from "@/db/schema-sms";
+import { campaignEnrollments, campaigns, conversations, suppressions } from "@/db/schema-sms";
 import { campaignRowToConfig, type CampaignConfig } from "@/lib/campaigns/schema";
 import {
   canEnroll,
@@ -58,22 +52,6 @@ const TORONTO = "America/Toronto";
 const startOfTorontoDay = (now: Date): Date =>
   fromZonedTime(`${formatInTimeZone(now, TORONTO, "yyyy-MM-dd")}T00:00:00`, TORONTO);
 
-/** Consentement SMS valide : accordé, non révoqué, non expiré. */
-async function consentedClientIds(clientIds: string[], now: Date): Promise<Set<string>> {
-  if (clientIds.length === 0) return new Set();
-  const rows = await db
-    .select({ clientId: consents.clientId })
-    .from(consents)
-    .where(
-      and(
-        inArray(consents.clientId, clientIds),
-        eq(consents.channel, "sms"),
-        isNull(consents.revokedAt),
-        or(isNull(consents.expiresAt), gte(consents.expiresAt, now))!,
-      ),
-    );
-  return new Set(rows.map((r) => r.clientId));
-}
 
 async function suppressedPhones(phones: string[]): Promise<Set<string>> {
   if (phones.length === 0) return new Set();
@@ -148,8 +126,7 @@ export async function enrollClients(
   const byId = new Map(clientRows.map((c) => [c.id, c]));
   const phones = clientRows.map((c) => c.phone);
 
-  const [consented, suppressed, live, elsewhere, alreadyIn, counts] = await Promise.all([
-    consentedClientIds(clientIds, now),
+  const [suppressed, live, elsewhere, alreadyIn, counts] = await Promise.all([
     suppressedPhones(phones),
     livePhones(phones, now),
     config.audience.excludeActiveInOtherCampaign
@@ -183,7 +160,6 @@ export async function enrollClients(
       status: row.status,
       now,
       hasPhone: client.phone.trim() !== "",
-      hasValidConsent: consented.has(clientId),
       suppressed: suppressed.has(client.phone),
       doNotCall: client.doNotCall,
       alreadyEnrolled: alreadyIn.has(clientId),
@@ -312,7 +288,6 @@ export async function audienceCountFor(
     .where(
       audienceWhere(config.audience, config.trigger, now, {
         campaignId: opts.campaignId,
-        requireConsent: config.requireConsent,
       }),
     );
   return result?.n ?? 0;
@@ -340,7 +315,6 @@ export async function audienceClientIds(
     .where(
       audienceWhere(config.audience, config.trigger, now, {
         campaignId,
-        requireConsent: config.requireConsent,
       }),
     )
     // Les plus anciens d'abord : une réactivation doit commencer par les leads

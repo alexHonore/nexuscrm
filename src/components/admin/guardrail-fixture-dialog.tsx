@@ -5,6 +5,13 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
+import {
+  GUARDRAIL_KIND_LOOK,
+  LookGlyph,
+  RESULT_LOOK,
+  SEVERITY_LOOK,
+  type Look,
+} from "@/components/look";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -94,7 +101,9 @@ export function FixtureFieldHelp({ field }: { field: string }) {
       >
         <HelpCircleIcon className="size-3.5" />
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-96 space-y-2.5 text-sm">
+      {/* 384 px d'aide sur un écran de 360 px : le plafond ne mord qu'en
+          dessous de 416 px de large. */}
+      <PopoverContent align="start" className="w-96 max-w-[calc(100vw-2rem)] space-y-2.5 text-sm">
         <div>
           <p className="font-medium">{text.label}</p>
           <p className="mt-1 text-xs text-muted-foreground">{text.what}</p>
@@ -113,24 +122,35 @@ export function FixtureFieldHelp({ field }: { field: string }) {
   );
 }
 
+/**
+ * Une attente de fixture — liste de lignes.
+ *
+ * `look` n'est pas de la décoration : « Doit appeler » et « Ne doit PAS
+ * appeler » sont deux champs voisins, de même taille, dont seul le mot « PAS »
+ * les sépare — et remplir le mauvais rend la fixture verte sur exactement ce
+ * qu'elle devait interdire. La coche et la croix se voient avant qu'on lise.
+ */
 function ListField({
   field,
   label,
   value,
   onChange,
   mono,
+  look,
 }: {
   field: string;
   label: string;
   value: string[];
   onChange: (next: string[]) => void;
   mono?: boolean;
+  look?: Look;
 }) {
   const t = useTranslations("assistants");
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-0.5">
-        <Label>{label}</Label>
+        {look ? <LookGlyph look={look} className="mr-1 size-3.5" /> : null}
+        <Label className="min-w-0 break-words">{label}</Label>
         <FixtureFieldHelp field={field} />
       </div>
       <Textarea
@@ -293,6 +313,7 @@ export function GuardrailFixtureDialog({
               value={draft.mustCallTool}
               onChange={(v) => setDraft({ ...draft, mustCallTool: v })}
               mono
+              look={RESULT_LOOK.pass}
             />
             <ListField
               field="mustNotCallTool"
@@ -300,6 +321,7 @@ export function GuardrailFixtureDialog({
               value={draft.mustNotCallTool}
               onChange={(v) => setDraft({ ...draft, mustNotCallTool: v })}
               mono
+              look={RESULT_LOOK.fail}
             />
             <ListField
               field="mustMatch"
@@ -307,6 +329,7 @@ export function GuardrailFixtureDialog({
               value={draft.mustMatch}
               onChange={(v) => setDraft({ ...draft, mustMatch: v })}
               mono
+              look={RESULT_LOOK.pass}
             />
             <ListField
               field="mustNotMatch"
@@ -314,11 +337,15 @@ export function GuardrailFixtureDialog({
               value={draft.mustNotMatch}
               onChange={(v) => setDraft({ ...draft, mustNotMatch: v })}
               mono
+              look={RESULT_LOOK.fail}
             />
           </div>
 
           <div className="space-y-1.5">
             <div className="flex items-center gap-0.5">
+              {/* Le même pictogramme que la règle « Jugement par IA » : c'est
+                  le même mécanisme, appliqué à une seule mise en situation. */}
+              <LookGlyph look={GUARDRAIL_KIND_LOOK.llm_judge} className="mr-1 size-3.5" />
               <Label htmlFor="fx-judge">{t("guardrails.fixtures.judge")}</Label>
               <FixtureFieldHelp field="judge" />
             </div>
@@ -333,6 +360,7 @@ export function GuardrailFixtureDialog({
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
               <div className="flex items-center gap-0.5">
+                <LookGlyph look={GUARDRAIL_KIND_LOOK.max_chars} className="mr-1 size-3.5" />
                 <Label htmlFor="fx-maxchars">{t("guardrails.fixtures.maxChars")}</Label>
                 <FixtureFieldHelp field="maxChars" />
               </div>
@@ -362,11 +390,13 @@ export function GuardrailFixtureDialog({
                 }
               >
                 <SelectTrigger className="min-h-11 w-full md:min-h-9">
+                  <LookGlyph look={SEVERITY_LOOK[draft.severity]} className="size-3.5" />
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {GUARDRAIL_SEVERITIES.map((s) => (
                     <SelectItem key={s} value={s}>
+                      <LookGlyph look={SEVERITY_LOOK[s]} className="size-3.5" />
                       {severityText(GUARDRAIL_SEVERITY_DOCS[s], locale).label}
                     </SelectItem>
                   ))}

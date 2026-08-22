@@ -1,9 +1,7 @@
 "use client";
 
 import {
-  AlertTriangle,
   Bot,
-  CheckCircle2,
   Download,
   Loader2,
   MessageSquare,
@@ -39,6 +37,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ASSISTANT_STATUS_LOOK, GOAL_LOOK, LookIcon, type Look } from "@/components/look";
 import type { GoalType } from "@/lib/assistants/schema";
 import { api } from "./api";
 import { AssistantImportDialog } from "./assistant-import-dialog";
@@ -149,12 +148,14 @@ export function AssistantsListClient({
         <div className="grid gap-3 md:grid-cols-2">
           {items.map((item) => (
             <Card key={item.id} className="overflow-hidden">
-              <CardContent className="flex items-start gap-3 p-4">
-                <div className="min-w-0 flex-1 space-y-2">
+              <CardContent className="flex flex-wrap items-start gap-3 p-4">
+                <div className="w-full min-w-0 space-y-2 md:w-auto md:flex-1">
                   <div className="flex flex-wrap items-center gap-2">
+                    {/* `break-words` : un nom d'assistant sans espace déborde
+                        sinon de la carte sur un écran de 360 px. */}
                     <Link
                       href={`/admin/assistants/${item.id}`}
-                      className="font-medium hover:underline"
+                      className="min-w-0 break-words font-medium hover:underline"
                     >
                       {item.name}
                     </Link>
@@ -166,7 +167,13 @@ export function AssistantsListClient({
                   ) : null}
 
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <Badge variant="outline" className="font-normal">
+                    <Badge variant="outline" className="gap-1 pl-1 font-normal">
+                      {/* Même pastille qu'au choix de l'objectif à la création :
+                          ce qu'on a coché doit se reconnaître ici sans relire. */}
+                      <LookIcon
+                        look={GOAL_LOOK[item.goalType] ?? GOAL_LOOK.qualify_only}
+                        size="sm"
+                      />
                       {t(`goalType.${item.goalType}`)}
                     </Badge>
                     <CompileBadge item={item} />
@@ -174,53 +181,60 @@ export function AssistantsListClient({
                   </div>
                 </div>
 
-                {/* « Tester » est un BOUTON, pas une entrée de menu : c'est le
-                    geste qu'on fait le plus souvent en réglant un assistant. */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="min-h-11 shrink-0 md:min-h-8"
-                  render={<Link href={`/admin/assistants/${item.id}?tab=sandbox`} />}
-                >
-                  <MessageSquare /> {t("list.actions.test")}
-                </Button>
-
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button variant="ghost" size="icon" className="size-11 shrink-0 md:size-9" />
-                    }
+                {/* Sous `md`, la carte n'est pas assez large pour porter le
+                    texte ET les deux gestes sur la même ligne : la pastille
+                    de l'objectif poussait « Rencontre en personne » hors de
+                    la carte, où `overflow-hidden` le coupait. Les gestes
+                    passent sous le texte, alignés à droite, cibles intactes. */}
+                <div className="flex w-full shrink-0 items-center justify-end gap-3 md:w-auto">
+                  {/* « Tester » est un BOUTON, pas une entrée de menu : c'est le
+                      geste qu'on fait le plus souvent en réglant un assistant. */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="min-h-11 shrink-0 md:min-h-8"
+                    render={<Link href={`/admin/assistants/${item.id}?tab=sandbox`} />}
                   >
-                    <MoreHorizontal />
-                    <span className="sr-only">{item.name}</span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuGroup>
-                      <DropdownMenuItem render={<Link href={`/admin/assistants/${item.id}`} />}>
-                        {t("list.actions.edit")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        render={<Link href={`/admin/assistants/${item.id}?tab=sandbox`} />}
-                      >
-                        <MessageSquare /> {t("list.actions.test")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        render={<a href={`/api/assistants/${item.id}/export`} download />}
-                      >
-                        <Download /> {t("list.actions.export")}
-                      </DropdownMenuItem>
-                      {item.status === "active" ? (
-                        <DropdownMenuItem onClick={() => setToDeactivate(item)}>
-                          <PowerOff /> {t("list.actions.deactivate")}
+                    <MessageSquare /> {t("list.actions.test")}
+                  </Button>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button variant="ghost" size="icon" className="size-11 shrink-0 md:size-9" />
+                      }
+                    >
+                      <MoreHorizontal />
+                      <span className="sr-only">{item.name}</span>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem render={<Link href={`/admin/assistants/${item.id}`} />}>
+                          {t("list.actions.edit")}
                         </DropdownMenuItem>
-                      ) : null}
-                      <DropdownMenuItem variant="destructive" onClick={() => setTarget(item)}>
-                        <Trash2 />{" "}
-                        {item.hasWritten ? t("list.actions.archive") : t("list.actions.delete")}
-                      </DropdownMenuItem>
-                    </DropdownMenuGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                        <DropdownMenuItem
+                          render={<Link href={`/admin/assistants/${item.id}?tab=sandbox`} />}
+                        >
+                          <MessageSquare /> {t("list.actions.test")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          render={<a href={`/api/assistants/${item.id}/export`} download />}
+                        >
+                          <Download /> {t("list.actions.export")}
+                        </DropdownMenuItem>
+                        {item.status === "active" ? (
+                          <DropdownMenuItem onClick={() => setToDeactivate(item)}>
+                            <PowerOff /> {t("list.actions.deactivate")}
+                          </DropdownMenuItem>
+                        ) : null}
+                        <DropdownMenuItem variant="destructive" onClick={() => setTarget(item)}>
+                          <Trash2 />{" "}
+                          {item.hasWritten ? t("list.actions.archive") : t("list.actions.delete")}
+                        </DropdownMenuItem>
+                      </DropdownMenuGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -279,34 +293,54 @@ export function AssistantsListClient({
   );
 }
 
+/**
+ * Les trois lectures d'une ligne portent le MÊME habillage : bordure neutre,
+ * libellé au ton du texte, et toute la couleur dans la pastille.
+ *
+ * Avant, la teinte était sur le TEXTE — un libellé ambre de douze pixels se
+ * repère mal dans une grille de six cartes — et deux pictogrammes seulement
+ * (coche, triangle) servaient aux cinq lectures : la coche de « prompt à jour »
+ * et celle de « suite verte » étaient le même dessin. Sur une pastille, la
+ * teinte devient une surface, et chaque lecture a son propre pictogramme, donc
+ * la couleur peut disparaître sans que le sens parte avec elle.
+ */
+function StateBadge({ look, children }: { look: Look; children: React.ReactNode }) {
+  return (
+    <Badge variant="outline" className="gap-1 pl-1 font-normal">
+      <LookIcon look={look} size="sm" />
+      {children}
+    </Badge>
+  );
+}
+
 function StatusBadge({ status }: { status: string }) {
   const t = useTranslations("assistants");
-  const variant = status === "active" ? "default" : status === "archived" ? "outline" : "secondary";
-  return <Badge variant={variant}>{t(`list.status.${status}` as never)}</Badge>;
+  // Un état inconnu venu de la base ne doit pas faire disparaître la pastille ;
+  // on retombe sur le brouillon, l'état le moins engageant.
+  const look = ASSISTANT_STATUS_LOOK[status] ?? ASSISTANT_STATUS_LOOK.draft;
+  return <StateBadge look={look}>{t(`list.status.${status}` as never)}</StateBadge>;
 }
 
 function CompileBadge({ item }: { item: AssistantListItem }) {
   const t = useTranslations("assistants");
   if (!item.everCompiled) {
     return (
-      <Badge variant="outline" className="gap-1 font-normal text-muted-foreground">
+      <StateBadge look={ASSISTANT_STATUS_LOOK.compiled_never}>
         {t("list.compiled.never")}
-      </Badge>
+      </StateBadge>
     );
   }
   if (item.needsRecompile) {
     // Le cas qui compte : actif ET périmé. Le texte du prompt n'est plus celui
-    // que la fiche affiche.
+    // que la fiche affiche — c'est la seule pastille ambre de la carte.
     return (
-      <Badge variant="outline" className="gap-1 border-amber-500/40 font-normal text-amber-600 dark:text-amber-400">
-        <AlertTriangle className="size-3" /> {t("list.compiled.stale")}
-      </Badge>
+      <StateBadge look={ASSISTANT_STATUS_LOOK.compiled_stale}>
+        {t("list.compiled.stale")}
+      </StateBadge>
     );
   }
   return (
-    <Badge variant="outline" className="gap-1 font-normal text-muted-foreground">
-      <CheckCircle2 className="size-3" /> {t("list.compiled.fresh")}
-    </Badge>
+    <StateBadge look={ASSISTANT_STATUS_LOOK.compiled_fresh}>{t("list.compiled.fresh")}</StateBadge>
   );
 }
 
@@ -314,12 +348,8 @@ function SuiteBadge({ item }: { item: AssistantListItem }) {
   const t = useTranslations("assistants");
   if (!item.everCompiled) return null;
   return item.suitePassed ? (
-    <Badge variant="outline" className="gap-1 border-emerald-500/40 font-normal text-emerald-600 dark:text-emerald-400">
-      <CheckCircle2 className="size-3" /> {t("list.suite.passed")}
-    </Badge>
+    <StateBadge look={ASSISTANT_STATUS_LOOK.suite_passed}>{t("list.suite.passed")}</StateBadge>
   ) : (
-    <Badge variant="outline" className="gap-1 border-destructive/40 font-normal text-destructive">
-      <AlertTriangle className="size-3" /> {t("list.suite.failed")}
-    </Badge>
+    <StateBadge look={ASSISTANT_STATUS_LOOK.suite_failed}>{t("list.suite.failed")}</StateBadge>
   );
 }

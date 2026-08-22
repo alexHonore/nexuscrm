@@ -142,6 +142,5 @@ export function briefToCampaignConfig(brief: CampaignBrief): CampaignConfig {
     ladder,
     variants,
     dailyEnrollmentCap: brief.dailyCap ?? 50,
-    requireConsent: true,
   });
 }

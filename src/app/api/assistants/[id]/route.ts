@@ -86,6 +86,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       name: config.name,
       description: config.description,
       language: config.language,
+      secondaryLanguage: config.secondaryLanguage,
       identity: config.identity,
       goal: config.goal,
       approach: config.approach,

@@ -147,7 +147,6 @@ export const campaignConfigSchema = z
     totalEnrollmentCap: z.number().int().min(1).nullable().default(null),
     startsAt: z.coerce.date().nullable().default(null),
     endsAt: z.coerce.date().nullable().default(null),
-    requireConsent: z.boolean().default(true),
   })
   .refine((c) => c.startsAt === null || c.endsAt === null || c.endsAt > c.startsAt, {
     message: "endsAt must be after startsAt",
@@ -179,7 +178,6 @@ export function campaignRowToConfig(row: {
   totalEnrollmentCap: number | null;
   startsAt: Date | null;
   endsAt: Date | null;
-  requireConsent: boolean;
 }): CampaignConfig {
   return campaignConfigSchema.parse({
     name: row.name,
@@ -194,6 +192,5 @@ export function campaignRowToConfig(row: {
     totalEnrollmentCap: row.totalEnrollmentCap,
     startsAt: row.startsAt,
     endsAt: row.endsAt,
-    requireConsent: row.requireConsent,
   });
 }

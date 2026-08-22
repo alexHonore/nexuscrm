@@ -83,7 +83,6 @@ describe("brief → configuration de campagne", () => {
     // Les protections par défaut restent en place.
     expect(config.audience.excludeDoNotCall).toBe(true);
     expect(config.audience.excludeActiveInOtherCampaign).toBe(true);
-    expect(config.requireConsent).toBe(true);
   });
 
   it("le nom de repli DÉCRIT la campagne, il n'invente rien", () => {

@@ -26,6 +26,10 @@ CRM de centre d'appels pour un courtier immobilier québécois. Interface **fran
 8. **Réglages typés** via `getSetting`/`setSetting` (`src/lib/settings.ts`) — clés : `booking`, `google`, `telephony`.
 9. Dates en base : `timestamptz` (objets `Date` UTC). Affichage : `formatInTimeZone(date, "America/Toronto", …)`.
 10. Server Components par défaut ; `"use client"` seulement quand nécessaire. Mutations : Server Actions (`"use server"`) ou routes API sous `src/app/api/`.
+11. **Un pictogramme et une couleur par concept, définis une seule fois.** Le couple vit dans `src/components/look.tsx` (`GOAL_LOOK`, `TOOL_LOOK`, `SEVERITY_LOOK`, `EDITOR_TAB_LOOK`, `CHANNEL_LOOK`, familles `TONE`) ou dans `src/components/admin/trigger-look.tsx`. Jamais de couleur en dur dans un écran. Une icône DOUBLE un libellé (elle est `aria-hidden`), elle ne le remplace pas, et la couleur ne porte jamais le sens toute seule. `tests/unit-look.test.ts` refuse un concept sans pictogramme.
+    - Le **canal SMS** a sa couleur réservée (`CHANNEL_LOOK.sms`) : sur une fiche client, cette carte SORT de l'application, ses voisines non. Ne pas la réutiliser ailleurs.
+12. **Pas de notion de consentement SMS** (décision de l'exploitant, 2026-08-22). Toute fiche entrée dans ce CRM est réputée joignable : ni porte, ni registre, ni réglage. Ce qui reste et qui est ABSOLU : le désabonnement (table `suppressions`, mot-clé STOP traité dans `/api/webhooks/twilio/inbound`) et `clients.doNotCall`. Ne pas réintroduire de condition de consentement dans `canEnroll` / `canSendTouch`.
+13. **La langue de l'assistant est un réglage** (`language` + `secondaryLanguage`, onglet Identité), compilé en L3. Elle n'a rien à voir avec la langue de l'interface — voir la règle 2.
 
 ## Fichiers clés
 

@@ -156,10 +156,4 @@ export const CAMPAIGN_FIELD_TEXT_EN: Record<string, CampaignFieldText> = {
     what: "Date after which the campaign stops enrolling anyone. Empty = no end.",
     why: "Enrollments already under way finish their ladder; only new ones stop.",
   },
-  requireConsent: {
-    label: "Consent required",
-    what: "Yes by default: only write to contacts with a valid SMS consent on file.",
-    why: "Canadian anti-spam law (CASL). Unchecking it is only defensible for a campaign whose text is itself a request for consent.",
-    pitfalls: "Unchecking does not get around opt-outs: a number under \"STOP\" never receives anything.",
-  },
 };

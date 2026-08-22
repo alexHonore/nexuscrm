@@ -3,7 +3,6 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { settings } from "@/db/schema";
-import { CONSENT_VALIDITIES, DEFAULT_CONSENT_VALIDITY } from "@/lib/sms/consent";
 
 // ── Schemas des réglages ─────────────────────────────────────────────────────
 
@@ -49,13 +48,6 @@ export const smsSettingsSchema = z.object({
   killSwitch: z.boolean().default(false),
   killSwitchReason: z.string().nullable().default(null),
   killSwitchAt: z.string().nullable().default(null),
-  /**
-   * Durée de validité estampillée sur les NOUVEAUX consentements du registre
-   * (le registre est append-only : les rangées existantes gardent leur
-   * échéance sauf recalcul explicite). Défaut : illimité (choix de l'admin) ;
-   * « 6m » = fenêtre LCAP du consentement implicite après demande.
-   */
-  consentValidity: z.enum(CONSENT_VALIDITIES).default(DEFAULT_CONSENT_VALIDITY),
   /**
    * Battement du répartiteur — ISO, écrit à chaque cycle.
    *

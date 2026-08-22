@@ -57,7 +57,6 @@ export async function matchCampaigns(
           eq(clients.id, clientId),
           audienceWhere(config.audience, config.trigger, now, {
             campaignId: row.id,
-            requireConsent: config.requireConsent,
           }),
         ),
       )

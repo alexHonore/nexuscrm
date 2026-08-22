@@ -983,16 +983,46 @@ const prompt: ParamDoc[] = [
   doc({
     path: "language",
     section: "identity",
-    labelFr: "Langue",
+    labelFr: "Langue principale",
     type: "enum",
     required: true,
     defaultValue: "fr-CA",
-    allowed: [{ value: "fr-CA", labelFr: "Français québécois" }],
-    whatFr: "La langue de rédaction.",
-    whyFr: "Les destinataires sont francophones du Québec.",
-    pitfallsFr: "Seul le français québécois est pris en charge pour l'instant.",
-    related: ["approach.formality"],
+    allowed: [
+      { value: "fr-CA", labelFr: "Français québécois" },
+      { value: "en-CA", labelFr: "Anglais canadien" },
+    ],
+    whatFr: "La langue dans laquelle l'assistant écrit TOUS ses messages, à commencer par le premier.",
+    whyFr:
+      "Une étiquette régionale et non « fr » : ce qu'on demande au modèle, c'est le français québécois, pas celui de France. La différence s'entend dès la première phrase d'un SMS.",
+    effectFr:
+      "Compilée en L3, en toutes lettres. Sans cette ligne, le modèle écrivait en français parce que le reste du prompt l'était — pas parce qu'on le lui demandait, et un assistant réglé sur l'anglais écrivait quand même en français.",
+    pitfallsFr:
+      "Les paquets d'objections et le gabarit du tour sont rédigés en français : sur un assistant anglophone, le modèle les traduit à la volée. Relisez le bac à sable avant d'activer.",
+    related: ["secondaryLanguage", "approach.formality"],
     example: "fr-CA",
+  }),
+  doc({
+    path: "secondaryLanguage",
+    section: "identity",
+    labelFr: "Seconde langue",
+    type: "enum",
+    required: false,
+    defaultValue: null,
+    allowed: [
+      { value: null, labelFr: "Aucune — une seule langue" },
+      { value: "fr-CA", labelFr: "Français québécois" },
+      { value: "en-CA", labelFr: "Anglais canadien" },
+    ],
+    whatFr:
+      "Une langue dans laquelle l'assistant a le droit de BASCULER quand la personne y écrit — jamais d'ouvrir.",
+    whyFr:
+      "Un courtier de Québec reçoit des leads anglophones. Sans ce champ, l'assistant répondait en français à quelqu'un qui venait d'écrire en anglais, et la conversation s'arrêtait là.",
+    effectFr:
+      "Ajoute deux lignes en L3 : réponds dans cette langue si la personne s'y met, mais garde la langue principale pour le PREMIER message — on ne devine pas la langue de quelqu'un qui n'a encore rien écrit.",
+    pitfallsFr:
+      "La même valeur que la langue principale est refusée à l'enregistrement : le réglage n'aurait aucun effet tout en paraissant en avoir un.",
+    related: ["language"],
+    example: "en-CA",
   }),
 ];
 

@@ -8,7 +8,7 @@
  * Pourquoi une liste de vérifications explicite plutôt qu'un « ça marche » :
  * le moteur a huit endroits qui peuvent, chacun, faire qu'aucun message ne
  * parte — le mode, les deux drapeaux, l'interrupteur, le numéro, le
- * consentement, la porte d'activation de l'assistant, l'état de la campagne, le
+ * la porte d'activation de l'assistant, l'état de la campagne, le
  * répartiteur. Découvrir lequel après avoir cliqué « activer » et attendu une
  * heure est le pire chemin possible ; c'est aussi celui qu'on prend quand rien
  * ne l'énumère.
@@ -31,8 +31,6 @@ export const CHECK_IDS = [
   "webhook_signature",
   "sms_number",
   "messaging_service",
-  "consent_policy",
-  "consented_clients",
   "quiet_hours",
   "assistant_active",
   "assistant_suite",
@@ -67,8 +65,6 @@ export interface PreflightFacts {
   hasMessagingServiceEnv: boolean;
   activeNumberCount: number;
   numbersWithoutMessagingService: number;
-  consentValidity: string;
-  consentedClientCount: number;
   quietHoursLabel: string;
   activeAssistantCount: number;
   /** Assistants actifs dont la suite n'est PAS verte. */
@@ -152,13 +148,6 @@ export function preflight(facts: PreflightFacts): PreflightReport {
   );
 
   // ── Ce qui décide qu'il part vers QUELQU'UN ──────────────────────────────
-  add("consent_policy", "info", true, facts.consentValidity);
-  add(
-    "consented_clients",
-    "warning",
-    facts.consentedClientCount > 0,
-    `${facts.consentedClientCount}`,
-  );
   add("quiet_hours", "info", true, facts.quietHoursLabel);
 
   // ── Ce qui décide qu'il dit quelque chose ────────────────────────────────

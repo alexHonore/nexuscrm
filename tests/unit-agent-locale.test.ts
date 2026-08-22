@@ -16,7 +16,11 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { assistantConfigSchema, type AssistantConfig } from "@/lib/assistants/schema";
+import {
+  assistantConfigInputSchema,
+  assistantConfigSchema,
+  type AssistantConfig,
+} from "@/lib/assistants/schema";
 import { compileAssistantPrompt, type CoreDoc } from "@/lib/agent/compile";
 
 /** Les dossiers dont le contenu part dans un SMS ou dans un prompt. */
@@ -132,5 +136,57 @@ describe("langue de l'assistant", () => {
     }
     // …et il est bien rédigé en français.
     expect(before).toContain("CONNAISSANCES ET CONSIGNES");
+  });
+});
+
+describe("langue de rédaction — réglage réel", () => {
+  const core: CoreDoc = { version: 1, body: "# RÔLE\nAssistant." };
+  const build = (overrides: Record<string, unknown>) =>
+    compileAssistantPrompt(
+      assistantConfigSchema.parse({
+        name: "A",
+        identity: {},
+        goal: { primary: { type: "video_meeting" } },
+        approach: {},
+        model: {},
+        ...overrides,
+      }),
+      core,
+      [],
+      [],
+    ).layers.find((l) => l.id === "L3")!.text;
+
+  it("la langue principale est ÉCRITE dans le prompt, pas seulement stockée", () => {
+    // Elle était enregistrée sur la fiche et n'entrait dans aucune couche : le
+    // modèle écrivait en français par imprégnation, pas sur consigne.
+    expect(build({ language: "fr-CA" })).toContain("Tu écris en français québécois.");
+    expect(build({ language: "en-CA" })).toContain("Tu écris en anglais canadien.");
+  });
+
+  it("sans seconde langue, l'assistant NE bascule pas", () => {
+    const l3 = build({ language: "fr-CA", secondaryLanguage: null });
+    expect(l3).toContain("tu continues en français québécois");
+  });
+
+  it("avec une seconde langue, il bascule — mais n'OUVRE jamais avec", () => {
+    const l3 = build({ language: "fr-CA", secondaryLanguage: "en-CA" });
+    expect(l3).toContain("Si la personne écrit en anglais canadien");
+    // On ne devine pas la langue de quelqu'un qui n'a encore rien écrit.
+    expect(l3).toMatch(/PREMIER message reste en français québécois/);
+  });
+
+  it("une seconde langue identique à la principale est REFUSÉE", () => {
+    const input = {
+      name: "A",
+      identity: {},
+      goal: { primary: { type: "video_meeting" } },
+      approach: {},
+      model: {},
+      language: "fr-CA",
+      secondaryLanguage: "fr-CA",
+    };
+    // Un réglage sans effet, affiché comme s'il en avait un.
+    expect(assistantConfigInputSchema.safeParse(input).success).toBe(false);
+    expect(assistantConfigSchema.parse(input).secondaryLanguage).toBe("fr-CA");
   });
 });

@@ -59,6 +59,7 @@ export async function POST(req: Request) {
       description: config.description,
       status: "draft",
       language: config.language,
+      secondaryLanguage: config.secondaryLanguage,
       identity: config.identity,
       goal: config.goal,
       approach: config.approach,

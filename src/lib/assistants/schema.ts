@@ -76,6 +76,17 @@ export type LayerId = (typeof LAYER_IDS)[number];
 export const PROVIDER_IDS = ["openrouter", "anthropic", "google", "openai"] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
+/**
+ * Les langues dans lesquelles un assistant peut écrire.
+ *
+ * Étiquettes régionales et non « fr » / « en » : ce qu'on demande au modèle,
+ * c'est le français QUÉBÉCOIS (« bonjour », « à quelle heure ça vous
+ * convient ») et non le français de France, et l'anglais canadien plutôt que
+ * l'américain. La différence s'entend dès la première phrase d'un SMS.
+ */
+export const ASSISTANT_LANGUAGES = ["fr-CA", "en-CA"] as const;
+export type AssistantLanguage = (typeof ASSISTANT_LANGUAGES)[number];
+
 // ── Identité (L1) ────────────────────────────────────────────────────────────
 
 export const identitySchema = z.object({
@@ -275,7 +286,14 @@ export type LayerOverrides = z.infer<typeof layerOverridesSchema>;
 export const assistantConfigSchema = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(500).nullable().default(null),
-  language: z.literal("fr-CA").default("fr-CA"),
+  /** Langue de rédaction — celle de TOUS les messages sortants. */
+  language: z.enum(ASSISTANT_LANGUAGES).default("fr-CA"),
+  /**
+   * Seconde langue, facultative : l'assistant y BASCULE si la personne y
+   * écrit, sans jamais ouvrir avec. `null` = une seule langue, et une réponse
+   * dans une autre langue reste dans la principale.
+   */
+  secondaryLanguage: z.enum(ASSISTANT_LANGUAGES).nullable().default(null),
   identity: identitySchema,
   goal: goalConfigSchema,
   approach: approachSchema,
@@ -301,6 +319,14 @@ export type AssistantConfig = z.infer<typeof assistantConfigSchema>;
  * fiche déjà en base impossible à ouvrir.
  */
 export const assistantConfigInputSchema = assistantConfigSchema.superRefine((config, ctx) => {
+  if (config.secondaryLanguage !== null && config.secondaryLanguage === config.language) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["secondaryLanguage"],
+      message:
+        "La seconde langue doit différer de la principale — sinon le réglage n'a aucun effet.",
+    });
+  }
   if (config.promptMode === "raw" && (config.systemPromptOverride ?? "").trim() === "") {
     ctx.addIssue({
       code: "custom",
@@ -320,6 +346,7 @@ export function assistantRowToConfig(row: {
   name: string;
   description: string | null;
   language: string;
+  secondaryLanguage: string | null;
   identity: unknown;
   goal: unknown;
   approach: unknown;
@@ -338,6 +365,7 @@ export function assistantRowToConfig(row: {
     name: row.name,
     description: row.description,
     language: row.language,
+    secondaryLanguage: row.secondaryLanguage,
     identity: row.identity,
     goal: row.goal,
     approach: row.approach,

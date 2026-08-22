@@ -151,7 +151,6 @@ export async function importCampaign(
       totalEnrollmentCap: config.totalEnrollmentCap,
       startsAt: config.startsAt,
       endsAt: config.endsAt,
-      requireConsent: config.requireConsent,
       createdById: options.actorId,
     })
     .returning({ id: campaigns.id, name: campaigns.name });

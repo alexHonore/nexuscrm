@@ -60,7 +60,6 @@
     "queuedNow": "En file — part dans un instant",
     "cancelQueued": "Annuler",
     "skippedLabel": "Non envoyé : {reason}",
-    "noConsent": "Aucun consentement SMS au dossier et la personne n'a jamais écrit : enregistrez d'abord le consentement sur la fiche.",
     "assistantUnavailable": "Cet assistant n'est pas actif."
   },
   "ai": {
@@ -145,41 +144,6 @@
     "attention": "{count} à traiter"
   },
   "error": "Une erreur est survenue",
-  "consent": {
-    "title": "Consentement SMS",
-    "status": {
-      "valid": "Valide",
-      "expired": "Expiré",
-      "none": "Aucun au dossier"
-    },
-    "kind": {
-      "express": "Exprès",
-      "implied_inquiry": "Implicite (demande)"
-    },
-    "kindHint": {
-      "express": "La personne a clairement accepté de recevoir des textos (au téléphone, en personne, par écrit).",
-      "implied_inquiry": "La personne a fait une demande (formulaire, appel entrant) : consentement implicite, limité dans le temps par la LCAP."
-    },
-    "kindLabel": "Type de consentement",
-    "sourceLabel": "Obtenu comment ?",
-    "source": {
-      "phone_call": "Au téléphone",
-      "in_person": "En personne",
-      "form": "Formulaire",
-      "email": "Par courriel",
-      "other": "Autre"
-    },
-    "note": "Note (facultatif)",
-    "notePlaceholder": "Ex. : « a dit oui aux textos lors de l'appel du 21 août »",
-    "record": "Enregistrer un consentement",
-    "revoke": "Révoquer",
-    "confirm": "Enregistrer",
-    "cancel": "Annuler",
-    "granted": "Consentement enregistré",
-    "revoked": "Consentement révoqué",
-    "failed": "L'enregistrement a échoué",
-    "suppressedHint": "Ce numéro s'est désabonné : enregistrer un consentement ne rouvrirait rien — la suppression est définitive."
-  },
   "assistant": {
     "label": "Assistant",
     "none": "Aucun (un humain répond)",

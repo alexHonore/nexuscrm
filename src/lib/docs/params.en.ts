@@ -559,13 +559,27 @@ export const PARAM_DOCS_EN: Record<string, ParamDocText> = {
     what: "What this assistant is for, for your team.",
     why: "Six months later, \"Buyer FB 2\" no longer means anything to anyone.",
   },
-  "language": {
-    label: "Language",
-    what: "The language messages are written in.",
-    why: "The recipients are French-speaking Quebecers.",
-    pitfalls: "Only Quebec French is supported for now.",
+  "secondaryLanguage": {
+    label: "Second language",
+    what: "A language the assistant is allowed to SWITCH to when the person writes in it — never to open with.",
+    why: "A Québec City broker gets English-speaking leads. Without this field the assistant answered in French to someone who had just written in English, and the conversation ended there.",
+    effect: "Adds two lines in L3: answer in that language if the person moves to it, but keep the primary language for the FIRST message — you do not guess the language of someone who has not written yet.",
+    pitfalls: "The same value as the primary language is refused on save: the setting would have no effect while looking as if it had one.",
     allowed: {
-      "fr-CA": "Quebec French",
+      "null": "None — a single language",
+      "fr-CA": "Québec French",
+      "en-CA": "Canadian English",
+    },
+  },
+  "language": {
+    label: "Primary language",
+    what: "The language the assistant writes ALL its messages in, starting with the first one.",
+    why: "A regional tag rather than plain \"fr\": what we ask the model for is Québec French, not the French of France. The difference is audible in the first sentence of a text message.",
+    effect: "Compiled into L3, spelled out. Without that line the model wrote in French because the rest of the prompt was — not because it had been asked to, and an assistant set to English still wrote in French.",
+    pitfalls: "Objection packs and the turn template are written in French: on an English assistant the model translates them on the fly. Check the sandbox before activating.",
+    allowed: {
+      "fr-CA": "Québec French",
+      "en-CA": "Canadian English",
     },
   },
   "model.fallback.provider": {

@@ -17,6 +17,16 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  EDITOR_TAB_LOOK,
+  GOAL_LOOK,
+  KNOWLEDGE_LOOK,
+  LookGlyph,
+  LookIcon,
+  TOOL_LOOK,
+  lookTint,
+} from "@/components/look";
+import {
+  ASSISTANT_LANGUAGES,
   ASSISTANT_TOOLS,
   BOOKING_GOAL_TYPES,
   GOAL_TYPES,
@@ -24,12 +34,14 @@ import {
   TYPE_MANDATED_FIELDS,
   defaultAppointmentTypeFor,
   withMandatedFields,
+  type AssistantLanguage,
   type AssistantTool,
   type GoalStep,
   type GoalType,
 } from "@/lib/assistants/schema";
 import { Label } from "@/components/ui/label";
 import { signatureFor } from "@/lib/agent/compile";
+import { cn } from "@/lib/utils";
 import { FieldLabel, useParamDoc } from "./param-help";
 import type { TabProps } from "./types";
 
@@ -59,7 +71,14 @@ function ScaleField({
 
   return (
     <div className="space-y-1.5">
-      <FieldLabel path={path} />
+      {/* Trois curseurs 1-5 voisins (persistance, proactivité, chaleur) ne se
+          comparaient qu'en lisant trois libellés nommés. Remplis jusqu'à la
+          valeur, ils se situent d'un coup d'œil — le libellé du choix reste
+          seul porteur du sens, la jauge ne fait que le doubler. */}
+      <div className="flex items-center justify-between gap-2">
+        <FieldLabel path={path} />
+        <ScaleMeter value={value} max={options.length} />
+      </div>
       <Select
         items={options.map((o) => ({ value: String(o.value), label: o.label }))}
         value={String(value)}
@@ -77,6 +96,22 @@ function ScaleField({
         </SelectContent>
       </Select>
     </div>
+  );
+}
+
+/** Les crans de l'échelle, remplis jusqu'à la valeur — décor pur, donc muet. */
+function ScaleMeter({ value, max }: { value: number; max: number }) {
+  const { color } = EDITOR_TAB_LOOK.approach;
+  return (
+    <span aria-hidden className="flex shrink-0 items-center gap-1">
+      {Array.from({ length: max }, (_, i) => (
+        <span
+          key={i}
+          className="size-1.5 rounded-full bg-muted-foreground/25"
+          style={i < value ? { backgroundColor: color } : undefined}
+        />
+      ))}
+    </span>
   );
 }
 
@@ -174,6 +209,47 @@ export function IdentityTab({ config, update, data }: TabProps) {
           value={config.description ?? ""}
           onChange={(e) => update((d) => void (d.description = e.target.value || null))}
         />
+      </div>
+
+      {/* La langue vit ICI, avec le nom et l'organisation : c'est une donnée
+          d'identité de l'assistant, pas un réglage technique. Elle était
+          enregistrée sans jamais être modifiable ni compilée. */}
+      <EnumField
+        path="language"
+        value={config.language}
+        onChange={(v) => update((d) => void (d.language = v as AssistantLanguage))}
+      />
+
+      <div className="space-y-1.5">
+        <FieldLabel path="secondaryLanguage" />
+        <Select
+          items={[
+            { value: NONE, label: t("editor.identity.noSecondLanguage") },
+            ...ASSISTANT_LANGUAGES.filter((l) => l !== config.language).map((l) => ({
+              value: l,
+              label: t(`language.${l}`),
+            })),
+          ]}
+          value={config.secondaryLanguage ?? NONE}
+          onValueChange={(v) =>
+            update((d) => {
+              d.secondaryLanguage = v === NONE ? null : (String(v) as AssistantLanguage);
+            })
+          }
+        >
+          <SelectTrigger className="min-h-11 w-full md:min-h-9">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>{t("editor.identity.noSecondLanguage")}</SelectItem>
+            {ASSISTANT_LANGUAGES.filter((l) => l !== config.language).map((l) => (
+              <SelectItem key={l} value={l}>
+                {t(`language.${l}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">{t("editor.identity.secondLanguageHint")}</p>
       </div>
 
       <EnumField
@@ -309,6 +385,11 @@ function GoalStepFields({
   // était la source de confusion — deux champs presque homonymes dont l'un ne
   // servait à rien.
   const books = BOOKING_GOALS.includes(step.type);
+  // Le cran emprunte la couleur de SON objectif. Les trois objectifs qui
+  // réservent vraiment une plage d'agenda la partagent : la retrouver autour
+  // du bloc de réservation ci-dessous fait dire quelque chose à ce bleu
+  // commun — « ceci pose un rendez-vous » — au lieu de le laisser décoratif.
+  const accent = GOAL_LOOK[step.type];
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
@@ -339,66 +420,117 @@ function GoalStepFields({
           }
         >
           <SelectTrigger className="min-h-11 w-full md:min-h-9">
-            <SelectValue />
+            <SelectValue>
+              {(v: unknown) => {
+                // Base UI passe la valeur brute : hors des sept objectifs
+                // connus on n'affiche rien plutôt qu'une clé i18n crue.
+                const picked = GOAL_TYPES.find((g) => g === v);
+                if (!picked) return null;
+                return (
+                  <span className="flex min-w-0 items-center gap-2">
+                    <LookGlyph look={GOAL_LOOK[picked]} />
+                    <span className="truncate">{t(`goalType.${picked}`)}</span>
+                  </span>
+                );
+              }}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             {GOAL_TYPES.map((g) => (
               <SelectItem key={g} value={g}>
-                <span className="flex flex-col items-start">
-                  <span>{t(`goalType.${g}`)}</span>
-                  {/* La ligne d'explication vit DANS l'option : choisir entre
-                      sept objectifs sur leur seul nom demande de deviner. */}
-                  <span className="text-xs text-muted-foreground">{t(`goalTypeHint.${g}`)}</span>
+                {/* `whitespace-normal` : la ligne d'une option Base UI est en
+                    « nowrap » et le menu fait la largeur du champ, à bord
+                    coupé. Sans ça la phrase d'explication part hors de l'écran
+                    au lieu de passer à la ligne — et le pictogramme, qui prend
+                    sa place à gauche, en coupait encore un mot de plus. */}
+                <span className="flex items-start gap-2 whitespace-normal">
+                  <LookIcon look={GOAL_LOOK[g]} size="sm" className="mt-0.5" />
+                  <span className="flex min-w-0 flex-col items-start">
+                    <span>{t(`goalType.${g}`)}</span>
+                    {/* La ligne d'explication vit DANS l'option : choisir entre
+                        sept objectifs sur leur seul nom demande de deviner. */}
+                    <span className="text-xs text-muted-foreground">{t(`goalTypeHint.${g}`)}</span>
+                  </span>
                 </span>
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
-        <p className="text-xs text-muted-foreground">{t(`goalTypeHint.${step.type}`)}</p>
+        <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+          <LookGlyph look={GOAL_LOOK[step.type]} className="mt-px size-3.5" />
+          <span className="min-w-0">{t(`goalTypeHint.${step.type}`)}</span>
+        </p>
       </div>
 
+      {/* Durée, lieu et nombre de plages ne sont QUE les réglages de la
+          réservation : rassemblés dans un bloc à la couleur de l'objectif, ils
+          se lisent comme la conséquence du type choisi et disparaissent
+          ensemble dès qu'il ne réserve plus rien. Séparés, le nombre de plages
+          se retrouvait sous les champs de qualification, loin de la durée. */}
       {books ? (
-        <div className="space-y-1.5">
-          <FieldLabel path={`${prefix}.durationMin`} htmlFor={`${prefix}-duration`} />
-          <Input
-            id={`${prefix}-duration`}
-            type="number"
-            inputMode="numeric"
-            min={5}
-            max={240}
-            value={step.durationMin ?? ""}
-            onChange={(e) =>
-              onChange((s) => void (s.durationMin = e.target.value ? Number(e.target.value) : null))
-            }
-            className="min-h-11 md:min-h-9"
-          />
-        </div>
-      ) : null}
+        <div
+          className="grid gap-4 rounded-lg border border-l-4 p-3 md:col-span-2 md:grid-cols-3"
+          style={{
+            borderLeftColor: accent.color,
+            backgroundColor: lookTint(accent).backgroundColor,
+          }}
+        >
+          <div className="space-y-1.5">
+            <FieldLabel path={`${prefix}.durationMin`} htmlFor={`${prefix}-duration`} />
+            <Input
+              id={`${prefix}-duration`}
+              type="number"
+              inputMode="numeric"
+              min={5}
+              max={240}
+              value={step.durationMin ?? ""}
+              onChange={(e) =>
+                onChange(
+                  (s) => void (s.durationMin = e.target.value ? Number(e.target.value) : null),
+                )
+              }
+              className="min-h-11 md:min-h-9"
+            />
+          </div>
 
-      {books ? (
-        <div className="space-y-1.5">
-          <FieldLabel path={`${prefix}.appointmentType`}>
-            {t("editor.goal.calendarSlot")}
-          </FieldLabel>
-          <Select
-            items={[
-              { value: "meet", label: t("editor.goal.calendarMeet") },
-              { value: "inperson", label: t("editor.goal.calendarInperson") },
-            ]}
-            value={step.appointmentType ?? "meet"}
-            onValueChange={(v) =>
-              onChange((s) => void (s.appointmentType = String(v) as "meet" | "inperson"))
-            }
-          >
-            <SelectTrigger className="min-h-11 w-full md:min-h-9">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="meet">{t("editor.goal.calendarMeet")}</SelectItem>
-              <SelectItem value="inperson">{t("editor.goal.calendarInperson")}</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">{t("editor.goal.calendarHint")}</p>
+          <div className="space-y-1.5">
+            <FieldLabel path={`${prefix}.appointmentType`}>
+              {t("editor.goal.calendarSlot")}
+            </FieldLabel>
+            <Select
+              items={[
+                { value: "meet", label: t("editor.goal.calendarMeet") },
+                { value: "inperson", label: t("editor.goal.calendarInperson") },
+              ]}
+              value={step.appointmentType ?? "meet"}
+              onValueChange={(v) =>
+                onChange((s) => void (s.appointmentType = String(v) as "meet" | "inperson"))
+              }
+            >
+              <SelectTrigger className="min-h-11 w-full md:min-h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="meet">{t("editor.goal.calendarMeet")}</SelectItem>
+                <SelectItem value="inperson">{t("editor.goal.calendarInperson")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">{t("editor.goal.calendarHint")}</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <FieldLabel path={`${prefix}.slotOfferCount`} htmlFor={`${prefix}-slots`} />
+            <Input
+              id={`${prefix}-slots`}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={3}
+              value={step.slotOfferCount}
+              onChange={(e) => onChange((s) => void (s.slotOfferCount = Number(e.target.value)))}
+              className="min-h-11 md:min-h-9"
+            />
+          </div>
         </div>
       ) : null}
 
@@ -465,22 +597,6 @@ function GoalStepFields({
         </div>
       </div>
 
-      {books ? (
-      <div className="space-y-1.5">
-        <FieldLabel path={`${prefix}.slotOfferCount`} htmlFor={`${prefix}-slots`} />
-        <Input
-          id={`${prefix}-slots`}
-          type="number"
-          inputMode="numeric"
-          min={1}
-          max={3}
-          value={step.slotOfferCount}
-          onChange={(e) => onChange((s) => void (s.slotOfferCount = Number(e.target.value)))}
-          className="min-h-11 md:min-h-9"
-        />
-      </div>
-      ) : null}
-
       <div className="space-y-1.5 md:col-span-2">
         <FieldLabel path={`${prefix}.confirmationTemplate`} htmlFor={`${prefix}-confirm`} />
         <Textarea
@@ -493,6 +609,36 @@ function GoalStepFields({
         />
       </div>
     </div>
+  );
+}
+
+/**
+ * Le nom d'un objectif, avec son pictogramme.
+ *
+ * La chaîne se lit de haut en bas : « Repli 1 », « Repli 2 »… sans qu'on sache
+ * ce que chaque cran vise avant d'ouvrir son sélecteur. La forme se reconnaît
+ * sans être lue, et le bleu commun aux trois objectifs qui réservent une plage
+ * d'agenda dit lesquels posent un rendez-vous. Le NOM reste écrit à côté : la
+ * couleur ne porte jamais le sens toute seule.
+ */
+function GoalTypeTag({ type, className }: { type: GoalType; className?: string }) {
+  const t = useTranslations("assistants");
+  const look = GOAL_LOOK[type];
+  // On reprend le fond et la bordure de `lookTint`, mais PAS sa couleur de
+  // texte : l'ambre de « passer la main » sur fond clair ne se lit pas. Le
+  // pictogramme porte la couleur, le libellé garde son contraste.
+  const tint = lookTint(look);
+  return (
+    <span
+      className={cn(
+        "inline-flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-normal text-muted-foreground",
+        className,
+      )}
+      style={{ borderColor: tint.borderColor, backgroundColor: tint.backgroundColor }}
+    >
+      <LookGlyph look={look} className="size-3.5" />
+      <span className="truncate">{t(`goalType.${type}`)}</span>
+    </span>
   );
 }
 
@@ -517,7 +663,10 @@ export function GoalTab({ config, update, data }: TabProps) {
   return (
     <div className="space-y-6">
       <section className="space-y-3">
-        <h3 className="font-medium">{t("editor.goal.primary")}</h3>
+        <h3 className="flex flex-wrap items-center gap-2 font-medium">
+          {t("editor.goal.primary")}
+          <GoalTypeTag type={config.goal.primary.type} />
+        </h3>
         <GoalStepFields
           step={config.goal.primary}
           prefix="goal.primary"
@@ -548,12 +697,16 @@ export function GoalTab({ config, update, data }: TabProps) {
         ) : (
           config.goal.fallbacks.map((step, i) => (
             <div key={i} className="space-y-3 rounded-lg border p-4">
-              <div className="flex items-center justify-between">
-                <Badge variant="secondary">{t("editor.goal.fallbackAt", { n: i + 1 })}</Badge>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="secondary" className="shrink-0">
+                  {t("editor.goal.fallbackAt", { n: i + 1 })}
+                </Badge>
+                {/* Ce que ce cran vise, visible sans le déplier. */}
+                <GoalTypeTag type={step.type} />
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="min-h-11 text-destructive md:min-h-9"
+                  className="ml-auto min-h-11 shrink-0 text-destructive md:min-h-9"
                   onClick={() => update((d) => void d.goal.fallbacks.splice(i, 1))}
                 >
                   <Trash2 /> {t("editor.goal.removeFallback")}
@@ -692,12 +845,17 @@ export function KnowledgeTab({ config, update }: TabProps) {
                 toutes « zone de texte » au lecteur d'écran. */}
             <span
               aria-hidden
-              className="mt-2 w-6 shrink-0 text-right font-mono text-xs text-muted-foreground"
+              className="mt-1.5 flex size-6 shrink-0 items-center justify-center rounded-md font-mono text-xs"
+              style={{ backgroundColor: lookTint(EDITOR_TAB_LOOK.knowledge).backgroundColor }}
             >
-              {i + 1}.
+              {i + 1}
             </span>
             <Textarea
               rows={2}
+              // Une zone de texte ne descend pas sous sa largeur intrinsèque
+              // dans une rangée flex : à 360 px la rangée (numéro, flèches,
+              // corbeille) poussait la page en débordement horizontal.
+              className="min-w-0"
               value={claim}
               maxLength={600}
               aria-label={t("editor.knowledge.entry", { index: i + 1 })}
@@ -754,17 +912,28 @@ export function KnowledgeTab({ config, update }: TabProps) {
 /** Un exemple des deux formes admises — c'est ce qui les rend évidentes. */
 function ExampleLine({ kind, text }: { kind: "fact" | "rule"; text: string }) {
   const t = useTranslations("assistants");
+  // Les deux exemples s'écrivent dans la même liste et se ressemblent en
+  // texte ; le pictogramme sépare « ce que l'assistant peut affirmer » de
+  // « comment il doit se conduire » avant qu'on ait lu la phrase.
+  const look = KNOWLEDGE_LOOK[kind];
   return (
-    <p className="rounded-md bg-muted/40 p-2.5 text-xs text-muted-foreground">
-      <Badge variant="outline" className="mr-1.5 align-middle text-[10px]">
-        {t(`editor.knowledge.kind.${kind}`)}
-      </Badge>
-      {text}
+    <p className="flex items-start gap-2 rounded-md bg-muted/40 p-2.5 text-xs text-muted-foreground">
+      <LookIcon look={look} size="sm" className="mt-px" />
+      <span className="min-w-0">
+        <Badge variant="outline" className="mr-1.5 align-middle text-[10px]">
+          {t(`editor.knowledge.kind.${kind}`)}
+        </Badge>
+        {text}
+      </span>
     </p>
   );
 }
 
 // ── Objections ───────────────────────────────────────────────────────────────
+
+/** Les paquets sont tous la même matière : ils portent le pictogramme de l'onglet. */
+const OBJECTIONS_LOOK = EDITOR_TAB_LOOK.objections;
+const OBJECTIONS_TINT = lookTint(OBJECTIONS_LOOK);
 
 export function ObjectionsTab({ config, update, data }: TabProps) {
   const t = useTranslations("assistants");
@@ -777,10 +946,22 @@ export function ObjectionsTab({ config, update, data }: TabProps) {
       <div className="grid gap-2 sm:grid-cols-2">
         {data.packs.map((pack) => {
           const checked = config.objectionPacks.includes(pack.id);
+          // Une grille de cases identiques : le pictogramme dit de quelle
+          // matière il s'agit, et la teinte des paquets retenus les fait
+          // ressortir sans qu'on relise chaque case — laquelle reste, elle,
+          // le seul indicateur d'état qui compte.
           return (
             <label
               key={pack.id}
               className="flex min-h-11 items-center gap-3 rounded-md border px-3 py-2 text-sm"
+              style={
+                checked
+                  ? {
+                      borderColor: OBJECTIONS_TINT.borderColor,
+                      backgroundColor: OBJECTIONS_TINT.backgroundColor,
+                    }
+                  : undefined
+              }
             >
               <Checkbox
                 checked={checked}
@@ -792,6 +973,7 @@ export function ObjectionsTab({ config, update, data }: TabProps) {
                   })
                 }
               />
+              <LookIcon look={OBJECTIONS_LOOK} size="sm" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{pack.label}</span>
                 <span className="text-xs text-muted-foreground">
@@ -816,13 +998,38 @@ export function ToolsTab({ config, update }: TabProps) {
   return (
     <div className="space-y-3">
       <FieldLabel path="tools" />
-      <p className="text-sm text-muted-foreground">{t("editor.tools.requiredNote")}</p>
+      {/* La note nomme « stop » et « handoff » : leurs deux pictogrammes la
+          précèdent, ce sont eux qu'on retrouvera plus bas dans la liste. */}
+      <p className="flex items-start gap-2 text-sm text-muted-foreground">
+        <span className="flex shrink-0 items-center gap-1 pt-0.5">
+          <LookGlyph look={TOOL_LOOK.stop} className="size-3.5" />
+          <LookGlyph look={TOOL_LOOK.handoff} className="size-3.5" />
+        </span>
+        <span className="min-w-0">{t("editor.tools.requiredNote")}</span>
+      </p>
       <div className="space-y-2">
         {ASSISTANT_TOOLS.map((tool) => {
           const required = REQUIRED_TOOLS.includes(tool);
           const checked = config.tools.includes(tool);
+          // Huit interrupteurs de texte nu se valaient tous à l'œil. Le
+          // pictogramme identifie l'outil ; le liseré ne teinte QUE les deux
+          // qu'on ne peut pas éteindre, dans leur propre couleur — le rouge de
+          // l'arrêt et l'ambre du passage à un humain sont déjà graves.
+          const look = TOOL_LOOK[tool];
           return (
-            <div key={tool} className="flex items-start gap-3 rounded-md border p-3">
+            <div
+              key={tool}
+              className="flex items-start gap-3 rounded-md border p-3"
+              style={
+                required
+                  ? {
+                      borderLeftWidth: 3,
+                      borderLeftColor: look.color,
+                      backgroundColor: lookTint(look).backgroundColor,
+                    }
+                  : undefined
+              }
+            >
               <Switch
                 checked={checked || required}
                 disabled={required}
@@ -833,14 +1040,17 @@ export function ToolsTab({ config, update }: TabProps) {
                   })
                 }
               />
+              <LookIcon look={look} />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium">{t(`tool.${tool}`)}</span>
+                  <span className="text-sm font-medium break-words">{t(`tool.${tool}`)}</span>
                   {required ? (
                     <Badge variant="secondary">{t("editor.tools.required")}</Badge>
                   ) : null}
-                  <ToolHelp tool={tool} />
                 </div>
+                {/* L'explication passe sous le nom : à 360 px elle se glissait
+                    entre le nom et la pastille « Requis ». */}
+                <ToolHelp tool={tool} />
               </div>
             </div>
           );
@@ -853,5 +1063,5 @@ export function ToolsTab({ config, update }: TabProps) {
 function ToolHelp({ tool }: { tool: AssistantTool }) {
   const doc = useParamDoc(`tools.${tool}`);
   if (!doc) return null;
-  return <span className="text-xs text-muted-foreground">{doc.what}</span>;
+  return <p className="mt-1 text-xs text-muted-foreground">{doc.what}</p>;
 }

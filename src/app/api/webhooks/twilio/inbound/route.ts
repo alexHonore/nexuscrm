@@ -3,7 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
-import { assistants, consents, conversations, messages, smsNumbers, suppressions } from "@/db/schema-sms";
+import { assistants, conversations, messages, smsNumbers, suppressions } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
 import { normalizePhone, phoneMatchKey } from "@/lib/phone";
 import { markEnrollmentsReplied, markEnrollmentsStopped } from "@/lib/campaigns-server/inbound";
@@ -132,12 +132,9 @@ export async function POST(req: NextRequest) {
   }
 
   if (optOut.optOut) {
-    await db
-      .update(consents)
-      .set({ revokedAt: now })
-      .where(
-        and(eq(consents.clientId, client.id), eq(consents.channel, "sms"), isNull(consents.revokedAt)),
-      );
+    // La suppression du numéro est écrite plus haut, AVANT même d'avoir
+    // rattaché une fiche : c'est elle qui arrête tout. Ici, on ne fait que
+    // journaliser le refus contre la personne.
     await logAudit({
       userId: null,
       action: "sms.optout",

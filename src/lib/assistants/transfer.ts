@@ -244,6 +244,7 @@ export async function importAssistant(
         // Brouillon imposé : voir l'entête.
         status: "draft",
         language: config.language,
+      secondaryLanguage: config.secondaryLanguage,
         identity: config.identity,
         goal: config.goal,
         approach: config.approach,

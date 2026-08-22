@@ -34,6 +34,14 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  CREATE_MODE_TONE,
+  EDITOR_TAB_LOOK,
+  GOAL_LOOK,
+  LookGlyph,
+  LookIcon,
+  type Look,
+} from "@/components/look";
+import {
   GOAL_TYPES,
   PROVIDER_IDS,
   type AssistantConfig,
@@ -202,15 +210,28 @@ export function AssistantCreateDialog({ trigger }: { trigger: React.ReactNode })
 function ModeChooser({ onPick }: { onPick: (mode: Mode) => void }) {
   const t = useTranslations("assistants");
 
+  // Les teintes viennent du vocabulaire, pas d'un hex écrit ici — les trois
+  // portes de la création de campagne montrent les mêmes et doivent pouvoir
+  // les lire au même endroit.
   const modes = [
     {
       key: "ai" as const,
-      color: "var(--color-primary)",
+      color: CREATE_MODE_TONE.ai,
       Illustration: ChatIllustration,
       badge: t("create.ai.badge"),
     },
-    { key: "simple" as const, color: "#10B981", Illustration: FormIllustration, badge: null },
-    { key: "complex" as const, color: "#8B5CF6", Illustration: DashboardIllustration, badge: null },
+    {
+      key: "simple" as const,
+      color: CREATE_MODE_TONE.simple,
+      Illustration: FormIllustration,
+      badge: null,
+    },
+    {
+      key: "complex" as const,
+      color: CREATE_MODE_TONE.complex,
+      Illustration: DashboardIllustration,
+      badge: null,
+    },
   ];
 
   return (
@@ -471,6 +492,10 @@ function SimpleCreator({ onSubmit }: { onSubmit: (pending: Pending) => void }) {
           value: g,
           label: t(`goalType.${g}`),
           hint: t(`goalTypeHint.${g}`),
+          // Six objectifs en six lignes de texte gris : on les lit tous pour
+          // retrouver celui qu'on veut. Le pictogramme le donne sans lire, et
+          // c'est le MÊME que dans la liste et dans l'éditeur ensuite.
+          look: GOAL_LOOK[g],
         }))}
       />
 
@@ -495,6 +520,15 @@ function SimpleCreator({ onSubmit }: { onSubmit: (pending: Pending) => void }) {
   );
 }
 
+/**
+ * Une grille de choix.
+ *
+ * `look` est facultatif : seuls les concepts qui EXISTENT dans le vocabulaire
+ * en portent un. Inventer un pictogramme pour « des acheteurs » ou « insister
+ * modérément » ne ferait qu'ajouter des dessins à deviner ; laisser ces
+ * grilles en texte concentre l'œil sur l'objectif, qui est le choix dont tout
+ * le reste découle.
+ */
 function Choice({
   label,
   value,
@@ -504,7 +538,7 @@ function Choice({
   label: string;
   value: string;
   onChange: (value: string) => void;
-  options: { value: string; label: string; hint?: string }[];
+  options: { value: string; label: string; hint?: string; look?: Look }[];
 }) {
   return (
     <div className="space-y-1.5">
@@ -516,15 +550,20 @@ function Choice({
             type="button"
             onClick={() => onChange(option.value)}
             className={cn(
-              "rounded-lg border p-2.5 text-left text-sm transition-colors",
+              // `min-h-11` : ces tuiles sont la première chose qu'on touche du
+              // pouce en créant un assistant depuis un téléphone.
+              "flex min-h-11 items-start gap-2 rounded-lg border p-2.5 text-left text-sm transition-colors",
               "hover:border-primary hover:bg-primary/5",
               value === option.value && "border-primary bg-primary/5",
             )}
           >
-            <span className="font-medium">{option.label}</span>
-            {option.hint ? (
-              <span className="mt-0.5 block text-xs text-muted-foreground">{option.hint}</span>
-            ) : null}
+            {option.look ? <LookIcon look={option.look} size="sm" className="mt-0.5" /> : null}
+            <span className="min-w-0 flex-1">
+              <span className="font-medium">{option.label}</span>
+              {option.hint ? (
+                <span className="mt-0.5 block text-xs text-muted-foreground">{option.hint}</span>
+              ) : null}
+            </span>
           </button>
         ))}
       </div>
@@ -672,7 +711,13 @@ function ModelStep({
   return (
     <div className="space-y-4">
       <div className="space-y-1.5">
-        <Label htmlFor="cm-provider">{t("create.model.provider")}</Label>
+        {/* Une seule marque sur tout l'écran, celle de l'onglet « Modèle » :
+            l'entonnoir en dessous porte déjà les couleurs des laboratoires, et
+            cette étape se termine par la création — elle doit rester calme. */}
+        <Label htmlFor="cm-provider" className="gap-1.5">
+          <LookGlyph look={EDITOR_TAB_LOOK.model} className="size-3.5" />
+          {t("create.model.provider")}
+        </Label>
         <Select
           items={PROVIDER_IDS.map((p) => ({ value: p, label: p }))}
           value={provider}
@@ -752,13 +797,24 @@ function ConfigSummary({ config }: { config: AssistantConfig }) {
   const t = useTranslations("assistants");
   return (
     <dl className="grid gap-x-4 gap-y-1 rounded-lg bg-muted/40 p-3 text-xs sm:grid-cols-2">
-      <Row label={t("create.summary.goal")} value={t(`goalType.${config.goal.primary.type}`)} />
+      {/* Le même pictogramme que sur la tuile qu'on vient de cocher : l'aperçu
+          se relit d'un coup d'œil au lieu de se déchiffrer ligne à ligne. */}
+      <Row
+        label={t("create.summary.goal")}
+        value={t(`goalType.${config.goal.primary.type}`)}
+        look={GOAL_LOOK[config.goal.primary.type]}
+      />
       <Row
         label={t("create.summary.fallback")}
         value={
           config.goal.fallbacks.length > 0
             ? t(`goalType.${config.goal.fallbacks[0].type}`)
             : t("create.summary.none")
+        }
+        look={
+          config.goal.fallbacks.length > 0
+            ? GOAL_LOOK[config.goal.fallbacks[0].type]
+            : undefined
         }
       />
       <Row
@@ -774,11 +830,14 @@ function ConfigSummary({ config }: { config: AssistantConfig }) {
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({ label, value, look }: { label: string; value: string; look?: Look }) {
   return (
     <div className="flex justify-between gap-2 sm:block">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="font-medium">{value}</dd>
+      <dd className="flex min-w-0 items-center gap-1 font-medium">
+        {look ? <LookGlyph look={look} className="size-3.5" /> : null}
+        <span className="min-w-0 break-words">{value}</span>
+      </dd>
     </div>
   );
 }

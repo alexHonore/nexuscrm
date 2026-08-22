@@ -8,17 +8,22 @@ import type { CampaignConfig } from "./schema";
  * seule chose qui compte vraiment dans une campagne SMS : **pourquoi on ne
  * devrait PAS écrire à quelqu'un.**
  *
- * Chaque refus porte un motif distinct. Regrouper « pas de consentement » et
- * « numéro supprimé » sous un « inéligible » unique rendrait impossible de
+ * Chaque refus porte un motif distinct. Regrouper « numéro supprimé » et
+ * « ne pas appeler » sous un « inéligible » unique rendrait impossible de
  * répondre à la question qu'on se posera forcément un jour : cette campagne
  * convertit-elle mal, ou n'a-t-elle jamais eu le droit de partir?
+ *
+ * PAS de condition de consentement (décision de l'exploitant, 2026-08-22) :
+ * toute fiche entrée dans ce CRM a été vérifiée comme joignable, et le registre
+ * de consentement n'ajoutait qu'un refus de plus à diagnostiquer. Ce qui reste,
+ * et qui compte : un REFUS EXPRIMÉ — désabonnement (« suppressed ») et « ne pas
+ * appeler » — passe toujours avant tout le reste.
  */
 
 export const ENROLL_REFUSALS = [
   "campaign_not_active",
   "outside_window",
   "no_phone",
-  "no_consent",
   "suppressed",
   "do_not_call",
   "already_enrolled",
@@ -59,8 +64,6 @@ export interface EnrollFacts {
   status: string;
   now: Date;
   hasPhone: boolean;
-  /** Consentement valide et non expiré pour le canal SMS. */
-  hasValidConsent: boolean;
   suppressed: boolean;
   doNotCall: boolean;
   alreadyEnrolled: boolean;
@@ -92,7 +95,6 @@ export function canEnroll(config: CampaignConfig, facts: EnrollFacts): EnrollDec
   // L'ordre suit la gravité : un numéro désabonné est un refus exprimé, il
   // passe AVANT toute considération de capacité ou de doublon.
   if (facts.suppressed) return deny("suppressed");
-  if (config.requireConsent && !facts.hasValidConsent) return deny("no_consent");
   if (config.audience.excludeDoNotCall && facts.doNotCall) return deny("do_not_call");
 
   if (facts.alreadyEnrolled) return deny("already_enrolled");
@@ -122,7 +124,6 @@ export const TOUCH_REFUSALS = [
   "campaign_not_active",
   "enrollment_ended",
   "suppressed",
-  "consent_expired",
   /** `clients.doNotCall` posé APRÈS l'inscription (disposition d'après-appel). */
   "do_not_call",
   "ai_paused",
@@ -146,7 +147,6 @@ export interface TouchFacts {
   /** Interrupteur d'arrêt global (`sms.killSwitch`). */
   killSwitch: boolean;
   suppressed: boolean;
-  hasValidConsent: boolean;
   /** `clients.doNotCall` au moment du barreau, pas à l'inscription. */
   doNotCall: boolean;
   /** `audience.excludeDoNotCall` de la campagne. */
@@ -171,20 +171,19 @@ export type TouchDecision = { allowed: true } | { allowed: false; refusal: Touch
 
 /**
  * Les conditions sont RE-VÉRIFIÉES à chaque barreau, jamais seulement à
- * l'inscription. Une échelle de trois semaines part avec un consentement valide
- * et peut très bien atteindre son dernier barreau après un désabonnement : la
- * décision d'inscrire ne vaut pas autorisation permanente d'écrire.
+ * l'inscription. Une échelle de trois semaines peut très bien atteindre son
+ * dernier barreau après un désabonnement : la décision d'inscrire ne vaut pas
+ * autorisation permanente d'écrire.
  *
- * L'ordre compte : les « non » définitifs (désabonnement, consentement, ne pas
- * appeler, réponse) passent AVANT les « pas maintenant » (interrupteur, numéro
- * manquant, heures de politesse). Sinon une personne désabonnée verrait son
- * inscription simplement repoussée au lendemain matin au lieu d'être close.
+ * L'ordre compte : les « non » définitifs (désabonnement, ne pas appeler,
+ * réponse) passent AVANT les « pas maintenant » (interrupteur, numéro manquant,
+ * heures de politesse). Sinon une personne désabonnée verrait son inscription
+ * simplement repoussée au lendemain matin au lieu d'être close.
  */
 export function canSendTouch(facts: TouchFacts): TouchDecision {
   const deny = (refusal: TouchRefusal): TouchDecision => ({ allowed: false, refusal });
 
   if (facts.suppressed) return deny("suppressed");
-  if (!facts.hasValidConsent) return deny("consent_expired");
   if (facts.excludeDoNotCall && facts.doNotCall) return deny("do_not_call");
   if (facts.campaignStatus !== "active") return deny("campaign_not_active");
 

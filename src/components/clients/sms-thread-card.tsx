@@ -5,7 +5,6 @@ import {
   AlertTriangleIcon,
   BotIcon,
   ClockIcon,
-  FileCheck2Icon,
   HandIcon,
   SmartphoneIcon,
   Undo2Icon,
@@ -23,13 +22,12 @@ import {
   sendManualSmsAction,
   setConversationAiAction,
 } from "@/app/(app)/conversations/actions";
-import { grantSmsConsentAction, revokeSmsConsentAction } from "@/app/(app)/clients/consent-actions";
-import { CONSENT_SOURCES, type ConsentSource, type SmsConsentState } from "@/lib/sms/consent-sources";
 import { RelativeTime } from "@/components/relative-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { CHANNEL_LOOK, LookIcon } from "@/components/look";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -80,8 +78,6 @@ export type SmsThreadData = {
   attentionReason: string | null;
   suppressed: boolean;
   hasActiveNumber: boolean;
-  /** Consentement SMS au dossier — sans lui, aucune campagne n'écrira. */
-  consent: SmsConsentState;
   /** Qui parle côté IA, et à qui on peut confier le fil. */
   assistant: {
     currentId: string | null;
@@ -102,6 +98,8 @@ const DRAFT_PREFIX = "draft:";
  * l'utilisateur, et payer ce rafraîchissement serait gratuit dans le mauvais
  * sens du terme.
  */
+const SMS = CHANNEL_LOOK.sms;
+
 const POLL_MS = 30_000;
 
 /**
@@ -126,6 +124,7 @@ export function SmsThreadCard({
   thread: SmsThreadData;
 }) {
   const t = useTranslations("conversations");
+  const tCommon = useTranslations("common");
   const locale = useLocale();
   const dfnsLocale = locale === "en" ? enUS : fr;
   const router = useRouter();
@@ -185,8 +184,6 @@ export function SmsThreadCard({
               ? t("thread.suppressed")
               : result.error === "noNumber"
                 ? t("thread.noNumber")
-                : result.error === "noConsent"
-                  ? t("thread.noConsent")
                   : t("thread.error"),
           );
           return;
@@ -286,15 +283,48 @@ export function SmsThreadCard({
   };
 
   return (
-    /* Identité visuelle DISTINCTE des commentaires : bordure teintée, icône de
-       téléphone (les commentaires ont une bulle), destinataire affiché. Les
-       deux cartes vivent l'une sous l'autre et se ressemblaient trop — une
-       note interne envoyée par SMS à un client ne se rattrape pas. */
-    <Card className="border-primary/40">
-      <CardHeader className="rounded-t-xl border-b border-primary/20 bg-primary/5">
-        <CardTitle className="flex items-center gap-2">
-          <SmartphoneIcon className="size-4 text-primary" />
+    /*
+     * Cette carte SORT de l'application : ce qu'on y tape arrive sur le
+     * téléphone de quelqu'un. Ses voisines (commentaires, historique, relances)
+     * n'engagent rien.
+     *
+     * Elle portait la couleur PRIMAIRE, qui est celle de tous les boutons de
+     * l'application : « teinté en bleu » ne se lit pas comme « autre chose »,
+     * mais comme « mis en avant ». D'où une couleur de canal réservée
+     * (`CHANNEL_LOOK.sms`), un liseré épais à gauche — le signal le moins cher
+     * et le plus immédiat — et le numéro du destinataire écrit dans l'en-tête,
+     * pas seulement au-dessus du champ de saisie.
+     */
+    <Card
+      className="border-l-4 shadow-xs"
+      style={{
+        borderLeftColor: SMS.color,
+        borderColor: `color-mix(in srgb, ${SMS.color} 35%, transparent)`,
+        borderLeftWidth: 4,
+      }}
+    >
+      <CardHeader
+        className="rounded-t-xl border-b"
+        style={{
+          backgroundColor: `color-mix(in srgb, ${SMS.color} 7%, transparent)`,
+          borderBottomColor: `color-mix(in srgb, ${SMS.color} 22%, transparent)`,
+        }}
+      >
+        <CardTitle className="flex flex-wrap items-center gap-2">
+          <LookIcon look={SMS} size="sm" />
           {t("thread.title")}
+          {/* Le numéro dans l'EN-TÊTE : on sait à qui on parle avant même de
+              faire défiler jusqu'au champ de saisie. */}
+          <Badge
+            variant="outline"
+            className="gap-1 font-mono text-[10px]"
+            style={{
+              color: SMS.color,
+              borderColor: `color-mix(in srgb, ${SMS.color} 40%, transparent)`,
+            }}
+          >
+            {formatPhone(thread.clientPhone)}
+          </Badge>
         </CardTitle>
         <CardAction>
           {thread.conversationId ? (
@@ -330,7 +360,7 @@ export function SmsThreadCard({
               <HandIcon /> {t("ai.confirmPause")}
             </Button>
             <Button variant="ghost" size="sm" className="min-h-11 md:min-h-8" disabled={pending} onClick={() => setPausePrompt(null)}>
-              {t("consent.cancel")}
+              {tCommon("cancel")}
             </Button>
           </div>
         ) : null}
@@ -401,7 +431,6 @@ export function SmsThreadCard({
           </div>
         ) : null}
 
-        <ConsentPanel clientId={clientId} consent={thread.consent} suppressed={thread.suppressed} />
 
         {thread.needsAttention && thread.conversationId ? (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
@@ -476,10 +505,19 @@ export function SmsThreadCard({
           </div>
         )}
 
-        <div className="space-y-1.5 rounded-lg border-2 border-primary/40 bg-primary/5 p-3">
+        <div
+          className="space-y-1.5 rounded-lg border-2 p-3"
+          style={{
+            borderColor: `color-mix(in srgb, ${SMS.color} 40%, transparent)`,
+            backgroundColor: `color-mix(in srgb, ${SMS.color} 6%, transparent)`,
+          }}
+        >
           {/* Le destinataire est toujours visible : c'est ce qui distingue le
               plus sûrement une note interne (personne) d'un SMS (quelqu'un). */}
-          <p className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-primary">
+          <p
+            className="flex flex-wrap items-center gap-1.5 text-xs font-medium"
+            style={{ color: SMS.color }}
+          >
             <SmartphoneIcon className="size-3.5" />
             {t("thread.sendsTo", {
               name: thread.clientName,
@@ -508,7 +546,10 @@ export function SmsThreadCard({
             </p>
             <Button
               size="sm"
-              className="min-h-11 md:min-h-8"
+              className="min-h-11 text-white md:min-h-8"
+              // Le bouton qui envoie VRAIMENT porte la couleur du canal ; tous
+              // les autres boutons de la fiche sont bleus.
+              style={{ backgroundColor: SMS.color }}
               disabled={pending || blocked || body.trim() === ""}
               onClick={send}
             >
@@ -607,174 +648,6 @@ function MessageBubble({
         >
           <Undo2Icon className="size-3" /> {t("thread.cancel")}
         </Button>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * Consentement SMS : l'état au dossier et, pour le téléphoniste, le geste de
- * l'enregistrer quand il vient de l'obtenir — ou de le révoquer. Sans
- * consentement valide, une campagne n'écrit pas ; le dire ICI, sur le fil,
- * évite de chercher pourquoi « la campagne ne fait rien » sur cette personne.
- */
-function ConsentPanel({
-  clientId,
-  consent,
-  suppressed,
-}: {
-  clientId: string;
-  consent: SmsConsentState;
-  suppressed: boolean;
-}) {
-  const t = useTranslations("conversations");
-  const locale = useLocale();
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [kind, setKind] = useState<"express" | "implied_inquiry">("express");
-  const [source, setSource] = useState<ConsentSource>("phone_call");
-  const [note, setNote] = useState("");
-  const [pending, startTransition] = useTransition();
-
-  const fmt = (iso: string) =>
-    new Date(iso).toLocaleDateString(locale === "en" ? "en-CA" : "fr-CA", {
-      timeZone: "America/Toronto",
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-
-  const grant = () =>
-    startTransition(async () => {
-      const res = await grantSmsConsentAction({ clientId, kind, source, note });
-      if (res.ok) {
-        toast.success(t("consent.granted"));
-        setOpen(false);
-        setNote("");
-        emitDataChange("sms");
-        router.refresh();
-      } else {
-        toast.error(t("consent.failed"));
-      }
-    });
-
-  const revoke = () =>
-    startTransition(async () => {
-      const res = await revokeSmsConsentAction(clientId);
-      if (res.ok) {
-        toast.success(t("consent.revoked"));
-        emitDataChange("sms");
-        router.refresh();
-      } else {
-        toast.error(t("consent.failed"));
-      }
-    });
-
-  return (
-    <div className="rounded-lg border px-3 py-2 text-sm">
-      <div className="flex flex-wrap items-center gap-2">
-        <FileCheck2Icon
-          className={cn(
-            "size-4 shrink-0",
-            consent.status === "valid" ? "text-emerald-600" : "text-muted-foreground",
-          )}
-        />
-        <span className="font-medium">{t("consent.title")}</span>
-        <Badge variant={consent.status === "valid" ? "default" : "secondary"}>
-          {t(`consent.status.${consent.status}`)}
-        </Badge>
-        {consent.status !== "none" && consent.kind ? (
-          <span className="text-xs text-muted-foreground">
-            {t(`consent.kind.${consent.kind}`)}
-            {consent.grantedAt ? ` · ${fmt(consent.grantedAt)}` : ""}
-            {consent.expiresAt ? ` → ${fmt(consent.expiresAt)}` : ""}
-          </span>
-        ) : null}
-        <span className="flex-1" />
-        {!suppressed ? (
-          <Button
-            variant={consent.status === "valid" ? "ghost" : "outline"}
-            size="sm"
-            className="min-h-11 md:min-h-7"
-            disabled={pending}
-            onClick={() => setOpen((o) => !o)}
-          >
-            {t("consent.record")}
-          </Button>
-        ) : null}
-        {consent.status !== "none" ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="min-h-11 text-destructive md:min-h-7"
-            disabled={pending}
-            onClick={revoke}
-          >
-            {t("consent.revoke")}
-          </Button>
-        ) : null}
-      </div>
-      {suppressed ? <p className="mt-1 text-xs text-muted-foreground">{t("consent.suppressedHint")}</p> : null}
-
-      {open ? (
-        <div className="mt-3 grid gap-3 border-t pt-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label>{t("consent.kindLabel")}</Label>
-            <div className="grid gap-1.5">
-              {(["express", "implied_inquiry"] as const).map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => setKind(k)}
-                  className={cn(
-                    "min-h-11 rounded-md border px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-muted md:min-h-9",
-                    kind === k && "border-primary bg-primary/5",
-                  )}
-                >
-                  <span className="font-medium">{t(`consent.kind.${k}`)}</span>
-                  <span className="block text-xs text-muted-foreground">{t(`consent.kindHint.${k}`)}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label>{t("consent.sourceLabel")}</Label>
-            <div className="grid gap-1.5">
-              {CONSENT_SOURCES.map((src) => (
-                <button
-                  key={src}
-                  type="button"
-                  onClick={() => setSource(src)}
-                  className={cn(
-                    "min-h-11 rounded-md border px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-muted md:min-h-8",
-                    source === src && "border-primary bg-primary/5",
-                  )}
-                >
-                  {t(`consent.source.${src}`)}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label htmlFor={`consent-note-${clientId}`}>{t("consent.note")}</Label>
-            <Input
-              id={`consent-note-${clientId}`}
-              className="min-h-11 md:min-h-9"
-              maxLength={300}
-              placeholder={t("consent.notePlaceholder")}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
-          </div>
-          <div className="flex justify-end gap-2 sm:col-span-2">
-            <Button variant="ghost" size="sm" className="min-h-11 md:min-h-8" disabled={pending} onClick={() => setOpen(false)}>
-              {t("consent.cancel")}
-            </Button>
-            <Button size="sm" className="min-h-11 md:min-h-8" disabled={pending} onClick={grant}>
-              <FileCheck2Icon /> {t("consent.confirm")}
-            </Button>
-          </div>
-        </div>
       ) : null}
     </div>
   );

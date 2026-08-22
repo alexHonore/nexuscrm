@@ -178,18 +178,24 @@ describe("POST /api/kill-switch", () => {
     expect((await byId(pending.id)).status).toBe("pending");
   });
 
-  it("préserve les autres réglages sms (consentValidity) au basculement", async () => {
+  it("préserve les autres réglages sms au basculement", async () => {
     const admin = await makeUser({ role: "admin" });
     await loginAs(admin);
-    await setSetting("sms", { consentValidity: "3y" });
+    await setSetting("sms", { lastDispatchAt: "2026-08-22T10:00:00.000Z" });
 
     const on = await POST(killSwitchRequest({ enabled: true }));
     expect(on.status).toBe(200);
-    expect(await getSetting("sms")).toMatchObject({ killSwitch: true, consentValidity: "3y" });
+    expect(await getSetting("sms")).toMatchObject({
+      killSwitch: true,
+      lastDispatchAt: "2026-08-22T10:00:00.000Z",
+    });
 
     const off = await POST(killSwitchRequest({ enabled: false }));
     expect(off.status).toBe(200);
-    expect(await getSetting("sms")).toMatchObject({ killSwitch: false, consentValidity: "3y" });
+    expect(await getSetting("sms")).toMatchObject({
+      killSwitch: false,
+      lastDispatchAt: "2026-08-22T10:00:00.000Z",
+    });
   });
 
   it("désactive l'interrupteur : motif et horodatage effacés", async () => {

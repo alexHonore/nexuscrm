@@ -1,7 +1,7 @@
 import "server-only";
 import { and, eq, gte, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { clients } from "@/db/schema";
-import { campaignEnrollments, campaigns, consents, suppressions } from "@/db/schema-sms";
+import { campaignEnrollments, campaigns, suppressions } from "@/db/schema-sms";
 import type { CampaignAudience, CampaignTrigger } from "@/lib/campaigns/schema";
 
 /**
@@ -20,11 +20,7 @@ import type { CampaignAudience, CampaignTrigger } from "@/lib/campaigns/schema";
  *
  *  · le numéro supprimé — rien ne partira jamais, compter la personne gonfle
  *    l'aperçu ;
- *  · l'absence de consentement quand la campagne l'exige — le balayage prend
- *    les N plus anciens de l'audience et les refuse un à un ; si ces N-là
- *    n'ont pas de consentement, il repêche les MÊMES à chaque cycle et la
- *    campagne n'inscrit plus jamais personne, alors que l'aperçu annonce des
- *    milliers de gens. Une base importée sans consentement (le cas réel) aurait
+ *  · un numéro désabonné — un refus exprimé ne se repêche jamais ;
  *    stoppé net toute réactivation, sans rien dire.
  *
  * Les autres motifs (déjà ailleurs, plafonds) restent hors audience : ils
@@ -36,8 +32,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface AudienceOptions {
   campaignId?: string;
-  /** `campaign.requireConsent` — applique le filtre de consentement SMS valide. */
-  requireConsent?: boolean;
 }
 
 export function audienceConditions(
@@ -120,20 +114,6 @@ export function audienceConditions(
     )`,
   );
 
-  if (options.requireConsent) {
-    // Même définition que `consentedClientIds` (enroll.ts) : accordé, non
-    // révoqué, non expiré. Le constructeur drizzle et non un paramètre brut
-    // pour la date — dans un `sql` template, une Date part sans type.
-    conditions.push(
-      sql`exists (
-        select 1 from ${consents}
-        where ${consents.clientId} = ${clients.id}
-          and ${consents.channel} = 'sms'
-          and ${consents.revokedAt} is null
-          and ${or(isNull(consents.expiresAt), gte(consents.expiresAt, now))}
-      )`,
-    );
-  }
 
   return conditions;
 }

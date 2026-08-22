@@ -1,11 +1,23 @@
 "use client";
 
-import { Download, Loader2, Megaphone, MoreHorizontal, Pause, Play, Plus, Trash2, Upload } from "lucide-react";
+import {
+  Download,
+  Loader2,
+  Megaphone,
+  MoreHorizontal,
+  Pause,
+  PencilLine,
+  Play,
+  Plus,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
+import { CAMPAIGN_STAT_LOOK, CAMPAIGN_STATUS_LOOK, LookGlyph, lookTint } from "@/components/look";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,10 +40,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { TriggerKind } from "@/lib/campaigns/schema";
+import { cn } from "@/lib/utils";
 import { api } from "./api";
 import { CampaignCreateDialog } from "./campaign-create";
 import { CampaignImportDialog } from "./campaign-import-dialog";
 import { TriggerIcon } from "./trigger-look";
+
+/**
+ * Les quatre compteurs, dans l'ordre où on les lit : combien sont entrés,
+ * combien reçoivent encore, combien ont répondu, combien ont dit stop.
+ */
+const STAT_KEYS = ["enrolled", "active", "replied", "stopped"] as const;
 
 export type CampaignListItem = {
   id: string;
@@ -132,86 +151,129 @@ export function CampaignsListClient({
         />
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
-          {items.map((item) => (
-            <Card key={item.id}>
-              <CardContent className="flex items-start gap-3 p-4">
-                <div className="min-w-0 flex-1 space-y-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Link
-                      href={`/admin/campaigns/${item.id}`}
-                      className="font-medium hover:underline"
-                    >
-                      {item.name}
-                    </Link>
-                    <Badge variant={item.status === "active" ? "default" : "secondary"}>
-                      {t(`list.status.${item.status}` as never)}
-                    </Badge>
-                    <Badge variant="outline" className="gap-1 pl-1 font-normal">
-                      {/* Même pastille qu'à la création : ce qu'on a choisi
-                          doit se reconnaître ici sans relire le libellé. */}
-                      <TriggerIcon kind={item.triggerKind} size="sm" />
-                      {t(`list.trigger.${item.triggerKind}`)}
-                    </Badge>
-                  </div>
+          {items.map((item) => {
+            // Un état inconnu (valeur écrite par un module futur) reste
+            // lisible plutôt que de faire disparaître la pastille.
+            const statusLook = CAMPAIGN_STATUS_LOOK[item.status] ?? CAMPAIGN_STATUS_LOOK.draft;
+            const statusTint = lookTint(statusLook);
+            return (
+              <Card
+                key={item.id}
+                // Le liseré reprend la couleur de l'état : empilées sur
+                // téléphone, les cartes se trient à l'œil avant d'être lues. Il
+                // DOUBLE la pastille, il ne la remplace pas.
+                className="border-l-[3px]"
+                style={{ borderLeftColor: `color-mix(in srgb, ${statusLook.color} 55%, transparent)` }}
+              >
+                <CardContent className="flex items-start gap-3 p-4">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link
+                        href={`/admin/campaigns/${item.id}`}
+                        className="font-medium hover:underline"
+                      >
+                        {item.name}
+                      </Link>
+                      {/* L'état dit si des SMS partent en ce moment : il porte
+                          son pictogramme et sa couleur, jamais la couleur
+                          seule. La teinte prend le fond et la bordure, jamais
+                          le libellé : un « En pause » ambre de douze pixels se
+                          repère mal dans une grille de cartes. */}
+                      <Badge
+                        variant="outline"
+                        className="gap-1 pl-1.5 font-medium"
+                        style={{
+                          borderColor: statusTint.borderColor,
+                          backgroundColor: statusTint.backgroundColor,
+                        }}
+                      >
+                        <LookGlyph look={statusLook} />
+                        {t(`list.status.${item.status}` as never)}
+                      </Badge>
+                      <Badge variant="outline" className="gap-1 pl-1 font-normal">
+                        {/* Même pastille qu'à la création : ce qu'on a choisi
+                            doit se reconnaître ici sans relire le libellé. */}
+                        <TriggerIcon kind={item.triggerKind} size="sm" />
+                        {t(`list.trigger.${item.triggerKind}`)}
+                      </Badge>
+                    </div>
 
-                  {item.description ? (
-                    <p className="line-clamp-2 text-sm text-muted-foreground">{item.description}</p>
-                  ) : null}
+                    {item.description ? (
+                      <p className="line-clamp-2 text-sm text-muted-foreground">{item.description}</p>
+                    ) : null}
 
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-                    <span>{t("list.stats.enrolled", { count: item.enrolled })}</span>
-                    <span>{t("list.stats.active", { count: item.active })}</span>
-                    <span>{t("list.stats.replied", { count: item.replied })}</span>
                     {/* Les arrêts sont affichés à côté des réponses, jamais
                         cachés : un bon taux de réponse avec beaucoup d'arrêts
-                        n'est pas un succès. */}
-                    <span className={item.stopped > 0 ? "text-destructive" : undefined}>
-                      {t("list.stats.stopped", { count: item.stopped })}
-                    </span>
+                        n'est pas un succès. Quatre nombres gris alignés se
+                        valent à l'œil — le pictogramme et la couleur disent
+                        lequel réjouit et lequel coûte. */}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                      {STAT_KEYS.map((key) => {
+                        const value = item[key];
+                        return (
+                          <span key={key} className="flex min-w-0 items-center gap-1.5">
+                            {/* À zéro, le pictogramme s'efface : un stop rouge
+                                devant « 0 arrêts » crierait au loup. */}
+                            <LookGlyph
+                              look={CAMPAIGN_STAT_LOOK[key]}
+                              className={cn("size-3.5", value === 0 && "opacity-35")}
+                            />
+                            <span
+                              className={
+                                key === "stopped" && value > 0 ? "text-destructive" : undefined
+                              }
+                            >
+                              {t(`list.stats.${key}`, { count: value })}
+                            </span>
+                          </span>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
 
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={<Button variant="ghost" size="icon" className="size-11 shrink-0 md:size-9" />}
-                  >
-                    <MoreHorizontal />
-                    <span className="sr-only">{item.name}</span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuGroup>
-                      <DropdownMenuItem render={<Link href={`/admin/campaigns/${item.id}`} />}>
-                        {t("list.actions.edit")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        render={<a href={`/api/campaigns/${item.id}/export`} download />}
-                      >
-                        <Download /> {t("list.actions.export")}
-                      </DropdownMenuItem>
-                      {item.status === "active" ? (
-                        <DropdownMenuItem onClick={() => void setStatus(item, "paused")}>
-                          <Pause /> {t("list.actions.pause")}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={<Button variant="ghost" size="icon" className="size-11 shrink-0 md:size-9" />}
+                    >
+                      <MoreHorizontal />
+                      <span className="sr-only">{item.name}</span>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem render={<Link href={`/admin/campaigns/${item.id}`} />}>
+                          <PencilLine /> {t("list.actions.edit")}
                         </DropdownMenuItem>
-                      ) : (
-                        <DropdownMenuItem onClick={() => void setStatus(item, "active")}>
-                          <Play /> {t("list.actions.activate")}
+                        <DropdownMenuItem
+                          render={<a href={`/api/campaigns/${item.id}/export`} download />}
+                        >
+                          <Download /> {t("list.actions.export")}
                         </DropdownMenuItem>
-                      )}
-                      <DropdownMenuItem variant="destructive" onClick={() => setTarget(item)}>
-                        <Trash2 />{" "}
-                        {item.enrolled > 0 ? t("list.actions.archive") : t("list.actions.delete")}
-                      </DropdownMenuItem>
-                    </DropdownMenuGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </CardContent>
-            </Card>
-          ))}
+                        {item.status === "active" ? (
+                          <DropdownMenuItem onClick={() => void setStatus(item, "paused")}>
+                            <Pause /> {t("list.actions.pause")}
+                          </DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem onClick={() => void setStatus(item, "active")}>
+                            <Play /> {t("list.actions.activate")}
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem variant="destructive" onClick={() => setTarget(item)}>
+                          <Trash2 />{" "}
+                          {item.enrolled > 0 ? t("list.actions.archive") : t("list.actions.delete")}
+                        </DropdownMenuItem>
+                      </DropdownMenuGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
 
       {archivedCount > 0 ? (
-        <p className="text-sm text-muted-foreground">
+        <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <LookGlyph look={CAMPAIGN_STATUS_LOOK.archived} className="size-3.5" />
           {archivedCount} {t("list.status.archived").toLowerCase()}
         </p>
       ) : null}

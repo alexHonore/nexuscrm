@@ -1,10 +1,19 @@
 "use client";
 
-import { FlaskConical, ListChecks, Loader2, Pencil, Plus, RotateCcw, ScrollText, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
+import {
+  EDITOR_TAB_LOOK,
+  GUARDRAIL_KIND_LOOK,
+  LookGlyph,
+  LookIcon,
+  ORIGIN_LOOK,
+  SEVERITY_LOOK,
+  lookTint,
+} from "@/components/look";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -89,47 +98,46 @@ export type PromptCoreDto = {
   createdAt: string;
 } | null;
 
-/** Pastille d'icône commune aux en-têtes de cartes — même patron que settings-client.tsx. */
-function CardIcon({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      aria-hidden
-      className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary [&_svg]:size-4"
-    >
-      {children}
-    </div>
-  );
-}
-
+/**
+ * Puce du type de règle.
+ *
+ * Les huit types se ressemblent tous à la lecture — trois d'entre eux ouvrent
+ * même sur le mot « interdit ». Le pictogramme précède le libellé (jamais à sa
+ * place) et sa couleur dit ce que la règle regarde : les mots, ce qui se
+ * compte, les outils, l'avis d'un modèle.
+ */
 function KindBadge({ kind }: { kind: GuardrailKind }) {
   const t = useTranslations("assistants");
   return (
-    <Badge variant="outline" className="whitespace-nowrap">
-      {t(`guardrails.kind.${kind}`)}
+    <Badge variant="outline" className="max-w-full gap-1 whitespace-nowrap">
+      <LookGlyph look={GUARDRAIL_KIND_LOOK[kind]} className="size-3" />
+      {/* `min-w-0` sans quoi la troncature n'a pas lieu : dans une puce en
+          flex, un enfant ne descend pas sous sa largeur de contenu, et le
+          libellé se ferait couper net par `overflow-hidden`, sans points de
+          suspension, sur une carte de 360 px. */}
+      <span className="min-w-0 truncate">{t(`guardrails.kind.${kind}`)}</span>
     </Badge>
   );
 }
 
-const SEVERITY_TONE: Record<GuardrailSeverity, string> = {
-  block: "bg-destructive/10 text-destructive",
-  warn: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  off: "bg-muted text-muted-foreground",
-};
-
-/** Pastille de sévérité en lecture seule (fixtures). */
+/** Pastille de sévérité en lecture seule (fixtures, préréglages). */
 function SeverityBadge({ severity }: { severity: GuardrailSeverity }) {
   const t = useTranslations("assistants");
+  const look = SEVERITY_LOOK[severity];
   return (
-    <Badge variant="secondary" className={SEVERITY_TONE[severity]}>
+    <Badge variant="outline" className="gap-1" style={lookTint(look)}>
+      <LookGlyph look={look} className="size-3" />
       {t(`guardrails.severity.${severity}`)}
     </Badge>
   );
 }
 
+/** « Modifié » = quelqu'un a repris à la main ce que la semence avait écrit. */
 function ModifiedChip() {
   const t = useTranslations("assistants");
   return (
-    <Badge variant="secondary" className="gap-1 bg-amber-500/10 text-amber-700 dark:text-amber-400">
+    <Badge variant="outline" className="gap-1" style={lookTint(ORIGIN_LOOK.handwritten)}>
+      <LookGlyph look={ORIGIN_LOOK.handwritten} className="size-3" />
       {t("guardrails.modified")}
     </Badge>
   );
@@ -172,15 +180,20 @@ function RuleSeveritySelect({ rule }: { rule: GuardrailRuleDto }) {
       onValueChange={(v) => void change(v as GuardrailSeverity)}
       disabled={pending}
     >
+      {/* Le feu de circulation jusque DANS le sélecteur : c'est ce champ qui
+          décide si un message part, et « Bloque » / « Avertit » se lisent
+          presque pareil quand on parcourt une colonne de dix règles. */}
       <SelectTrigger
         aria-label={t("guardrails.columns.severity")}
         className="min-h-11 w-full md:min-h-8 md:w-44"
       >
+        <LookGlyph look={SEVERITY_LOOK[rule.severity]} className="size-3.5" />
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         {GUARDRAIL_SEVERITIES.map((s) => (
           <SelectItem key={s} value={s}>
+            <LookGlyph look={SEVERITY_LOOK[s]} className="size-3.5" />
             {t(`guardrails.severity.${s}`)}
           </SelectItem>
         ))}
@@ -332,8 +345,19 @@ function RuleDeleteButton({ rule }: { rule: GuardrailRuleDto }) {
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
+      {/* Bouton sans libellé : la corbeille est `aria-hidden` (lucide le pose
+          seul), donc sans `aria-label` ce bouton n'a AUCUN nom — un lecteur
+          d'écran annonce « bouton », juste avant une suppression. Le libellé
+          existe déjà dans le registre. */}
       <AlertDialogTrigger
-        render={<Button variant="ghost" size="sm" className="min-h-11 text-destructive md:min-h-8" />}
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={t("guardrails.deleteRule")}
+            className="min-h-11 text-destructive md:min-h-8"
+          />
+        }
       >
         <Trash2 className="size-3.5" />
       </AlertDialogTrigger>
@@ -372,10 +396,11 @@ function RulesCard({ rules }: { rules: GuardrailRuleDto[] }) {
     <Card className="shadow-xs">
       <CardHeader className="border-b">
         <div className="flex items-center gap-3">
-          <CardIcon>
-            <ListChecks />
-          </CardIcon>
-          <div className="space-y-0.5">
+          {/* Le bouclier des garde-fous, le presse-papiers de la vérification,
+              le parchemin du prompt : trois cartes qui portaient la même
+              pastille bleue et se cherchaient à la lecture du titre. */}
+          <LookIcon look={EDITOR_TAB_LOOK.guardrails} size="lg" />
+          <div className="min-w-0 space-y-0.5">
             <CardTitle>{t("guardrails.sections.rules.title")}</CardTitle>
             <CardDescription>{t("guardrails.sections.rules.desc")}</CardDescription>
           </div>
@@ -574,7 +599,14 @@ function FixtureDeleteButton({ fixture }: { fixture: GuardrailFixtureDto }) {
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger
-        render={<Button variant="ghost" size="sm" className="min-h-11 text-destructive md:min-h-8" />}
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={t("guardrails.fixtures.delete")}
+            className="min-h-11 text-destructive md:min-h-8"
+          />
+        }
       >
         <Trash2 className="size-3.5" />
       </AlertDialogTrigger>
@@ -609,10 +641,8 @@ function FixturesCard({ fixtures }: { fixtures: GuardrailFixtureDto[] }) {
     <Card className="shadow-xs">
       <CardHeader className="border-b">
         <div className="flex items-center gap-3">
-          <CardIcon>
-            <FlaskConical />
-          </CardIcon>
-          <div className="space-y-0.5">
+          <LookIcon look={EDITOR_TAB_LOOK.test} size="lg" />
+          <div className="min-w-0 space-y-0.5">
             <CardTitle>{t("guardrails.sections.fixtures.title")}</CardTitle>
             <CardDescription>{t("guardrails.sections.fixtures.desc")}</CardDescription>
           </div>
@@ -693,10 +723,8 @@ function CoreCard({ core }: { core: PromptCoreDto }) {
     <Card className="shadow-xs">
       <CardHeader className="border-b">
         <div className="flex items-center gap-3">
-          <CardIcon>
-            <ScrollText />
-          </CardIcon>
-          <div className="space-y-0.5">
+          <LookIcon look={EDITOR_TAB_LOOK.prompt} size="lg" />
+          <div className="min-w-0 space-y-0.5">
             <CardTitle>{t("guardrails.sections.core.title")}</CardTitle>
             <CardDescription>{t("guardrails.sections.core.desc")}</CardDescription>
           </div>
@@ -719,7 +747,8 @@ function CoreCard({ core }: { core: PromptCoreDto }) {
         {core ? (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <Badge variant="secondary">
+              <Badge variant="outline" className="gap-1" style={lookTint(EDITOR_TAB_LOOK.prompt)}>
+                <LookGlyph look={EDITOR_TAB_LOOK.prompt} className="size-3" />
                 {t("guardrails.sections.core.version", { version: core.version })}
               </Badge>
               <Button

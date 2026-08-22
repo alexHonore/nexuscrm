@@ -50,7 +50,6 @@ export async function POST(req: Request) {
       totalEnrollmentCap: config.totalEnrollmentCap,
       startsAt: config.startsAt,
       endsAt: config.endsAt,
-      requireConsent: config.requireConsent,
       createdById: admin.id,
     })
     .returning({ id: campaigns.id, name: campaigns.name });

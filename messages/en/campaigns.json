@@ -141,9 +141,7 @@
       "totalCap": "Total enrollment cap",
       "noTotalCap": "None",
       "startsAt": "Starts",
-      "endsAt": "Ends",
-      "requireConsent": "Require valid consent",
-      "requireConsentHint": "Turning this off is a deliberate act you answer for under CASL."
+      "endsAt": "Ends"
     },
     "trigger": {
       "kind": "Trigger type",
@@ -233,7 +231,6 @@
         "campaign_not_active": "Campaign inactive",
         "outside_window": "Outside window",
         "no_phone": "No phone",
-        "no_consent": "No consent",
         "suppressed": "Unsubscribed number",
         "do_not_call": "Do not call",
         "already_enrolled": "Already enrolled",
@@ -250,7 +247,6 @@
         "opted_out": "Opted out (STOP)",
         "ladder_exhausted": "Ladder finished",
         "suppressed": "Unsubscribed number",
-        "consent_expired": "Consent expired",
         "do_not_call": "Do not call",
         "live_conversation": "Conversation already in progress",
         "client_deleted": "Client deleted",

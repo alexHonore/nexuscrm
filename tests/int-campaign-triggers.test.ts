@@ -93,7 +93,6 @@ async function makeCampaign(overrides: Record<string, unknown> = {}, numberId: s
       ladder: config.ladder,
       variants: config.variants,
       dailyEnrollmentCap: config.dailyEnrollmentCap,
-      requireConsent: config.requireConsent,
     })
     .returning();
   return row;

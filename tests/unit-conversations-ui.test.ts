@@ -9,6 +9,7 @@ import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
 import { describe, expect, it, vi } from "vitest";
+import { CHANNEL_LOOK } from "@/components/look";
 import conversationsFr from "../messages/fr/conversations.json";
 import commonFr from "../messages/fr/common.json";
 import type { SmsThreadData } from "@/components/clients/sms-thread-card";
@@ -17,10 +18,6 @@ import type { EngineHealth, InboxRow } from "@/components/conversations/conversa
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 // Les composants importent les actions serveur ; les simuler évite d'entraîner
 // toute la couche base dans un test de rendu.
-vi.mock("@/app/(app)/clients/consent-actions", () => ({
-  grantSmsConsentAction: vi.fn(),
-  revokeSmsConsentAction: vi.fn(),
-}));
 vi.mock("@/app/(app)/conversations/actions", () => ({
   assignAssistantAction: vi.fn(),
   cancelQueuedSmsAction: vi.fn(),
@@ -58,7 +55,6 @@ const THREAD: SmsThreadData = {
   needsAttention: false,
   attentionReason: null,
   suppressed: false,
-  consent: { status: "valid", kind: "express", source: "manual:phone_call", grantedAt: "2026-08-01T12:00:00.000Z", expiresAt: null },
   assistant: { currentId: null, currentName: null, options: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Acheteur FB" }] },
   queued: [],
   hasActiveNumber: true,
@@ -222,12 +218,26 @@ describe("fil SMS", () => {
     expect(html).toContain("418");
   });
 
-  it("la carte SMS ne ressemble PAS à la carte de commentaires", () => {
+  it("la carte SMS ne ressemble PAS à ses voisines", () => {
     const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
-    // Teinte et bordure propres : le signal doit être perçu du coin de l'œil,
-    // pas lu. Une note envoyée par erreur à un client ne se rattrape pas.
-    expect(html).toContain("border-primary/40");
-    expect(html).toContain("bg-primary/5");
+    // Le signal doit être perçu du coin de l'œil, pas lu : une note envoyée
+    // par erreur à un client ne se rattrape pas.
+    //
+    // La couleur PRIMAIRE ne peut pas jouer ce rôle — c'est celle de tous les
+    // boutons de l'application. Il faut une couleur de CANAL, réservée.
+    expect(html).toContain(CHANNEL_LOOK.sms.color);
+    expect(html).not.toContain("border-primary/40");
+    // Un liseré épais à gauche : le signal le moins cher et le plus immédiat.
+    expect(html).toContain("border-l-4");
+  });
+
+  it("le numéro du destinataire se lit dans l'EN-TÊTE, pas seulement près du champ", () => {
+    // Savoir à qui on parle ne doit pas demander de faire défiler la carte.
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    // Avant la zone de saisie, donc dans l'en-tête.
+    const composerAt = html.indexOf("Votre message");
+    expect(composerAt).toBeGreaterThan(0);
+    expect(html.slice(0, composerAt)).toContain("418");
   });
 
   it("un message ENCORE EN FILE peut être annulé", () => {
@@ -348,23 +358,7 @@ describe("boîte de réception", () => {
   });
 });
 
-describe("consentement dans le fil", () => {
-  it("l'état du consentement est affiché, avec le geste de l'enregistrer ou de le révoquer", () => {
-    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
-    expect(html).toContain("Consentement SMS");
-    expect(html).toContain(">Valide<");
-    expect(html).toContain("Révoquer");
-    const none = wrap(
-      createElement(SmsThreadCard, {
-        clientId: "x",
-        thread: { ...THREAD, consent: { status: "none", kind: null, source: null, grantedAt: null, expiresAt: null } },
-      }),
-    );
-    expect(none).toContain("Aucun au dossier");
-    expect(none).toContain("Enregistrer un consentement");
-    expect(none).not.toContain("Révoquer");
-  });
-
+describe("fil SMS", () => {
   it("un message en simulation (dry_run) a un libellé, pas une clé brute", () => {
     // Trouvé en essai local : le fil affichait « thread.status.dry_run ».
     const html = wrap(

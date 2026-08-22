@@ -2,17 +2,27 @@
 
 import {
   AlertTriangle,
-  CheckCircle2,
   Copy,
+  DownloadIcon,
   ExternalLink,
   Loader2,
+  PlayIcon,
   RotateCcw,
-  XCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
+import {
+  EDITOR_TAB_LOOK,
+  GUARDRAIL_KIND_LOOK,
+  LookGlyph,
+  LookIcon,
+  ORIGIN_LOOK,
+  RESULT_LOOK,
+  SEVERITY_LOOK,
+  lookTint,
+} from "@/components/look";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,9 +37,40 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { LAYER_IDS, assistantConfigSchema, type LayerId } from "@/lib/assistants/schema";
+import type { GuardrailSeverity } from "@/lib/guardrails/types";
+import { cn } from "@/lib/utils";
 import { copyToClipboard } from "../api";
 import { FieldLabel } from "./param-help";
 import type { TabProps } from "./types";
+
+/**
+ * Puce de sévérité.
+ *
+ * Redéfinie ici plutôt qu'importée de l'écran d'administration : l'éditeur
+ * d'assistant n'a pas à traîner le dialogue CRUD des garde-fous dans son
+ * paquet. Ce qui doit rester unique, c'est le VOCABULAIRE (`SEVERITY_LOOK`),
+ * pas le composant qui l'affiche.
+ */
+function SeverityBadge({
+  severity,
+  label,
+  className,
+}: {
+  severity: GuardrailSeverity;
+  /** Formulation propre à l'écran (« Bloquante ») quand elle qualifie une
+   *  fixture et non le sort d'un message. */
+  label?: string;
+  className?: string;
+}) {
+  const t = useTranslations("assistants");
+  const look = SEVERITY_LOOK[severity];
+  return (
+    <Badge variant="outline" className={cn("gap-1", className)} style={lookTint(look)}>
+      <LookGlyph look={look} className="size-3" />
+      {label ?? t(`guardrails.severity.${severity}`)}
+    </Badge>
+  );
+}
 
 // ── Garde-fous ───────────────────────────────────────────────────────────────
 
@@ -45,7 +86,12 @@ export function GuardrailsTab({ config, update, data }: TabProps) {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 rounded-md border p-3">
-        <FieldLabel path="requireSuitePass" />
+        {/* La pastille est celle de l'onglet « Vérification » : ce réglage
+            parle de la suite, pas des règles listées en dessous. */}
+        <div className="flex min-w-0 items-center gap-2">
+          <LookIcon look={EDITOR_TAB_LOOK.test} size="sm" />
+          <FieldLabel path="requireSuitePass" />
+        </div>
         <Switch
           checked={config.requireSuitePass}
           aria-label={t("editor.tabs.guardrails")}
@@ -55,7 +101,10 @@ export function GuardrailsTab({ config, update, data }: TabProps) {
 
       <section className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-medium">{t("editor.guardrails.coreTitle")}</h3>
+          <h3 className="flex min-w-0 items-center gap-2 font-medium">
+            <LookIcon look={EDITOR_TAB_LOOK.guardrails} size="sm" />
+            <span className="min-w-0 break-words">{t("editor.guardrails.coreTitle")}</span>
+          </h3>
           <Button
             variant="outline"
             size="sm"
@@ -70,7 +119,10 @@ export function GuardrailsTab({ config, update, data }: TabProps) {
       </section>
 
       <section className="space-y-2">
-        <h3 className="font-medium">{t("editor.guardrails.ownTitle")}</h3>
+        <h3 className="flex min-w-0 items-center gap-2 font-medium">
+          <LookIcon look={EDITOR_TAB_LOOK.guardrails} size="sm" />
+          <span className="min-w-0 break-words">{t("editor.guardrails.ownTitle")}</span>
+        </h3>
         {data.ownRules.length === 0 ? (
           <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
             {t("editor.guardrails.ownEmpty")}
@@ -90,15 +142,14 @@ function RuleList({ rules }: { rules: TabProps["data"]["coreRules"] }) {
       {rules.map((rule) => (
         <li key={rule.id} className="flex flex-wrap items-center gap-2 p-3 text-sm">
           <span className="min-w-0 flex-1 truncate">{rule.label}</span>
-          <Badge variant="outline" className="font-normal">
-            {t(`guardrails.kind.${rule.kind}`)}
+          <Badge variant="outline" className="max-w-full gap-1 font-normal">
+            <LookGlyph look={GUARDRAIL_KIND_LOOK[rule.kind]} className="size-3" />
+            {/* `min-w-0` : sans lui la puce ne tronque pas, elle coupe. */}
+            <span className="min-w-0 truncate">{t(`guardrails.kind.${rule.kind}`)}</span>
           </Badge>
-          <Badge
-            variant={rule.severity === "block" ? "destructive" : "secondary"}
-            className={rule.enabled ? "" : "opacity-50"}
-          >
-            {t(`guardrails.severity.${rule.severity}`)}
-          </Badge>
+          {/* Une règle désactivée garde sa sévérité affichée, en retrait : la
+              masquer ferait croire qu'elle n'en a plus quand on la rallume. */}
+          <SeverityBadge severity={rule.severity} className={rule.enabled ? undefined : "opacity-50"} />
         </li>
       ))}
     </ul>
@@ -123,12 +174,23 @@ export function PromptTab({ config, update, data }: TabProps) {
           value={config.promptMode}
           onValueChange={(v) => update((d) => void (d.promptMode = String(v) as "composed" | "raw"))}
         >
+          {/* Les deux modes décident QUI écrit le prompt — l'app ou la main. */}
           <SelectTrigger className="min-h-11 w-full md:min-h-9 md:w-72">
+            <LookGlyph
+              look={ORIGIN_LOOK[raw ? "handwritten" : "generated"]}
+              className="size-3.5"
+            />
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="composed">{t("editor.prompt.modeComposed")}</SelectItem>
-            <SelectItem value="raw">{t("editor.prompt.modeRaw")}</SelectItem>
+            <SelectItem value="composed">
+              <LookGlyph look={ORIGIN_LOOK.generated} className="size-3.5" />
+              {t("editor.prompt.modeComposed")}
+            </SelectItem>
+            <SelectItem value="raw">
+              <LookGlyph look={ORIGIN_LOOK.handwritten} className="size-3.5" />
+              {t("editor.prompt.modeRaw")}
+            </SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -185,7 +247,10 @@ export function PromptTab({ config, update, data }: TabProps) {
       </section>
 
       <section className="space-y-2">
-        <h3 className="font-medium">{t("editor.tabs.prompt")}</h3>
+        <h3 className="flex min-w-0 items-center gap-2 font-medium">
+          <LookIcon look={EDITOR_TAB_LOOK.prompt} size="sm" />
+          <span className="min-w-0 break-words">{t("editor.tabs.prompt")}</span>
+        </h3>
         {data.compiledPrompt ? (
           <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 font-mono text-xs">
             {data.compiledPrompt}
@@ -216,10 +281,16 @@ function LayerRow({
     <div className="space-y-2 rounded-md border p-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-sm">{layer}</span>
+        {/* Sept couches nommées L0…L6 : ce qu'on cherche en ouvrant l'onglet,
+            c'est laquelle a été reprise à la main. */}
         {override ? (
-          <Badge variant="secondary">{t("editor.prompt.overridden")}</Badge>
+          <Badge variant="outline" className="gap-1" style={lookTint(ORIGIN_LOOK.handwritten)}>
+            <LookGlyph look={ORIGIN_LOOK.handwritten} className="size-3" />
+            {t("editor.prompt.overridden")}
+          </Badge>
         ) : (
-          <Badge variant="outline" className="font-normal text-muted-foreground">
+          <Badge variant="outline" className="gap-1 font-normal text-muted-foreground">
+            <LookGlyph look={ORIGIN_LOOK.generated} className="size-3" />
             {t("editor.prompt.generated")}
           </Badge>
         )}
@@ -246,6 +317,7 @@ function LayerRow({
               update((d) => void (d.layerOverrides[layer] = { mode: "append", text: "" }))
             }
           >
+            <LookGlyph look={ORIGIN_LOOK.handwritten} className="size-3.5" />
             {t("editor.prompt.override")}
           </Button>
         )}
@@ -310,33 +382,38 @@ export function TestTab({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="space-y-1">
-          {run ? (
-            <>
-              <p className="text-sm">
-                {t("editor.test.passed", { passed: run.passedCount, total: run.total })}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {t("editor.test.lastRun", {
-                  when: new Date(run.createdAt).toLocaleString("fr-CA", {
-                    timeZone: "America/Toronto",
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  }),
-                })}
-              </p>
-              {stale ? (
-                <p className="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
-                  <AlertTriangle className="size-3.5" /> {t("editor.test.stale")}
+        <div className="flex min-w-0 items-start gap-3">
+          {/* Le verdict de la suite en pastille : « 13/14 » se lit, un rouge se
+              voit. Le compte reste à côté — c'est lui qui dit combien. */}
+          {run ? <LookIcon look={RESULT_LOOK[run.passed ? "pass" : "fail"]} /> : null}
+          <div className="min-w-0 space-y-1">
+            {run ? (
+              <>
+                <p className="text-sm">
+                  {t("editor.test.passed", { passed: run.passedCount, total: run.total })}
                 </p>
-              ) : null}
-            </>
-          ) : (
-            <p className="text-sm text-muted-foreground">{t("editor.test.never")}</p>
-          )}
+                <p className="text-xs text-muted-foreground">
+                  {t("editor.test.lastRun", {
+                    when: new Date(run.createdAt).toLocaleString("fr-CA", {
+                      timeZone: "America/Toronto",
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    }),
+                  })}
+                </p>
+                {stale ? (
+                  <p className="flex items-center gap-1 text-xs break-words text-amber-700 dark:text-amber-400">
+                    <AlertTriangle className="size-3.5 shrink-0" /> {t("editor.test.stale")}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">{t("editor.test.never")}</p>
+            )}
+          </div>
         </div>
         <Button onClick={onRunSuite} disabled={running} className="min-h-11 md:min-h-9">
-          {running ? <Loader2 className="animate-spin" /> : null}
+          {running ? <Loader2 className="animate-spin" /> : <PlayIcon />}
           {running ? t("editor.runningSuite") : t("editor.test.run")}
         </Button>
       </div>
@@ -346,23 +423,22 @@ export function TestTab({
           {run.results.map((r, i) => (
             <li key={i} className="space-y-1 p-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
-                {r.passed ? (
-                  <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
-                ) : (
-                  <XCircle className="size-4 shrink-0 text-destructive" />
-                )}
-                <span className="min-w-0 flex-1">{r.label}</span>
-                {r.severity === "block" ? (
-                  <Badge variant="outline">{t("editor.test.blocking")}</Badge>
-                ) : null}
+                {/* Coche ou croix : la forme dit déjà ce que dit la couleur,
+                    pour l'œil qui ne distingue pas le rouge du vert. */}
+                <LookGlyph look={RESULT_LOOK[r.passed ? "pass" : "fail"]} />
+                <span className="min-w-0 flex-1 break-words">{r.label}</span>
+                <SeverityBadge
+                  severity={r.severity}
+                  label={r.severity === "block" ? t("editor.test.blocking") : undefined}
+                />
               </div>
               {!r.passed && r.reason ? (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs break-words text-muted-foreground">
                   <span className="font-medium">{t("editor.test.reason")} :</span> {r.reason}
                 </p>
               ) : null}
               {!r.passed && r.output ? (
-                <p className="rounded bg-muted/50 p-2 font-mono text-xs">{r.output}</p>
+                <p className="rounded bg-muted/50 p-2 font-mono text-xs break-words">{r.output}</p>
               ) : null}
             </li>
           ))}
@@ -394,7 +470,10 @@ export function JsonTab({ config, update, data }: TabProps) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Label htmlFor="f-json">{t("editor.json.title")}</Label>
+        <Label htmlFor="f-json">
+          <LookIcon look={EDITOR_TAB_LOOK.json} size="sm" />
+          {t("editor.json.title")}
+        </Label>
         <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
@@ -414,7 +493,7 @@ export function JsonTab({ config, update, data }: TabProps) {
             className="min-h-11 md:min-h-9"
             render={<a href={`/api/assistants/${data.id}/export`} download />}
           >
-            {t("editor.json.download")}
+            <DownloadIcon /> {t("editor.json.download")}
           </Button>
           <Button size="sm" className="min-h-11 md:min-h-9" onClick={apply}>
             {t("editor.json.apply")}

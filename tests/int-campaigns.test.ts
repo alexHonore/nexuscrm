@@ -23,7 +23,6 @@ import {
   campaignEnrollments,
   campaignTouches,
   campaigns,
-  consents,
   conversations,
   messages,
   scheduledJobs,
@@ -84,24 +83,20 @@ async function makeCampaign(overrides: Record<string, unknown> = {}) {
       totalEnrollmentCap: config.totalEnrollmentCap,
       startsAt: config.startsAt,
       endsAt: config.endsAt,
-      requireConsent: config.requireConsent,
     })
     .returning();
   return row;
 }
 
-/** Un client joignable : téléphone + consentement SMS valide. */
+/**
+ * Un client joignable : un téléphone, et rien qui l'en empêche.
+ *
+ * Il fallait autrefois lui poser un consentement au registre. Depuis que toute
+ * fiche entrée dans ce CRM est réputée joignable, « joignable » se réduit à
+ * « a un numéro et n'a pas dit non ».
+ */
 async function makeReachableClient(overrides: Record<string, unknown> = {}) {
-  const client = await makeClient(overrides);
-  await testDb.insert(consents).values({
-    clientId: client.id,
-    channel: "sms",
-    kind: "express",
-    source: "test",
-    grantedAt: new Date("2026-01-01T00:00:00Z"),
-    expiresAt: null,
-  });
-  return client;
+  return makeClient(overrides);
 }
 
 beforeEach(async () => {
@@ -151,7 +146,6 @@ describe("inscription — idempotence", () => {
   it("chaque refus porte SON motif, pas un « inéligible » global", async () => {
     const campaign = await makeCampaign();
 
-    const noConsent = await makeClient();
     const suppressed = await makeReachableClient();
     await testDb
       .insert(suppressions)
@@ -161,12 +155,11 @@ describe("inscription — idempotence", () => {
 
     const results = await enrollClients(
       campaign.id,
-      [noConsent.id, suppressed.id, dnc.id, ok.id],
+      [suppressed.id, dnc.id, ok.id],
       { now: NOW },
     );
     const byClient = new Map(results.map((r) => [r.clientId, r]));
 
-    expect(byClient.get(noConsent.id)?.refusal).toBe("no_consent");
     expect(byClient.get(suppressed.id)?.refusal).toBe("suppressed");
     expect(byClient.get(dnc.id)?.refusal).toBe("do_not_call");
     expect(byClient.get(ok.id)?.enrolled).toBe(true);
@@ -547,7 +540,6 @@ describe("le webhook de leads inscrit sans faire attendre n8n", () => {
       trigger: { kind: "lead_created", sourceIds: [] },
       // Le lead arrive sans consentement enregistré par nos soins : c'est le
       // webhook lui-même qui l'inscrit au registre.
-      requireConsent: true,
     });
 
     const rawKey = "cle-webhook-campagne-0123456789";
@@ -1048,34 +1040,20 @@ describe("un fil déjà vivant n'est pas ouvert à froid", () => {
   });
 });
 
-describe("audience, consentement, plafonds", () => {
-  it("le balayage ne s'enlise pas sur une tête de liste sans consentement", async () => {
-    // 60 fiches importées sans consentement, plus ANCIENNES que 10 fiches
-    // consentantes, plafond 50 : sans filtre, le balayage repêchait les 50
-    // mêmes à chaque cycle, en refusait 50, et n'inscrivait plus jamais
-    // personne — alors que l'aperçu annonçait 70.
+describe("audience et plafonds", () => {
+  it("le balayage inscrit jusqu'au plafond, et l'aperçu annonce le même nombre", async () => {
+    // L'aperçu et le balayage doivent compter la MÊME chose : un aperçu qui
+    // annonce 70 pour une campagne qui en inscrit 50 fait chercher une panne
+    // là où il n'y a qu'un plafond.
     const campaign = await makeCampaign({
       trigger: { kind: "scheduled", everyHours: 24 },
       dailyEnrollmentCap: 50,
     });
-    for (let i = 0; i < 60; i += 1) {
-      await makeClient({ createdAt: new Date(`2025-01-${String((i % 28) + 1).padStart(2, "0")}T00:00:00Z`) });
-    }
-    for (let i = 0; i < 10; i += 1) {
-      await makeReachableClient({ createdAt: new Date("2026-06-01T00:00:00Z") });
-    }
+    for (let i = 0; i < 70; i += 1) await makeReachableClient();
 
-    // L'aperçu dit ce que le balayage inscrira : 10, pas 70.
-    expect(await audienceCount(campaign.id, NOW)).toBe(10);
+    expect(await audienceCount(campaign.id, NOW)).toBe(70);
     const swept = await sweepCampaign(campaign.id, { now: NOW });
-    expect(swept.enrolled).toBe(10);
-  });
-
-  it("sans exigence de consentement, l'audience reste entière", async () => {
-    const campaign = await makeCampaign({ requireConsent: false, dailyEnrollmentCap: 100 });
-    for (let i = 0; i < 3; i += 1) await makeClient();
-    expect(await audienceCount(campaign.id, NOW)).toBe(3);
-    expect((await sweepCampaign(campaign.id, { now: NOW })).enrolled).toBe(3);
+    expect(swept.enrolled).toBe(50);
   });
 
   it("une campagne EN PAUSE compte comme « ailleurs »", async () => {

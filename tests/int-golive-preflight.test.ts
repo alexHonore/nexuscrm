@@ -45,7 +45,7 @@ describe("battement du répartiteur", () => {
   it("le battement NE RESSUSCITE PAS un interrupteur d'arrêt relevé", async () => {
     await testDb.insert(settings).values({
       key: "sms",
-      value: { killSwitch: true, killSwitchReason: "incident", consentValidity: "unlimited" },
+      value: { killSwitch: true, killSwitchReason: "incident" },
     });
     expect(await settingsSendGate.isSendingAllowed()).toBe(false);
 
@@ -62,14 +62,13 @@ describe("battement du répartiteur", () => {
   it("le battement ne réarme pas non plus un interrupteur BAISSÉ", async () => {
     await testDb.insert(settings).values({
       key: "sms",
-      value: { killSwitch: false, consentValidity: "6m" },
+      value: { killSwitch: false },
     });
     await runDispatchCycle();
 
     const after = await getSetting("sms");
     expect(after.killSwitch).toBe(false);
     // Et les autres réglages sont intacts.
-    expect(after.consentValidity).toBe("6m");
     expect(await settingsSendGate.isSendingAllowed()).toBe(true);
   });
 

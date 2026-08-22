@@ -1,16 +1,8 @@
 import "server-only";
-import { and, eq, gte, isNull, or } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
-import {
-  campaignEnrollments,
-  campaignTouches,
-  campaigns,
-  consents,
-  conversations,
-  smsNumbers,
-  suppressions,
-} from "@/db/schema-sms";
+import { campaignEnrollments, campaignTouches, campaigns, conversations, smsNumbers, suppressions } from "@/db/schema-sms";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { campaignRowToConfig } from "@/lib/campaigns/schema";
 import {
@@ -103,19 +95,6 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
     .where(eq(suppressions.phoneE164, client.phone))
     .limit(1);
 
-  const [consentRow] = await db
-    .select({ id: consents.id })
-    .from(consents)
-    .where(
-      and(
-        eq(consents.clientId, client.id),
-        eq(consents.channel, "sms"),
-        isNull(consents.revokedAt),
-        or(isNull(consents.expiresAt), gte(consents.expiresAt, now))!,
-      ),
-    )
-    .limit(1);
-
   // Le fil : celui de l'inscription, sinon celui qui existe DÉJÀ pour ce
   // téléphone sur ce numéro. Avant le premier barreau l'inscription n'en connaît
   // aucun — mais la personne peut très bien être en pleine conversation avec
@@ -162,7 +141,6 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
     // sur un réglage illisible, comme l'envoi lui-même.
     killSwitch: !(await settingsSendGate.isSendingAllowed()),
     suppressed: suppressedRow !== undefined,
-    hasValidConsent: config.requireConsent ? consentRow !== undefined : true,
     doNotCall: client.doNotCall,
     excludeDoNotCall: config.audience.excludeDoNotCall,
     aiEnabled: conversation?.aiEnabled ?? true,
@@ -307,7 +285,7 @@ type EnrollmentRow = typeof campaignEnrollments.$inferSelect;
 /**
  * Un refus n'a pas toujours la même conséquence.
  *
- *  · Un « non » définitif (désabonnement, consentement expiré, ne pas appeler,
+ *  · Un « non » définitif (désabonnement, ne pas appeler,
  *    réponse, échelle finie, fil déjà vivant) CLÔT l'inscription.
  *  · Un « pas maintenant » (interrupteur, numéro manquant, fil en pause, heures
  *    de politesse) la REPOUSSE : `next_touch_at` avance, sinon la file la
@@ -335,7 +313,6 @@ async function handleRefusal(
       // commencé, et les statistiques ne doivent pas y voir un refus exprimé.
       return finish(enrollment.id, "excluded", refusal, result);
     case "suppressed":
-    case "consent_expired":
     case "do_not_call":
       return finish(enrollment.id, "stopped", refusal, result);
 

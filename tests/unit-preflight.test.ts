@@ -23,8 +23,6 @@ function ready(overrides: Partial<PreflightFacts> = {}): PreflightFacts {
     hasWebhookSignatureSecret: true,
     activeNumberCount: 1,
     numbersWithoutMessagingService: 0,
-    consentValidity: "unlimited",
-    consentedClientCount: 120,
     quietHoursLabel: "9h-20h",
     appUrl: "https://crm.example.com",
     hasMessagingServiceEnv: true,
@@ -105,12 +103,6 @@ describe("avertissements — ça partira, mais quelque chose surprendra", () => 
     expect(report.warnings).toContain("messaging_service");
   });
 
-  it("aucun consentement enregistré avertit : la campagne n'inscrira personne", () => {
-    const report = preflight(ready({ consentedClientCount: 0 }));
-    expect(report.canSendLive).toBe(true);
-    expect(report.warnings).toContain("consented_clients");
-  });
-
   it("un assistant ACTIF avec une suite rouge est signalé", () => {
     // Il a forcément été activé en contournant l'exigence : le signaler vaut
     // mieux que supposer que c'est impossible.
@@ -156,13 +148,11 @@ describe("le modèle", () => {
 });
 
 describe("informations", () => {
-  it("les heures de politesse et la validité du consentement sont affichées, pas jugées", () => {
-    const report = preflight(ready({ consentValidity: "6m", quietHoursLabel: "9h-20h" }));
+  it("les heures de politesse sont affichées, pas jugées", () => {
+    const report = preflight(ready({ quietHoursLabel: "9h-20h" }));
     const quiet = report.checks.find((c) => c.id === "quiet_hours");
-    const consent = report.checks.find((c) => c.id === "consent_policy");
     expect(quiet?.level).toBe("info");
     expect(quiet?.detail).toBe("9h-20h");
-    expect(consent?.detail).toBe("6m");
     expect(report.canSendLive).toBe(true);
   });
 

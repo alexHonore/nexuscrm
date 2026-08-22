@@ -416,19 +416,20 @@ describe("envoi manuel — garde-fous de la revue", () => {
     await resetDb();
   });
 
-  it("SANS consentement et sans message entrant, l'envoi à la main est refusé", async () => {
-    // Loi anti-pourriel : un texto commercial exige un consentement — ou une
-    // conversation que la personne a elle-même engagée.
+  it("un envoi à la main part sans registre de consentement", async () => {
+    // Toute fiche entrée dans ce CRM est réputée joignable : le registre de
+    // consentement ne conditionne plus l'envoi. Ce qui reste, et qui compte,
+    // c'est le refus exprimé — voir le cas « désabonné » plus bas.
     const caller = await makeUser({ role: "caller", email: "c1@x.test" });
     await loginAs(caller);
     await makeSmsNumber();
     const client = await makeClient({ phone: "+15145550171" });
     const result = await sendManualSmsAction({ clientId: client.id, body: "Bonjour!" });
-    expect(result).toEqual({ ok: false, error: "noConsent" });
-    expect(await testDb.select().from(scheduledJobs)).toHaveLength(0);
+    expect(result).toMatchObject({ ok: true });
+    expect(await testDb.select().from(scheduledJobs)).toHaveLength(1);
   });
 
-  it("la personne a écrit en premier : répondre est permis sans consentement au dossier", async () => {
+  it("la personne a écrit en premier : répondre est permis", async () => {
     const caller = await makeUser({ role: "caller", email: "c2@x.test" });
     await loginAs(caller);
     const number = await makeSmsNumber();

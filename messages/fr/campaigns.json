@@ -141,9 +141,7 @@
       "totalCap": "Plafond total d'inscriptions",
       "noTotalCap": "Aucun",
       "startsAt": "Début",
-      "endsAt": "Fin",
-      "requireConsent": "Exiger un consentement valide",
-      "requireConsentHint": "Le désactiver est un geste délibéré dont vous répondez devant la LCAP."
+      "endsAt": "Fin"
     },
     "trigger": {
       "kind": "Type de déclencheur",
@@ -233,7 +231,6 @@
         "campaign_not_active": "Campagne inactive",
         "outside_window": "Hors fenêtre",
         "no_phone": "Sans téléphone",
-        "no_consent": "Sans consentement",
         "suppressed": "Numéro désabonné",
         "do_not_call": "Ne pas appeler",
         "already_enrolled": "Déjà inscrit",
@@ -250,7 +247,6 @@
         "opted_out": "Désabonnement (STOP)",
         "ladder_exhausted": "Échelle terminée",
         "suppressed": "Numéro désabonné",
-        "consent_expired": "Consentement expiré",
         "do_not_call": "Ne pas appeler",
         "live_conversation": "Conversation déjà en cours",
         "client_deleted": "Fiche supprimée",

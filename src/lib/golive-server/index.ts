@@ -1,7 +1,7 @@
 import "server-only";
-import { and, eq, isNull, gte, or, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { assistants, campaigns, consents, smsNumbers } from "@/db/schema-sms";
+import { assistants, campaigns, smsNumbers } from "@/db/schema-sms";
 import { getSetting } from "@/lib/settings";
 import { configuredProviders } from "@/lib/llm-server";
 import { resolveSmsMode } from "@/lib/sms/provider";
@@ -19,23 +19,13 @@ import { preflight, type PreflightFacts, type PreflightReport } from "@/lib/goli
 export async function collectPreflight(now = new Date()): Promise<PreflightReport> {
   const smsSettings = await getSetting("sms").catch(() => null);
 
-  const [numbers, consented, assistantRows, campaignRows] = await Promise.all([
+  const [numbers, assistantRows, campaignRows] = await Promise.all([
     db
       .select({
         active: sql<number>`(count(*) filter (where ${smsNumbers.active}))::int`,
         withoutService: sql<number>`(count(*) filter (where ${smsNumbers.active} and ${smsNumbers.messagingServiceSid} = ''))::int`,
       })
       .from(smsNumbers),
-    db
-      .select({ n: sql<number>`count(distinct ${consents.clientId})::int` })
-      .from(consents)
-      .where(
-        and(
-          eq(consents.channel, "sms"),
-          isNull(consents.revokedAt),
-          or(isNull(consents.expiresAt), gte(consents.expiresAt, now))!,
-        ),
-      ),
     db
       .select({
         active: sql<number>`(count(*) filter (where ${assistants.status} = 'active'))::int`,
@@ -71,8 +61,6 @@ export async function collectPreflight(now = new Date()): Promise<PreflightRepor
     hasMessagingServiceEnv: Boolean(env.TWILIO_MESSAGING_SERVICE_SID),
     activeNumberCount: numbers[0]?.active ?? 0,
     numbersWithoutMessagingService: numbers[0]?.withoutService ?? 0,
-    consentValidity: smsSettings?.consentValidity ?? "unlimited",
-    consentedClientCount: consented[0]?.n ?? 0,
     quietHoursLabel: `${DEFAULT_QUIET_HOURS.weekday[0]}h-${DEFAULT_QUIET_HOURS.weekday[1]}h`,
     activeAssistantCount: assistantRows[0]?.active ?? 0,
     activeAssistantsWithRedSuite: assistantRows[0]?.redSuite ?? 0,

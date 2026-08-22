@@ -17,6 +17,7 @@
 import {
   LAYER_IDS,
   type AssistantConfig,
+  type AssistantLanguage,
   type GoalStep,
   type IdentityConfig,
   type GoalType,
@@ -210,10 +211,46 @@ function styleLevelPhrase(level: number): string {
   return "chaleureux et proactif";
 }
 
+/** Comment on NOMME une langue au modèle — un code ISO ne suffit pas. */
+const LANGUAGE_NAMES: Record<AssistantLanguage, string> = {
+  "fr-CA": "français québécois",
+  "en-CA": "anglais canadien",
+};
+
+/**
+ * La langue de rédaction, dite explicitement.
+ *
+ * Elle était enregistrée sur la fiche et n'entrait dans AUCUNE couche : le
+ * modèle écrivait en français parce que tout le reste du prompt l'était, pas
+ * parce qu'on le lui demandait. Un assistant réglé sur l'anglais écrivait donc
+ * en français — le réglage mentait.
+ *
+ * La seconde langue est une autorisation de BASCULER, jamais d'ouvrir : le
+ * premier message suit la langue principale, et l'assistant ne change que si
+ * la personne écrit dans l'autre.
+ */
+function buildLanguageLines(config: AssistantConfig): string[] {
+  const primary = LANGUAGE_NAMES[config.language];
+  const lines = [`Tu écris en ${primary}.`];
+  if (config.secondaryLanguage === null) {
+    lines.push(
+      `Même si la personne écrit dans une autre langue, tu continues en ${primary}.`,
+    );
+    return lines;
+  }
+  const secondary = LANGUAGE_NAMES[config.secondaryLanguage];
+  lines.push(
+    `Si la personne écrit en ${secondary}, tu lui réponds en ${secondary} et tu continues dans cette langue tant qu'elle s'y tient.`,
+    `Ton PREMIER message reste en ${primary} : tu ne devines pas la langue de quelqu'un qui n'a encore rien écrit.`,
+  );
+  return lines;
+}
+
 function buildApproachLayer(config: AssistantConfig): string {
   const { approach } = config;
   const lines: string[] = ["# APPROCHE"];
 
+  lines.push(...buildLanguageLines(config));
   lines.push(
     approach.formality === "vous"
       ? "Vouvoie la personne (« vous »)."

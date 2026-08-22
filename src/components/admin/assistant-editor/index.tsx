@@ -10,6 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { EDITOR_TAB_LOOK, LookGlyph } from "@/components/look";
 import type { AssistantConfig } from "@/lib/assistants/schema";
 import { ApiError, api } from "../api";
 import { ParamDocsProvider, type ParamDocView } from "./param-help";
@@ -269,15 +270,25 @@ export function AssistantEditor({
               : "identity"
           }
         >
-          {/* Onze onglets : la liste défile horizontalement sur téléphone
-              plutôt que de se replier en menu, pour rester repérable. */}
+          {/* Douze onglets : la liste défile horizontalement sur téléphone
+              plutôt que de se replier en menu, pour rester repérable.
+
+              Chacun porte son pictogramme. Douze libellés gris de la même
+              taille se lisent un par un, à chaque fois ; une forme se
+              reconnaît. La COULEUR, elle, groupe les onglets en familles (ce
+              que l'assistant dit / ce qui le fait fonctionner / ce qui le
+              vérifie) — douze couleurs distinctes feraient des confettis. */}
           <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
             <TabsList className="w-max">
-              {TAB_IDS.map((id) => (
-                <TabsTrigger key={id} value={id} className="min-h-11 md:min-h-8">
-                  {t(`editor.tabs.${id}`)}
-                </TabsTrigger>
-              ))}
+              {TAB_IDS.map((id) => {
+                const look = EDITOR_TAB_LOOK[id];
+                return (
+                  <TabsTrigger key={id} value={id} className="min-h-11 gap-1.5 md:min-h-8">
+                    <LookGlyph look={look} className="size-3.5" />
+                    {t(`editor.tabs.${id}`)}
+                  </TabsTrigger>
+                );
+              })}
             </TabsList>
           </div>
 

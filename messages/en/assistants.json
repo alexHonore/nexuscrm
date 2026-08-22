@@ -357,7 +357,9 @@
       "linkedHint": "The name follows the chosen account; meetings are assigned to them.",
       "signaturePlaceholder": "— The Nexus team",
       "signaturePreview": "Signature preview",
-      "noSignature": "No signature"
+      "noSignature": "No signature",
+      "noSecondLanguage": "None — a single language",
+      "secondLanguageHint": "The assistant switches to this language if the person writes in it. Its first message stays in the primary language."
     }
   },
   "import": {
@@ -565,14 +567,6 @@
       "messaging_service": {
         "label": "Messaging service (A2P)",
         "fix": "Active numbers have no Messaging Service: sending works but loses A2P grouping, which is what gets a number flagged."
-      },
-      "consent_policy": {
-        "label": "Consent validity",
-        "fix": ""
-      },
-      "consented_clients": {
-        "label": "Clients with valid SMS consent",
-        "fix": "No valid consent: a campaign will enroll nobody. Check that the lead webhook records the ledger."
       },
       "quiet_hours": {
         "label": "Quiet hours",
@@ -867,10 +861,6 @@
     },
     "sending": {
       "title": "Sending rules",
-      "consent": {
-        "title": "Consent (Canada's anti-spam law)",
-        "p": "By default a campaign only writes to contacts with a valid SMS consent on file. A lead received by webhook gets an implied inquiry consent; the validity period is set in SMS settings (6 months, 1, 2, 3 years, unlimited) with an audited retroactive backfill. A STOP revokes consent and suppresses the number. A caller who gets the yes by phone records it directly on the client's SMS thread (express or implied, how it was obtained, a note); revoking dates the entries without deleting anything. A hand-typed send is refused without consent, unless the person wrote first."
-      },
       "optout": {
         "title": "Opt-out",
         "p": "An inbound message that is exactly one of these keywords suppresses the number — before anything else, even with no client record. A suppression survives client deletion and re-import: nothing ever leaves to that number again.",
@@ -907,8 +897,7 @@
       "admin": {
         "title": "What the settings control",
         "numbers": "SMS numbers: the line that sends and receives. Label, daily send cap (applied to automated sends — going over is pushed to the next morning), active or not, and the DEFAULT ASSISTANT that takes an inbound thread with no assistant. A number can be added by hand or synced from the Twilio Messaging Service (new ones arrive inactive). A number with threads is not deleted: it is deactivated.",
-        "killSwitch": "Kill switch: stops EVERY send whatever the mode, cancels already-queued sends, and keeps assistant turns from paying for a model call on a message that would be discarded. It is lifted by hand.",
-        "consentPolicy": "Consent validity: stamped on new consents, with an audited retroactive backfill if you apply it to existing ones."
+        "killSwitch": "Kill switch: stops EVERY send whatever the mode, cancels already-queued sends, and keeps assistant turns from paying for a model call on a message that would be discarded. It is lifted by hand."
       }
     },
     "json": {
@@ -973,5 +962,9 @@
       "p1": "The \"Go live\" page lists every reason nothing would leave, separating blockers (nothing leaves) from warnings (it leaves, but badly) and information. Here is what it checks and how to fix each point.",
       "checks": "Checks"
     }
+  },
+  "language": {
+    "fr-CA": "Québec French",
+    "en-CA": "Canadian English"
   }
 }

@@ -357,7 +357,9 @@
       "linkedHint": "Le nom suit le compte choisi ; les rendez-vous lui seront assignés.",
       "signaturePlaceholder": "— L'équipe Nexus",
       "signaturePreview": "Aperçu de la signature",
-      "noSignature": "Aucune signature"
+      "noSignature": "Aucune signature",
+      "noSecondLanguage": "Aucune — une seule langue",
+      "secondLanguageHint": "L'assistant bascule dans cette langue si la personne y écrit. Son premier message reste dans la langue principale."
     }
   },
   "import": {
@@ -565,14 +567,6 @@
       "messaging_service": {
         "label": "Service de messagerie (A2P)",
         "fix": "Des numéros actifs n'ont pas de Messaging Service : l'envoi fonctionne mais perd le regroupement A2P, ce qui fait classer un numéro comme indésirable."
-      },
-      "consent_policy": {
-        "label": "Validité des consentements",
-        "fix": ""
-      },
-      "consented_clients": {
-        "label": "Clients avec consentement SMS valide",
-        "fix": "Aucun consentement valide : une campagne n'inscrira personne. Vérifiez que le webhook de leads enregistre bien le registre."
       },
       "quiet_hours": {
         "label": "Heures de politesse",
@@ -867,10 +861,6 @@
     },
     "sending": {
       "title": "Règles d'envoi",
-      "consent": {
-        "title": "Consentement (Loi canadienne anti-pourriel)",
-        "p": "Par défaut, une campagne n'écrit qu'aux contacts qui ont un consentement SMS valide au dossier. Un lead reçu par webhook reçoit un consentement implicite d'enquête ; la durée de validité se règle dans les réglages SMS (6 mois, 1 an, 2 ans, 3 ans, illimité) avec rattrapage rétroactif journalisé. Un STOP révoque le consentement et met le numéro sous suppression. Un téléphoniste qui obtient le oui au téléphone l'enregistre directement sur le fil SMS de la fiche (type exprès ou implicite, comment il a été obtenu, note) ; révoquer date les entrées sans rien effacer. Un envoi à la main est refusé sans consentement, sauf si la personne a écrit la première."
-      },
       "optout": {
         "title": "Désabonnement",
         "p": "Un message entrant qui est exactement l'un de ces mots-clés met le numéro sous suppression — avant tout autre traitement, même sans fiche client. Une suppression survit à la suppression du client et à une réimportation : rien ne repart jamais vers ce numéro.",
@@ -907,8 +897,7 @@
       "admin": {
         "title": "Ce qui se règle dans les réglages",
         "numbers": "Numéros SMS : la ligne qui envoie et reçoit. Libellé, plafond d'envois par jour (appliqué aux envois automatisés — un dépassement est reporté au lendemain matin), actif ou non, et l'ASSISTANT PAR DÉFAUT qui prend un fil entrant sans assistant. Un numéro peut être ajouté à la main ou synchronisé depuis le Messaging Service Twilio (les nouveaux arrivent inactifs). Un numéro qui a des fils ne se supprime pas : on le désactive.",
-        "killSwitch": "Interrupteur d'arrêt : coupe TOUT envoi, quel que soit le mode, annule les envois déjà en file, et empêche les tours d'assistant de coûter un appel au modèle pour un message qui serait jeté. Il se relève à la main.",
-        "consentPolicy": "Durée de validité des consentements : estampillée sur les nouveaux consentements, avec un rattrapage rétroactif journalisé si vous l'appliquez aux existants."
+        "killSwitch": "Interrupteur d'arrêt : coupe TOUT envoi, quel que soit le mode, annule les envois déjà en file, et empêche les tours d'assistant de coûter un appel au modèle pour un message qui serait jeté. Il se relève à la main."
       }
     },
     "json": {
@@ -973,5 +962,9 @@
       "p1": "La page « Mise en service » énumère toutes les raisons pour lesquelles rien ne partirait, en séparant les blocages (rien ne part) des avertissements (ça part, mais mal) et des informations. Voici ce qu'elle vérifie et comment corriger chaque point.",
       "checks": "Vérifications"
     }
+  },
+  "language": {
+    "fr-CA": "Français québécois",
+    "en-CA": "Anglais canadien"
   }
 }
