@@ -2,7 +2,7 @@
 
 import { AlertTriangleIcon, HelpCircleIcon, Loader2, SaveIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -27,7 +27,13 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { GUARDRAIL_SEVERITY_DOCS, fixtureFieldDoc } from "@/lib/guardrails/docs";
+import { docLocale } from "@/lib/docs/types";
+import {
+  GUARDRAIL_SEVERITY_DOCS,
+  fixtureFieldDoc,
+  fixtureText,
+  severityText,
+} from "@/lib/guardrails/docs";
 import { GUARDRAIL_SEVERITIES, type GuardrailSeverity } from "@/lib/guardrails/types";
 import { api } from "./api";
 
@@ -69,8 +75,10 @@ export function emptyFixture(): EditableFixture {
 /** (?) d'un champ de fixture — ce qu'il fait, un exemple, et son piège. */
 export function FixtureFieldHelp({ field }: { field: string }) {
   const t = useTranslations("assistants");
+  const locale = docLocale(useLocale());
   const doc = fixtureFieldDoc(field);
   if (!doc) return null;
+  const text = fixtureText(doc, locale);
 
   return (
     <Popover>
@@ -80,7 +88,7 @@ export function FixtureFieldHelp({ field }: { field: string }) {
             variant="ghost"
             size="icon"
             className="size-6 text-muted-foreground"
-            aria-label={`${t("guardrails.help")} — ${doc.labelFr}`}
+            aria-label={`${t("guardrails.help")} — ${text.label}`}
           />
         }
       >
@@ -88,17 +96,17 @@ export function FixtureFieldHelp({ field }: { field: string }) {
       </PopoverTrigger>
       <PopoverContent align="start" className="w-96 space-y-2.5 text-sm">
         <div>
-          <p className="font-medium">{doc.labelFr}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{doc.whatFr}</p>
+          <p className="font-medium">{text.label}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{text.what}</p>
         </div>
         <p className="rounded-md bg-muted/60 p-2 text-xs text-muted-foreground">
-          <span className="font-medium">{t("guardrails.helpExample")} :</span> {doc.exampleFr}
+          <span className="font-medium">{t("guardrails.helpExample")} :</span> {text.example}
         </p>
         <div className="rounded-md bg-amber-500/10 p-2">
           <p className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
             <AlertTriangleIcon className="size-3.5" /> {t("guardrails.helpPitfall")}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">{doc.pitfallFr}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{text.pitfall}</p>
         </div>
       </PopoverContent>
     </Popover>
@@ -146,6 +154,7 @@ export function GuardrailFixtureDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations("assistants");
+  const locale = docLocale(useLocale());
   const router = useRouter();
   const [draft, setDraft] = useState<EditableFixture>(fixture);
   const [busy, setBusy] = useState(false);
@@ -345,7 +354,7 @@ export function GuardrailFixtureDialog({
               <Select
                 items={GUARDRAIL_SEVERITIES.map((s) => ({
                   value: s,
-                  label: GUARDRAIL_SEVERITY_DOCS[s].labelFr,
+                  label: severityText(GUARDRAIL_SEVERITY_DOCS[s], locale).label,
                 }))}
                 value={draft.severity}
                 onValueChange={(v) =>
@@ -358,7 +367,7 @@ export function GuardrailFixtureDialog({
                 <SelectContent>
                   {GUARDRAIL_SEVERITIES.map((s) => (
                     <SelectItem key={s} value={s}>
-                      {GUARDRAIL_SEVERITY_DOCS[s].labelFr}
+                      {severityText(GUARDRAIL_SEVERITY_DOCS[s], locale).label}
                     </SelectItem>
                   ))}
                 </SelectContent>

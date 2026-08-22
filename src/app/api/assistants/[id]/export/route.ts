@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { getLocale } from "next-intl/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { exportAssistantFile } from "@/lib/assistants/transfer";
+import { docLocale } from "@/lib/docs/locale";
 
 /**
  * GET /api/assistants/:id/export — télécharge l'assistant en JSON.
@@ -22,7 +24,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const annotate = new URL(req.url).searchParams.get("annotate") !== "0";
 
   try {
-    const file = await exportAssistantFile(id, { annotate });
+    // Les annotations sont lues par un humain : elles suivent la langue de
+    // l'interface. La configuration exportée, elle, ne bouge pas d'un poil.
+    const file = await exportAssistantFile(id, { annotate, locale: docLocale(await getLocale()) });
     await logAudit({
       userId: admin.id,
       action: "assistant.export",

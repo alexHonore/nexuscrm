@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -54,7 +54,7 @@ function ScaleField({
 }) {
   const doc = useParamDoc(path);
   const options = doc?.allowed?.length
-    ? doc.allowed.map((a) => ({ value: Number(a.value), label: a.labelFr }))
+    ? doc.allowed.map((a) => ({ value: Number(a.value), label: a.label }))
     : [1, 2, 3, 4, 5].map((n) => ({ value: n, label: labels?.[n] ?? String(n) }));
 
   return (
@@ -95,7 +95,7 @@ function EnumField({
     <div className="space-y-1.5">
       <FieldLabel path={path} />
       <Select
-        items={options.map((o) => ({ value: String(o.value), label: o.labelFr }))}
+        items={options.map((o) => ({ value: String(o.value), label: o.label }))}
         value={value}
         onValueChange={(v) => onChange(String(v))}
       >
@@ -105,7 +105,7 @@ function EnumField({
         <SelectContent>
           {options.map((o) => (
             <SelectItem key={String(o.value)} value={String(o.value)}>
-              {o.labelFr}
+              {o.label}
             </SelectItem>
           ))}
         </SelectContent>
@@ -635,13 +635,39 @@ export function ApproachTab({ config, update }: TabProps) {
   );
 }
 
-// ── Connaissances ────────────────────────────────────────────────────────────
+// ── Connaissances et consignes ───────────────────────────────────────────────
 
+/**
+ * La liste porte DEUX sortes d'entrées — un fait que l'assistant peut
+ * affirmer, ou une consigne de conduite (« si on demande X, réponds Y ») — et
+ * l'ORDRE compte : c'est la première entrée qui gagne quand deux se
+ * contredisent. Rien de tout ça ne se devinait devant un champ intitulé
+ * « Faits autorisés » suivi de zones de texte sans numéro : on y écrivait des
+ * consignes sans savoir si elles seraient suivies. D'où le numéro visible et
+ * les flèches de réordonnancement, qui rendent la règle manipulable.
+ */
 export function KnowledgeTab({ config, update }: TabProps) {
   const t = useTranslations("assistants");
+  const claims = config.knowledge.claims;
+
+  /** Déplace une entrée d'un cran — l'ordre est une donnée, pas une présentation. */
+  const move = (from: number, to: number) =>
+    update((d) => {
+      if (to < 0 || to >= d.knowledge.claims.length) return;
+      const [entry] = d.knowledge.claims.splice(from, 1);
+      d.knowledge.claims.splice(to, 0, entry);
+    });
+
   return (
     <div className="space-y-4">
       <FieldLabel path="knowledge.claims" />
+      <p className="text-sm text-muted-foreground">{t("editor.knowledge.intro")}</p>
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        <ExampleLine kind="fact" text={t("editor.knowledge.exampleFact")} />
+        <ExampleLine kind="rule" text={t("editor.knowledge.exampleRule")} />
+      </div>
+
       {/* Ce n'est pas une note de ton : ces phrases sortent au nom d'un
           courtier titulaire d'un permis. */}
       <Alert>
@@ -649,26 +675,62 @@ export function KnowledgeTab({ config, update }: TabProps) {
         <AlertDescription>{t("editor.knowledge.warning")}</AlertDescription>
       </Alert>
 
-      {config.knowledge.claims.length === 0 ? (
+      {claims.length === 0 ? (
         <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
           {t("editor.knowledge.empty")}
         </p>
-      ) : null}
+      ) : (
+        <p className="text-xs text-muted-foreground">{t("editor.knowledge.orderHint")}</p>
+      )}
 
       <div className="space-y-2">
-        {config.knowledge.claims.map((claim, i) => (
+        {claims.map((claim, i) => (
           <div key={i} className="flex items-start gap-2">
+            {/* Le numéro porte du SENS (c'est la première entrée qui gagne un
+                conflit) : décoratif à l'œil, il est repris dans le nom
+                accessible de la zone de texte, sinon trois entrées se lisent
+                toutes « zone de texte » au lecteur d'écran. */}
+            <span
+              aria-hidden
+              className="mt-2 w-6 shrink-0 text-right font-mono text-xs text-muted-foreground"
+            >
+              {i + 1}.
+            </span>
             <Textarea
               rows={2}
               value={claim}
-              maxLength={300}
+              maxLength={600}
+              aria-label={t("editor.knowledge.entry", { index: i + 1 })}
+              placeholder={t("editor.knowledge.placeholder")}
               onChange={(e) => update((d) => void (d.knowledge.claims[i] = e.target.value))}
             />
+            <div className="flex shrink-0 flex-col">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-11 md:size-8"
+                disabled={i === 0}
+                aria-label={t("editor.knowledge.moveUp", { index: i + 1 })}
+                onClick={() => move(i, i - 1)}
+              >
+                <ArrowUp />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-11 md:size-8"
+                disabled={i === claims.length - 1}
+                aria-label={t("editor.knowledge.moveDown", { index: i + 1 })}
+                onClick={() => move(i, i + 1)}
+              >
+                <ArrowDown />
+              </Button>
+            </div>
             <Button
               variant="ghost"
               size="icon"
               className="size-11 shrink-0 text-destructive md:size-9"
-              aria-label={t("editor.goal.removeFallback")}
+              aria-label={t("editor.knowledge.remove", { index: i + 1 })}
               onClick={() => update((d) => void d.knowledge.claims.splice(i, 1))}
             >
               <Trash2 />
@@ -680,12 +742,25 @@ export function KnowledgeTab({ config, update }: TabProps) {
       <Button
         variant="outline"
         className="min-h-11 md:min-h-9"
-        disabled={config.knowledge.claims.length >= 50}
+        disabled={claims.length >= 50}
         onClick={() => update((d) => void d.knowledge.claims.push(""))}
       >
         <Plus /> {t("editor.knowledge.add")}
       </Button>
     </div>
+  );
+}
+
+/** Un exemple des deux formes admises — c'est ce qui les rend évidentes. */
+function ExampleLine({ kind, text }: { kind: "fact" | "rule"; text: string }) {
+  const t = useTranslations("assistants");
+  return (
+    <p className="rounded-md bg-muted/40 p-2.5 text-xs text-muted-foreground">
+      <Badge variant="outline" className="mr-1.5 align-middle text-[10px]">
+        {t(`editor.knowledge.kind.${kind}`)}
+      </Badge>
+      {text}
+    </p>
   );
 }
 
@@ -778,5 +853,5 @@ export function ToolsTab({ config, update }: TabProps) {
 function ToolHelp({ tool }: { tool: AssistantTool }) {
   const doc = useParamDoc(`tools.${tool}`);
   if (!doc) return null;
-  return <span className="text-xs text-muted-foreground">{doc.whatFr}</span>;
+  return <span className="text-xs text-muted-foreground">{doc.what}</span>;
 }

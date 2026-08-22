@@ -1,3 +1,10 @@
+import {
+  FIXTURE_FIELD_TEXT_EN,
+  GUARDRAIL_KIND_TEXT_EN,
+  GUARDRAIL_SEVERITY_TEXT_EN,
+  RULE_PRESET_TEXT_EN,
+} from "./docs.en";
+import type { DocLocale } from "@/lib/docs/types";
 import type { GuardrailKind, GuardrailSeverity } from "./types";
 
 /**
@@ -9,6 +16,16 @@ import type { GuardrailKind, GuardrailSeverity } from "./types";
  * beaucoup sur le papier, et le choix entre les deux décide pourtant si
  * « commissionnaire » déclenche la règle sur « commission ».
  */
+
+/**
+ * Langue de l'aide. Le français est la source, l'anglais une surcouche par
+ * clé (`./docs.en`) — même règle que `messages/<locale>/*.json`. Ce qui n'est
+ * PAS traduisible : le `promptText` et le `criterion` d'un préréglage. Ces
+ * deux-là partent dans le prompt de l'assistant, dont la langue est celle de
+ * l'assistant, pas celle de l'administrateur qui regarde l'écran.
+ */
+// Une seule définition de la langue dans tout le dépôt : `DocLocale`.
+export type DocsLocale = DocLocale;
 
 export interface GuardrailKindDoc {
   kind: GuardrailKind;
@@ -140,7 +157,7 @@ export const GUARDRAIL_KIND_DOCS: Record<GuardrailKind, GuardrailKindDoc> = {
     passesFr: "Tout passe : cette règle n'a aucun pouvoir de blocage.",
     caughtFr: "Rien n'est jamais attrapé.",
     pitfallFr:
-      "Sa sévérité n'a AUCUN effet : la marquer « bloquante » l'affiche comme un garde-fou dur alors qu'elle ne peut rien refuser. Si le comportement doit être garanti, utilisez « Jugement par le modèle ».",
+      "Sa sévérité n'a AUCUN effet : la marquer « bloquante » l'affiche comme un garde-fou dur alors qu'elle ne peut rien refuser. Si le comportement doit être garanti, utilisez « Faire vérifier le sens par l'IA ».",
     costsModelCall: false,
   },
 };
@@ -174,6 +191,41 @@ export const GUARDRAIL_SEVERITY_DOCS: Record<GuardrailSeverity, SeverityDoc> = {
 
 export function kindDoc(kind: string): GuardrailKindDoc | undefined {
   return (GUARDRAIL_KIND_DOCS as Record<string, GuardrailKindDoc>)[kind];
+}
+
+/** Le texte d'un type de règle, sans suffixe de langue. */
+export interface GuardrailKindText {
+  label: string;
+  what: string;
+  when: string;
+  config: string;
+  passes: string;
+  caught: string;
+  pitfall: string;
+}
+
+/** Une traduction manquante retombe sur le français : mieux que du vide. */
+export function kindText(doc: GuardrailKindDoc, locale: DocsLocale): GuardrailKindText {
+  const fr: GuardrailKindText = {
+    label: doc.labelFr,
+    what: doc.whatFr,
+    when: doc.whenFr,
+    config: doc.configFr,
+    passes: doc.passesFr,
+    caught: doc.caughtFr,
+    pitfall: doc.pitfallFr,
+  };
+  return locale === "en" ? { ...fr, ...(GUARDRAIL_KIND_TEXT_EN[doc.kind] ?? {}) } : fr;
+}
+
+export interface SeverityText {
+  label: string;
+  what: string;
+}
+
+export function severityText(doc: SeverityDoc, locale: DocsLocale): SeverityText {
+  const fr: SeverityText = { label: doc.labelFr, what: doc.whatFr };
+  return locale === "en" ? { ...fr, ...(GUARDRAIL_SEVERITY_TEXT_EN[doc.severity] ?? {}) } : fr;
 }
 
 /** Config par défaut d'un type — sert au formulaire de création. */
@@ -404,4 +456,39 @@ export const RULE_PRESETS: RulePreset[] = [
 
 export function rulePreset(key: string): RulePreset | undefined {
   return RULE_PRESETS.find((p) => p.key === key);
+}
+
+/**
+ * Le texte d'un préréglage — ce que l'administrateur LIT.
+ *
+ * `promptText`, `config` et `severity` n'y sont pas : ils partent dans le
+ * prompt de l'assistant ou dans le moteur. Traduire un `promptText` selon la
+ * langue de l'écran ferait écrire l'assistant en anglais à des clients
+ * québécois.
+ */
+export interface RulePresetText {
+  label: string;
+  what: string;
+}
+
+export function presetText(preset: RulePreset, locale: DocsLocale): RulePresetText {
+  const fr: RulePresetText = { label: preset.labelFr, what: preset.whatFr };
+  return locale === "en" ? { ...fr, ...(RULE_PRESET_TEXT_EN[preset.key] ?? {}) } : fr;
+}
+
+export interface FixtureFieldText {
+  label: string;
+  what: string;
+  example: string;
+  pitfall: string;
+}
+
+export function fixtureText(doc: FixtureFieldDoc, locale: DocsLocale): FixtureFieldText {
+  const fr: FixtureFieldText = {
+    label: doc.labelFr,
+    what: doc.whatFr,
+    example: doc.exampleFr,
+    pitfall: doc.pitfallFr,
+  };
+  return locale === "en" ? { ...fr, ...(FIXTURE_FIELD_TEXT_EN[doc.key] ?? {}) } : fr;
 }

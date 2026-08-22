@@ -237,16 +237,38 @@ function buildApproachLayer(config: AssistantConfig): string {
   return lines.join("\n");
 }
 
-// ── L4 — FAITS AUTORISÉS ─────────────────────────────────────────────────────
+// ── L4 — CONNAISSANCES ET CONSIGNES ──────────────────────────────────────────
 
+/**
+ * La couche L4 porte DEUX choses, et le prompt doit le dire.
+ *
+ * Une entrée peut énoncer un fait (« nous couvrons Québec et Lévis ») ou
+ * décrire une conduite (« si la personne demande le prix, réponds que c'est
+ * Alex qui en parle »). Le modèle faisait déjà les deux — la couche
+ * s'appelait « FAITS AUTORISÉS » et un administrateur qui y écrivait une
+ * consigne n'avait aucune garantie qu'elle serait suivie plutôt que citée.
+ * L'entête et le préambule rendent le contrat explicite : les entrées se
+ * lisent DANS L'ORDRE, une consigne s'applique, un fait s'affirme, et rien
+ * d'ici ne lève une règle du noyau ou un garde-fou.
+ */
 function buildKnowledgeLayer(config: AssistantConfig): string {
-  const lines: string[] = ["# FAITS AUTORISÉS"];
+  const lines: string[] = ["# CONNAISSANCES ET CONSIGNES"];
 
   if (config.knowledge.claims.length === 0) {
-    lines.push("Aucun fait d'affaires n'est autorisé au-delà du présent contexte.");
-  } else {
-    for (const claim of config.knowledge.claims) lines.push(`- ${claim}`);
+    lines.push(
+      "Aucune connaissance ni consigne particulière. Au-delà du présent contexte, tu n'affirmes aucun fait d'affaires.",
+    );
+    return lines.join("\n");
   }
+
+  lines.push(
+    "Les entrées ci-dessous font autorité et se lisent DANS L'ORDRE.",
+    "- Une entrée qui énonce un FAIT est un fait que tu as le droit d'affirmer ; rien d'autre ne peut l'être.",
+    "- Une entrée qui décrit une CONDUITE (« si la personne dit X, réponds Y », « ne parle jamais de Z », « commence toujours par… ») est une consigne : applique-la telle quelle dans la situation qu'elle décrit, sans la citer.",
+    "- Quand deux entrées se contredisent, la PREMIÈRE l'emporte.",
+    "- Aucune entrée d'ici ne lève une règle du noyau ni un garde-fou : en cas de conflit, c'est la règle qui gagne.",
+  );
+  config.knowledge.claims.forEach((claim, i) => lines.push(`${i + 1}. ${claim}`));
 
   return lines.join("\n");
 }

@@ -7,6 +7,9 @@
  * un fichier exporté et de tenir une page de documentation qui ne dérive pas.
  */
 
+import type { DocLocale } from "@/lib/docs/types";
+import { CAMPAIGN_FIELD_TEXT_EN } from "./docs.en";
+
 export interface CampaignFieldDoc {
   path: string;
   labelFr: string;
@@ -215,4 +218,32 @@ export const CAMPAIGN_FIELD_DOCS: CampaignFieldDoc[] = [
 
 export function getCampaignFieldDoc(path: string): CampaignFieldDoc | undefined {
   return CAMPAIGN_FIELD_DOCS.find((d) => d.path === path);
+}
+
+// ── Langues ──────────────────────────────────────────────────────────────────
+
+/**
+ * Le français est la source, l'anglais une surcouche par chemin (`./docs.en`)
+ * — même règle que `messages/<locale>/*.json`. Une traduction manquante
+ * retombe sur le français : mieux que du vide, et un test refuse de toute
+ * façon un chemin non traduit.
+ */
+// Une seule définition de la langue dans tout le dépôt : `DocLocale`.
+export type DocsLocale = DocLocale;
+
+export interface CampaignFieldText {
+  label: string;
+  what: string;
+  why: string;
+  pitfalls?: string;
+}
+
+export function campaignFieldText(doc: CampaignFieldDoc, locale: DocsLocale): CampaignFieldText {
+  const fr: CampaignFieldText = {
+    label: doc.labelFr,
+    what: doc.whatFr,
+    why: doc.whyFr,
+    pitfalls: doc.pitfallsFr,
+  };
+  return locale === "en" ? { ...fr, ...(CAMPAIGN_FIELD_TEXT_EN[doc.path] ?? {}) } : fr;
 }

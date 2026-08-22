@@ -6,7 +6,7 @@ import { createContext, useContext } from "react";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import type { ParamDoc } from "@/lib/docs/types";
+import type { ResolvedParamDoc } from "@/lib/docs/types";
 
 /**
  * L'aide en ligne d'un paramètre.
@@ -15,9 +15,13 @@ import type { ParamDoc } from "@/lib/docs/types";
  * descend par contexte : écrire l'aide dans chaque composant la condamnerait à
  * diverger du schéma. Un champ sans documentation ne s'affiche pas sans aide —
  * il n'existe pas, un test le refuse.
+ *
+ * La LANGUE est déjà tranchée côté serveur (`getParamDocs(locale)`) : le
+ * registre anglais ne descend donc jamais dans le paquet client, et l'aide
+ * suit la langue de l'interface — pas celle de l'assistant, qui a la sienne.
  */
 
-export type ParamDocView = ParamDoc & { overridden: boolean };
+export type ParamDocView = ResolvedParamDoc;
 
 const DocsContext = createContext<Record<string, ParamDocView>>({});
 
@@ -50,7 +54,7 @@ export function ParamHelp({ path }: { path: string }) {
             variant="ghost"
             size="icon"
             className="size-6 text-muted-foreground"
-            aria-label={`${t("editor.help.show")} — ${doc.labelFr}`}
+            aria-label={`${t("editor.help.show")} — ${doc.label}`}
           />
         }
       >
@@ -58,17 +62,17 @@ export function ParamHelp({ path }: { path: string }) {
       </PopoverTrigger>
       <PopoverContent align="start" className="w-80 space-y-3 text-sm">
         <div>
-          <p className="font-medium">{doc.labelFr}</p>
-          <p className="mt-1 text-muted-foreground">{doc.whatFr}</p>
+          <p className="font-medium">{doc.label}</p>
+          <p className="mt-1 text-muted-foreground">{doc.what}</p>
         </div>
-        <Section title={t("editor.help.why")} body={doc.whyFr} />
-        {doc.effectFr ? <Section title={t("editor.help.effect")} body={doc.effectFr} /> : null}
-        {doc.pitfallsFr ? (
+        <Section title={t("editor.help.why")} body={doc.why} />
+        {doc.effect ? <Section title={t("editor.help.effect")} body={doc.effect} /> : null}
+        {doc.pitfalls ? (
           <div className="rounded-md bg-amber-500/10 p-2">
             <p className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
               <AlertTriangle className="size-3.5" /> {t("editor.help.pitfalls")}
             </p>
-            <p className="mt-1 text-xs text-muted-foreground">{doc.pitfallsFr}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{doc.pitfalls}</p>
           </div>
         ) : null}
         <p className="font-mono text-[11px] text-muted-foreground">{doc.path}</p>
@@ -99,7 +103,7 @@ export function FieldLabel({
   const doc = useParamDoc(path);
   return (
     <div className="flex items-center gap-0.5">
-      <Label htmlFor={htmlFor}>{children ?? doc?.labelFr ?? path}</Label>
+      <Label htmlFor={htmlFor}>{children ?? doc?.label ?? path}</Label>
       <ParamHelp path={path} />
     </div>
   );

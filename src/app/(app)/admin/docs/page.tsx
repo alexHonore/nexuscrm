@@ -1,16 +1,20 @@
 import { BookOpenText } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { DocsContent, type DocsLabels } from "@/components/admin/docs/docs-content";
 import { PageHeader } from "@/components/shell/page-header";
 import { TOOL_DEFS } from "@/lib/agent/tools";
 import { requireAdmin } from "@/lib/auth/guards";
-import { CAMPAIGN_FIELD_DOCS } from "@/lib/campaigns/docs";
+import { CAMPAIGN_FIELD_DOCS, campaignFieldText } from "@/lib/campaigns/docs";
 import { getParamDocs } from "@/lib/docs-server";
 import { exampleAssistantFile, exampleCampaignFile } from "@/lib/docs/examples";
+import { docLocale } from "@/lib/docs/locale";
 import {
   FIXTURE_FIELD_DOCS,
   GUARDRAIL_KIND_DOCS,
   GUARDRAIL_SEVERITY_DOCS,
+  fixtureText,
+  kindText,
+  severityText,
 } from "@/lib/guardrails/docs";
 import { OPTOUT_KEYWORDS } from "@/lib/sms/optout";
 import { DEFAULT_QUIET_HOURS } from "@/lib/sms/quiet-hours";
@@ -23,6 +27,10 @@ import { DEFAULT_QUIET_HOURS } from "@/lib/sms/quiet-hours";
  */
 export default async function AdminDocsPage() {
   await requireAdmin();
+  // Les registres sont écrits en français ; ils sont RÉSOLUS ici, une fois,
+  // dans la langue de la requête. Rien de tout cela ne touche la langue de
+  // l'assistant, qui vient de sa propre configuration.
+  const locale = docLocale(await getLocale());
   const t = await getTranslations("assistants");
   const labels = t.raw("docs") as DocsLabels;
   const checks = t.raw("goLive.check") as Record<string, { label: string; fix: string }>;
@@ -36,16 +44,33 @@ export default async function AdminDocsPage() {
       <DocsContent
         labels={labels}
         data={{
-          params: await getParamDocs(),
-          campaignFields: CAMPAIGN_FIELD_DOCS,
-          guardrailKinds: Object.values(GUARDRAIL_KIND_DOCS),
-          severities: Object.values(GUARDRAIL_SEVERITY_DOCS),
-          fixtureFields: FIXTURE_FIELD_DOCS,
+          params: await getParamDocs(locale),
+          campaignFields: CAMPAIGN_FIELD_DOCS.map((f) => ({
+            ...campaignFieldText(f, locale),
+            path: f.path,
+            binding: f.binding,
+          })),
+          guardrailKinds: Object.values(GUARDRAIL_KIND_DOCS).map((k) => ({
+            ...kindText(k, locale),
+            kind: k.kind,
+            costsModelCall: k.costsModelCall,
+          })),
+          severities: Object.values(GUARDRAIL_SEVERITY_DOCS).map((s) => ({
+            ...severityText(s, locale),
+            severity: s.severity,
+          })),
+          fixtureFields: FIXTURE_FIELD_DOCS.map((f) => ({
+            ...fixtureText(f, locale),
+            key: f.key,
+          })),
           tools: Object.values(TOOL_DEFS).map((d) => ({ name: d.name, description: d.description })),
           optoutKeywords: [...OPTOUT_KEYWORDS],
           quietHours: DEFAULT_QUIET_HOURS,
           goLiveChecks: Object.entries(checks).map(([id, c]) => ({ id, label: c.label, fix: c.fix })),
-          examples: { assistant: exampleAssistantFile(now), campaign: exampleCampaignFile(now) },
+          examples: {
+            assistant: exampleAssistantFile(now, locale),
+            campaign: exampleCampaignFile(now, locale),
+          },
         }}
       />
     </div>

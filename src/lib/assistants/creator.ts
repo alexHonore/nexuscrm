@@ -46,11 +46,12 @@ export const assistantBriefSchema = z.object({
   questionBudget: z.number().int().min(1).max(4).nullish().default(2),
   formality: z.enum(["vous", "tu"]).nullish().default("vous"),
   /**
-   * Faits d'affaires que l'assistant pourra affirmer. Le modèle n'a le droit
-   * d'en proposer que si l'utilisateur les a ÉCRITS : tout le reste serait
-   * inventé, et sortirait ensuite au nom d'un courtier titulaire d'un permis.
+   * Connaissances et consignes (L4) : faits que l'assistant pourra affirmer,
+   * et conduites qu'il devra tenir. Le modèle n'a le droit d'en proposer que
+   * si l'utilisateur les a ÉCRITS : tout le reste serait inventé, et sortirait
+   * ensuite au nom d'un courtier titulaire d'un permis.
    */
-  claims: z.array(z.string().trim().min(1).max(300)).max(6).nullish().default([]),
+  claims: z.array(z.string().trim().min(1).max(600)).max(6).nullish().default([]),
 });
 export type AssistantBrief = z.infer<typeof assistantBriefSchema>;
 
@@ -87,6 +88,11 @@ RÈGLES ABSOLUES :
   phrases que l'utilisateur a écrites lui-même. Dans le doute, il reste vide.
 - Tu ne proposes jamais de chiffre de marché, de délai de vente ni de statistique.
 
+Le champ « claims » porte DEUX sortes d'entrées, dans l'ordre où l'utilisateur les a dites :
+un FAIT que l'assistant pourra affirmer (« nous couvrons Québec et Lévis »), ou une CONSIGNE
+de conduite (« si on demande le prix, dire que c'est Alex qui en parle »). Reprends la
+formulation de l'utilisateur ; n'ajoute rien qu'il n'a pas dit.
+
 Tu réponds UNIQUEMENT par un objet JSON, sans texte autour :
 - pour poser une question : {"done":false,"question":"…","suggestions":["…","…"]}
 - quand c'est prêt : {"done":true,"summary":"…","brief":{…}}
@@ -95,7 +101,8 @@ Le brief contient : name, description, audience (buyer|seller|both|unknown),
 goalType (${GOAL_TYPES.join("|")}), durationMin (nombre ou null),
 requiredFields (parmi ${QUALIFICATION_FIELDS.join("|")}, 2 maximum de préférence),
 persistence (1-5), warmth (1-5), questionBudget (1-4), formality (vous|tu),
-claims (tableau, vide si l'utilisateur n'a rien affirmé).`;
+claims (tableau de faits ET de consignes, dans l'ordre dit ; vide si l'utilisateur n'a rien
+donné).`;
 
 /** Les objectifs qui réservent réellement une plage d'agenda. */
 const BOOKING_GOALS = new Set(["video_meeting", "in_person_meeting", "phone_call"]);
@@ -177,6 +184,9 @@ export function briefToConfig(
     tools: books
       ? ["get_slots", "book_meeting", "update_qualification", "stop", "handoff"]
       : ["update_qualification", "schedule_followup", "stop", "handoff"],
+    // Le modèle n'est PAS décidé ici : il est choisi à la dernière étape de la
+    // création (voir `withChosenModel`). Le défaut du schéma ne sert qu'à
+    // rendre l'objet valide entre-temps.
     model: {},
   });
 }

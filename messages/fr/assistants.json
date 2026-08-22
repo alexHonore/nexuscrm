@@ -100,7 +100,7 @@
       "intent": "Intention",
       "tool": "Outil attendu",
       "criterion": "Critère",
-      "criterionPlaceholder": "La réponse n'affirme aucun fait qui ne soit pas dans les faits autorisés.",
+      "criterionPlaceholder": "La réponse n'affirme aucun fait absent des connaissances de l'assistant.",
       "nothingToConfigure": "Rien à configurer : cette règle ajoute seulement son texte au prompt."
     },
     "errors": {
@@ -232,7 +232,7 @@
       "identity": "Identité",
       "goal": "Objectif",
       "approach": "Approche",
-      "knowledge": "Connaissances",
+      "knowledge": "Connaissances et consignes",
       "objections": "Objections",
       "tools": "Outils",
       "guardrails": "Garde-fous",
@@ -266,10 +266,22 @@
       "mandatedField": "imposé par l'objectif"
     },
     "knowledge": {
-      "add": "Ajouter un fait",
-      "placeholder": "Un fait vérifiable que l'assistant peut affirmer",
-      "empty": "Aucun fait autorisé : l'assistant ne pourra affirmer aucune information d'affaires.",
-      "warning": "Tout ce qui figure ici sera affirmé par écrit au nom d'un courtier titulaire d'un permis."
+      "add": "Ajouter une entrée",
+      "placeholder": "Un fait que l'assistant peut affirmer, ou une consigne : « si la personne dit…, réponds… »",
+      "empty": "Aucune connaissance ni consigne : l'assistant ne pourra affirmer aucune information d'affaires et suivra seulement ses réglages.",
+      "warning": "Tout ce qui figure ici sera affirmé par écrit au nom d'un courtier titulaire d'un permis.",
+      "intro": "Deux sortes d'entrées, dans une seule liste : un FAIT que l'assistant a le droit d'affirmer, ou une CONSIGNE de conduite — « si la personne dit ceci, réponds cela ». L'assistant les lit dans l'ordre ci-dessous.",
+      "orderHint": "L'ordre compte : quand deux entrées se contredisent, la première l'emporte. Une consigne ne lève jamais un garde-fou.",
+      "exampleFact": "Nous couvrons la région de Québec et Lévis.",
+      "exampleRule": "Si la personne demande le prix, réponds que c'est Alex qui en parle et propose la rencontre.",
+      "kind": {
+        "fact": "Fait",
+        "rule": "Consigne"
+      },
+      "moveUp": "Monter l'entrée {index}",
+      "moveDown": "Descendre l'entrée {index}",
+      "remove": "Supprimer l'entrée {index}",
+      "entry": "Entrée {index}"
     },
     "objections": {
       "none": "Aucun paquet disponible.",
@@ -669,7 +681,8 @@
       "nousresearch": "Modèles Hermes, réglages ouverts.",
       "openrouter": "Routeurs automatiques — le modèle réel change d'un appel à l'autre, à éviter pour un assistant réglé.",
       "autre": "Laboratoire non répertorié."
-    }
+    },
+    "noneChosen": "Aucun modèle choisi"
   },
   "create": {
     "title": "Créer un assistant",
@@ -687,7 +700,6 @@
       "placeholder": "Décrivez votre besoin…",
       "thinking": "Réflexion…",
       "ready": "Prêt à créer",
-      "createIt": "Créer cet assistant",
       "noProvider": "Aucune clé de modèle configurée — la création assistée a besoin d'un fournisseur.",
       "retry": "Réponse illisible du modèle. Reformulez et réessayez.",
       "failed": "La création assistée n'a pas abouti."
@@ -710,17 +722,16 @@
       "balancedHint": "Deux relances espacées. Le réglage habituel.",
       "firm": "Beaucoup",
       "firmHint": "Insiste. Attention au taux de désabonnement.",
-      "createIt": "Créer cet assistant",
       "fieldName": "Nom de l'assistant"
     },
     "complex": {
       "name": "Configuration complète",
-      "pitch": "Tous les réglages : objectif, ton, connaissances, outils, garde-fous, modèle, prompt.",
+      "pitch": "Tous les réglages : objectif, ton, connaissances et consignes, outils, garde-fous, prompt.",
       "time": "Onze onglets",
       "title": "Configuration complète",
       "subtitle": "On crée un brouillon, puis vous réglez tout dans l'éditeur.",
-      "note": "L'assistant est créé avec des valeurs par défaut raisonnables. Vous ajusterez chaque onglet ensuite.",
-      "createIt": "Créer et ouvrir l'éditeur"
+      "note": "L'assistant est créé avec des valeurs par défaut raisonnables — sauf le modèle, que vous choisissez à l'étape suivante. Vous ajusterez chaque onglet ensuite.",
+      "defaultName": "Nouvel assistant"
     },
     "summary": {
       "goal": "Objectif",
@@ -728,6 +739,19 @@
       "required": "À recueillir",
       "persistence": "Persistance",
       "none": "Aucun"
+    },
+    "next": "Continuer",
+    "model": {
+      "title": "Choisir le modèle",
+      "subtitle": "Le modèle qui rédigera les messages. Rien n'est créé tant qu'il n'est pas choisi.",
+      "provider": "Fournisseur",
+      "createIt": "Créer l'assistant",
+      "required": "Choisissez un modèle pour créer l'assistant.",
+      "unconfigured": "Aucune clé configurée pour ce fournisseur — choisissez-en un autre, ou ajoutez la clé dans les réglages.",
+      "unavailable": "Catalogue indisponible pour l'instant. Réessayez, ou choisissez un autre fournisseur.",
+      "manual": "Identifiant du modèle",
+      "manualPlaceholder": "anthropic/claude-sonnet-5",
+      "manualHint": "Le catalogue est vide : saisissez l'identifiant exact. Vous pourrez le corriger dans l'éditeur."
     }
   },
   "docs": {
@@ -738,7 +762,6 @@
     "copy": "Copier",
     "copied": "Copié",
     "download": "Télécharger l'exemple",
-    "frOnlyNote": "Les fiches de référence (paramètres, garde-fous, champs de campagne) sont rédigées en français : ce sont les mêmes textes que l'aide en ligne à côté de chaque champ.",
     "columns": {
       "path": "Chemin JSON",
       "type": "Type",
@@ -806,7 +829,7 @@
         "identity": "Identité et signature",
         "goal": "Objectif",
         "approach": "Approche",
-        "knowledge": "Connaissances",
+        "knowledge": "Connaissances et consignes",
         "objections": "Objections",
         "tools": "Outils",
         "guardrails": "Garde-fous",

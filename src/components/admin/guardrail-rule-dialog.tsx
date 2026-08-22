@@ -2,7 +2,7 @@
 
 import { AlertTriangleIcon, HelpCircleIcon, Loader2, SaveIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -27,12 +27,16 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { docLocale } from "@/lib/docs/types";
 import {
   GUARDRAIL_KIND_DOCS,
   GUARDRAIL_SEVERITY_DOCS,
   RULE_PRESETS,
   defaultConfigFor,
   kindDoc,
+  kindText,
+  presetText,
+  severityText,
   type RulePreset,
 } from "@/lib/guardrails/docs";
 import {
@@ -55,7 +59,18 @@ export type EditableRule = {
   enabled: boolean;
 };
 
-/** Une règle prête à l'emploi → brouillon éditable. */
+/**
+ * Une règle prête à l'emploi → brouillon éditable.
+ *
+ * Le libellé enregistré reste FRANÇAIS, même quand l'écran est en anglais.
+ * Ce n'est pas un oubli : quand un garde-fou refuse un brouillon, le moteur
+ * renvoie le modèle au travail avec « ta réponse a été refusée par un
+ * garde-fou (<libellé>) » (src/lib/agent/runtime.ts). Un libellé anglais
+ * entrerait donc dans le prompt d'un assistant qui écrit à des Québécois.
+ * La liste des préréglages, elle, s'affiche bien dans la langue de l'écran —
+ * on choisit dans sa langue, on enregistre dans celle de l'assistant, et le
+ * champ reste éditable juste en dessous.
+ */
 export function ruleFromPreset(preset: RulePreset): EditableRule {
   return {
     id: null,
@@ -94,8 +109,10 @@ export function emptyRule(): EditableRule {
  */
 export function KindHelp({ kind }: { kind: GuardrailKind }) {
   const t = useTranslations("assistants");
+  const locale = docLocale(useLocale());
   const doc = kindDoc(kind);
   if (!doc) return null;
+  const text = kindText(doc, locale);
 
   return (
     <Popover>
@@ -105,7 +122,7 @@ export function KindHelp({ kind }: { kind: GuardrailKind }) {
             variant="ghost"
             size="icon"
             className="size-6 text-muted-foreground"
-            aria-label={`${t("guardrails.help")} — ${doc.labelFr}`}
+            aria-label={`${t("guardrails.help")} — ${text.label}`}
           />
         }
       >
@@ -113,23 +130,23 @@ export function KindHelp({ kind }: { kind: GuardrailKind }) {
       </PopoverTrigger>
       <PopoverContent align="start" className="w-96 space-y-3 text-sm">
         <div>
-          <p className="font-medium">{doc.labelFr}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{doc.whatFr}</p>
+          <p className="font-medium">{text.label}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{text.what}</p>
         </div>
 
-        <Block title={t("guardrails.helpWhen")} body={doc.whenFr} />
-        <Block title={t("guardrails.helpConfig")} body={doc.configFr} />
+        <Block title={t("guardrails.helpWhen")} body={text.when} />
+        <Block title={t("guardrails.helpConfig")} body={text.config} />
 
         <div className="space-y-1.5">
           <p className="rounded-md bg-emerald-500/10 p-2 text-xs">
             <span className="font-medium text-emerald-700 dark:text-emerald-400">
               {t("guardrails.helpPasses")} :
             </span>{" "}
-            <span className="text-muted-foreground">{doc.passesFr}</span>
+            <span className="text-muted-foreground">{text.passes}</span>
           </p>
           <p className="rounded-md bg-destructive/10 p-2 text-xs">
             <span className="font-medium text-destructive">{t("guardrails.helpCaught")} :</span>{" "}
-            <span className="text-muted-foreground">{doc.caughtFr}</span>
+            <span className="text-muted-foreground">{text.caught}</span>
           </p>
         </div>
 
@@ -137,7 +154,7 @@ export function KindHelp({ kind }: { kind: GuardrailKind }) {
           <p className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
             <AlertTriangleIcon className="size-3.5" /> {t("guardrails.helpPitfall")}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">{doc.pitfallFr}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{text.pitfall}</p>
         </div>
 
         {doc.costsModelCall ? (
@@ -317,6 +334,7 @@ export function GuardrailRuleDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations("assistants");
+  const locale = docLocale(useLocale());
   const router = useRouter();
   const [draft, setDraft] = useState<EditableRule>(rule);
   const [busy, setBusy] = useState(false);
@@ -420,8 +438,10 @@ export function GuardrailRuleDialog({
                     setShowPresets(false);
                   }}
                 >
-                  <p className="text-sm font-medium">{preset.labelFr}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{preset.whatFr}</p>
+                  <p className="text-sm font-medium">{presetText(preset, locale).label}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {presetText(preset, locale).what}
+                  </p>
                 </button>
               ))}
               <button
@@ -488,7 +508,10 @@ export function GuardrailRuleDialog({
               <KindHelp kind={draft.kind} />
             </div>
             <Select
-              items={GUARDRAIL_KINDS.map((k) => ({ value: k, label: GUARDRAIL_KIND_DOCS[k].labelFr }))}
+              items={GUARDRAIL_KINDS.map((k) => ({
+                value: k,
+                label: kindText(GUARDRAIL_KIND_DOCS[k], locale).label,
+              }))}
               value={draft.kind}
               disabled={!creating}
               onValueChange={(v) => {
@@ -504,12 +527,14 @@ export function GuardrailRuleDialog({
               <SelectContent>
                 {GUARDRAIL_KINDS.map((k) => (
                   <SelectItem key={k} value={k}>
-                    {GUARDRAIL_KIND_DOCS[k].labelFr}
+                    {kindText(GUARDRAIL_KIND_DOCS[k], locale).label}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            {doc ? <p className="text-xs text-muted-foreground">{doc.whatFr}</p> : null}
+            {doc ? (
+              <p className="text-xs text-muted-foreground">{kindText(doc, locale).what}</p>
+            ) : null}
             {!creating ? (
               <p className="text-xs text-muted-foreground">{t("guardrails.kindImmutable")}</p>
             ) : null}
@@ -539,7 +564,7 @@ export function GuardrailRuleDialog({
               <Select
                 items={GUARDRAIL_SEVERITIES.map((s) => ({
                   value: s,
-                  label: GUARDRAIL_SEVERITY_DOCS[s].labelFr,
+                  label: severityText(GUARDRAIL_SEVERITY_DOCS[s], locale).label,
                 }))}
                 value={draft.severity}
                 onValueChange={(v) => setDraft({ ...draft, severity: String(v) as GuardrailSeverity })}
@@ -550,13 +575,13 @@ export function GuardrailRuleDialog({
                 <SelectContent>
                   {GUARDRAIL_SEVERITIES.map((s) => (
                     <SelectItem key={s} value={s}>
-                      {GUARDRAIL_SEVERITY_DOCS[s].labelFr}
+                      {severityText(GUARDRAIL_SEVERITY_DOCS[s], locale).label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                {GUARDRAIL_SEVERITY_DOCS[draft.severity].whatFr}
+                {severityText(GUARDRAIL_SEVERITY_DOCS[draft.severity], locale).what}
               </p>
             </div>
 

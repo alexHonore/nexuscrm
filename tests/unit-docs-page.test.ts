@@ -15,7 +15,8 @@ import commonEn from "../messages/en/common.json";
 import commonFr from "../messages/fr/common.json";
 import { parseBundle, serializeBundle } from "@/lib/assistants/portable";
 import { parseCampaignBundle, serializeCampaignBundle } from "@/lib/campaigns/portable";
-import { CAMPAIGN_FIELD_DOCS } from "@/lib/campaigns/docs";
+import { CAMPAIGN_FIELD_DOCS, campaignFieldText } from "@/lib/campaigns/docs";
+import { resolveParamDoc } from "@/lib/docs/locale";
 import { PARAM_DOCS } from "@/lib/docs/params";
 import {
   exampleAssistantBundle,
@@ -29,6 +30,9 @@ import {
   FIXTURE_FIELD_DOCS,
   GUARDRAIL_KIND_DOCS,
   GUARDRAIL_SEVERITY_DOCS,
+  fixtureText,
+  kindText,
+  severityText,
 } from "@/lib/guardrails/docs";
 import { TOOL_DEFS } from "@/lib/agent/tools";
 import { OPTOUT_KEYWORDS } from "@/lib/sms/optout";
@@ -78,16 +82,32 @@ function render(locale: "fr" | "en"): string {
     createElement(DocsContent, {
       labels,
       data: {
-        params: PARAM_DOCS.map((p) => ({ ...p, overridden: false })),
-        campaignFields: CAMPAIGN_FIELD_DOCS,
-        guardrailKinds: Object.values(GUARDRAIL_KIND_DOCS),
-        severities: Object.values(GUARDRAIL_SEVERITY_DOCS),
-        fixtureFields: FIXTURE_FIELD_DOCS,
+        // Résolus dans la langue rendue — exactement ce que fait la page.
+        params: PARAM_DOCS.map((p) => resolveParamDoc({ ...p, overridden: false }, locale)),
+        campaignFields: CAMPAIGN_FIELD_DOCS.map((f) => ({
+          ...campaignFieldText(f, locale),
+          path: f.path,
+          binding: f.binding,
+        })),
+        guardrailKinds: Object.values(GUARDRAIL_KIND_DOCS).map((k) => ({
+          ...kindText(k, locale),
+          kind: k.kind,
+          costsModelCall: k.costsModelCall,
+        })),
+        severities: Object.values(GUARDRAIL_SEVERITY_DOCS).map((sv) => ({
+          ...severityText(sv, locale),
+          severity: sv.severity,
+        })),
+        fixtureFields: FIXTURE_FIELD_DOCS.map((f) => ({ ...fixtureText(f, locale), key: f.key })),
         tools: Object.values(TOOL_DEFS).map((d) => ({ name: d.name, description: d.description })),
         optoutKeywords: [...OPTOUT_KEYWORDS],
         quietHours: DEFAULT_QUIET_HOURS,
         goLiveChecks: Object.entries(checks).map(([id, c]) => ({ id, label: c.label, fix: c.fix })),
-        examples: { assistant: exampleAssistantFile(NOW), campaign: exampleCampaignFile(NOW) },
+        // Les annotations « _docs » du fichier d'exemple suivent la page.
+        examples: {
+          assistant: exampleAssistantFile(NOW, locale),
+          campaign: exampleCampaignFile(NOW, locale),
+        },
       },
     }),
   );
@@ -122,6 +142,31 @@ describe("page de documentation", () => {
       expect(html, locale).not.toContain("undefined");
     }
     expect(render("en")).toContain("How it works");
+  });
+
+  it("les REGISTRES suivent la langue de la page, pas seulement les titres", () => {
+    // Le vrai contenu de cette page, ce sont les fiches — pas les intertitres.
+    // Tant qu'elles n'existaient qu'en français, basculer la langue ne changeait
+    // qu'une dizaine de mots sur mille lignes.
+    const fr = render("fr");
+    const en = render("en");
+
+    expect(fr).toContain("Objectif principal — type");
+    expect(en).toContain("Primary goal — type");
+    expect(en).not.toContain("Objectif principal — type");
+
+    // Garde-fous et champs de campagne, mêmes registres, même règle.
+    expect(fr).toContain("Interdire des mots précis");
+    expect(en).toContain("Forbid specific words");
+    expect(en).not.toContain("Interdire des mots précis");
+    expect(en).toContain("Sending number");
+
+    // Les identifiants, eux, ne se traduisent JAMAIS : c'est ce qu'on tape.
+    for (const html of [fr, en]) {
+      expect(html).toContain(">goal.primary.type<");
+      expect(html).toContain(">forbidden_terms<");
+      expect(html).toContain("anthropic/claude-sonnet-5");
+    }
   });
 
   it("les blocs « docs » fr et en ont exactement les mêmes clés", () => {

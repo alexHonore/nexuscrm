@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { notFound } from "next/navigation";
+import { getLocale } from "next-intl/server";
 import { z } from "zod";
 import { AssistantEditor } from "@/components/admin/assistant-editor";
 import type { ParamDocView } from "@/components/admin/assistant-editor/param-help";
@@ -10,6 +11,7 @@ import { assistants, guardrailRules, guardrailRuns, objectionPacks } from "@/db/
 import { requireAdmin } from "@/lib/auth/guards";
 import { assistantRowToConfig } from "@/lib/assistants/schema";
 import { getParamDocs } from "@/lib/docs-server";
+import { docLocale } from "@/lib/docs/locale";
 import type { GuardrailKind, GuardrailSeverity } from "@/lib/guardrails/types";
 
 export default async function AssistantEditorPage({
@@ -53,7 +55,7 @@ export default async function AssistantEditorPage({
       .where(and(eq(guardrailRuns.assistantId, id), eq(guardrailRuns.assistantVersion, row.version)))
       .orderBy(desc(guardrailRuns.startedAt))
       .limit(1),
-    getParamDocs(),
+    getParamDocs(docLocale(await getLocale())),
   ]);
 
   const toRule = (r: typeof coreRuleRows[number]): EditorRule => ({

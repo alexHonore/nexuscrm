@@ -191,14 +191,24 @@ export const approachSchema = z.object({
 });
 export type ApproachConfig = z.infer<typeof approachSchema>;
 
-// ── Connaissances (L4) ───────────────────────────────────────────────────────
+// ── Connaissances et consignes (L4) ──────────────────────────────────────────
 
 export const knowledgeSchema = z.object({
   /**
-   * Allowed-claims list — the ONLY facts the assistant may state about the
-   * business. Everything else is forbidden by L0 (no invented facts).
+   * Ce que l'assistant SAIT et ce qu'il DOIT FAIRE — une liste ordonnée.
+   *
+   * Une entrée énonce un fait d'affaires que l'assistant a le droit
+   * d'affirmer (tout ce qui n'y figure pas est interdit par L0 : pas
+   * d'invention), OU décrit une conduite à tenir (« si la personne demande le
+   * prix, réponds que c'est Alex qui en parle »). L'ordre compte : en cas de
+   * contradiction, la première entrée l'emporte (rendu tel quel en L4).
+   *
+   * Le champ garde le nom `claims` : c'est la clé déjà écrite dans la colonne
+   * jsonb `knowledge` de toutes les fiches en base, la renommer les rendrait
+   * illisibles. 600 caractères parce qu'une consigne conditionnelle (« si…,
+   * alors… , sauf si… ») ne tient pas dans la longueur d'un fait.
    */
-  claims: z.array(z.string().trim().min(1).max(300)).max(50).default([]),
+  claims: z.array(z.string().trim().min(1).max(600)).max(50).default([]),
 });
 export type KnowledgeConfig = z.infer<typeof knowledgeSchema>;
 

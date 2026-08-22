@@ -143,7 +143,11 @@ describe("import", () => {
     expect(plan.config.assistantId).toBeNull();
     expect(plan.config.audience.categoryIds).toEqual([]);
     expect(plan.config.audience.assignedToIds).toEqual([]);
-    expect(plan.warnings.filter((w) => w.code === "unresolved_binding").length).toBeGreaterThanOrEqual(6);
+    const unresolved = plan.warnings.filter((w) => w.code.startsWith("unresolved_binding"));
+    expect(unresolved.length).toBeGreaterThanOrEqual(6);
+    // Chaque avertissement DIT laquelle : quatre lignes identiques
+    // n'apprendraient rien à qui doit décider quoi rebrancher.
+    for (const w of unresolved) expect(w.params?.target, w.path).toBeTruthy();
     // Et surtout : aucun identifiant d'ORIGINE ne s'est glissé dans la config.
     expect(JSON.stringify(plan.config)).not.toContain(ASSISTANT);
   });

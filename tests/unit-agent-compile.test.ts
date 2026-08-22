@@ -183,6 +183,53 @@ describe("compileAssistantPrompt — mode composed", () => {
     );
   });
 
+  it("L4 : les entrées sont NUMÉROTÉES dans l'ordre saisi", () => {
+    // L'ordre est une donnée : c'est lui qui tranche entre deux consignes
+    // contradictoires. Une puce « - » ne le dit pas ; un numéro, oui.
+    const config = buildConfig({
+      knowledge: {
+        claims: [
+          "Nous couvrons Québec et Lévis.",
+          "Si la personne demande le prix, réponds que c'est Alex qui en parle.",
+        ],
+      },
+    });
+    const l4 = compileAssistantPrompt(config, core, packs, rules).layers.find((l) => l.id === "L4")!
+      .text;
+
+    expect(l4).toContain("1. Nous couvrons Québec et Lévis.");
+    expect(l4).toContain(
+      "2. Si la personne demande le prix, réponds que c'est Alex qui en parle.",
+    );
+    expect(l4.indexOf("1. Nous")).toBeLessThan(l4.indexOf("2. Si la personne"));
+  });
+
+  it("L4 : le prompt DIT qu'une entrée peut être une consigne, pas seulement un fait", () => {
+    // Le régression que ce test attrape : revenir à une couche « FAITS
+    // AUTORISÉS » où une consigne écrite par l'administrateur n'a aucune
+    // garantie d'être appliquée plutôt que citée.
+    const config = buildConfig({ knowledge: { claims: ["Ne parle jamais de la commission."] } });
+    const l4 = compileAssistantPrompt(config, core, packs, rules).layers.find((l) => l.id === "L4")!
+      .text;
+
+    expect(l4.startsWith("# CONNAISSANCES ET CONSIGNES")).toBe(true);
+    expect(l4).toContain("DANS L'ORDRE");
+    expect(l4).toMatch(/CONDUITE|consigne/);
+    expect(l4).toMatch(/PREMIÈRE l'emporte/);
+    // Une consigne ne peut pas servir à lever un garde-fou.
+    expect(l4).toMatch(/garde-fou/);
+  });
+
+  it("L4 : liste vide → aucune affirmation d'affaires autorisée", () => {
+    const config = buildConfig({ knowledge: { claims: [] } });
+    const l4 = compileAssistantPrompt(config, core, packs, rules).layers.find((l) => l.id === "L4")!
+      .text;
+
+    expect(l4).toContain("# CONNAISSANCES ET CONSIGNES");
+    expect(l4).toContain("tu n'affirmes aucun fait d'affaires");
+    expect(l4).not.toContain("1.");
+  });
+
   it("L5 : aucun pack sélectionné → note explicite, aucune section", () => {
     const config = buildConfig({ objectionPacks: [] });
     const result = compileAssistantPrompt(config, core, packs, rules);

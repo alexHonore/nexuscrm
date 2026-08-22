@@ -9,6 +9,7 @@ import {
   objectionPacks,
 } from "@/db/schema-sms";
 import { fixtureRowToData, loadCoreRules, ruleRowToData } from "@/lib/guardrails/store";
+import type { DocLocale } from "@/lib/docs/types";
 import { objectionItemSchema, parseRuleConfig } from "@/lib/guardrails/types";
 import { assistantRowToConfig, type AssistantConfig } from "./schema";
 import { compileAssistant, runAssistantSuite } from "./service";
@@ -73,6 +74,8 @@ export interface ExportOptions {
   /** Annoté par défaut (§15.3) : un fichier relu six mois plus tard. */
   annotate?: boolean;
   now?: Date;
+  /** Langue des annotations — celle de qui exporte, pas celle de l'assistant. */
+  locale?: DocLocale;
 }
 
 export async function exportAssistant(
@@ -106,6 +109,7 @@ export async function exportAssistant(
     sourceOrg: config.identity.orgName,
     now: options.now ?? new Date(),
     annotate: options.annotate,
+    locale: options.locale,
   });
 }
 
@@ -121,7 +125,7 @@ export async function exportAssistantFile(
     .replace(/^-|-$/g, "")
     .toLowerCase();
   return {
-    filename: `assistant-${slug || "sans-nom"}.json`,
+    filename: `assistant-${slug || (options.locale === "en" ? "untitled" : "sans-nom")}.json`,
     body: serializeBundle(bundle),
   };
 }

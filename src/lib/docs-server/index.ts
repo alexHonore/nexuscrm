@@ -2,8 +2,9 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { paramDocs } from "@/db/schema-sms";
+import { resolveParamDoc } from "@/lib/docs/locale";
 import { PARAM_DOCS, getParamDoc, listParamDocs } from "@/lib/docs/params";
-import type { DocSection, ParamDoc } from "@/lib/docs/types";
+import type { DocLocale, DocSection, ParamDoc, ResolvedParamDoc } from "@/lib/docs/types";
 
 /**
  * Lecture de la documentation : registre de code + surcouches administrateur.
@@ -13,24 +14,34 @@ import type { DocSection, ParamDoc } from "@/lib/docs/types";
  * simplement ignorée — elle ne peut pas ressusciter un champ supprimé.
  */
 
-export interface ParamDocView extends ParamDoc {
-  /** Vrai quand le texte affiché vient d'une réécriture en base. */
-  overridden: boolean;
-}
+/**
+ * La fiche telle qu'elle part vers l'écran : langue déjà tranchée.
+ *
+ * La réécriture en base ne porte que le FRANÇAIS (colonnes `label_fr`,
+ * `what_fr`…). En anglais, la fiche affichée reste donc celle du registre —
+ * une réécriture française rendue à un administrateur anglophone serait pire
+ * que le texte d'origine.
+ */
+export type ParamDocView = ResolvedParamDoc;
 
 type OverrideRow = typeof paramDocs.$inferSelect;
 
-function merge(base: ParamDoc, row: OverrideRow | undefined): ParamDocView {
-  if (!row) return { ...base, overridden: false };
-  return {
-    ...base,
-    labelFr: row.labelFr ?? base.labelFr,
-    whatFr: row.whatFr ?? base.whatFr,
-    whyFr: row.whyFr ?? base.whyFr,
-    effectFr: row.effectFr ?? base.effectFr,
-    pitfallsFr: row.pitfallsFr ?? base.pitfallsFr,
-    overridden: true,
-  };
+function merge(base: ParamDoc, row: OverrideRow | undefined, locale: DocLocale): ParamDocView {
+  // Une réécriture ne porte que le français : en anglais on rend le registre
+  // tel quel, plutôt qu'un texte français maquillé en « personnalisé ».
+  if (!row || locale !== "fr") return resolveParamDoc({ ...base, overridden: false }, locale);
+  return resolveParamDoc(
+    {
+      ...base,
+      labelFr: row.labelFr ?? base.labelFr,
+      whatFr: row.whatFr ?? base.whatFr,
+      whyFr: row.whyFr ?? base.whyFr,
+      effectFr: row.effectFr ?? base.effectFr,
+      pitfallsFr: row.pitfallsFr ?? base.pitfallsFr,
+      overridden: true,
+    },
+    locale,
+  );
 }
 
 async function overrideMap(): Promise<Map<string, OverrideRow>> {
@@ -38,16 +49,19 @@ async function overrideMap(): Promise<Map<string, OverrideRow>> {
   return new Map(rows.map((r) => [r.path, r]));
 }
 
-export async function getParamDocs(section?: DocSection): Promise<ParamDocView[]> {
+export async function getParamDocs(
+  locale: DocLocale,
+  section?: DocSection,
+): Promise<ParamDocView[]> {
   const overrides = await overrideMap();
-  return listParamDocs(section).map((d) => merge(d, overrides.get(d.path)));
+  return listParamDocs(section).map((d) => merge(d, overrides.get(d.path), locale));
 }
 
-export async function getParamDocFor(path: string): Promise<ParamDocView | null> {
+export async function getParamDocFor(path: string, locale: DocLocale): Promise<ParamDocView | null> {
   const base = getParamDoc(path);
   if (!base) return null;
   const [row] = await db.select().from(paramDocs).where(eq(paramDocs.path, base.path)).limit(1);
-  return merge(base, row);
+  return merge(base, row, locale);
 }
 
 export interface SaveParamDocInput {
@@ -85,15 +99,18 @@ export async function saveParamDoc(input: SaveParamDocInput): Promise<ParamDocVi
     .onConflictDoUpdate({ target: paramDocs.path, set: values })
     .returning();
 
-  return merge(base, row);
+  return merge(base, row, "fr");
 }
 
-/** Rend au paramètre son texte d'origine. */
+/**
+ * Rend au paramètre son texte d'origine. Français : les colonnes de réécriture
+ * n'ont jamais porté que ça, et c'est le seul écran qui les édite.
+ */
 export async function resetParamDoc(path: string): Promise<ParamDocView | null> {
   const base = getParamDoc(path);
   if (!base) return null;
   await db.delete(paramDocs).where(eq(paramDocs.path, base.path));
-  return { ...base, overridden: false };
+  return resolveParamDoc({ ...base, overridden: false }, "fr");
 }
 
 /** Chemins réécrits dont le registre ne veut plus — à nettoyer. */

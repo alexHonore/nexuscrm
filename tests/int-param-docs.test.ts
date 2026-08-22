@@ -28,9 +28,9 @@ afterAll(async () => {
 
 describe("documentation — surcouche", () => {
   it("sans surcouche, le texte vient du registre", async () => {
-    const view = await getParamDocFor("approach.persistence");
+    const view = await getParamDocFor("approach.persistence", "fr");
     expect(view?.overridden).toBe(false);
-    expect(view?.whyFr).toBe(getParamDoc("approach.persistence")!.whyFr);
+    expect(view?.why).toBe(getParamDoc("approach.persistence")!.whyFr);
   });
 
   it("une réécriture remplace le texte et se signale comme telle", async () => {
@@ -40,11 +40,11 @@ describe("documentation — surcouche", () => {
       updatedById: adminId,
     });
 
-    const view = await getParamDocFor("approach.persistence");
+    const view = await getParamDocFor("approach.persistence", "fr");
     expect(view?.overridden).toBe(true);
-    expect(view?.whyFr).toBe("Texte maison de l'équipe.");
+    expect(view?.why).toBe("Texte maison de l'équipe.");
     // Les champs laissés vides gardent le texte d'origine.
-    expect(view?.whatFr).toBe(getParamDoc("approach.persistence")!.whatFr);
+    expect(view?.what).toBe(getParamDoc("approach.persistence")!.whatFr);
   });
 
   it("réécrire deux fois le même chemin met à jour la ligne au lieu d'en créer une", async () => {
@@ -67,7 +67,7 @@ describe("documentation — surcouche", () => {
     await saveParamDoc({ path: "model.temperature", whyFr: "X", updatedById: adminId });
     const back = await resetParamDoc("model.temperature");
     expect(back?.overridden).toBe(false);
-    expect(back?.whyFr).toBe(getParamDoc("model.temperature")!.whyFr);
+    expect(back?.why).toBe(getParamDoc("model.temperature")!.whyFr);
     expect(await testDb.select().from(paramDocs)).toHaveLength(0);
   });
 
@@ -75,13 +75,29 @@ describe("documentation — surcouche", () => {
     // Écriture directe : simule un paramètre renommé après une réécriture.
     await testDb.insert(paramDocs).values({ path: "approach.disparu", whyFr: "orphelin" });
 
-    const all = await getParamDocs();
+    const all = await getParamDocs("fr");
     expect(all.some((d) => d.path === "approach.disparu")).toBe(false);
     expect(await staleOverrides()).toEqual(["approach.disparu"]);
   });
 
+  it("une réécriture FRANÇAISE ne s'affiche pas à un administrateur anglophone", async () => {
+    // Les colonnes de réécriture sont françaises. Les rendre en anglais
+    // afficherait une phrase française maquillée en texte « personnalisé ».
+    await saveParamDoc({
+      path: "approach.persistence",
+      whyFr: "Texte maison de l'équipe.",
+      updatedById: adminId,
+    });
+
+    const fr = await getParamDocFor("approach.persistence", "fr");
+    const en = await getParamDocFor("approach.persistence", "en");
+    expect(fr?.why).toBe("Texte maison de l'équipe.");
+    expect(en?.why).not.toBe("Texte maison de l'équipe.");
+    expect(en?.overridden).toBe(false);
+  });
+
   it("la liste par section ne renvoie que cette section", async () => {
-    const model = await getParamDocs("model");
+    const model = await getParamDocs("fr", "model");
     expect(model.length).toBeGreaterThan(5);
     expect(model.every((d) => d.section === "model")).toBe(true);
   });

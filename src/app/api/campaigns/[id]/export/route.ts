@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { getLocale } from "next-intl/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { exportCampaignFile } from "@/lib/campaigns-server/transfer";
+import { docLocale } from "@/lib/docs/locale";
 
 /**
  * GET /api/campaigns/:id/export — télécharge la campagne en JSON, annotée par
@@ -19,7 +21,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const annotate = new URL(req.url).searchParams.get("annotate") !== "0";
 
   try {
-    const file = await exportCampaignFile(id, { annotate });
+    // Annotations = texte lu par un humain : langue de l'interface.
+    const file = await exportCampaignFile(id, { annotate, locale: docLocale(await getLocale()) });
     await logAudit({
       userId: admin.id,
       action: "campaign.export",

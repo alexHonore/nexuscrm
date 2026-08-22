@@ -129,7 +129,7 @@ const identity: ParamDoc[] = [
       "Les formes dérivées (prénom, nom complet, organisation) ne couvrent pas tout : « — L'équipe Nexus » ou « — Alex, courtier immobilier » n'entrent dans aucune.",
     effectFr: "Ajouté tel quel à la fin des messages, sans autre traitement.",
     pitfallsFr:
-      "Une signature longue est répétée à CHAQUE message et compte dans les 160 caractères d'un segment : « — Alex-Honoré, courtier immobilier résidentiel » coûte 45 caractères par envoi.",
+      "Une signature longue est répétée à CHAQUE message et compte dans les 160 caractères d'un segment : « — Alex-Honoré, courtier immobilier résidentiel » coûte 46 caractères par envoi.",
     related: ["identity.signature", "approach.maxChars"],
     example: "— Alex",
   }),
@@ -506,19 +506,23 @@ const knowledge: ParamDoc[] = [
   doc({
     path: "knowledge.claims",
     section: "knowledge",
-    labelFr: "Faits autorisés",
+    labelFr: "Connaissances et consignes",
     type: "array",
     required: true,
     defaultValue: [],
     whatFr:
-      "La liste EXHAUSTIVE des affirmations d'affaires que l'assistant a le droit de faire.",
+      "La liste ORDONNÉE de ce que l'assistant sait et de ce qu'il doit faire. Une entrée est soit un fait d'affaires qu'il a le droit d'affirmer, soit une consigne de conduite — « si la personne demande le prix, réponds que c'est Alex qui en parle », « ne parle jamais de la commission », « commence par la remercier de sa demande ».",
     whyFr:
-      "Le noyau interdit d'inventer quoi que ce soit. Cette liste est la seule porte de sortie : tout ce qui n'y est pas ne peut pas être affirmé.",
-    effectFr: "Compilée en L4. Une liste vide interdit toute affirmation d'affaires.",
+      "Le noyau interdit d'inventer quoi que ce soit : pour les faits, cette liste est la seule porte de sortie — ce qui n'y est pas ne peut pas être affirmé. Pour la conduite, c'est l'endroit où dicter le déroulé sans réécrire le prompt : « dans cet ordre, si… alors… ».",
+    effectFr:
+      "Compilée en L4, dans l'ordre saisi et numérotée. Le prompt annonce explicitement qu'une entrée-fait s'affirme et qu'une entrée-consigne s'applique, et qu'en cas de contradiction la PREMIÈRE l'emporte. Une liste vide interdit toute affirmation d'affaires.",
     pitfallsFr:
-      "Tout ce qui est écrit ici sera affirmé PAR ÉCRIT, au nom d'un courtier titulaire d'un permis. Une statistique, une promesse de délai ou un chiffre de marché ajouté ici devient une déclaration dont le courtier répond devant l'OACIQ.",
-    related: ["guardrails.no_fabrication"],
-    example: ["Nous couvrons la région de Québec et Lévis."],
+      "Tout ce qui est écrit ici sera affirmé PAR ÉCRIT, au nom d'un courtier titulaire d'un permis : une statistique, une promesse de délai ou un chiffre de marché y devient une déclaration dont le courtier répond devant l'OACIQ. Et une consigne d'ici ne lève JAMAIS un garde-fou — « donne le prix » écrit ici sera bloqué à l'envoi, sans que le modèle comprenne pourquoi.",
+    related: ["guardrails.no_fabrication", "turnInstructions", "layerOverrides.text"],
+    example: [
+      "Nous couvrons la région de Québec et Lévis.",
+      "Si la personne demande une évaluation gratuite, propose la rencontre de 30 minutes.",
+    ],
   }),
 ];
 

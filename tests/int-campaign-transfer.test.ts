@@ -115,7 +115,7 @@ describe("import", () => {
     expect((row!.audience as { categoryIds: number[] }).categoryIds).toEqual([category.id]);
     expect((row!.audience as { assignedToIds: string[] }).assignedToIds).toEqual([broker.id]);
     expect((row!.trigger as { sourceIds: number[] }).sourceIds).toEqual([source.id]);
-    expect(result.warnings.filter((w) => w.code === "unresolved_binding")).toEqual([]);
+    expect(result.warnings.filter((w) => w.code.startsWith("unresolved_binding"))).toEqual([]);
   });
 
   it("dans une base où rien ne porte ces noms, les liaisons restent vides et préviennent", async () => {
@@ -129,7 +129,9 @@ describe("import", () => {
     expect(row!.assistantId).toBeNull();
     expect(row!.smsNumberId).toBeNull();
     expect((row!.audience as { categoryIds: number[] }).categoryIds).toEqual([]);
-    expect(result.warnings.filter((w) => w.code === "unresolved_binding").length).toBeGreaterThanOrEqual(5);
+    expect(
+      result.warnings.filter((w) => w.code.startsWith("unresolved_binding")).length,
+    ).toBeGreaterThanOrEqual(5);
   });
 
   it("la prévisualisation n'écrit rien et montre ce qui s'est relié tout seul", async () => {

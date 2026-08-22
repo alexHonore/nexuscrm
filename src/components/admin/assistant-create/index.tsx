@@ -1,9 +1,16 @@
 "use client";
 
-import { ArrowLeftIcon, Loader2, SendIcon, SparklesIcon, WandSparklesIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  Loader2,
+  SendIcon,
+  SparklesIcon,
+  WandSparklesIcon,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -18,11 +25,26 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { GOAL_TYPES, type AssistantConfig, type GoalType } from "@/lib/assistants/schema";
+import {
+  GOAL_TYPES,
+  PROVIDER_IDS,
+  type AssistantConfig,
+  type GoalType,
+  type ProviderId,
+} from "@/lib/assistants/schema";
 import { briefToConfig } from "@/lib/assistants/creator";
+import type { ModelDescriptor } from "@/lib/llm/types";
 import { cn } from "@/lib/utils";
 import { ApiError, api } from "../api";
+import { ModelPicker, type Effort } from "../model-picker";
 import {
   ChatIllustration,
   DashboardIllustration,
@@ -32,6 +54,35 @@ import {
 
 type Mode = "choose" | "ai" | "simple" | "complex";
 type Turn = { role: "user" | "assistant"; content: string };
+
+/** Une configuration prête, en attente du choix du modèle. */
+export type Pending = { config: AssistantConfig };
+
+/** Le modèle retenu à la dernière étape. */
+export type ChosenModel = { provider: ProviderId; model: string; effort: Effort };
+
+/** Rien de choisi. `model: ""` est ce qui garde le bouton de création inerte. */
+export const EMPTY_CHOICE: ChosenModel = { provider: "openrouter", model: "", effort: "none" };
+
+/**
+ * Applique le modèle CHOISI à la configuration.
+ *
+ * Le schéma d'assistant garde un modèle par défaut — il faut bien qu'une
+ * fiche déjà en base reste lisible — mais personne ne doit créer un assistant
+ * sur ce défaut sans l'avoir vu : c'est lui qui décide du coût de chaque
+ * message et de la qualité des réponses, et il vieillit vite.
+ */
+export function withChosenModel(config: AssistantConfig, chosen: ChosenModel): AssistantConfig {
+  return {
+    ...config,
+    model: {
+      ...config.model,
+      provider: chosen.provider,
+      model: chosen.model,
+      reasoningEffort: chosen.effort,
+    },
+  };
+}
 
 /**
  * Création d'un assistant — trois chemins vers le même objet.
@@ -47,15 +98,25 @@ export function AssistantCreateDialog({ trigger }: { trigger: React.ReactNode })
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("choose");
+  const [pending, setPending] = useState<Pending | null>(null);
+  // Le modèle retenu vit ICI, pas dans l'étape : revenir en arrière pour
+  // corriger un champ ne doit pas effacer le modèle déjà choisi.
+  const [chosen, setChosen] = useState<ChosenModel>(EMPTY_CHOICE);
   const [busy, setBusy] = useState(false);
 
   const reset = () => {
     setMode("choose");
+    setPending(null);
+    setChosen(EMPTY_CHOICE);
     setBusy(false);
   };
 
+  // Le choix du modèle passe DEVANT le mode dès qu'une configuration attend :
+  // les trois portes produisent une config, une seule sortie la crée.
+  const screen: Mode | "model" = pending ? "model" : mode;
+
   /** Enregistre la configuration et ouvre l'éditeur dessus. */
-  const create = async (config: AssistantConfig, opening?: string) => {
+  const create = async (config: AssistantConfig) => {
     setBusy(true);
     try {
       const created = await api<{ id: string }>("/api/assistants", {
@@ -65,7 +126,7 @@ export function AssistantCreateDialog({ trigger }: { trigger: React.ReactNode })
       toast.success(t("list.created"));
       setOpen(false);
       reset();
-      router.push(`/admin/assistants/${created.id}${opening ?? ""}`);
+      router.push(`/admin/assistants/${created.id}`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : t("editor.errors.save"));
       setBusy(false);
@@ -84,34 +145,52 @@ export function AssistantCreateDialog({ trigger }: { trigger: React.ReactNode })
       <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {mode !== "choose" ? (
+            {screen !== "choose" ? (
               <Button
                 variant="ghost"
                 size="icon"
                 className="-ml-2 size-8"
                 aria-label={t("create.back")}
-                onClick={() => setMode("choose")}
+                // Reculer d'UN écran : depuis le modèle on retombe sur le mode
+                // qui a produit la configuration, pas sur le choix des portes.
+                onClick={() => (pending ? setPending(null) : setMode("choose"))}
               >
                 <ArrowLeftIcon className="size-4" />
               </Button>
             ) : null}
-            {t(mode === "choose" ? "create.title" : `create.${mode}.title`)}
+            {t(screen === "choose" ? "create.title" : `create.${screen}.title`)}
           </DialogTitle>
           <DialogDescription>
-            {t(mode === "choose" ? "create.subtitle" : `create.${mode}.subtitle`)}
+            {t(screen === "choose" ? "create.subtitle" : `create.${screen}.subtitle`)}
           </DialogDescription>
         </DialogHeader>
 
-        {/* `key` sur le mode : le panneau est REMONTÉ à chaque changement, donc
-            l'animation d'entrée rejoue et le changement d'écran se voit. */}
+        {/* `key` sur le MODE : le panneau est remonté quand on change de porte,
+            donc l'animation d'entrée rejoue. Mais passer au choix du modèle ne
+            change pas de mode — le formulaire reste monté, seulement masqué :
+            revenir en arrière pour corriger un nom doit retrouver la
+            conversation ou le formulaire, pas un écran vierge. */}
         <div
           key={mode}
           className="animate-in fade-in-0 slide-in-from-right-2 duration-200 motion-reduce:animate-none"
         >
-          {mode === "choose" ? <ModeChooser onPick={setMode} /> : null}
-          {mode === "ai" ? <AiCreator busy={busy} onCreate={create} /> : null}
-          {mode === "simple" ? <SimpleCreator busy={busy} onCreate={create} /> : null}
-          {mode === "complex" ? <ComplexCreator busy={busy} onCreate={create} /> : null}
+          <div className={cn(pending !== null && "hidden")}>
+            {mode === "choose" ? <ModeChooser onPick={setMode} /> : null}
+            {mode === "ai" ? <AiCreator onSubmit={setPending} /> : null}
+            {mode === "simple" ? <SimpleCreator onSubmit={setPending} /> : null}
+            {mode === "complex" ? <ComplexCreator onSubmit={setPending} /> : null}
+          </div>
+          {pending ? (
+            <div className="animate-in fade-in-0 slide-in-from-right-2 duration-200 motion-reduce:animate-none">
+              <ModelStep
+                busy={busy}
+                config={pending.config}
+                value={chosen}
+                onChange={setChosen}
+                onCreate={() => void create(withChosenModel(pending.config, chosen))}
+              />
+            </div>
+          ) : null}
         </div>
       </DialogContent>
     </Dialog>
@@ -189,13 +268,7 @@ type DraftReply =
   | { done: false; question: string; suggestions: string[] }
   | { done: true; summary: string; config: AssistantConfig };
 
-function AiCreator({
-  busy,
-  onCreate,
-}: {
-  busy: boolean;
-  onCreate: (config: AssistantConfig) => void;
-}) {
+function AiCreator({ onSubmit }: { onSubmit: (pending: Pending) => void }) {
   const t = useTranslations("assistants");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
@@ -282,11 +355,10 @@ function AiCreator({
           <ConfigSummary config={reply.config} />
           <Button
             className="w-full min-h-11 md:min-h-9"
-            disabled={busy}
-            onClick={() => onCreate(reply.config)}
+            onClick={() => onSubmit({ config: reply.config })}
           >
-            {busy ? <Loader2 className="animate-spin" /> : <SparklesIcon />}
-            {t("create.ai.createIt")}
+            <ArrowRightIcon />
+            {t("create.next")}
           </Button>
         </div>
       ) : null}
@@ -343,13 +415,7 @@ function AiCreator({
 
 // ── Mode « simple » ──────────────────────────────────────────────────────────
 
-function SimpleCreator({
-  busy,
-  onCreate,
-}: {
-  busy: boolean;
-  onCreate: (config: AssistantConfig) => void;
-}) {
+function SimpleCreator({ onSubmit }: { onSubmit: (pending: Pending) => void }) {
   const t = useTranslations("assistants");
   const [name, setName] = useState("");
   const [audience, setAudience] = useState<"buyer" | "seller" | "both">("buyer");
@@ -421,9 +487,9 @@ function SimpleCreator({
 
       <ConfigSummary config={config} />
 
-      <Button className="w-full min-h-11 md:min-h-9" disabled={busy} onClick={() => onCreate(config)}>
-        {busy ? <Loader2 className="animate-spin" /> : null}
-        {t("create.simple.createIt")}
+      <Button className="w-full min-h-11 md:min-h-9" onClick={() => onSubmit({ config })}>
+        <ArrowRightIcon />
+        {t("create.next")}
       </Button>
     </div>
   );
@@ -468,19 +534,16 @@ function Choice({
 
 // ── Mode « complet » ─────────────────────────────────────────────────────────
 
-function ComplexCreator({
-  busy,
-  onCreate,
-}: {
-  busy: boolean;
-  onCreate: (config: AssistantConfig, opening?: string) => void;
-}) {
+function ComplexCreator({ onSubmit }: { onSubmit: (pending: Pending) => void }) {
   const t = useTranslations("assistants");
   const [name, setName] = useState("");
 
+  // Le nom de repli est le MÊME que l'invite du champ : ce qu'on lit en gris
+  // est ce qui sera enregistré si on ne tape rien.
+  const fallbackName = t("create.complex.defaultName");
   const config = briefToConfig(
     {
-      name: name.trim() || "Nouvel assistant",
+      name: name.trim() || fallbackName,
       description: null,
       audience: "unknown",
       goalType: "video_meeting",
@@ -502,16 +565,184 @@ function ComplexCreator({
         <Input
           id="cc-name"
           className="min-h-11 md:min-h-9"
-          placeholder="Nouvel assistant"
+          placeholder={fallbackName}
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
       </div>
       <p className="text-sm text-muted-foreground">{t("create.complex.note")}</p>
-      <Button className="w-full min-h-11 md:min-h-9" disabled={busy} onClick={() => onCreate(config)}>
-        {busy ? <Loader2 className="animate-spin" /> : null}
-        {t("create.complex.createIt")}
+      <Button className="w-full min-h-11 md:min-h-9" onClick={() => onSubmit({ config })}>
+        <ArrowRightIcon />
+        {t("create.next")}
       </Button>
+    </div>
+  );
+}
+
+// ── Choix du modèle — dernière étape, commune aux trois modes ────────────────
+
+/**
+ * Le modèle se CHOISIT ; il n'est plus hérité.
+ *
+ * Avant, les trois portes créaient l'assistant sur le modèle par défaut du
+ * schéma. C'est le réglage qui décide du prix de chaque message et de la
+ * tenue des consignes, et il se périme : un défaut écrit il y a six mois
+ * désigne un modèle que le catalogue ne sert peut-être plus. Le bouton reste
+ * donc inerte tant que rien n'est choisi — un choix par omission n'est pas un
+ * choix.
+ *
+ * Seul le modèle GÉNÉRATEUR est demandé ici. Le classifieur et le repli ont
+ * des défauts qui se tiennent (un modèle économique, un fournisseur direct
+ * différent) et se règlent dans l'éditeur : les demander maintenant ferait
+ * quatre décisions avant d'avoir vu un seul message.
+ */
+function ModelStep({
+  busy,
+  config,
+  value,
+  onChange,
+  onCreate,
+}: {
+  busy: boolean;
+  config: AssistantConfig;
+  /** Le choix est piloté par le dialogue : il survit à un aller-retour. */
+  value: ChosenModel;
+  onChange: (chosen: ChosenModel) => void;
+  onCreate: () => void;
+}) {
+  const t = useTranslations("assistants");
+  const { provider, model, effort } = value;
+  const setProvider = (next: ProviderId) =>
+    // Les identifiants ne se recoupent pas d'un fournisseur à l'autre : garder
+    // le modèle en changeant de fournisseur créerait un assistant dont TOUS
+    // les appels échouent.
+    onChange({ provider: next, model: "", effort: "none" });
+  const setModel = (next: string) => onChange({ ...value, model: next });
+  const [catalog, setCatalog] = useState<Record<string, ModelDescriptor[]>>({});
+  const [loading, setLoading] = useState<string | null>(null);
+  // L'échec est retenu PAR FOURNISSEUR : garder un seul drapeau afficherait
+  // encore « aucune clé configurée » après être passé à un fournisseur qui,
+  // lui, répond très bien.
+  const [failures, setFailures] = useState<Record<string, "unconfigured" | "unavailable">>({});
+
+  const load = useCallback(async (id: string) => {
+    setLoading(id);
+    try {
+      const res = await api<{ models: ModelDescriptor[] }>(`/api/llm/models?provider=${id}`);
+      setCatalog((c) => ({ ...c, [id]: res.models }));
+      setFailures((f) => {
+        if (!(id in f)) return f;
+        const next = { ...f };
+        delete next[id];
+        return next;
+      });
+    } catch (err) {
+      // Un catalogue vide sans explication ressemble à « aucun modèle n'existe ».
+      // La clé manquante et le fournisseur en panne ne se corrigent pas pareil.
+      setCatalog((c) => ({ ...c, [id]: [] }));
+      setFailures((f) => ({
+        ...f,
+        [id]:
+          err instanceof ApiError && err.code === "provider_unconfigured"
+            ? "unconfigured"
+            : "unavailable",
+      }));
+    } finally {
+      setLoading(null);
+    }
+  }, []);
+
+  // Un catalogue par fournisseur, demandé UNE fois : la réponse est déjà mise
+  // en cache six heures côté serveur.
+  const requested = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (requested.current.has(provider)) return;
+    requested.current.add(provider);
+    void load(provider);
+  }, [provider, load]);
+
+  const chosen = (catalog[provider] ?? []).find((m) => m.id === model);
+  const failure = failures[provider];
+  const needsTools = config.tools.some((tool) => tool === "get_slots" || tool === "book_meeting");
+  // Catalogue vide (clé absente, fournisseur en panne) : sans porte de sortie,
+  // l'étape empêcherait de créer le moindre assistant. La saisie libre existe
+  // pour la même raison dans l'éditeur — le catalogue n'est pas une autorité.
+  const catalogueUnusable = catalog[provider]?.length === 0 && loading !== provider;
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <Label htmlFor="cm-provider">{t("create.model.provider")}</Label>
+        <Select
+          items={PROVIDER_IDS.map((p) => ({ value: p, label: p }))}
+          value={provider}
+          onValueChange={(v) => setProvider(String(v) as ProviderId)}
+        >
+          <SelectTrigger id="cm-provider" className="min-h-11 w-full md:min-h-9">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PROVIDER_IDS.map((p) => (
+              <SelectItem key={p} value={p}>
+                {p}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* `key` sur le fournisseur : l'entonnoir est REMONTÉ et repart du choix
+          du laboratoire. Sans ça, on reste sur la liste d'un laboratoire qui
+          n'existe pas dans le nouveau catalogue — un écran vide sans raison. */}
+      <ModelPicker
+        key={provider}
+        models={catalog[provider] ?? []}
+        loading={loading === provider}
+        value={model}
+        effort={effort}
+        onReload={() => void load(provider)}
+        onChange={(next) => onChange({ ...value, model: next.model, effort: next.effort })}
+      />
+
+      {failure ? (
+        <Alert variant="destructive">
+          <AlertDescription>{t(`create.model.${failure}`)}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {catalogueUnusable ? (
+        <div className="space-y-1.5">
+          <Label htmlFor="cm-manual">{t("create.model.manual")}</Label>
+          <Input
+            id="cm-manual"
+            value={model}
+            placeholder={t("create.model.manualPlaceholder")}
+            onChange={(e) => setModel(e.target.value.trim())}
+            className="min-h-11 font-mono text-xs md:min-h-9"
+          />
+          <p className="text-xs text-muted-foreground">{t("create.model.manualHint")}</p>
+        </div>
+      ) : null}
+
+      {/* Badgé, pas filtré : un modèle sans outils convient à un assistant
+          « qualifier seulement » — mais pas à celui-ci, qui doit réserver. */}
+      {chosen && !chosen.supportsTools && needsTools ? (
+        <Alert>
+          <AlertDescription>{t("editor.model.toolWarning")}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <Button
+        className="w-full min-h-11 md:min-h-9"
+        disabled={busy || model === ""}
+        onClick={onCreate}
+      >
+        {busy ? <Loader2 className="animate-spin" /> : <SparklesIcon />}
+        {t("create.model.createIt")}
+      </Button>
+      {model === "" ? (
+        <p className="text-center text-xs text-muted-foreground">{t("create.model.required")}</p>
+      ) : null}
     </div>
   );
 }
@@ -558,4 +789,4 @@ function Row({ label, value }: { label: string; value: string }) {
  * manquante ou un composant mal composé à l'intérieur ne se verrait qu'à
  * l'ouverture, en production.
  */
-export { AiCreator, SimpleCreator, ComplexCreator };
+export { AiCreator, SimpleCreator, ComplexCreator, ModelStep };

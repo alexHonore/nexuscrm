@@ -1,10 +1,10 @@
 import { Download } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { CampaignFieldDoc } from "@/lib/campaigns/docs";
+import type { CampaignFieldText } from "@/lib/campaigns/docs";
 import type { ParamDocView } from "@/lib/docs-server";
 import type { DocSection } from "@/lib/docs/types";
-import type { FixtureFieldDoc, GuardrailKindDoc, SeverityDoc } from "@/lib/guardrails/docs";
+import type { FixtureFieldText, GuardrailKindText, SeverityText } from "@/lib/guardrails/docs";
 import type { QuietHours } from "@/lib/sms/quiet-hours";
 import { TriggerIcon } from "../trigger-look";
 import { CopyButton } from "./copy-button";
@@ -25,7 +25,6 @@ export interface DocsLabels {
   copy: string;
   copied: string;
   download: string;
-  frOnlyNote: string;
   columns: Record<
     | "path" | "type" | "default" | "allowed" | "what" | "why" | "effect" | "pitfalls" | "binding"
     | "when" | "config" | "passes" | "caught" | "cost" | "yes" | "no" | "none" | "field" | "example"
@@ -83,12 +82,17 @@ export interface DocsLabels {
   golive: { title: string; p1: string; checks: string };
 }
 
+/**
+ * Les registres arrivent DÉJÀ traduits : la page les résout dans la langue de
+ * la requête et ce composant n'a plus qu'à les rendre. C'est ce qui garde le
+ * rendu synchrone et testable avec les vrais messages, dans les deux langues.
+ */
 export interface DocsData {
   params: ParamDocView[];
-  campaignFields: CampaignFieldDoc[];
-  guardrailKinds: GuardrailKindDoc[];
-  severities: SeverityDoc[];
-  fixtureFields: FixtureFieldDoc[];
+  campaignFields: (CampaignFieldText & { path: string; binding?: string })[];
+  guardrailKinds: (GuardrailKindText & { kind: string; costsModelCall: boolean })[];
+  severities: (SeverityText & { severity: string })[];
+  fixtureFields: (FixtureFieldText & { key: string })[];
   tools: { name: string; description: string }[];
   optoutKeywords: string[];
   quietHours: QuietHours;
@@ -179,7 +183,6 @@ export function DocsContent({ labels: L, data }: { labels: DocsLabels; data: Doc
         {/* ── 4. Paramètres d'assistant ───────────────────────────────── */}
         <Section id="assistants" title={L.assistants.title} index={4}>
           <P>{L.assistants.p1}</P>
-          <p className="text-xs text-muted-foreground">{L.frOnlyNote}</p>
           {SECTION_ORDER.filter((s) => (bySection.get(s) ?? []).length > 0).map((section) => (
             <div key={section} className="mt-6">
               <h3 className="mb-2 font-medium">{L.assistants.sections[section]}</h3>
@@ -187,7 +190,7 @@ export function DocsContent({ labels: L, data }: { labels: DocsLabels; data: Doc
                 {(bySection.get(section) ?? []).map((doc) => (
                   <article key={doc.path} className="rounded-lg border p-3 text-sm">
                     <header className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{doc.labelFr}</span>
+                      <span className="font-medium">{doc.label}</span>
                       <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">{doc.path}</code>
                       <Badge variant="outline" className="text-[10px]">{doc.type}</Badge>
                       {doc.overridden ? (
@@ -195,10 +198,10 @@ export function DocsContent({ labels: L, data }: { labels: DocsLabels; data: Doc
                       ) : null}
                     </header>
                     <dl className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-[8rem_minmax(0,1fr)]">
-                      <Row k={L.columns.what} v={doc.whatFr} />
-                      <Row k={L.columns.why} v={doc.whyFr} />
-                      {doc.effectFr ? <Row k={L.columns.effect} v={doc.effectFr} /> : null}
-                      {doc.pitfallsFr ? <Row k={L.columns.pitfalls} v={doc.pitfallsFr} /> : null}
+                      <Row k={L.columns.what} v={doc.what} />
+                      <Row k={L.columns.why} v={doc.why} />
+                      {doc.effect ? <Row k={L.columns.effect} v={doc.effect} /> : null}
+                      {doc.pitfalls ? <Row k={L.columns.pitfalls} v={doc.pitfalls} /> : null}
                       {doc.defaultValue !== undefined ? (
                         <Row k={L.columns.default} v={<code className="font-mono text-xs">{JSON.stringify(doc.defaultValue)}</code>} />
                       ) : null}
@@ -210,7 +213,7 @@ export function DocsContent({ labels: L, data }: { labels: DocsLabels; data: Doc
                               {doc.allowed.map((a) => (
                                 <li key={String(a.value)}>
                                   <code className="font-mono text-xs">{JSON.stringify(a.value)}</code>{" "}
-                                  <span className="text-muted-foreground">— {a.labelFr}</span>
+                                  <span className="text-muted-foreground">— {a.label}</span>
                                 </li>
                               ))}
                             </ul>
@@ -235,19 +238,19 @@ export function DocsContent({ labels: L, data }: { labels: DocsLabels; data: Doc
             {data.guardrailKinds.map((k) => (
               <article key={k.kind} className="rounded-lg border p-3 text-sm">
                 <header className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{k.labelFr}</span>
+                  <span className="font-medium">{k.label}</span>
                   <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">{k.kind}</code>
                   <Badge variant="outline" className="text-[10px]">
                     {L.columns.cost} : {k.costsModelCall ? L.columns.yes : L.columns.no}
                   </Badge>
                 </header>
                 <dl className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-[8rem_minmax(0,1fr)]">
-                  <Row k={L.columns.what} v={k.whatFr} />
-                  <Row k={L.columns.when} v={k.whenFr} />
-                  <Row k={L.columns.config} v={k.configFr} />
-                  <Row k={L.columns.passes} v={k.passesFr} />
-                  <Row k={L.columns.caught} v={k.caughtFr} />
-                  <Row k={L.columns.pitfalls} v={k.pitfallFr} />
+                  <Row k={L.columns.what} v={k.what} />
+                  <Row k={L.columns.when} v={k.when} />
+                  <Row k={L.columns.config} v={k.config} />
+                  <Row k={L.columns.passes} v={k.passes} />
+                  <Row k={L.columns.caught} v={k.caught} />
+                  <Row k={L.columns.pitfalls} v={k.pitfall} />
                 </dl>
               </article>
             ))}
@@ -257,8 +260,8 @@ export function DocsContent({ labels: L, data }: { labels: DocsLabels; data: Doc
             {data.severities.map((s) => (
               <li key={s.severity} className="flex flex-wrap gap-2">
                 <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">{s.severity}</code>
-                <span className="font-medium">{s.labelFr}</span>
-                <span className="text-muted-foreground">— {s.whatFr}</span>
+                <span className="font-medium">{s.label}</span>
+                <span className="text-muted-foreground">— {s.what}</span>
               </li>
             ))}
           </ul>
@@ -267,13 +270,13 @@ export function DocsContent({ labels: L, data }: { labels: DocsLabels; data: Doc
             {data.fixtureFields.map((f) => (
               <article key={f.key} className="rounded-lg border p-3 text-sm">
                 <header className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{f.labelFr}</span>
+                  <span className="font-medium">{f.label}</span>
                   <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">{f.key}</code>
                 </header>
                 <dl className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-[8rem_minmax(0,1fr)]">
-                  <Row k={L.columns.what} v={f.whatFr} />
-                  <Row k={L.columns.example} v={f.exampleFr} />
-                  <Row k={L.columns.pitfalls} v={f.pitfallFr} />
+                  <Row k={L.columns.what} v={f.what} />
+                  <Row k={L.columns.example} v={f.example} />
+                  <Row k={L.columns.pitfalls} v={f.pitfall} />
                 </dl>
               </article>
             ))}
@@ -407,7 +410,7 @@ export function DocsContent({ labels: L, data }: { labels: DocsLabels; data: Doc
             {data.campaignFields.map((f) => (
               <article key={f.path} className="rounded-lg border p-3 text-sm">
                 <header className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{f.labelFr}</span>
+                  <span className="font-medium">{f.label}</span>
                   <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">{f.path}</code>
                   {f.binding ? (
                     <Badge variant="outline" className="text-[10px]">
@@ -416,9 +419,9 @@ export function DocsContent({ labels: L, data }: { labels: DocsLabels; data: Doc
                   ) : null}
                 </header>
                 <dl className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-[8rem_minmax(0,1fr)]">
-                  <Row k={L.columns.what} v={f.whatFr} />
-                  <Row k={L.columns.why} v={f.whyFr} />
-                  {f.pitfallsFr ? <Row k={L.columns.pitfalls} v={f.pitfallsFr} /> : null}
+                  <Row k={L.columns.what} v={f.what} />
+                  <Row k={L.columns.why} v={f.why} />
+                  {f.pitfalls ? <Row k={L.columns.pitfalls} v={f.pitfalls} /> : null}
                 </dl>
               </article>
             ))}

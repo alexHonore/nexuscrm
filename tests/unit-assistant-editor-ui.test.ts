@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 import assistantsFr from "../messages/fr/assistants.json";
 import commonFr from "../messages/fr/common.json";
 import { assistantConfigSchema } from "@/lib/assistants/schema";
+import { resolveParamDoc } from "@/lib/docs/locale";
 import { PARAM_DOCS } from "@/lib/docs/params";
 import type { AssistantEditorData } from "@/components/admin/assistant-editor/types";
 
@@ -31,7 +32,10 @@ const { GoalTab, IdentityTab } = await import("@/components/admin/assistant-edit
 
 type IntlMessages = ComponentProps<typeof NextIntlClientProvider>["messages"];
 
-const DOCS = Object.fromEntries(PARAM_DOCS.map((d) => [d.path, { ...d, overridden: false }]));
+// Le serveur envoie des fiches DÉJÀ résolues dans la langue de la requête.
+const DOCS = Object.fromEntries(
+  PARAM_DOCS.map((d) => [d.path, resolveParamDoc({ ...d, overridden: false }, "fr")]),
+);
 
 const CONFIG = assistantConfigSchema.parse({
   name: "Acheteur FB",

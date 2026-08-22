@@ -96,8 +96,15 @@ export function ModelPicker({
       <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 p-3">
         <LabMark lab={currentLab} size={38} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{current?.label ?? value}</p>
-          <p className="truncate font-mono text-[11px] text-muted-foreground">{value}</p>
+          {/* À la création, rien n'est encore choisi : on le DIT. Une ligne
+              vide ressemble à un catalogue en cours de chargement, et on
+              attend au lieu de cliquer. */}
+          <p className="truncate text-sm font-medium">
+            {value === "" ? t("model.noneChosen") : (current?.label ?? value)}
+          </p>
+          {value === "" ? null : (
+            <p className="truncate font-mono text-[11px] text-muted-foreground">{value}</p>
+          )}
         </div>
         {effort !== "none" ? (
           <Badge variant="outline" className="gap-1">

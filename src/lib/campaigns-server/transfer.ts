@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { categories, sources, users } from "@/db/schema";
 import { assistants, campaigns, smsNumbers } from "@/db/schema-sms";
 import { campaignRowToConfig } from "@/lib/campaigns/schema";
+import type { DocsLocale } from "@/lib/campaigns/docs";
 import {
   buildCampaignBundle,
   parseCampaignBundle,
@@ -58,7 +59,7 @@ function labelsFrom(catalog: CampaignImportCatalog): BindingLabels {
 
 export async function exportCampaign(
   campaignId: string,
-  options: { annotate?: boolean; now?: Date } = {},
+  options: { annotate?: boolean; now?: Date; locale?: DocsLocale } = {},
 ): Promise<CampaignBundle> {
   const row = await db.query.campaigns.findFirst({ where: eq(campaigns.id, campaignId) });
   if (!row) throw new Error("campaign_not_found");
@@ -69,12 +70,13 @@ export async function exportCampaign(
     sourceOrg: "",
     now: options.now ?? new Date(),
     annotate: options.annotate,
+    locale: options.locale,
   });
 }
 
 export async function exportCampaignFile(
   campaignId: string,
-  options: { annotate?: boolean; now?: Date } = {},
+  options: { annotate?: boolean; now?: Date; locale?: DocsLocale } = {},
 ): Promise<{ filename: string; body: string }> {
   const bundle = await exportCampaign(campaignId, options);
   const slug = bundle.campaign.name
@@ -83,7 +85,14 @@ export async function exportCampaignFile(
     .replace(/[^a-zA-Z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .toLowerCase();
-  return { filename: `campagne-${slug || "sans-nom"}.json`, body: serializeCampaignBundle(bundle) };
+  // Le nom du fichier suit la langue de qui télécharge : « campagne-… » dans
+  // un dossier de téléchargements anglais n'aide personne à le retrouver.
+  const stem = options.locale === "en" ? "campaign" : "campagne";
+  const fallback = options.locale === "en" ? "untitled" : "sans-nom";
+  return {
+    filename: `${stem}-${slug || fallback}.json`,
+    body: serializeCampaignBundle(bundle),
+  };
 }
 
 export interface CampaignImportPreview {

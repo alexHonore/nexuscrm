@@ -14,7 +14,9 @@ import {
   type FixtureData,
   type RuleData,
 } from "@/lib/guardrails/types";
+import { paramDocText } from "@/lib/docs/locale";
 import { PARAM_DOCS, getParamDoc } from "@/lib/docs/params";
+import type { DocLocale } from "@/lib/docs/types";
 
 /**
  * Import / export d'un assistant (§15.3).
@@ -207,6 +209,12 @@ export interface BuildBundleInput {
   now: Date;
   /** Annoter par défaut : un fichier qu'on relit six mois plus tard. */
   annotate?: boolean;
+  /**
+   * Langue des annotations `_docs`. Celles-ci sont lues par un HUMAIN — elles
+   * suivent donc la langue de qui exporte, contrairement à la configuration
+   * elle-même, qui décide de ce que l'assistant écrit à ses clients.
+   */
+  locale?: DocLocale;
 }
 
 /** Chemins de la config qui portent un identifiant d'utilisateur local. */
@@ -307,22 +315,26 @@ export function buildBundle(input: BuildBundleInput): AssistantBundle {
     objectionPacks: input.objectionPacks.filter((p) => config.objectionPacks.includes(p.id)),
   };
 
-  if (input.annotate !== false) bundle._docs = buildDocs(config);
+  if (input.annotate !== false) bundle._docs = buildDocs(config, input.locale ?? "fr");
   return bundle;
 }
 
 /** Annotations pour les chemins effectivement présents dans cette config. */
-export function buildDocs(config: AssistantConfig): Record<string, z.infer<typeof docBlockSchema>> {
+export function buildDocs(
+  config: AssistantConfig,
+  locale: DocLocale = "fr",
+): Record<string, z.infer<typeof docBlockSchema>> {
   const out: Record<string, z.infer<typeof docBlockSchema>> = {};
   const add = (path: string) => {
     const entry = getParamDoc(path);
     if (!entry) return;
+    const text = paramDocText(entry, locale);
     out[path] = {
-      label: entry.labelFr,
-      what: entry.whatFr,
-      why: entry.whyFr,
-      ...(entry.effectFr ? { effect: entry.effectFr } : {}),
-      ...(entry.pitfallsFr ? { pitfalls: entry.pitfallsFr } : {}),
+      label: text.label,
+      what: text.what,
+      why: text.why,
+      ...(text.effect ? { effect: text.effect } : {}),
+      ...(text.pitfalls ? { pitfalls: text.pitfalls } : {}),
     };
   };
 

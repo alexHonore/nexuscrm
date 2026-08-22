@@ -6,6 +6,7 @@ import {
   serializeCampaignBundle,
   type CampaignBundle,
 } from "@/lib/campaigns/portable";
+import type { DocLocale } from "@/lib/docs/types";
 
 /**
  * Fichiers d'EXEMPLE pour la documentation — module PUR.
@@ -24,7 +25,7 @@ export const SAMPLE_USER_ID = "00000000-0000-4000-8000-00000000c0a1";
 export const SAMPLE_ASSISTANT_ID = "00000000-0000-4000-8000-00000000a551";
 export const SAMPLE_NUMBER_ID = "00000000-0000-4000-8000-0000000005a5";
 
-export function exampleAssistantBundle(now: Date): AssistantBundle {
+export function exampleAssistantBundle(now: Date, locale: DocLocale = "fr"): AssistantBundle {
   const config = briefToConfig(
     {
       name: "Acheteurs Facebook",
@@ -60,10 +61,11 @@ export function exampleAssistantBundle(now: Date): AssistantBundle {
     },
     sourceOrg: "Groupe Nexus",
     now,
+    locale,
   });
 }
 
-export function exampleCampaignBundle(now: Date): CampaignBundle {
+export function exampleCampaignBundle(now: Date, locale: DocLocale = "fr"): CampaignBundle {
   const config = briefToCampaignConfig({
     name: "Réactivation 180 j",
     description: "Acheteurs sans nouvelles depuis six mois — un message, deux relances.",
@@ -89,13 +91,20 @@ export function exampleCampaignBundle(now: Date): CampaignBundle {
     },
     sourceOrg: "Groupe Nexus",
     now,
+    locale,
   });
 }
 
-export function exampleAssistantFile(now: Date): string {
-  return serializeBundle(exampleAssistantBundle(now));
+/**
+ * Le fichier d'exemple. Seules les ANNOTATIONS suivent la langue : la
+ * configuration montrée reste la même, parce que c'est elle que l'import
+ * relit — un exemple dont les valeurs changeraient avec la langue de l'écran
+ * enseignerait deux formats.
+ */
+export function exampleAssistantFile(now: Date, locale: DocLocale = "fr"): string {
+  return serializeBundle(exampleAssistantBundle(now, locale));
 }
 
-export function exampleCampaignFile(now: Date): string {
-  return serializeCampaignBundle(exampleCampaignBundle(now));
+export function exampleCampaignFile(now: Date, locale: DocLocale = "fr"): string {
+  return serializeCampaignBundle(exampleCampaignBundle(now, locale));
 }

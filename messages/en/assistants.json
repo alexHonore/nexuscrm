@@ -100,7 +100,7 @@
       "intent": "Intent",
       "tool": "Expected tool",
       "criterion": "Criterion",
-      "criterionPlaceholder": "The reply states no fact that is not in the allowed claims.",
+      "criterionPlaceholder": "The reply states no fact that is absent from the assistant's knowledge.",
       "nothingToConfigure": "Nothing to configure: this rule only adds its text to the prompt."
     },
     "errors": {
@@ -232,7 +232,7 @@
       "identity": "Identity",
       "goal": "Goal",
       "approach": "Approach",
-      "knowledge": "Knowledge",
+      "knowledge": "Knowledge & rules",
       "objections": "Objections",
       "tools": "Tools",
       "guardrails": "Guardrails",
@@ -266,10 +266,22 @@
       "mandatedField": "required by the goal"
     },
     "knowledge": {
-      "add": "Add a fact",
-      "placeholder": "A verifiable fact the assistant may state",
-      "empty": "No allowed claims: the assistant may not state any business information.",
-      "warning": "Anything listed here will be stated in writing on behalf of a licensed broker."
+      "add": "Add an entry",
+      "placeholder": "A fact the assistant may state, or a rule: “if they say…, answer…”",
+      "empty": "No knowledge or rules: the assistant may not state any business information and will only follow its settings.",
+      "warning": "Anything listed here will be stated in writing on behalf of a licensed broker.",
+      "intro": "Two kinds of entries in a single list: a FACT the assistant may state, or a RULE of conduct — “if they say this, answer that”. The assistant reads them in the order below.",
+      "orderHint": "Order matters: when two entries conflict, the first one wins. A rule never overrides a guardrail.",
+      "exampleFact": "We cover the Québec City and Lévis area.",
+      "exampleRule": "If they ask about price, say Alex is the one who discusses it and offer the meeting.",
+      "kind": {
+        "fact": "Fact",
+        "rule": "Rule"
+      },
+      "moveUp": "Move entry {index} up",
+      "moveDown": "Move entry {index} down",
+      "remove": "Delete entry {index}",
+      "entry": "Entry {index}"
     },
     "objections": {
       "none": "No packs available.",
@@ -669,7 +681,8 @@
       "nousresearch": "Hermes models, open settings.",
       "openrouter": "Automatic routers — the actual model changes from call to call; avoid for a tuned assistant.",
       "autre": "Unlisted lab."
-    }
+    },
+    "noneChosen": "No model chosen"
   },
   "create": {
     "title": "Create an assistant",
@@ -687,7 +700,6 @@
       "placeholder": "Describe what you need…",
       "thinking": "Thinking…",
       "ready": "Ready to create",
-      "createIt": "Create this assistant",
       "noProvider": "No model key configured — assisted creation needs a provider.",
       "retry": "Unreadable model reply. Rephrase and try again.",
       "failed": "Assisted creation did not complete."
@@ -710,17 +722,16 @@
       "balancedHint": "Two spaced follow-ups. The usual setting.",
       "firm": "Hard",
       "firmHint": "Pushes. Watch the opt-out rate.",
-      "createIt": "Create this assistant",
       "fieldName": "Assistant name"
     },
     "complex": {
       "name": "Full setup",
-      "pitch": "Every setting: goal, tone, knowledge, tools, guardrails, model, prompt.",
+      "pitch": "Every setting: goal, tone, knowledge and rules, tools, guardrails, prompt.",
       "time": "Eleven tabs",
       "title": "Full setup",
       "subtitle": "We create a draft, then you configure everything in the editor.",
-      "note": "The assistant is created with sensible defaults. You will adjust each tab next.",
-      "createIt": "Create and open the editor"
+      "note": "The assistant is created with sensible defaults — except the model, which you pick in the next step. You will adjust each tab afterwards.",
+      "defaultName": "New assistant"
     },
     "summary": {
       "goal": "Goal",
@@ -728,6 +739,19 @@
       "required": "To gather",
       "persistence": "Persistence",
       "none": "None"
+    },
+    "next": "Continue",
+    "model": {
+      "title": "Pick the model",
+      "subtitle": "The model that will write the messages. Nothing is created until you pick one.",
+      "provider": "Provider",
+      "createIt": "Create the assistant",
+      "required": "Pick a model to create the assistant.",
+      "unconfigured": "No key configured for this provider — pick another one, or add the key in settings.",
+      "unavailable": "Catalogue unavailable right now. Try again, or pick another provider.",
+      "manual": "Model identifier",
+      "manualPlaceholder": "anthropic/claude-sonnet-5",
+      "manualHint": "The catalogue is empty: type the exact identifier. You can correct it later in the editor."
     }
   },
   "docs": {
@@ -738,7 +762,6 @@
     "copy": "Copy",
     "copied": "Copied",
     "download": "Download the example",
-    "frOnlyNote": "The reference sheets (parameters, guardrails, campaign fields) are written in French: they are the same texts as the inline help next to each field.",
     "columns": {
       "path": "JSON path",
       "type": "Type",
@@ -806,7 +829,7 @@
         "identity": "Identity and signature",
         "goal": "Goal",
         "approach": "Approach",
-        "knowledge": "Knowledge",
+        "knowledge": "Knowledge & rules",
         "objections": "Objections",
         "tools": "Tools",
         "guardrails": "Guardrails",

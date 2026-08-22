@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { campaignConfigSchema, type CampaignConfig } from "./schema";
-import { CAMPAIGN_FIELD_DOCS, getCampaignFieldDoc } from "./docs";
+import { CAMPAIGN_FIELD_DOCS, campaignFieldText, getCampaignFieldDoc, type DocsLocale } from "./docs";
 
 /**
  * Import / export d'une campagne — module PUR (ni Next, ni base, ni horloge).
@@ -74,6 +74,8 @@ export interface BuildCampaignBundleInput {
   sourceOrg?: string;
   now: Date;
   annotate?: boolean;
+  /** Langue des annotations `_docs` — elles sont lues par un humain. */
+  locale?: DocsLocale;
 }
 
 function labelFor(
@@ -130,21 +132,25 @@ export function buildCampaignBundle(input: BuildCampaignBundleInput): CampaignBu
     campaign: config,
     bindings,
   };
-  if (input.annotate !== false) bundle._docs = buildCampaignDocs(config);
+  if (input.annotate !== false) bundle._docs = buildCampaignDocs(config, input.locale ?? "fr");
   return bundle;
 }
 
 /** Annotations pour les chemins effectivement présents dans cette config. */
-export function buildCampaignDocs(config: CampaignConfig): Record<string, z.infer<typeof docBlockSchema>> {
+export function buildCampaignDocs(
+  config: CampaignConfig,
+  locale: DocsLocale = "fr",
+): Record<string, z.infer<typeof docBlockSchema>> {
   const out: Record<string, z.infer<typeof docBlockSchema>> = {};
   const add = (path: string, docPath = path) => {
     const entry = getCampaignFieldDoc(docPath);
     if (!entry) return;
+    const text = campaignFieldText(entry, locale);
     out[path] = {
-      label: entry.labelFr,
-      what: entry.whatFr,
-      why: entry.whyFr,
-      ...(entry.pitfallsFr ? { pitfalls: entry.pitfallsFr } : {}),
+      label: text.label,
+      what: text.what,
+      why: text.why,
+      ...(text.pitfalls ? { pitfalls: text.pitfalls } : {}),
     };
   };
   for (const entry of CAMPAIGN_FIELD_DOCS) {
@@ -183,9 +189,16 @@ function sortKeys(value: unknown): unknown {
 // ── Import ───────────────────────────────────────────────────────────────────
 
 export interface CampaignImportWarning {
-  code: "unresolved_binding" | "docs_ignored" | "status_reset";
+  /**
+   * Deux codes pour une liaison perdue, parce que la conséquence n'est pas la
+   * même : un champ simple reste VIDE (plus d'assistant sur la campagne), une
+   * entrée de liste est simplement RETIRÉE (une catégorie de moins).
+   */
+  code: "unresolved_binding_cleared" | "unresolved_binding_removed" | "docs_ignored";
   messageFr: string;
   path?: string;
+  /** Ce qui rend l'avertissement utile : QUELLE liaison, de quelle sorte. */
+  params?: { target: string; kind: string };
 }
 
 /** Le catalogue local : ce vers quoi une liaison PEUT pointer. */
@@ -306,12 +319,15 @@ export function planCampaignImport(
     resolved[key] = target;
 
     if (target === null) {
+      const target = binding.label || binding.sourceValue || binding.path;
+      const removed = binding.path.endsWith("[]");
       warnings.push({
-        code: "unresolved_binding",
+        code: removed ? "unresolved_binding_removed" : "unresolved_binding_cleared",
         path: binding.path,
-        messageFr: `« ${binding.label || binding.sourceValue || binding.path} » (${binding.kind}) n'a pas d'équivalent ici : ${
-          binding.path.endsWith("[]") ? "retiré de la liste" : "le champ reste vide"
+        messageFr: `« ${target} » (${binding.kind}) n'a pas d'équivalent ici : ${
+          removed ? "retiré de la liste" : "le champ reste vide"
         }.`,
+        params: { target, kind: binding.kind },
       });
       continue;
     }
