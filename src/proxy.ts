@@ -16,6 +16,10 @@ export default function proxy(request: NextRequest) {
     pathname === "/" ||
     pathname === "/privacy" ||
     pathname === "/terms" ||
+    // Référence d'intégration : elle existe pour être lue AVANT d'avoir un
+    // compte. La renvoyer vers /login en ferait une documentation réservée à
+    // ceux qui n'en ont plus besoin.
+    pathname === "/developers" ||
     pathname.startsWith("/api/") ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico" ||

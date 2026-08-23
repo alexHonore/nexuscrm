@@ -867,13 +867,13 @@
     },
     "overview": {
       "title": "How it works",
-      "p1": "A CAMPAIGN decides who gets enrolled and when they are written to. An ASSISTANT decides what to reply — and, when a ladder rung has no text, what to write first. GUARDRAILS re-read every message before it leaves. Nothing leaves if the contact has no valid SMS consent, if they wrote STOP, outside quiet hours, or if the kill switch is down.",
+      "p1": "A CAMPAIGN decides who gets enrolled and when they are written to. An ASSISTANT decides what to reply — and, when a ladder rung has no text, what to write first. GUARDRAILS re-read every message before it leaves. Nothing leaves if the contact wrote STOP, if they are marked \"do not call\", outside quiet hours, or if the kill switch is down.",
       "p2": "Every send is a job in a durable queue: resumed after an outage, never sent twice (dedupe key), and pushed to the next morning if it falls at night. Every assistant turn leaves a full trace — prompt, tool calls, guardrail verdicts, cost.",
       "steps": {
         "title": "The path of a message",
         "items": [
           "Trigger: a new lead arrives, a contact changes category, a periodic sweep finds people without contact, or you enrol by hand.",
-          "Eligibility: valid consent, no STOP, no \"do not call\", not already in another active campaign, daily cap not reached. Every refusal has a code, visible in the enrolments.",
+          "Eligibility: no STOP, no \"do not call\", a reachable number, no conversation already under way, not already enrolled in another active campaign, daily and total caps not reached. Every refusal has a code, visible in the enrolments.",
           "Ladder: rung 0 leaves right away (quiet hours respected), the next ones after the given delay — cumulative. A reply from the contact stops the ladder.",
           "Writing: a rung with text leaves as is; an empty rung wakes the assistant, which writes first with the campaign's context.",
           "Guardrails: deterministic rules (terms, shapes, length, links, required tools) then AI judges. A blocking refusal triggers ONE rewrite; a second refusal hands over to a human.",
@@ -893,7 +893,7 @@
       "p1": "The trigger decides WHEN a contact is enrolled; the audience decides WHO is eligible; the ladder decides WHAT leaves and at what pace; A/B variants decide the WORDING of the opener.",
       "kinds": {
         "manual": "Manual — you enrol people yourself, from the Enrolments tab (or with a one-off sweep of the audience).",
-        "lead_created": "New lead — every lead received by the webhook (n8n, Facebook Lead Ads) is enrolled on arrival, with an implied inquiry consent on file.",
+        "lead_created": "New lead — every lead received by the webhook (n8n, Facebook Lead Ads) is enrolled on arrival.",
         "category_changed": "Category change — when a contact ENTERS one of the chosen categories (\"Callback\" → \"Hot\").",
         "scheduled": "Periodic sweep — the audience is re-examined every N hours; newly eligible people are enrolled, within the daily cap."
       },
@@ -969,8 +969,7 @@
       "title": "For callers: the inbox and the thread",
       "p1": "The \"Conversations\" inbox lists threads needing attention (reply received, handoff, blocked message, opt-out) with the reason. On the client page, the SMS thread is a box distinct from internal notes: the recipient is always shown, so a note isn't sent to a client by mistake.",
       "actions": [
-        "Write by hand: leaves right away, even while the AI is paused and outside quiet hours; clears the \"needs attention\" flag. Requires a consent on file, unless the person wrote first.",
-        "Record a consent: on the thread, when you have just obtained it by phone or in person. That is what allows a campaign to write to this person.",
+        "Write by hand: leaves right away, even while the AI is paused and outside quiet hours; clears the \"needs attention\" flag.",
         "Hand the thread to an assistant (or take it back): a contact who wrote on their own has no assistant until you give them one — or a number designates a default.",
         "Pause / resume the AI: while paused, no automated turn speaks on this thread, campaign rungs are held, and whatever the AI had already queued is cancelled. The reason is asked for and shown.",
         "Cancel a queued send: as long as the dispatcher hasn't taken it. After that, an SMS handed to the operator cannot be recalled.",
@@ -1005,7 +1004,7 @@
           "exportedAt": "ISO 8601 export date — informative.",
           "sourceOrg": "Name of the source installation — informative.",
           "assistant": "The assistant's full configuration, same paths as the reference above, id fields emptied.",
-          "campaign": "The campaign's full configuration (name, trigger, audience, ladder, variants, caps, consent), id fields emptied.",
+          "campaign": "The campaign's full configuration (name, trigger, audience, ladder, variants, caps), id fields emptied.",
           "bindings": "Bindings: { path, kind, sourceValue, label, hint }. sourceValue is the original value — never reused as is.",
           "guardrails": "Assistant-specific rules (scope \"assistant\"). \"core\" rules are stripped on import.",
           "fixtures": "Assistant-specific test scenarios.",

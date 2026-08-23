@@ -7,6 +7,11 @@ import { runAfterResponse } from "@/lib/after-response";
 import { logAudit } from "@/lib/audit";
 import { sha256Hex } from "@/lib/crypto";
 import { formatPhone, normalizePhone, phoneMatchKey } from "@/lib/phone";
+import {
+  LEAD_FIELD_ALIASES,
+  LEAD_MAX_BODY_BYTES,
+  type LeadField,
+} from "@/lib/webhooks/lead-fields";
 
 /**
  * Webhook entrant public (n8n / Facebook Lead Ads / site web).
@@ -16,38 +21,6 @@ import { formatPhone, normalizePhone, phoneMatchKey } from "@/lib/phone";
  * dans `.data`.
  */
 
-const MAX_BODY_BYTES = 100_000;
-
-const ALIASES = {
-  name: ["name", "nom_complet", "full_name", "fullname", "nom"],
-  phone: [
-    "phone",
-    "numéro_de_téléphone",
-    "numero_de_telephone",
-    "telephone",
-    "téléphone",
-    "phone_number",
-  ],
-  email: ["email", "e-mail", "courriel"],
-  projectType: [
-    "type",
-    "quel_est_votre_besoin_?",
-    "quel_est_votre_besoin?",
-    "besoin",
-    "project_type",
-  ],
-  timing: [
-    "timing",
-    "votre_projet_est_prévu_pour_quand_?",
-    "votre_projet_est_prevu_pour_quand_?",
-    "votre_projet_est_prévu_pour_quand?",
-    "délai",
-    "delai",
-  ],
-  source: ["source"],
-  notes: ["notes", "note", "message"],
-  city: ["city", "ville"],
-} as const;
 
 function coerce(value: unknown): string | undefined {
   if (typeof value === "string") return value.trim() || undefined;
@@ -59,14 +32,17 @@ function coerce(value: unknown): string | undefined {
   return undefined;
 }
 
-function extract(payload: Record<string, unknown>): Partial<Record<keyof typeof ALIASES, string>> {
+function extract(payload: Record<string, unknown>): Partial<Record<LeadField, string>> {
   // Clés normalisées (minuscules, espaces → _) pour tolérer les variantes.
   const normalized = new Map<string, unknown>();
   for (const [k, v] of Object.entries(payload)) {
     normalized.set(k.trim().toLowerCase().replace(/\s+/g, "_"), v);
   }
-  const out: Partial<Record<keyof typeof ALIASES, string>> = {};
-  for (const [field, aliases] of Object.entries(ALIASES) as [keyof typeof ALIASES, readonly string[]][]) {
+  const out: Partial<Record<LeadField, string>> = {};
+  for (const [field, aliases] of Object.entries(LEAD_FIELD_ALIASES) as [
+    LeadField,
+    readonly string[],
+  ][]) {
     for (const alias of aliases) {
       const value = coerce(normalized.get(alias));
       if (value !== undefined) {
@@ -87,11 +63,11 @@ type KeyDefaults = {
 export async function POST(req: Request) {
   // ── Taille du corps ──
   const contentLength = Number(req.headers.get("content-length") ?? 0);
-  if (contentLength > MAX_BODY_BYTES) {
+  if (contentLength > LEAD_MAX_BODY_BYTES) {
     return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
   }
   const raw = await req.text();
-  if (raw.length > MAX_BODY_BYTES) {
+  if (raw.length > LEAD_MAX_BODY_BYTES) {
     return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
   }
 

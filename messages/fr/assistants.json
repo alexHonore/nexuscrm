@@ -867,13 +867,13 @@
     },
     "overview": {
       "title": "Comment ça marche",
-      "p1": "Une CAMPAGNE décide qui est inscrit et quand on lui écrit. Un ASSISTANT décide quoi répondre — et, quand un barreau de l'échelle n'a pas de texte, quoi écrire en premier. Les GARDE-FOUS relisent chaque message avant qu'il parte. Rien ne part si le contact n'a pas de consentement SMS valide, s'il a écrit STOP, hors des heures de politesse, ou si l'interrupteur d'arrêt est baissé.",
+      "p1": "Une CAMPAGNE décide qui est inscrit et quand on lui écrit. Un ASSISTANT décide quoi répondre — et, quand un barreau de l'échelle n'a pas de texte, quoi écrire en premier. Les GARDE-FOUS relisent chaque message avant qu'il parte. Rien ne part si le contact a écrit STOP, s'il est marqué « ne pas appeler », hors des heures de politesse, ou si l'interrupteur d'arrêt est baissé.",
       "p2": "Chaque envoi est un travail dans une file durable : il est repris après une panne, jamais envoyé deux fois (clé de dédoublonnage), et décalé au matin suivant s'il tombe la nuit. Chaque tour d'assistant laisse une trace complète — prompt, outils appelés, verdicts des garde-fous, coût.",
       "steps": {
         "title": "Le chemin d'un message",
         "items": [
           "Déclencheur : un nouveau lead arrive, un contact change de catégorie, un balayage périodique trouve des gens sans nouvelles, ou vous inscrivez à la main.",
-          "Éligibilité : consentement valide, pas de STOP, pas « ne pas appeler », pas déjà dans une autre campagne active, plafond du jour non atteint. Chaque refus a un code, visible dans les inscriptions.",
+          "Éligibilité : pas de STOP, pas « ne pas appeler », un numéro joignable, aucune conversation déjà en cours, pas déjà inscrit dans une autre campagne active, plafonds du jour et du total non atteints. Chaque refus a un code, visible dans les inscriptions.",
           "Échelle : le barreau 0 part tout de suite (heures de politesse respectées), les suivants après le délai indiqué — cumulatif. Une réponse du contact arrête l'échelle.",
           "Rédaction : un barreau avec texte part tel quel ; un barreau vide réveille l'assistant, qui écrit en premier avec le contexte de la campagne.",
           "Garde-fous : règles déterministes (termes, formes, longueur, liens, outils requis) puis juges IA. Un refus bloquant déclenche UNE réécriture ; un second refus passe la main à un humain.",
@@ -893,7 +893,7 @@
       "p1": "Le déclencheur décide QUAND un contact est inscrit ; l'audience décide QUI est admissible ; l'échelle décide QUOI part et à quel rythme ; les variantes A/B décident de la FORMULATION de l'ouverture.",
       "kinds": {
         "manual": "Manuelle — vous inscrivez les gens vous-même, depuis l'onglet Inscriptions (ou par balayage ponctuel de l'audience).",
-        "lead_created": "Nouveau lead — chaque lead reçu par le webhook (n8n, Facebook Lead Ads) est inscrit dès son arrivée, avec un consentement implicite d'enquête au dossier.",
+        "lead_created": "Nouveau lead — chaque lead reçu par le webhook (n8n, Facebook Lead Ads) est inscrit dès son arrivée.",
         "category_changed": "Changement de catégorie — quand un contact ENTRE dans l'une des catégories choisies (« À rappeler » → « Chaud »).",
         "scheduled": "Balayage périodique — l'audience est réexaminée toutes les N heures ; les nouveaux admissibles sont inscrits, dans la limite du plafond quotidien."
       },
@@ -969,8 +969,7 @@
       "title": "Côté téléphonistes : l'inbox et le fil",
       "p1": "L'inbox « Conversations » liste les fils qui demandent une attention (réponse reçue, passage humain, message bloqué, désabonnement) avec la raison. Sur la fiche client, le fil SMS est un encadré distinct des notes internes : le destinataire y est toujours affiché, pour ne pas envoyer une note à un client par erreur.",
       "actions": [
-        "Écrire à la main : part tout de suite, même pendant une pause de l'IA et hors des heures de politesse ; efface la pastille « à traiter ». Exige un consentement au dossier, sauf si la personne a écrit la première.",
-        "Enregistrer un consentement : sur le fil, quand vous venez de l'obtenir au téléphone ou en personne. C'est ce qui autorise une campagne à écrire à cette personne.",
+        "Écrire à la main : part tout de suite, même pendant une pause de l'IA et hors des heures de politesse ; efface la pastille « à traiter ».",
         "Confier le fil à un assistant (ou le lui retirer) : un contact qui a écrit de lui-même n'a pas d'assistant tant qu'on ne lui en donne pas un — ou qu'un numéro n'en désigne un par défaut.",
         "Mettre l'IA en pause / la reprendre : en pause, aucun tour automatisé ne parle sur ce fil, les barreaux de campagne sont retenus, et ce que l'IA avait déjà mis en file est annulé. La raison est demandée et affichée.",
         "Annuler un envoi en file : tant que le répartiteur ne l'a pas pris. Après, un SMS remis à l'opérateur ne se rappelle pas.",
@@ -1005,7 +1004,7 @@
           "exportedAt": "Date d'export ISO 8601 — informative.",
           "sourceOrg": "Nom de l'installation d'origine — informatif.",
           "assistant": "La configuration complète de l'assistant, mêmes chemins que la référence ci-dessus, champs d'identifiants vidés.",
-          "campaign": "La configuration complète de la campagne (nom, déclencheur, audience, échelle, variantes, plafonds, consentement), champs d'identifiants vidés.",
+          "campaign": "La configuration complète de la campagne (nom, déclencheur, audience, échelle, variantes, plafonds), champs d'identifiants vidés.",
           "bindings": "Les liaisons : { path, kind, sourceValue, label, hint }. sourceValue est la valeur d'origine — jamais réutilisée telle quelle.",
           "guardrails": "Règles propres à l'assistant (scope « assistant »). Les règles « core » sont retirées à l'import.",
           "fixtures": "Scénarios de test propres à l'assistant.",
