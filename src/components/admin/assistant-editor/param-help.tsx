@@ -94,17 +94,50 @@ function Section({ title, body }: { title: string; body: string }) {
 export function FieldLabel({
   path,
   htmlFor,
+  short,
+  after,
   children,
 }: {
   path: string;
   htmlFor?: string;
+  /**
+   * Coupe le préfixe de contexte du libellé (« Objectif principal — durée »
+   * devient « Durée »).
+   *
+   * Le registre qualifie chaque fiche par le cran auquel elle appartient, et
+   * c'est juste : la bulle d'aide s'ouvre hors de tout contexte. Dans une carte
+   * qui s'intitule DÉJÀ « Objectif principal », le même préfixe se répétait sur
+   * huit libellés d'affilée — huit lignes qui commencent par les mêmes trois
+   * mots, et l'œil doit aller au bout de chacune pour trouver ce qui diffère.
+   */
+  short?: boolean;
+  /** Élément aligné à droite du libellé (jauge, compteur). */
+  after?: React.ReactNode;
   children?: React.ReactNode;
 }) {
   const doc = useParamDoc(path);
+  const label = doc?.label ?? path;
   return (
     <div className="flex items-center gap-0.5">
-      <Label htmlFor={htmlFor}>{children ?? doc?.label ?? path}</Label>
+      <Label htmlFor={htmlFor}>{children ?? (short ? shortLabel(label) : label)}</Label>
       <ParamHelp path={path} />
+      {/* Collé au libellé, pas poussé au bord : une jauge alignée à droite
+          d'une colonne large flotte loin du mot qu'elle qualifie. */}
+      {after ? <span className="ml-1 flex items-center">{after}</span> : null}
     </div>
   );
+}
+
+/**
+ * « Objectif principal — nombre de disponibilités offertes » → « Nombre de
+ * disponibilités offertes ».
+ *
+ * Le tiret cadratin entouré d'espaces est la convention du registre ; un
+ * libellé qui n'en porte pas ressort intact.
+ */
+function shortLabel(label: string): string {
+  const cut = label.split(" — ");
+  if (cut.length < 2) return label;
+  const tail = cut.slice(1).join(" — ");
+  return tail.charAt(0).toUpperCase() + tail.slice(1);
 }

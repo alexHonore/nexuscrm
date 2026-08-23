@@ -51,6 +51,7 @@ export function ModelPicker({
   const [step, setStep] = useState<"lab" | "model" | "effort">("lab");
   const [lab, setLab] = useState<string>(() => labIdOf(value));
   const [query, setQuery] = useState("");
+  const [showOther, setShowOther] = useState(false);
 
   // Les variantes différées et gratuites sont écartées : moins chères à
   // l'affichage, inutilisables pour un assistant qui répond à un client.
@@ -78,6 +79,30 @@ export function ModelPicker({
       return known !== 0 ? known : b.count - a.count;
     });
   }, [byLab]);
+
+  /**
+   * Les laboratoires RÉPERTORIÉS, et les autres.
+   *
+   * Le catalogue d'OpenRouter compte une soixantaine de maisons, dont quarante
+   * qu'on ne sait pas décrire : elles s'affichaient toutes, en deux colonnes,
+   * quarante fois « Laboratoire non répertorié ». La première étape de
+   * l'entonnoir — celle qui doit faire gagner du temps — était le plus long
+   * écran de l'éditeur. Les vingt connues restent ; les autres attendent
+   * derrière un bouton, et la recherche traverse les deux.
+   */
+  const knownLabs = useMemo(() => labs.filter((l) => Boolean(LABS[l.brand.id])), [labs]);
+  const otherLabs = useMemo(() => labs.filter((l) => !LABS[l.brand.id]), [labs]);
+
+  /** La recherche du premier écran ne connaît pas de laboratoire : elle
+   *  cherche dans TOUS les modèles à la fois, pour qui sait déjà son nom. */
+  const globalMatches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (step !== "lab" || q === "") return [];
+    return usable
+      .filter((m) => m.label.toLowerCase().includes(q) || m.id.toLowerCase().includes(q))
+      .sort((a, b) => (a.inputPerMTok ?? 0) - (b.inputPerMTok ?? 0))
+      .slice(0, 40);
+  }, [usable, query, step]);
 
   const labModels = useMemo(() => {
     const list = byLab.get(lab) ?? [];
@@ -133,35 +158,82 @@ export function ModelPicker({
       <Steps step={step} />
 
       {step === "lab" ? (
-        <div className="grid gap-2 sm:grid-cols-2">
-          {labs.map(({ brand, count }) => (
-            <button
-              key={brand.id}
-              type="button"
-              className={cn(
-                "group flex items-start gap-3 rounded-xl border p-3 text-left transition-all",
-                "hover:-translate-y-0.5 hover:border-current hover:shadow-sm",
-                lab === brand.id && "border-current bg-muted/40",
-              )}
-              style={{ color: lab === brand.id ? brand.color : undefined }}
-              onClick={() => {
-                setLab(brand.id);
+        <div className="space-y-2">
+          <span className="relative flex">
+            <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="min-h-11 pl-8 md:min-h-9"
+              placeholder={t("model.searchAll")}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </span>
+
+          {query.trim() !== "" ? (
+            <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+              {globalMatches.map((model) => (
+                <ModelRow
+                  key={model.id}
+                  model={model}
+                  selected={model.id === value}
+                  onPick={() => {
+                    const nextEffort = model.supportsReasoning ? effort : "none";
+                    onChange({ model: model.id, effort: nextEffort });
+                    setLab(labIdOf(model.id));
+                    setQuery("");
+                    if (model.supportsReasoning) setStep("effort");
+                  }}
+                />
+              ))}
+              {globalMatches.length === 0 ? (
+                <p className="p-3 text-sm text-muted-foreground">{t("model.noMatch")}</p>
+              ) : null}
+            </div>
+          ) : (
+            <LabGrid
+              labs={knownLabs}
+              current={lab}
+              onPick={(id) => {
+                setLab(id);
                 setQuery("");
                 setStep("model");
               }}
-            >
-              <LabMark lab={brand} className="group-hover:scale-105" />
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2">
-                  <span className="font-medium text-foreground">{brand.name}</span>
-                  <Badge variant="secondary" className="text-[10px]">
-                    {count}
-                  </Badge>
-                </span>
-                <LabNote noteKey={brand.noteKey} />
-              </span>
-            </button>
-          ))}
+            />
+          )}
+
+          {query.trim() === "" && otherLabs.length > 0 ? (
+            showOther ? (
+              <div className="space-y-2">
+                <LabGrid
+                  labs={otherLabs}
+                  current={lab}
+                  onPick={(id) => {
+                    setLab(id);
+                    setQuery("");
+                    setStep("model");
+                  }}
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="min-h-11 md:min-h-8"
+                  onClick={() => setShowOther(false)}
+                >
+                  {t("model.hideOtherLabs")}
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-h-11 w-full md:min-h-9"
+                onClick={() => setShowOther(true)}
+              >
+                {t("model.otherLabs", { count: otherLabs.length })}
+              </Button>
+            )
+          ) : null}
+
           {labs.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("model.empty")}</p>
           ) : null}
@@ -186,66 +258,20 @@ export function ModelPicker({
           </div>
 
           <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
-            {labModels.map((model) => {
-              const selected = model.id === value;
-              return (
-                <button
-                  key={model.id}
-                  type="button"
-                  className={cn(
-                    "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors",
-                    "hover:border-primary hover:bg-primary/5",
-                    selected && "border-primary bg-primary/5",
-                  )}
-                  onClick={() => {
-                    // Un modèle sans réflexion ne doit pas garder un effort
-                    // hérité du précédent : le fournisseur rejetterait l'appel.
-                    const nextEffort = model.supportsReasoning ? effort : "none";
-                    onChange({ model: model.id, effort: nextEffort });
-                    if (model.supportsReasoning) setStep("effort");
-                  }}
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-sm font-medium">{model.label}</span>
-                      {selected ? <CheckIcon className="size-3.5 text-primary" /> : null}
-                    </span>
-                    <span className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">
-                      {model.id}
-                    </span>
-                    <span className="mt-1 flex flex-wrap items-center gap-1.5">
-                      {model.supportsTools ? (
-                        <Badge variant="outline" className="gap-1 text-[10px]">
-                          <WrenchIcon className="size-2.5" /> {t("model.tools")}
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-[10px] text-destructive">
-                          {t("model.noTools")}
-                        </Badge>
-                      )}
-                      {model.supportsReasoning ? (
-                        <Badge variant="outline" className="gap-1 text-[10px]">
-                          <ZapIcon className="size-2.5" /> {t("model.reasons")}
-                        </Badge>
-                      ) : null}
-                      {/* Signalé, pas masqué : derrière un alias le modèle
-                          change sans prévenir, et un assistant réglé sur
-                          celui d'hier répond autrement demain. */}
-                      {isFloatingAlias(model.id) ? (
-                        <Badge variant="outline" className="gap-1 text-[10px] text-amber-600">
-                          <TriangleAlertIcon className="size-2.5" /> {t("model.floating")}
-                        </Badge>
-                      ) : null}
-                      {model.inputPerMTok !== undefined ? (
-                        <span className="text-[11px] text-muted-foreground">
-                          {t("model.price", { price: model.inputPerMTok.toFixed(2) })}
-                        </span>
-                      ) : null}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
+            {labModels.map((model) => (
+              <ModelRow
+                key={model.id}
+                model={model}
+                selected={model.id === value}
+                onPick={() => {
+                  // Un modèle sans réflexion ne doit pas garder un effort
+                  // hérité du précédent : le fournisseur rejetterait l'appel.
+                  const nextEffort = model.supportsReasoning ? effort : "none";
+                  onChange({ model: model.id, effort: nextEffort });
+                  if (model.supportsReasoning) setStep("effort");
+                }}
+              />
+            ))}
             {labModels.length === 0 ? (
               <p className="p-3 text-sm text-muted-foreground">{t("model.noMatch")}</p>
             ) : null}
@@ -285,6 +311,117 @@ export function ModelPicker({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * La grille des laboratoires.
+ *
+ * Extraite parce qu'elle sert deux fois : les maisons connues, puis celles
+ * qu'on ne sait pas décrire, sous un bouton.
+ */
+function LabGrid({
+  labs,
+  current,
+  onPick,
+}: {
+  labs: { brand: LabBrand; count: number }[];
+  current: string;
+  onPick: (id: string) => void;
+}) {
+  return (
+    // Vingt maisons font encore une colonne d'un écran et demi : la liste
+    // défile DANS la carte, pour que les réglages qui la suivent (température,
+    // classificateur, repli) restent atteignables sans traverser le catalogue.
+    <div className="grid max-h-96 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+      {labs.map(({ brand, count }) => (
+        <button
+          key={brand.id}
+          type="button"
+          className={cn(
+            "group flex items-start gap-3 rounded-xl border p-3 text-left transition-all",
+            "hover:-translate-y-0.5 hover:border-current hover:shadow-sm",
+            current === brand.id && "border-current bg-muted/40",
+          )}
+          style={{ color: current === brand.id ? brand.color : undefined }}
+          onClick={() => onPick(brand.id)}
+        >
+          <LabMark lab={brand} className="group-hover:scale-105" />
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2">
+              <span className="font-medium text-foreground">{brand.name}</span>
+              <Badge variant="secondary" className="text-[10px]">
+                {count}
+              </Badge>
+            </span>
+            <LabNote noteKey={brand.noteKey} />
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Une ligne de modèle — le même dessin, qu'on arrive par la recherche ou par le laboratoire. */
+function ModelRow({
+  model,
+  selected,
+  onPick,
+}: {
+  model: ModelDescriptor;
+  selected: boolean;
+  onPick: () => void;
+}) {
+  const t = useTranslations("assistants");
+  return (
+    <button
+      type="button"
+      className={cn(
+        "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors",
+        "hover:border-primary hover:bg-primary/5",
+        selected && "border-primary bg-primary/5",
+      )}
+      onClick={onPick}
+    >
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-center gap-1.5">
+          <span className="text-sm font-medium">{model.label}</span>
+          {selected ? <CheckIcon className="size-3.5 text-primary" /> : null}
+        </span>
+        <span className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">
+          {model.id}
+        </span>
+        <span className="mt-1 flex flex-wrap items-center gap-1.5">
+          {model.supportsTools ? (
+            <Badge variant="outline" className="gap-1 text-[10px]">
+              <WrenchIcon className="size-2.5" /> {t("model.tools")}
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="text-[10px] text-destructive">
+              {t("model.noTools")}
+            </Badge>
+          )}
+          {model.supportsReasoning ? (
+            <Badge variant="outline" className="gap-1 text-[10px]">
+              <ZapIcon className="size-2.5" /> {t("model.reasons")}
+            </Badge>
+          ) : null}
+          {/* Signalé, pas masqué : derrière un alias le modèle change sans
+              prévenir, et un assistant réglé sur celui d'hier répond
+              autrement demain. */}
+          {isFloatingAlias(model.id) ? (
+            <Badge variant="outline" className="gap-1 text-[10px] text-amber-600">
+              <TriangleAlertIcon className="size-2.5" /> {t("model.floating")}
+            </Badge>
+          ) : null}
+          {model.inputPerMTok !== undefined ? (
+            <span className="text-[11px] text-muted-foreground">
+              {t("model.price", { price: model.inputPerMTok.toFixed(2) })}
+            </span>
+          ) : null}
+        </span>
+      </span>
+    </button>
   );
 }
 

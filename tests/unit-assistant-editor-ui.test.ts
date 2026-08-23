@@ -11,8 +11,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
 import { describe, expect, it, vi } from "vitest";
 import assistantsFr from "../messages/fr/assistants.json";
+import assistantsEn from "../messages/en/assistants.json";
 import commonFr from "../messages/fr/common.json";
-import { assistantConfigSchema } from "@/lib/assistants/schema";
+import { ASSISTANT_TOOLS, assistantConfigSchema } from "@/lib/assistants/schema";
 import { resolveParamDoc } from "@/lib/docs/locale";
 import { PARAM_DOCS } from "@/lib/docs/params";
 import type { AssistantEditorData } from "@/components/admin/assistant-editor/types";
@@ -318,6 +319,27 @@ describe("éditeur d'assistant", () => {
     expect(html).not.toMatch(/\btool\.[a-z_]+/);
   });
 
+  it("l'en-tête dit QUEL assistant on édite, et dans quel état", () => {
+    // L'écran n'affichait le nom nulle part : il vivait dans le champ « Nom »
+    // du premier onglet, et l'état (en service? prompt à jour? suite verte?)
+    // n'apparaissait pas du tout. On ouvrait un assistant sans savoir lequel.
+    const html = renderEditor({ status: "active", suitePassed: false, needsRecompile: true });
+    expect(html).toContain("Acheteur FB");
+    expect(html).toContain("Actif");
+    expect(html).toContain("À recompiler");
+    expect(html).toContain("Suite rouge");
+    expect(html).toContain("v1");
+  });
+
+  it("les douze onglets sont rangés par famille, chaque famille titrée", () => {
+    // Une barre d'une seule ligne montrait trois onglets et demi, le quatrième
+    // coupé au bord, sans rien qui dise qu'il y en avait huit de plus.
+    const html = renderEditor();
+    for (const group of ["Ce qu", "Ce qui le fait marcher", "Ce qui le vérifie", "Matière brute"]) {
+      expect(html, group).toContain(group);
+    }
+  });
+
   it("un assistant à jour n'affiche pas l'avertissement", () => {
     const html = renderEditor({ needsRecompile: false });
     expect(html).not.toContain("Prompt périmé");
@@ -469,6 +491,29 @@ describe("onglets rendus isolément", () => {
       // Les huit champs de qualification (dont « sector » et
       // « preferred_time », renommés sans que les libellés ne suivent).
       expect(html).not.toMatch(/qualificationField\.[a-z_]+/);
+      // …et les outils. Le contrôle ne portait que sur l'éditeur complet, qui
+      // n'affiche QUE l'onglet actif : « set_category » a donc vécu plusieurs
+      // versions en montrant sa clé brute dans l'onglet Outils.
+      expect(html).not.toMatch(/\btool\.[a-z_]+/);
+    }
+  });
+
+  it("chaque outil du schéma porte un libellé dans LES DEUX langues", () => {
+    // Ajouter un outil, c'est toucher au schéma ; les deux fichiers de
+    // messages sont ailleurs et restent en arrière sans que rien ne le dise.
+    for (const tool of ASSISTANT_TOOLS) {
+      expect(assistantsFr.tool, `fr — ${tool}`).toHaveProperty(tool);
+      expect(assistantsEn.tool, `en — ${tool}`).toHaveProperty(tool);
+    }
+  });
+
+  it("chaque onglet annonce CE QU'ON Y RÈGLE, dans les deux langues", () => {
+    // Douze onglets nommés d'un mot : « Approche » ou « Objectif » ne disent
+    // pas ce qu'on y trouve avant de l'avoir ouvert. L'aide d'en-tête le dit,
+    // et un onglet ajouté sans elle ne doit pas passer.
+    for (const id of Object.keys(assistantsFr.editor.tabs)) {
+      expect(assistantsFr.editor.tabHint, `fr — ${id}`).toHaveProperty(id);
+      expect(assistantsEn.editor.tabHint, `en — ${id}`).toHaveProperty(id);
     }
   });
 

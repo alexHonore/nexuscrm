@@ -40,6 +40,7 @@ import { LAYER_IDS, assistantConfigSchema, type LayerId } from "@/lib/assistants
 import type { GuardrailSeverity } from "@/lib/guardrails/types";
 import { cn } from "@/lib/utils";
 import { copyToClipboard } from "../api";
+import { EmptyRow, Panel, TabHead, ToggleRow, useTabHead } from "./layout";
 import { FieldLabel } from "./param-help";
 import type { TabProps } from "./types";
 
@@ -83,28 +84,36 @@ function SeverityBadge({
  */
 export function GuardrailsTab({ config, update, data }: TabProps) {
   const t = useTranslations("assistants");
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-3 rounded-md border p-3">
-        {/* La pastille est celle de l'onglet « Vérification » : ce réglage
-            parle de la suite, pas des règles listées en dessous. */}
-        <div className="flex min-w-0 items-center gap-2">
-          <LookIcon look={EDITOR_TAB_LOOK.test} size="sm" />
-          <FieldLabel path="requireSuitePass" />
-        </div>
-        <Switch
-          checked={config.requireSuitePass}
-          aria-label={t("editor.tabs.guardrails")}
-          onCheckedChange={(next) => update((d) => void (d.requireSuitePass = next))}
-        />
-      </div>
+  const head = useTabHead("guardrails");
+  const look = EDITOR_TAB_LOOK.guardrails;
 
-      <section className="space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="flex min-w-0 items-center gap-2 font-medium">
-            <LookIcon look={EDITOR_TAB_LOOK.guardrails} size="sm" />
-            <span className="min-w-0 break-words">{t("editor.guardrails.coreTitle")}</span>
-          </h3>
+  return (
+    <div className="space-y-4">
+      <TabHead look={look} title={head.title} hint={head.hint} />
+
+      {/* La pastille est celle de l'onglet « Vérification » : ce réglage parle
+          de la suite, pas des règles listées en dessous. */}
+      <ToggleRow
+        control={
+          <Switch
+            checked={config.requireSuitePass}
+            aria-label={t("editor.tabs.guardrails")}
+            onCheckedChange={(next) => update((d) => void (d.requireSuitePass = next))}
+          />
+        }
+      >
+        <LookIcon look={EDITOR_TAB_LOOK.test} size="sm" />
+        <FieldLabel path="requireSuitePass" />
+      </ToggleRow>
+
+      {/* L'édition des règles du noyau vit dans /admin/guardrails : les
+          dupliquer ici ferait croire qu'on modifie une règle pour CET
+          assistant alors qu'on la change pour tous. */}
+      <Panel
+        look={look}
+        title={t("editor.guardrails.coreTitle")}
+        description={t("editor.guardrails.coreNote")}
+        actions={
           <Button
             variant="outline"
             size="sm"
@@ -113,24 +122,18 @@ export function GuardrailsTab({ config, update, data }: TabProps) {
           >
             <ExternalLink /> {t("editor.guardrails.manage")}
           </Button>
-        </div>
-        <p className="text-sm text-muted-foreground">{t("editor.guardrails.coreNote")}</p>
+        }
+      >
         <RuleList rules={data.coreRules} />
-      </section>
+      </Panel>
 
-      <section className="space-y-2">
-        <h3 className="flex min-w-0 items-center gap-2 font-medium">
-          <LookIcon look={EDITOR_TAB_LOOK.guardrails} size="sm" />
-          <span className="min-w-0 break-words">{t("editor.guardrails.ownTitle")}</span>
-        </h3>
+      <Panel look={look} title={t("editor.guardrails.ownTitle")}>
         {data.ownRules.length === 0 ? (
-          <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-            {t("editor.guardrails.ownEmpty")}
-          </p>
+          <EmptyRow>{t("editor.guardrails.ownEmpty")}</EmptyRow>
         ) : (
           <RuleList rules={data.ownRules} />
         )}
-      </section>
+      </Panel>
     </div>
   );
 }
@@ -160,80 +163,86 @@ function RuleList({ rules }: { rules: TabProps["data"]["coreRules"] }) {
 
 export function PromptTab({ config, update, data }: TabProps) {
   const t = useTranslations("assistants");
+  const head = useTabHead("prompt");
+  const look = EDITOR_TAB_LOOK.prompt;
   const raw = config.promptMode === "raw";
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1.5">
-        <FieldLabel path="promptMode" />
-        <Select
-          items={[
-            { value: "composed", label: t("editor.prompt.modeComposed") },
-            { value: "raw", label: t("editor.prompt.modeRaw") },
-          ]}
-          value={config.promptMode}
-          onValueChange={(v) => update((d) => void (d.promptMode = String(v) as "composed" | "raw"))}
-        >
-          {/* Les deux modes décident QUI écrit le prompt — l'app ou la main. */}
-          <SelectTrigger className="min-h-11 w-full md:min-h-9 md:w-72">
-            <LookGlyph
-              look={ORIGIN_LOOK[raw ? "handwritten" : "generated"]}
-              className="size-3.5"
-            />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="composed">
-              <LookGlyph look={ORIGIN_LOOK.generated} className="size-3.5" />
-              {t("editor.prompt.modeComposed")}
-            </SelectItem>
-            <SelectItem value="raw">
-              <LookGlyph look={ORIGIN_LOOK.handwritten} className="size-3.5" />
-              {t("editor.prompt.modeRaw")}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+    <div className="space-y-4">
+      <TabHead look={look} title={head.title} hint={head.hint} />
 
-      {raw ? (
-        <>
-          <Alert>
-            <AlertTriangle />
-            <AlertDescription>{t("editor.prompt.rawWarning")}</AlertDescription>
-          </Alert>
-          <div className="space-y-1.5">
-            <FieldLabel path="systemPromptOverride" htmlFor="f-raw" />
-            <Textarea
-              id="f-raw"
-              rows={16}
-              className="font-mono text-xs"
-              value={config.systemPromptOverride ?? ""}
-              onChange={(e) =>
-                update((d) => void (d.systemPromptOverride = e.target.value || null))
-              }
-            />
-          </div>
-        </>
-      ) : (
-        <section className="space-y-3">
-          <FieldLabel path="layerOverrides" />
+      <Panel look={look} contentClassName="space-y-4">
+        <div className="space-y-1.5">
+          <FieldLabel path="promptMode" />
+          <Select
+            items={[
+              { value: "composed", label: t("editor.prompt.modeComposed") },
+              { value: "raw", label: t("editor.prompt.modeRaw") },
+            ]}
+            value={config.promptMode}
+            onValueChange={(v) =>
+              update((d) => void (d.promptMode = String(v) as "composed" | "raw"))
+            }
+          >
+            {/* Les deux modes décident QUI écrit le prompt — l'app ou la main. */}
+            <SelectTrigger className="min-h-11 w-full md:min-h-9 md:w-72">
+              <LookGlyph look={ORIGIN_LOOK[raw ? "handwritten" : "generated"]} className="size-3.5" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="composed">
+                <LookGlyph look={ORIGIN_LOOK.generated} className="size-3.5" />
+                {t("editor.prompt.modeComposed")}
+              </SelectItem>
+              <SelectItem value="raw">
+                <LookGlyph look={ORIGIN_LOOK.handwritten} className="size-3.5" />
+                {t("editor.prompt.modeRaw")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {raw ? (
+          <>
+            <Alert>
+              <AlertTriangle />
+              <AlertDescription>{t("editor.prompt.rawWarning")}</AlertDescription>
+            </Alert>
+            <div className="space-y-1.5">
+              <FieldLabel path="systemPromptOverride" htmlFor="f-raw" />
+              <Textarea
+                id="f-raw"
+                rows={16}
+                className="font-mono text-xs"
+                value={config.systemPromptOverride ?? ""}
+                onChange={(e) =>
+                  update((d) => void (d.systemPromptOverride = e.target.value || null))
+                }
+              />
+            </div>
+          </>
+        ) : (
           <div className="space-y-2">
+            <FieldLabel path="layerOverrides" />
             {LAYER_IDS.map((layer) => (
               <LayerRow key={layer} layer={layer} config={config} update={update} />
             ))}
           </div>
-        </section>
-      )}
+        )}
+      </Panel>
 
-      <section className="space-y-3">
-        <div className="flex items-center justify-between gap-3 rounded-md border p-3">
+      <Panel look={look} contentClassName="space-y-3">
+        <ToggleRow
+          control={
+            <Switch
+              checked={config.includeRuntimeLayer}
+              aria-label={t("editor.prompt.runtimeLayer")}
+              onCheckedChange={(next) => update((d) => void (d.includeRuntimeLayer = next))}
+            />
+          }
+        >
           <FieldLabel path="includeRuntimeLayer" />
-          <Switch
-            checked={config.includeRuntimeLayer}
-            aria-label={t("editor.prompt.runtimeLayer")}
-            onCheckedChange={(next) => update((d) => void (d.includeRuntimeLayer = next))}
-          />
-        </div>
+        </ToggleRow>
         <div className="space-y-1.5">
           <FieldLabel path="turnInstructions" htmlFor="f-turn" />
           <Textarea
@@ -244,23 +253,17 @@ export function PromptTab({ config, update, data }: TabProps) {
             onChange={(e) => update((d) => void (d.turnInstructions = e.target.value || null))}
           />
         </div>
-      </section>
+      </Panel>
 
-      <section className="space-y-2">
-        <h3 className="flex min-w-0 items-center gap-2 font-medium">
-          <LookIcon look={EDITOR_TAB_LOOK.prompt} size="sm" />
-          <span className="min-w-0 break-words">{t("editor.tabs.prompt")}</span>
-        </h3>
+      <Panel look={look} title={t("editor.tabs.prompt")}>
         {data.compiledPrompt ? (
-          <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 font-mono text-xs">
+          <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-lg border bg-muted/40 p-3 font-mono text-xs">
             {data.compiledPrompt}
           </pre>
         ) : (
-          <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-            {t("editor.prompt.notCompiled")}
-          </p>
+          <EmptyRow>{t("editor.prompt.notCompiled")}</EmptyRow>
         )}
-      </section>
+      </Panel>
     </div>
   );
 }
@@ -373,6 +376,8 @@ export function TestTab({
   running,
 }: TabProps & { onRunSuite: () => void; running: boolean }) {
   const t = useTranslations("assistants");
+  const head = useTabHead("test");
+  const look = EDITOR_TAB_LOOK.test;
   const run = data.lastRun;
   // Un vert affiché n'en est un que si le drapeau de la fiche le confirme :
   // une sauvegarde ou une recompilation l'efface sans toucher à l'exécution
@@ -381,15 +386,26 @@ export function TestTab({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <TabHead
+        look={look}
+        title={head.title}
+        hint={head.hint}
+        actions={
+          <Button onClick={onRunSuite} disabled={running} className="min-h-11 md:min-h-9">
+            {running ? <Loader2 className="animate-spin" /> : <PlayIcon />}
+            {running ? t("editor.runningSuite") : t("editor.test.run")}
+          </Button>
+        }
+      />
+
+      {/* Le verdict d'abord, en grand : « 13/14 » se lit, un rouge se voit. */}
+      <Panel look={run && !run.passed ? RESULT_LOOK.fail : look}>
         <div className="flex min-w-0 items-start gap-3">
-          {/* Le verdict de la suite en pastille : « 13/14 » se lit, un rouge se
-              voit. Le compte reste à côté — c'est lui qui dit combien. */}
-          {run ? <LookIcon look={RESULT_LOOK[run.passed ? "pass" : "fail"]} /> : null}
+          {run ? <LookIcon look={RESULT_LOOK[run.passed ? "pass" : "fail"]} size="lg" /> : null}
           <div className="min-w-0 space-y-1">
             {run ? (
               <>
-                <p className="text-sm">
+                <p className="font-heading text-base font-medium">
                   {t("editor.test.passed", { passed: run.passedCount, total: run.total })}
                 </p>
                 <p className="text-xs text-muted-foreground">
@@ -412,37 +428,43 @@ export function TestTab({
             )}
           </div>
         </div>
-        <Button onClick={onRunSuite} disabled={running} className="min-h-11 md:min-h-9">
-          {running ? <Loader2 className="animate-spin" /> : <PlayIcon />}
-          {running ? t("editor.runningSuite") : t("editor.test.run")}
-        </Button>
-      </div>
+      </Panel>
 
       {run ? (
-        <ul className="divide-y rounded-md border">
-          {run.results.map((r, i) => (
-            <li key={i} className="space-y-1 p-3 text-sm">
-              <div className="flex flex-wrap items-center gap-2">
-                {/* Coche ou croix : la forme dit déjà ce que dit la couleur,
-                    pour l'œil qui ne distingue pas le rouge du vert. */}
-                <LookGlyph look={RESULT_LOOK[r.passed ? "pass" : "fail"]} />
-                <span className="min-w-0 flex-1 break-words">{r.label}</span>
-                <SeverityBadge
-                  severity={r.severity}
-                  label={r.severity === "block" ? t("editor.test.blocking") : undefined}
-                />
-              </div>
-              {!r.passed && r.reason ? (
-                <p className="text-xs break-words text-muted-foreground">
-                  <span className="font-medium">{t("editor.test.reason")} :</span> {r.reason}
-                </p>
-              ) : null}
-              {!r.passed && r.output ? (
-                <p className="rounded bg-muted/50 p-2 font-mono text-xs break-words">{r.output}</p>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+        <Panel look={look} contentClassName="p-0">
+          <ul className="divide-y">
+            {run.results.map((r, i) => (
+              <li
+                key={i}
+                className={cn(
+                  "space-y-1 px-4 py-3 text-sm first:rounded-t-xl last:rounded-b-xl",
+                  !r.passed && "bg-destructive/5",
+                )}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Coche ou croix : la forme dit déjà ce que dit la couleur,
+                      pour l'œil qui ne distingue pas le rouge du vert. */}
+                  <LookGlyph look={RESULT_LOOK[r.passed ? "pass" : "fail"]} />
+                  <span className="min-w-0 flex-1 break-words">{r.label}</span>
+                  <SeverityBadge
+                    severity={r.severity}
+                    label={r.severity === "block" ? t("editor.test.blocking") : undefined}
+                  />
+                </div>
+                {!r.passed && r.reason ? (
+                  <p className="text-xs break-words text-muted-foreground">
+                    <span className="font-medium">{t("editor.test.reason")} :</span> {r.reason}
+                  </p>
+                ) : null}
+                {!r.passed && r.output ? (
+                  <p className="rounded-md bg-background p-2 font-mono text-xs break-words ring-1 ring-border">
+                    {r.output}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </Panel>
       ) : null}
     </div>
   );
@@ -452,6 +474,8 @@ export function TestTab({
 
 export function JsonTab({ config, update, data }: TabProps) {
   const t = useTranslations("assistants");
+  const head = useTabHead("json");
+  const look = EDITOR_TAB_LOOK.json;
   const [draft, setDraft] = useState(() => JSON.stringify(config, null, 2));
   const [error, setError] = useState<string | null>(null);
 
@@ -468,54 +492,58 @@ export function JsonTab({ config, update, data }: TabProps) {
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <Label htmlFor="f-json">
-          <LookIcon look={EDITOR_TAB_LOOK.json} size="sm" />
-          {t("editor.json.title")}
-        </Label>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="min-h-11 md:min-h-9"
-            onClick={() =>
-              void copyToClipboard(draft).then((ok) =>
-                ok ? toast.success(t("editor.json.copied")) : undefined,
-              )
-            }
-          >
-            <Copy /> {t("editor.json.copy")}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="min-h-11 md:min-h-9"
-            render={<a href={`/api/assistants/${data.id}/export`} download />}
-          >
-            <DownloadIcon /> {t("editor.json.download")}
-          </Button>
-          <Button size="sm" className="min-h-11 md:min-h-9" onClick={apply}>
-            {t("editor.json.apply")}
-          </Button>
-        </div>
-      </div>
-
-      <Textarea
-        id="f-json"
-        rows={22}
-        className="font-mono text-xs"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        aria-invalid={error !== null || undefined}
+    <div className="space-y-4">
+      <TabHead
+        look={look}
+        title={head.title}
+        hint={head.hint}
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-h-11 md:min-h-9"
+              onClick={() =>
+                void copyToClipboard(draft).then((ok) =>
+                  ok ? toast.success(t("editor.json.copied")) : undefined,
+                )
+              }
+            >
+              <Copy /> {t("editor.json.copy")}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-h-11 md:min-h-9"
+              render={<a href={`/api/assistants/${data.id}/export`} download />}
+            >
+              <DownloadIcon /> {t("editor.json.download")}
+            </Button>
+            <Button size="sm" className="min-h-11 md:min-h-9" onClick={apply}>
+              {t("editor.json.apply")}
+            </Button>
+          </>
+        }
       />
 
-      {error ? (
-        <Alert variant="destructive">
-          <AlertTriangle />
-          <AlertDescription className="font-mono text-xs">{error}</AlertDescription>
-        </Alert>
-      ) : null}
+      <Panel look={look} contentClassName="space-y-3">
+        <Label htmlFor="f-json">{t("editor.json.title")}</Label>
+        <Textarea
+          id="f-json"
+          rows={22}
+          className="font-mono text-xs"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          aria-invalid={error !== null || undefined}
+        />
+
+        {error ? (
+          <Alert variant="destructive">
+            <AlertTriangle />
+            <AlertDescription className="font-mono text-xs">{error}</AlertDescription>
+          </Alert>
+        ) : null}
+      </Panel>
     </div>
   );
 }

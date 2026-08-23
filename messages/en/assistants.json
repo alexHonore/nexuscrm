@@ -263,7 +263,9 @@
       "instructionPlaceholder": "e.g. present it as a short call, no commitment.",
       "customRequirementPlaceholder": "Another piece of information to obtain…",
       "addRequirement": "Add",
-      "removeRequirement": "Remove the \"{name}\" requirement"
+      "removeRequirement": "Remove the \"{name}\" requirement",
+      "primaryHint": "What the assistant aims for first, and what it must have learned before booking.",
+      "fallbackHint": "A fallback is one notch down, not more insistence."
     },
     "knowledge": {
       "add": "Add an entry",
@@ -334,7 +336,14 @@
       "noTools": "No tools",
       "toolWarning": "This model does not support tools: the assistant will not be able to check the calendar or book.",
       "routingTitle": "Routing (OpenRouter)",
-      "routingNote": "These values apply to the router only; direct providers ignore them."
+      "routingNote": "These values apply to the router only; direct providers ignore them.",
+      "sectionMain": "Writing model",
+      "sectionMainHint": "The one that writes the messages sent to clients.",
+      "sectionClassifier": "Classifier",
+      "sectionClassifierHint": "A second, smaller model that reads incoming replies. Fast and cheap is enough.",
+      "sectionFallback": "Fallback",
+      "sectionFallbackHint": "The model called if the main one is unavailable. With no fallback, the message is not sent.",
+      "noFallback": "No fallback: if the main model does not answer, the message is not sent."
     },
     "prompt": {
       "modeComposed": "Composed from the tabs",
@@ -388,7 +397,46 @@
       "signaturePreview": "Signature preview",
       "noSignature": "No signature",
       "noSecondLanguage": "None — a single language",
-      "secondLanguageHint": "The assistant switches to this language if the person writes in it. Its first message stays in the primary language."
+      "secondLanguageHint": "The assistant switches to this language if the person writes in it. Its first message stays in the primary language.",
+      "sectionNaming": "Name and description",
+      "sectionNamingHint": "What you use to recognise it in the list. The client never sees it.",
+      "sectionLanguage": "Languages",
+      "sectionLanguageHint": "The one it writes in — unrelated to the language of this interface.",
+      "sectionWho": "Who is speaking",
+      "sectionWhoHint": "The name used in the messages, and the broker the meetings go to.",
+      "sectionSignature": "Signature and transparency"
+    },
+    "untitled": "Unnamed assistant",
+    "version": "v{n}",
+    "more": "More actions",
+    "groups": {
+      "speech": "What it says",
+      "machinery": "What makes it run",
+      "scrutiny": "What checks it",
+      "raw": "Raw material"
+    },
+    "tabHint": {
+      "identity": "Who writes, in what language, and how it signs off.",
+      "goal": "What the assistant is after, and what it offers when someone puts it off.",
+      "approach": "Tone, message length, and how hard it pushes.",
+      "knowledge": "What it may state as fact, and the rules of conduct it follows.",
+      "objections": "Ready answers to the objections you hear every day.",
+      "tools": "The actions it can take in the CRM and in the calendar.",
+      "model": "Which model writes the messages, and at what cost.",
+      "prompt": "The exact text sent to the model, layer by layer.",
+      "guardrails": "What it may never do — and what stops a message going out.",
+      "sandbox": "A practice conversation: nothing is sent, nothing is saved.",
+      "test": "Scripted situations replayed against the assistant before it goes live.",
+      "json": "The whole configuration, exactly as it is stored."
+    },
+    "approach": {
+      "sectionTone": "Tone",
+      "sectionToneHint": "How it addresses the person.",
+      "sectionRhythm": "Pace and length",
+      "sectionRhythmHint": "How much it writes, how much it asks, and how far it follows up."
+    },
+    "guardrailsSection": {
+      "gate": "Activation gate"
     }
   },
   "import": {
@@ -444,7 +492,8 @@
     "stop": "Stop and unsubscribe",
     "handoff": "Hand off to a human",
     "transfer_assistant": "Transfer to another assistant",
-    "close_conversation": "Close the conversation"
+    "close_conversation": "Close the conversation",
+    "set_category": "File the record"
   },
   "cancel": "Cancel",
   "goalTypeHint": {
@@ -709,7 +758,11 @@
       "openrouter": "Automatic routers — the actual model changes from call to call; avoid for a tuned assistant.",
       "autre": "Unlisted lab."
     },
-    "noneChosen": "No model chosen"
+    "noneChosen": "No model chosen",
+    "otherLabs": "Show the {count} other labs",
+    "hideOtherLabs": "Hide unlisted labs",
+    "searchAll": "Search every model…",
+    "allResults": "{count} models"
   },
   "create": {
     "title": "Create an assistant",

@@ -263,7 +263,9 @@
       "instructionPlaceholder": "Ex. : présente-le comme un appel court, sans engagement.",
       "customRequirementPlaceholder": "Autre information à obtenir…",
       "addRequirement": "Ajouter",
-      "removeRequirement": "Retirer l'exigence « {name} »"
+      "removeRequirement": "Retirer l'exigence « {name} »",
+      "primaryHint": "Ce que l'assistant vise en premier, et ce qu'il doit avoir appris avant de réserver.",
+      "fallbackHint": "Un repli est un cran plus bas, pas une insistance."
     },
     "knowledge": {
       "add": "Ajouter une entrée",
@@ -334,7 +336,14 @@
       "noTools": "Sans outils",
       "toolWarning": "Ce modèle ne prend pas en charge les outils : l'assistant ne pourra ni consulter l'agenda ni réserver.",
       "routingTitle": "Routage (OpenRouter)",
-      "routingNote": "Ces valeurs ne s'appliquent qu'au routeur ; les fournisseurs directs les ignorent."
+      "routingNote": "Ces valeurs ne s'appliquent qu'au routeur ; les fournisseurs directs les ignorent.",
+      "sectionMain": "Modèle générateur",
+      "sectionMainHint": "Celui qui écrit les messages envoyés aux clients.",
+      "sectionClassifier": "Classificateur",
+      "sectionClassifierHint": "Un second modèle, plus petit, qui lit les réponses entrantes. Un modèle rapide et peu coûteux suffit.",
+      "sectionFallback": "Repli",
+      "sectionFallbackHint": "Le modèle appelé si le principal est indisponible. Sans repli, le message n'est pas envoyé.",
+      "noFallback": "Aucun repli : si le modèle principal ne répond pas, le message n'est pas envoyé."
     },
     "prompt": {
       "modeComposed": "Composé depuis les onglets",
@@ -388,7 +397,46 @@
       "signaturePreview": "Aperçu de la signature",
       "noSignature": "Aucune signature",
       "noSecondLanguage": "Aucune — une seule langue",
-      "secondLanguageHint": "L'assistant bascule dans cette langue si la personne y écrit. Son premier message reste dans la langue principale."
+      "secondLanguageHint": "L'assistant bascule dans cette langue si la personne y écrit. Son premier message reste dans la langue principale.",
+      "sectionNaming": "Nom et description",
+      "sectionNamingHint": "Ce qui vous sert à le reconnaître dans la liste. Le client ne le voit jamais.",
+      "sectionLanguage": "Langues",
+      "sectionLanguageHint": "Celle dans laquelle il écrit — sans rapport avec la langue de cette interface.",
+      "sectionWho": "Qui parle",
+      "sectionWhoHint": "Le nom prononcé dans les messages, et le courtier à qui les rendez-vous reviennent.",
+      "sectionSignature": "Signature et transparence"
+    },
+    "untitled": "Assistant sans nom",
+    "version": "v{n}",
+    "more": "Autres actions",
+    "groups": {
+      "speech": "Ce qu'il dit",
+      "machinery": "Ce qui le fait marcher",
+      "scrutiny": "Ce qui le vérifie",
+      "raw": "Matière brute"
+    },
+    "tabHint": {
+      "identity": "Qui écrit, dans quelle langue, et comment il signe.",
+      "goal": "Ce que l'assistant cherche à obtenir, et ce qu'il propose quand on repousse.",
+      "approach": "Le ton, la longueur des messages et l'insistance.",
+      "knowledge": "Ce qu'il a le droit d'affirmer, et les consignes de conduite.",
+      "objections": "Les réponses toutes prêtes aux objections que vous entendez tous les jours.",
+      "tools": "Les gestes qu'il peut poser dans le CRM et dans l'agenda.",
+      "model": "Quel modèle écrit les messages, et à quel coût.",
+      "prompt": "Le texte exact envoyé au modèle, couche par couche.",
+      "guardrails": "Ce qu'il n'a jamais le droit de faire — et ce qui bloque un envoi.",
+      "sandbox": "Une conversation d'essai : rien n'est envoyé, rien n'est enregistré.",
+      "test": "Les mises en situation rejouées contre l'assistant avant sa mise en service.",
+      "json": "La configuration entière, telle qu'elle est enregistrée."
+    },
+    "approach": {
+      "sectionTone": "Le ton",
+      "sectionToneHint": "Comment il s'adresse à la personne.",
+      "sectionRhythm": "Le rythme et la longueur",
+      "sectionRhythmHint": "Combien il écrit, combien il demande, et jusqu'où il relance."
+    },
+    "guardrailsSection": {
+      "gate": "Porte d'activation"
     }
   },
   "import": {
@@ -444,7 +492,8 @@
     "stop": "Arrêter et désabonner",
     "handoff": "Passer à un humain",
     "transfer_assistant": "Transférer vers un autre assistant",
-    "close_conversation": "Clore la conversation"
+    "close_conversation": "Clore la conversation",
+    "set_category": "Ranger la fiche"
   },
   "cancel": "Annuler",
   "goalTypeHint": {
@@ -709,7 +758,11 @@
       "openrouter": "Routeurs automatiques — le modèle réel change d'un appel à l'autre, à éviter pour un assistant réglé.",
       "autre": "Laboratoire non répertorié."
     },
-    "noneChosen": "Aucun modèle choisi"
+    "noneChosen": "Aucun modèle choisi",
+    "otherLabs": "Voir les {count} autres laboratoires",
+    "hideOtherLabs": "Masquer les laboratoires non répertoriés",
+    "searchAll": "Chercher dans tous les modèles…",
+    "allResults": "{count} modèles"
   },
   "create": {
     "title": "Créer un assistant",

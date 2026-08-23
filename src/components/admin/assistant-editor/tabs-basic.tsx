@@ -44,6 +44,15 @@ import {
 import { Label } from "@/components/ui/label";
 import { signatureFor } from "@/lib/agent/compile";
 import { cn } from "@/lib/utils";
+import {
+  EmptyRow,
+  FieldNote,
+  Fields,
+  Panel,
+  TabHead,
+  WideField,
+  useTabHead,
+} from "./layout";
 import { FieldLabel, useParamDoc } from "./param-help";
 import { ObjectionPacksEditor } from "./objection-packs";
 import type { TabProps } from "./types";
@@ -77,11 +86,12 @@ function ScaleField({
       {/* Trois curseurs 1-5 voisins (persistance, proactivité, chaleur) ne se
           comparaient qu'en lisant trois libellés nommés. Remplis jusqu'à la
           valeur, ils se situent d'un coup d'œil — le libellé du choix reste
-          seul porteur du sens, la jauge ne fait que le doubler. */}
-      <div className="flex items-center justify-between gap-2">
-        <FieldLabel path={path} />
-        <ScaleMeter value={value} max={options.length} />
-      </div>
+          seul porteur du sens, la jauge ne fait que le doubler.
+
+          La jauge suit le libellé de PRÈS : poussée au bord droit d'une
+          colonne large, elle flottait dans le vide, à trente centimètres du
+          mot qu'elle qualifie. */}
+      <FieldLabel path={path} after={<ScaleMeter value={value} max={options.length} />} />
       <Select
         items={options.map((o) => ({ value: String(o.value), label: o.label }))}
         value={String(value)}
@@ -192,179 +202,213 @@ function signaturePreview(config: TabProps["config"]): string | null {
 
 export function IdentityTab({ config, update, data }: TabProps) {
   const t = useTranslations("assistants");
-  return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <div className="space-y-1.5 md:col-span-2">
-        <FieldLabel path="name" htmlFor="f-name" />
-        <Input
-          id="f-name"
-          value={config.name}
-          onChange={(e) => update((d) => void (d.name = e.target.value))}
-          className="min-h-11 md:min-h-9"
-        />
-      </div>
+  const head = useTabHead("identity");
+  const look = EDITOR_TAB_LOOK.identity;
 
-      <div className="space-y-1.5 md:col-span-2">
-        <FieldLabel path="description" htmlFor="f-description" />
-        <Textarea
-          id="f-description"
-          rows={2}
-          value={config.description ?? ""}
-          onChange={(e) => update((d) => void (d.description = e.target.value || null))}
-        />
-      </div>
+  return (
+    <div className="space-y-4">
+      <TabHead look={look} title={head.title} hint={head.hint} />
+
+      <Panel
+        look={look}
+        title={t("editor.identity.sectionNaming")}
+        description={t("editor.identity.sectionNamingHint")}
+      >
+        <Fields>
+          <WideField>
+            <FieldLabel path="name" htmlFor="f-name" />
+            <Input
+              id="f-name"
+              value={config.name}
+              onChange={(e) => update((d) => void (d.name = e.target.value))}
+              className="min-h-11 md:min-h-9"
+            />
+          </WideField>
+          <WideField>
+            <FieldLabel path="description" htmlFor="f-description" />
+            <Textarea
+              id="f-description"
+              rows={2}
+              value={config.description ?? ""}
+              onChange={(e) => update((d) => void (d.description = e.target.value || null))}
+            />
+          </WideField>
+        </Fields>
+      </Panel>
 
       {/* La langue vit ICI, avec le nom et l'organisation : c'est une donnée
           d'identité de l'assistant, pas un réglage technique. Elle était
           enregistrée sans jamais être modifiable ni compilée. */}
-      <EnumField
-        path="language"
-        value={config.language}
-        onChange={(v) => update((d) => void (d.language = v as AssistantLanguage))}
-      />
+      <Panel
+        look={look}
+        title={t("editor.identity.sectionLanguage")}
+        description={t("editor.identity.sectionLanguageHint")}
+      >
+        <Fields>
+          <EnumField
+            path="language"
+            value={config.language}
+            onChange={(v) => update((d) => void (d.language = v as AssistantLanguage))}
+          />
+          <div className="space-y-1.5">
+            <FieldLabel path="secondaryLanguage" />
+            <Select
+              items={[
+                { value: NONE, label: t("editor.identity.noSecondLanguage") },
+                ...ASSISTANT_LANGUAGES.filter((l) => l !== config.language).map((l) => ({
+                  value: l,
+                  label: t(`language.${l}`),
+                })),
+              ]}
+              value={config.secondaryLanguage ?? NONE}
+              onValueChange={(v) =>
+                update((d) => {
+                  d.secondaryLanguage = v === NONE ? null : (String(v) as AssistantLanguage);
+                })
+              }
+            >
+              <SelectTrigger className="min-h-11 w-full md:min-h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE}>{t("editor.identity.noSecondLanguage")}</SelectItem>
+                {ASSISTANT_LANGUAGES.filter((l) => l !== config.language).map((l) => (
+                  <SelectItem key={l} value={l}>
+                    {t(`language.${l}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FieldNote>{t("editor.identity.secondLanguageHint")}</FieldNote>
+          </div>
+        </Fields>
+      </Panel>
 
-      <div className="space-y-1.5">
-        <FieldLabel path="secondaryLanguage" />
-        <Select
-          items={[
-            { value: NONE, label: t("editor.identity.noSecondLanguage") },
-            ...ASSISTANT_LANGUAGES.filter((l) => l !== config.language).map((l) => ({
-              value: l,
-              label: t(`language.${l}`),
-            })),
-          ]}
-          value={config.secondaryLanguage ?? NONE}
-          onValueChange={(v) =>
-            update((d) => {
-              d.secondaryLanguage = v === NONE ? null : (String(v) as AssistantLanguage);
-            })
-          }
-        >
-          <SelectTrigger className="min-h-11 w-full md:min-h-9">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={NONE}>{t("editor.identity.noSecondLanguage")}</SelectItem>
-            {ASSISTANT_LANGUAGES.filter((l) => l !== config.language).map((l) => (
-              <SelectItem key={l} value={l}>
-                {t(`language.${l}`)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-xs text-muted-foreground">{t("editor.identity.secondLanguageHint")}</p>
-      </div>
+      <Panel
+        look={look}
+        title={t("editor.identity.sectionWho")}
+        description={t("editor.identity.sectionWhoHint")}
+      >
+        <Fields>
+          <EnumField
+            path="identity.mode"
+            value={config.identity.mode}
+            onChange={(v) => update((d) => void (d.identity.mode = v as "team" | "named_person"))}
+          />
 
-      <EnumField
-        path="identity.mode"
-        value={config.identity.mode}
-        onChange={(v) => update((d) => void (d.identity.mode = v as "team" | "named_person"))}
-      />
+          <div className="space-y-1.5">
+            <FieldLabel path="identity.orgName" htmlFor="f-org" />
+            <Input
+              id="f-org"
+              value={config.identity.orgName}
+              onChange={(e) => update((d) => void (d.identity.orgName = e.target.value))}
+              className="min-h-11 md:min-h-9"
+            />
+          </div>
 
-      <div className="space-y-1.5">
-        <FieldLabel path="identity.orgName" htmlFor="f-org" />
-        <Input
-          id="f-org"
-          value={config.identity.orgName}
-          onChange={(e) => update((d) => void (d.identity.orgName = e.target.value))}
-          className="min-h-11 md:min-h-9"
-        />
-      </div>
-
-      {/* Le courtier se choisit UNE fois : sélectionner la personne remplit le
-          nom ET rattache le compte. Deux champs séparés — un nom libre d'un
-          côté, un compte de l'autre — laissaient écrire « Alex » et rattacher
-          quelqu'un d'autre sans que rien ne le signale. */}
-      <div className="space-y-1.5 md:col-span-2">
-        <FieldLabel path="identity.brokerName" htmlFor="f-broker" />
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Select
-            items={[
-              { value: FREE_TEXT, label: t("editor.identity.freeText") },
-              ...data.users.map((u) => ({ value: u.id, label: u.name })),
-            ]}
-            value={config.identity.brokerUserId ?? FREE_TEXT}
-            onValueChange={(v) =>
-              update((d) => {
-                if (v === FREE_TEXT) {
-                  d.identity.brokerUserId = null;
-                  return;
+          {/* Le courtier se choisit UNE fois : sélectionner la personne remplit
+              le nom ET rattache le compte. Deux champs séparés — un nom libre
+              d'un côté, un compte de l'autre — laissaient écrire « Alex » et
+              rattacher quelqu'un d'autre sans que rien ne le signale. */}
+          <WideField>
+            <FieldLabel path="identity.brokerName" htmlFor="f-broker" />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Select
+                items={[
+                  { value: FREE_TEXT, label: t("editor.identity.freeText") },
+                  ...data.users.map((u) => ({ value: u.id, label: u.name })),
+                ]}
+                value={config.identity.brokerUserId ?? FREE_TEXT}
+                onValueChange={(v) =>
+                  update((d) => {
+                    if (v === FREE_TEXT) {
+                      d.identity.brokerUserId = null;
+                      return;
+                    }
+                    const picked = data.users.find((u) => u.id === String(v));
+                    d.identity.brokerUserId = String(v);
+                    if (picked) d.identity.brokerName = picked.name;
+                  })
                 }
-                const picked = data.users.find((u) => u.id === String(v));
-                d.identity.brokerUserId = String(v);
-                if (picked) d.identity.brokerName = picked.name;
-              })
+              >
+                <SelectTrigger className="min-h-11 w-full md:min-h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={FREE_TEXT}>{t("editor.identity.freeText")}</SelectItem>
+                  {data.users.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.name} — {u.email}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                id="f-broker"
+                value={config.identity.brokerName}
+                disabled={config.identity.brokerUserId !== null}
+                onChange={(e) => update((d) => void (d.identity.brokerName = e.target.value))}
+                className="min-h-11 md:min-h-9"
+              />
+            </div>
+            <FieldNote>
+              {config.identity.brokerUserId === null
+                ? t("editor.identity.freeTextHint")
+                : t("editor.identity.linkedHint")}
+            </FieldNote>
+          </WideField>
+
+          {config.identity.mode === "named_person" && !config.identity.brokerUserId ? (
+            <Alert className="md:col-span-2">
+              <AlertTriangle />
+              <AlertDescription>{t("editor.identity.namedPersonWarning")}</AlertDescription>
+            </Alert>
+          ) : null}
+        </Fields>
+      </Panel>
+
+      <Panel look={look} title={t("editor.identity.sectionSignature")}>
+        <Fields>
+          <EnumField
+            path="identity.signature"
+            value={config.identity.signature}
+            onChange={(v) =>
+              update((d) => void (d.identity.signature = v as typeof d.identity.signature))
             }
-          >
-            <SelectTrigger className="min-h-11 w-full md:min-h-9">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={FREE_TEXT}>{t("editor.identity.freeText")}</SelectItem>
-              {data.users.map((u) => (
-                <SelectItem key={u.id} value={u.id}>
-                  {u.name} — {u.email}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Input
-            id="f-broker"
-            value={config.identity.brokerName}
-            disabled={config.identity.brokerUserId !== null}
-            onChange={(e) => update((d) => void (d.identity.brokerName = e.target.value))}
-            className="min-h-11 md:min-h-9"
           />
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {config.identity.brokerUserId === null
-            ? t("editor.identity.freeTextHint")
-            : t("editor.identity.linkedHint")}
-        </p>
-      </div>
 
-      <EnumField
-        path="identity.signature"
-        value={config.identity.signature}
-        onChange={(v) =>
-          update((d) => void (d.identity.signature = v as typeof d.identity.signature))
-        }
-      />
+          {config.identity.signature === "custom" ? (
+            <div className="space-y-1.5">
+              <FieldLabel path="identity.signatureText" htmlFor="f-signature-text" />
+              <Input
+                id="f-signature-text"
+                maxLength={60}
+                placeholder={t("editor.identity.signaturePlaceholder")}
+                value={config.identity.signatureText ?? ""}
+                onChange={(e) =>
+                  update((d) => void (d.identity.signatureText = e.target.value || null))
+                }
+                className="min-h-11 md:min-h-9"
+              />
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label>{t("editor.identity.signaturePreview")}</Label>
+              <p className="flex min-h-11 items-center rounded-lg border bg-muted/40 px-3 text-sm text-muted-foreground md:min-h-9">
+                {signaturePreview(config) ?? t("editor.identity.noSignature")}
+              </p>
+            </div>
+          )}
 
-      {config.identity.signature === "custom" ? (
-        <div className="space-y-1.5">
-          <FieldLabel path="identity.signatureText" htmlFor="f-signature-text" />
-          <Input
-            id="f-signature-text"
-            maxLength={60}
-            placeholder={t("editor.identity.signaturePlaceholder")}
-            value={config.identity.signatureText ?? ""}
-            onChange={(e) => update((d) => void (d.identity.signatureText = e.target.value || null))}
-            className="min-h-11 md:min-h-9"
+          <EnumField
+            path="identity.aiDisclosure"
+            value={config.identity.aiDisclosure}
+            onChange={(v) =>
+              update((d) => void (d.identity.aiDisclosure = v as "on_request" | "upfront"))
+            }
           />
-        </div>
-      ) : (
-        <div className="space-y-1.5">
-          <Label>{t("editor.identity.signaturePreview")}</Label>
-          <p className="flex min-h-11 items-center rounded-md border bg-muted/40 px-3 text-sm text-muted-foreground md:min-h-9">
-            {signaturePreview(config) ?? t("editor.identity.noSignature")}
-          </p>
-        </div>
-      )}
-      <EnumField
-        path="identity.aiDisclosure"
-        value={config.identity.aiDisclosure}
-        onChange={(v) =>
-          update((d) => void (d.identity.aiDisclosure = v as "on_request" | "upfront"))
-        }
-      />
-
-      {config.identity.mode === "named_person" && !config.identity.brokerUserId ? (
-        <Alert className="md:col-span-2">
-          <AlertTriangle />
-          <AlertDescription>{t("editor.identity.namedPersonWarning")}</AlertDescription>
-        </Alert>
-      ) : null}
+        </Fields>
+      </Panel>
     </div>
   );
 }
@@ -475,8 +519,8 @@ function GoalStepFields({
   const accent = GOAL_LOOK[step.type];
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <div className="space-y-1.5 md:col-span-2">
+    <Fields>
+      <WideField>
         <FieldLabel path={`${prefix}.type`}>{t("editor.goal.whatToObtain")}</FieldLabel>
         <Select
           items={GOAL_TYPES.map((g) => ({ value: g, label: t(`goalType.${g}`) }))}
@@ -543,7 +587,7 @@ function GoalStepFields({
           <LookGlyph look={GOAL_LOOK[step.type]} className="mt-px size-3.5" />
           <span className="min-w-0">{t(`goalTypeHint.${step.type}`)}</span>
         </p>
-      </div>
+      </WideField>
 
       {/* Durée, lieu et nombre de plages ne sont QUE les réglages de la
           réservation : rassemblés dans un bloc à la couleur de l'objectif, ils
@@ -552,14 +596,14 @@ function GoalStepFields({
           se retrouvait sous les champs de qualification, loin de la durée. */}
       {books ? (
         <div
-          className="grid gap-4 rounded-lg border border-l-4 p-3 md:col-span-2 md:grid-cols-3"
+          className="grid gap-4 rounded-lg border border-l-[3px] p-3 md:col-span-2 md:grid-cols-3"
           style={{
             borderLeftColor: accent.color,
             backgroundColor: lookTint(accent).backgroundColor,
           }}
         >
           <div className="space-y-1.5">
-            <FieldLabel path={`${prefix}.durationMin`} htmlFor={`${prefix}-duration`} />
+            <FieldLabel short path={`${prefix}.durationMin`} htmlFor={`${prefix}-duration`} />
             <Input
               id={`${prefix}-duration`}
               type="number"
@@ -572,12 +616,12 @@ function GoalStepFields({
                   (s) => void (s.durationMin = e.target.value ? Number(e.target.value) : null),
                 )
               }
-              className="min-h-11 md:min-h-9"
+              className="min-h-11 bg-background md:min-h-9"
             />
           </div>
 
           <div className="space-y-1.5">
-            <FieldLabel path={`${prefix}.slotOfferCount`} htmlFor={`${prefix}-slots`} />
+            <FieldLabel short path={`${prefix}.slotOfferCount`} htmlFor={`${prefix}-slots`} />
             <Input
               id={`${prefix}-slots`}
               type="number"
@@ -586,41 +630,72 @@ function GoalStepFields({
               max={3}
               value={step.slotOfferCount}
               onChange={(e) => onChange((s) => void (s.slotOfferCount = Number(e.target.value)))}
-              className="min-h-11 md:min-h-9"
+              className="min-h-11 bg-background md:min-h-9"
             />
           </div>
+
+          <div className="space-y-1.5">
+            <FieldLabel short path={`${prefix}.withUserId`} />
+            <Select
+              items={[
+                { value: NONE, label: "—" },
+                ...data.users.map((u) => ({ value: u.id, label: u.name })),
+              ]}
+              value={step.withUserId ?? NONE}
+              onValueChange={(v) =>
+                onChange((s) => void (s.withUserId = v === NONE ? null : String(v)))
+              }
+            >
+              <SelectTrigger className="min-h-11 w-full bg-background md:min-h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE}>—</SelectItem>
+                {data.users.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    {u.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-      ) : null}
+      ) : (
+        <div className="space-y-1.5">
+          <FieldLabel short path={`${prefix}.withUserId`} />
+          <Select
+            items={[
+              { value: NONE, label: "—" },
+              ...data.users.map((u) => ({ value: u.id, label: u.name })),
+            ]}
+            value={step.withUserId ?? NONE}
+            onValueChange={(v) =>
+              onChange((s) => void (s.withUserId = v === NONE ? null : String(v)))
+            }
+          >
+            <SelectTrigger className="min-h-11 w-full md:min-h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE}>—</SelectItem>
+              {data.users.map((u) => (
+                <SelectItem key={u.id} value={u.id}>
+                  {u.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
-      <div className="space-y-1.5">
-        <FieldLabel path={`${prefix}.withUserId`} />
-        <Select
-          items={[
-            { value: NONE, label: "—" },
-            ...data.users.map((u) => ({ value: u.id, label: u.name })),
-          ]}
-          value={step.withUserId ?? NONE}
-          onValueChange={(v) =>
-            onChange((s) => void (s.withUserId = v === NONE ? null : String(v)))
-          }
-        >
-          <SelectTrigger className="min-h-11 w-full md:min-h-9">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={NONE}>—</SelectItem>
-            {data.users.map((u) => (
-              <SelectItem key={u.id} value={u.id}>
-                {u.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="space-y-2 md:col-span-2">
-        <FieldLabel path={`${prefix}.requiredFields`} />
-        <div className="grid gap-2 sm:grid-cols-2">
+      <WideField className="space-y-2">
+        <FieldLabel short path={`${prefix}.requiredFields`} />
+        {/* Des PUCES, pas huit rangées pleine largeur. Une case à cocher suivie
+            de deux mots dans une boîte de six cents pixels ressemble à un
+            bouton, et huit boutons empilés cachent que la liste est un choix
+            multiple court. Enroulées, les huit tiennent sur trois lignes et se
+            comparent d'un regard. */}
+        <div className="flex flex-wrap gap-2">
           {QUALIFICATION_FIELDS.map((field) => {
             // Un champ que le type impose (le courriel pour « obtenir le
             // courriel ») est coché et verrouillé : le schéma le rajouterait
@@ -630,7 +705,11 @@ function GoalStepFields({
             return (
               <label
                 key={field}
-                className="flex min-h-11 items-center gap-2 rounded-md border px-3 text-sm md:min-h-9"
+                className={cn(
+                  "flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border px-3 text-sm transition-colors md:min-h-9",
+                  checked ? "border-primary/40 bg-primary/5" : "hover:bg-muted/50",
+                  mandated && "cursor-default opacity-90",
+                )}
               >
                 <Checkbox
                   checked={checked}
@@ -645,7 +724,7 @@ function GoalStepFields({
                 />
                 {t(`qualificationField.${field}`)}
                 {mandated ? (
-                  <span className="ml-auto text-xs text-muted-foreground">
+                  <span className="text-xs text-muted-foreground">
                     {t("editor.goal.mandatedField")}
                   </span>
                 ) : null}
@@ -667,13 +746,13 @@ function GoalStepFields({
             })
           }
         />
-      </div>
+      </WideField>
 
       {/* L'objectif dit CE QU'ON CHERCHE ; il ne dit pas comment le demander.
           « Propose l'appel comme un dépannage de quinze minutes » n'entrait
           dans aucun réglage — il fallait réécrire une couche du prompt. */}
-      <div className="space-y-1.5 md:col-span-2">
-        <FieldLabel path={`${prefix}.instruction`} htmlFor={`${prefix}-instruction`} />
+      <div className="space-y-1.5">
+        <FieldLabel short path={`${prefix}.instruction`} htmlFor={`${prefix}-instruction`} />
         <Textarea
           id={`${prefix}-instruction`}
           rows={2}
@@ -684,18 +763,16 @@ function GoalStepFields({
         />
       </div>
 
-      <div className="space-y-1.5 md:col-span-2">
-        <FieldLabel path={`${prefix}.confirmationTemplate`} htmlFor={`${prefix}-confirm`} />
+      <div className="space-y-1.5">
+        <FieldLabel short path={`${prefix}.confirmationTemplate`} htmlFor={`${prefix}-confirm`} />
         <Textarea
           id={`${prefix}-confirm`}
           rows={2}
           value={step.confirmationTemplate ?? ""}
-          onChange={(e) =>
-            onChange((s) => void (s.confirmationTemplate = e.target.value || null))
-          }
+          onChange={(e) => onChange((s) => void (s.confirmationTemplate = e.target.value || null))}
         />
       </div>
-    </div>
+    </Fields>
   );
 }
 
@@ -731,6 +808,8 @@ function GoalTypeTag({ type, className }: { type: GoalType; className?: string }
 
 export function GoalTab({ config, update, data }: TabProps) {
   const t = useTranslations("assistants");
+  const head = useTabHead("goal");
+  const look = EDITOR_TAB_LOOK.goal;
 
   const addFallback = () =>
     update((d) => {
@@ -749,23 +828,31 @@ export function GoalTab({ config, update, data }: TabProps) {
     });
 
   return (
-    <div className="space-y-6">
-      <section className="space-y-3">
-        <h3 className="flex flex-wrap items-center gap-2 font-medium">
-          {t("editor.goal.primary")}
-          <GoalTypeTag type={config.goal.primary.type} />
-        </h3>
+    <div className="space-y-4">
+      <TabHead look={look} title={head.title} hint={head.hint} />
+
+      {/* Le titre de la carte porte « Objectif principal » UNE fois : les huit
+          libellés qu'elle contient le répétaient chacun en préfixe, huit lignes
+          commençant par les mêmes trois mots. */}
+      <Panel
+        look={look}
+        title={t("editor.goal.primary")}
+        description={t("editor.goal.primaryHint")}
+        actions={<GoalTypeTag type={config.goal.primary.type} />}
+      >
         <GoalStepFields
           step={config.goal.primary}
           prefix="goal.primary"
           data={data}
           onChange={(mutate) => update((d) => mutate(d.goal.primary))}
         />
-      </section>
+      </Panel>
 
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-medium">{t("editor.goal.fallbacks")}</h3>
+      <Panel
+        look={look}
+        title={t("editor.goal.fallbacks")}
+        description={t("editor.goal.chainNote")}
+        actions={
           <Button
             variant="outline"
             size="sm"
@@ -775,16 +862,14 @@ export function GoalTab({ config, update, data }: TabProps) {
           >
             <Plus /> {t("editor.goal.addFallback")}
           </Button>
-        </div>
-        <p className="text-sm text-muted-foreground">{t("editor.goal.chainNote")}</p>
-
+        }
+        contentClassName="space-y-3"
+      >
         {config.goal.fallbacks.length === 0 ? (
-          <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-            {t("editor.goal.noFallbacks")}
-          </p>
+          <EmptyRow>{t("editor.goal.noFallbacks")}</EmptyRow>
         ) : (
           config.goal.fallbacks.map((step, i) => (
-            <div key={i} className="space-y-3 rounded-lg border p-4">
+            <div key={i} className="space-y-3 rounded-lg border bg-muted/20 p-3 md:p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="secondary" className="shrink-0">
                   {t("editor.goal.fallbackAt", { n: i + 1 })}
@@ -809,7 +894,7 @@ export function GoalTab({ config, update, data }: TabProps) {
             </div>
           ))
         )}
-      </section>
+      </Panel>
     </div>
   );
 }
@@ -817,61 +902,91 @@ export function GoalTab({ config, update, data }: TabProps) {
 // ── Approche ─────────────────────────────────────────────────────────────────
 
 export function ApproachTab({ config, update }: TabProps) {
+  const t = useTranslations("assistants");
+  const head = useTabHead("approach");
+  const look = EDITOR_TAB_LOOK.approach;
+
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <EnumField
-        path="approach.formality"
-        value={config.approach.formality}
-        onChange={(v) => update((d) => void (d.approach.formality = v as "vous" | "tu"))}
-      />
-      <ScaleField
-        path="approach.persistence"
-        value={config.approach.persistence}
-        onChange={(v) => update((d) => void (d.approach.persistence = v))}
-      />
-      <NumberField
-        path="approach.questionBudget"
-        value={config.approach.questionBudget}
-        min={1}
-        max={10}
-        onChange={(v) => update((d) => void (d.approach.questionBudget = v))}
-      />
-      <NumberField
-        path="approach.maxChars"
-        value={config.approach.maxChars}
-        min={120}
-        max={480}
-        onChange={(v) => update((d) => void (d.approach.maxChars = v))}
-      />
-      <ScaleField
-        path="approach.proactivity"
-        value={config.approach.proactivity}
-        onChange={(v) => update((d) => void (d.approach.proactivity = v))}
-      />
-      <ScaleField
-        path="approach.warmth"
-        value={config.approach.warmth}
-        onChange={(v) => update((d) => void (d.approach.warmth = v))}
-      />
-      <EnumField
-        path="approach.emoji"
-        value={config.approach.emoji}
-        onChange={(v) => update((d) => void (d.approach.emoji = v as AssistantConfig["approach"]["emoji"]))}
-      />
-      <EnumField
-        path="approach.replySpeed"
-        value={config.approach.replySpeed}
-        onChange={(v) =>
-          update((d) => void (d.approach.replySpeed = v as "instant" | "natural" | "deliberate"))
-        }
-      />
-      <NumberField
-        path="approach.maxTurns"
-        value={config.approach.maxTurns}
-        min={4}
-        max={40}
-        onChange={(v) => update((d) => void (d.approach.maxTurns = v))}
-      />
+    <div className="space-y-4">
+      <TabHead look={look} title={head.title} hint={head.hint} />
+
+      {/* Neuf réglages en une seule grille se lisaient un par un. Ils règlent
+          pourtant deux choses distinctes : COMMENT il parle, et COMBIEN il
+          parle. Deux cartes séparent les deux questions. */}
+      <Panel
+        look={look}
+        title={t("editor.approach.sectionTone")}
+        description={t("editor.approach.sectionToneHint")}
+      >
+        <Fields>
+          <EnumField
+            path="approach.formality"
+            value={config.approach.formality}
+            onChange={(v) => update((d) => void (d.approach.formality = v as "vous" | "tu"))}
+          />
+          <ScaleField
+            path="approach.warmth"
+            value={config.approach.warmth}
+            onChange={(v) => update((d) => void (d.approach.warmth = v))}
+          />
+          <EnumField
+            path="approach.emoji"
+            value={config.approach.emoji}
+            onChange={(v) =>
+              update((d) => void (d.approach.emoji = v as AssistantConfig["approach"]["emoji"]))
+            }
+          />
+          <EnumField
+            path="approach.replySpeed"
+            value={config.approach.replySpeed}
+            onChange={(v) =>
+              update(
+                (d) => void (d.approach.replySpeed = v as "instant" | "natural" | "deliberate"),
+              )
+            }
+          />
+        </Fields>
+      </Panel>
+
+      <Panel
+        look={look}
+        title={t("editor.approach.sectionRhythm")}
+        description={t("editor.approach.sectionRhythmHint")}
+      >
+        <Fields>
+          <ScaleField
+            path="approach.persistence"
+            value={config.approach.persistence}
+            onChange={(v) => update((d) => void (d.approach.persistence = v))}
+          />
+          <ScaleField
+            path="approach.proactivity"
+            value={config.approach.proactivity}
+            onChange={(v) => update((d) => void (d.approach.proactivity = v))}
+          />
+          <NumberField
+            path="approach.questionBudget"
+            value={config.approach.questionBudget}
+            min={1}
+            max={10}
+            onChange={(v) => update((d) => void (d.approach.questionBudget = v))}
+          />
+          <NumberField
+            path="approach.maxChars"
+            value={config.approach.maxChars}
+            min={120}
+            max={480}
+            onChange={(v) => update((d) => void (d.approach.maxChars = v))}
+          />
+          <NumberField
+            path="approach.maxTurns"
+            value={config.approach.maxTurns}
+            min={4}
+            max={40}
+            onChange={(v) => update((d) => void (d.approach.maxTurns = v))}
+          />
+        </Fields>
+      </Panel>
     </div>
   );
 }
@@ -889,6 +1004,8 @@ export function ApproachTab({ config, update }: TabProps) {
  */
 export function KnowledgeTab({ config, update }: TabProps) {
   const t = useTranslations("assistants");
+  const head = useTabHead("knowledge");
+  const look = EDITOR_TAB_LOOK.knowledge;
   const claims = config.knowledge.claims;
 
   /** Déplace une entrée d'un cran — l'ordre est une donnée, pas une présentation. */
@@ -901,98 +1018,99 @@ export function KnowledgeTab({ config, update }: TabProps) {
 
   return (
     <div className="space-y-4">
-      <FieldLabel path="knowledge.claims" />
-      <p className="text-sm text-muted-foreground">{t("editor.knowledge.intro")}</p>
+      <TabHead look={look} title={head.title} hint={head.hint} />
 
-      <div className="grid gap-2 sm:grid-cols-2">
-        <ExampleLine kind="fact" text={t("editor.knowledge.exampleFact")} />
-        <ExampleLine kind="rule" text={t("editor.knowledge.exampleRule")} />
-      </div>
+      <Panel look={look} contentClassName="space-y-4">
+        <p className="text-sm text-muted-foreground">{t("editor.knowledge.intro")}</p>
 
-      {/* Ce n'est pas une note de ton : ces phrases sortent au nom d'un
-          courtier titulaire d'un permis. */}
-      <Alert>
-        <AlertTriangle />
-        <AlertDescription>{t("editor.knowledge.warning")}</AlertDescription>
-      </Alert>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <ExampleLine kind="fact" text={t("editor.knowledge.exampleFact")} />
+          <ExampleLine kind="rule" text={t("editor.knowledge.exampleRule")} />
+        </div>
 
-      {claims.length === 0 ? (
-        <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-          {t("editor.knowledge.empty")}
-        </p>
-      ) : (
-        <p className="text-xs text-muted-foreground">{t("editor.knowledge.orderHint")}</p>
-      )}
+        {/* Ce n'est pas une note de ton : ces phrases sortent au nom d'un
+            courtier titulaire d'un permis. */}
+        <Alert>
+          <AlertTriangle />
+          <AlertDescription>{t("editor.knowledge.warning")}</AlertDescription>
+        </Alert>
 
-      <div className="space-y-2">
-        {claims.map((claim, i) => (
-          <div key={i} className="flex items-start gap-2">
-            {/* Le numéro porte du SENS (c'est la première entrée qui gagne un
-                conflit) : décoratif à l'œil, il est repris dans le nom
-                accessible de la zone de texte, sinon trois entrées se lisent
-                toutes « zone de texte » au lecteur d'écran. */}
-            <span
-              aria-hidden
-              className="mt-1.5 flex size-6 shrink-0 items-center justify-center rounded-md font-mono text-xs"
-              style={{ backgroundColor: lookTint(EDITOR_TAB_LOOK.knowledge).backgroundColor }}
-            >
-              {i + 1}
-            </span>
-            <Textarea
-              rows={2}
-              // Une zone de texte ne descend pas sous sa largeur intrinsèque
-              // dans une rangée flex : à 360 px la rangée (numéro, flèches,
-              // corbeille) poussait la page en débordement horizontal.
-              className="min-w-0"
-              value={claim}
-              maxLength={600}
-              aria-label={t("editor.knowledge.entry", { index: i + 1 })}
-              placeholder={t("editor.knowledge.placeholder")}
-              onChange={(e) => update((d) => void (d.knowledge.claims[i] = e.target.value))}
-            />
-            <div className="flex shrink-0 flex-col">
+        {claims.length === 0 ? (
+          <EmptyRow>{t("editor.knowledge.empty")}</EmptyRow>
+        ) : (
+          <FieldNote>{t("editor.knowledge.orderHint")}</FieldNote>
+        )}
+
+        <div className="space-y-2">
+          {claims.map((claim, i) => (
+            <div key={i} className="flex items-start gap-2">
+              {/* Le numéro porte du SENS (c'est la première entrée qui gagne un
+                  conflit) : décoratif à l'œil, il est repris dans le nom
+                  accessible de la zone de texte, sinon trois entrées se lisent
+                  toutes « zone de texte » au lecteur d'écran. */}
+              <span
+                aria-hidden
+                className="mt-1.5 flex size-6 shrink-0 items-center justify-center rounded-md font-mono text-xs"
+                style={{ backgroundColor: lookTint(look).backgroundColor }}
+              >
+                {i + 1}
+              </span>
+              <Textarea
+                rows={2}
+                // Une zone de texte ne descend pas sous sa largeur intrinsèque
+                // dans une rangée flex : à 360 px la rangée (numéro, flèches,
+                // corbeille) poussait la page en débordement horizontal.
+                className="min-w-0"
+                value={claim}
+                maxLength={600}
+                aria-label={t("editor.knowledge.entry", { index: i + 1 })}
+                placeholder={t("editor.knowledge.placeholder")}
+                onChange={(e) => update((d) => void (d.knowledge.claims[i] = e.target.value))}
+              />
+              <div className="flex shrink-0 flex-col">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-11 md:size-8"
+                  disabled={i === 0}
+                  aria-label={t("editor.knowledge.moveUp", { index: i + 1 })}
+                  onClick={() => move(i, i - 1)}
+                >
+                  <ArrowUp />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-11 md:size-8"
+                  disabled={i === claims.length - 1}
+                  aria-label={t("editor.knowledge.moveDown", { index: i + 1 })}
+                  onClick={() => move(i, i + 1)}
+                >
+                  <ArrowDown />
+                </Button>
+              </div>
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-11 md:size-8"
-                disabled={i === 0}
-                aria-label={t("editor.knowledge.moveUp", { index: i + 1 })}
-                onClick={() => move(i, i - 1)}
+                className="size-11 shrink-0 text-destructive md:size-9"
+                aria-label={t("editor.knowledge.remove", { index: i + 1 })}
+                onClick={() => update((d) => void d.knowledge.claims.splice(i, 1))}
               >
-                <ArrowUp />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-11 md:size-8"
-                disabled={i === claims.length - 1}
-                aria-label={t("editor.knowledge.moveDown", { index: i + 1 })}
-                onClick={() => move(i, i + 1)}
-              >
-                <ArrowDown />
+                <Trash2 />
               </Button>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-11 shrink-0 text-destructive md:size-9"
-              aria-label={t("editor.knowledge.remove", { index: i + 1 })}
-              onClick={() => update((d) => void d.knowledge.claims.splice(i, 1))}
-            >
-              <Trash2 />
-            </Button>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
 
-      <Button
-        variant="outline"
-        className="min-h-11 md:min-h-9"
-        disabled={claims.length >= 50}
-        onClick={() => update((d) => void d.knowledge.claims.push(""))}
-      >
-        <Plus /> {t("editor.knowledge.add")}
-      </Button>
+        <Button
+          variant="outline"
+          className="min-h-11 md:min-h-9"
+          disabled={claims.length >= 50}
+          onClick={() => update((d) => void d.knowledge.claims.push(""))}
+        >
+          <Plus /> {t("editor.knowledge.add")}
+        </Button>
+      </Panel>
     </div>
   );
 }
@@ -1021,24 +1139,30 @@ function ExampleLine({ kind, text }: { kind: "fact" | "rule"; text: string }) {
 
 export function ObjectionsTab({ config, update, data }: TabProps) {
   const t = useTranslations("assistants");
+  const head = useTabHead("objections");
+  const look = EDITOR_TAB_LOOK.objections;
+
   return (
-    <div className="space-y-3">
-      <FieldLabel path="objectionPacks" />
-      <p className="text-sm text-muted-foreground">{t("editor.objections.intro")}</p>
-      {/* Cocher règle CET assistant ; ouvrir et corriger règle le paquet pour
-          tous ceux qui s'en servent. Les deux gestes vivent au même endroit
-          parce qu'on les enchaîne — mais ils s'enregistrent séparément. */}
-      <ObjectionPacksEditor
-        packs={data.packs}
-        selected={config.objectionPacks}
-        onToggle={(id, next) =>
-          update((d) => {
-            d.objectionPacks = next
-              ? [...d.objectionPacks, id]
-              : d.objectionPacks.filter((p) => p !== id);
-          })
-        }
-      />
+    <div className="space-y-4">
+      <TabHead look={look} title={head.title} hint={head.hint} />
+
+      <Panel look={look} contentClassName="space-y-3">
+        <p className="text-sm text-muted-foreground">{t("editor.objections.intro")}</p>
+        {/* Cocher règle CET assistant ; ouvrir et corriger règle le paquet pour
+            tous ceux qui s'en servent. Les deux gestes vivent au même endroit
+            parce qu'on les enchaîne — mais ils s'enregistrent séparément. */}
+        <ObjectionPacksEditor
+          packs={data.packs}
+          selected={config.objectionPacks}
+          onToggle={(id, next) =>
+            update((d) => {
+              d.objectionPacks = next
+                ? [...d.objectionPacks, id]
+                : d.objectionPacks.filter((p) => p !== id);
+            })
+          }
+        />
+      </Panel>
     </div>
   );
 }
@@ -1050,67 +1174,76 @@ const REQUIRED_TOOLS: AssistantTool[] = ["stop", "handoff"];
 
 export function ToolsTab({ config, update }: TabProps) {
   const t = useTranslations("assistants");
+  const head = useTabHead("tools");
+  const look = EDITOR_TAB_LOOK.tools;
+
   return (
-    <div className="space-y-3">
-      <FieldLabel path="tools" />
-      {/* La note nomme « stop » et « handoff » : leurs deux pictogrammes la
-          précèdent, ce sont eux qu'on retrouvera plus bas dans la liste. */}
-      <p className="flex items-start gap-2 text-sm text-muted-foreground">
-        <span className="flex shrink-0 items-center gap-1 pt-0.5">
-          <LookGlyph look={TOOL_LOOK.stop} className="size-3.5" />
-          <LookGlyph look={TOOL_LOOK.handoff} className="size-3.5" />
-        </span>
-        <span className="min-w-0">{t("editor.tools.requiredNote")}</span>
-      </p>
-      <div className="space-y-2">
-        {ASSISTANT_TOOLS.map((tool) => {
-          const required = REQUIRED_TOOLS.includes(tool);
-          const checked = config.tools.includes(tool);
-          // Huit interrupteurs de texte nu se valaient tous à l'œil. Le
-          // pictogramme identifie l'outil ; le liseré ne teinte QUE les deux
-          // qu'on ne peut pas éteindre, dans leur propre couleur — le rouge de
-          // l'arrêt et l'ambre du passage à un humain sont déjà graves.
-          const look = TOOL_LOOK[tool];
-          return (
-            <div
-              key={tool}
-              className="flex items-start gap-3 rounded-md border p-3"
-              style={
-                required
-                  ? {
-                      borderLeftWidth: 3,
-                      borderLeftColor: look.color,
-                      backgroundColor: lookTint(look).backgroundColor,
-                    }
-                  : undefined
-              }
-            >
-              <Switch
-                checked={checked || required}
-                disabled={required}
-                aria-label={t(`tool.${tool}`)}
-                onCheckedChange={(next) =>
-                  update((d) => {
-                    d.tools = next ? [...d.tools, tool] : d.tools.filter((x) => x !== tool);
-                  })
+    <div className="space-y-4">
+      <TabHead look={look} title={head.title} hint={head.hint} />
+
+      <Panel look={look} contentClassName="space-y-3">
+        {/* La note nomme « stop » et « handoff » : leurs deux pictogrammes la
+            précèdent, ce sont eux qu'on retrouvera plus bas dans la liste. */}
+        <p className="flex items-start gap-2 text-sm text-muted-foreground">
+          <span className="flex shrink-0 items-center gap-1 pt-0.5">
+            <LookGlyph look={TOOL_LOOK.stop} className="size-3.5" />
+            <LookGlyph look={TOOL_LOOK.handoff} className="size-3.5" />
+          </span>
+          <span className="min-w-0">{t("editor.tools.requiredNote")}</span>
+        </p>
+        <div className="space-y-2">
+          {ASSISTANT_TOOLS.map((tool) => {
+            const required = REQUIRED_TOOLS.includes(tool);
+            const checked = config.tools.includes(tool);
+            // Huit interrupteurs de texte nu se valaient tous à l'œil. Le
+            // pictogramme identifie l'outil ; le liseré ne teinte QUE les deux
+            // qu'on ne peut pas éteindre, dans leur propre couleur — le rouge de
+            // l'arrêt et l'ambre du passage à un humain sont déjà graves.
+            const toolLook = TOOL_LOOK[tool];
+            return (
+              <div
+                key={tool}
+                className={cn(
+                  "flex items-start gap-3 rounded-lg border p-3 transition-colors",
+                  !required && !checked && "opacity-70",
+                )}
+                style={
+                  required
+                    ? {
+                        borderLeftWidth: 3,
+                        borderLeftColor: toolLook.color,
+                        backgroundColor: lookTint(toolLook).backgroundColor,
+                      }
+                    : undefined
                 }
-              />
-              <LookIcon look={look} />
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium break-words">{t(`tool.${tool}`)}</span>
-                  {required ? (
-                    <Badge variant="secondary">{t("editor.tools.required")}</Badge>
-                  ) : null}
+              >
+                <Switch
+                  checked={checked || required}
+                  disabled={required}
+                  aria-label={t(`tool.${tool}`)}
+                  onCheckedChange={(next) =>
+                    update((d) => {
+                      d.tools = next ? [...d.tools, tool] : d.tools.filter((x) => x !== tool);
+                    })
+                  }
+                />
+                <LookIcon look={toolLook} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium break-words">{t(`tool.${tool}`)}</span>
+                    {required ? (
+                      <Badge variant="secondary">{t("editor.tools.required")}</Badge>
+                    ) : null}
+                  </div>
+                  {/* L'explication passe sous le nom : à 360 px elle se glissait
+                      entre le nom et la pastille « Requis ». */}
+                  <ToolHelp tool={tool} />
                 </div>
-                {/* L'explication passe sous le nom : à 360 px elle se glissait
-                    entre le nom et la pastille « Requis ». */}
-                <ToolHelp tool={tool} />
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      </Panel>
     </div>
   );
 }

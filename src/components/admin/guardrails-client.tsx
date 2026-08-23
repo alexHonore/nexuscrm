@@ -428,7 +428,6 @@ function RulesCard({ rules }: { rules: GuardrailRuleDto[] }) {
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead>{t("guardrails.columns.label")}</TableHead>
-                    <TableHead>{t("guardrails.columns.key")}</TableHead>
                     <TableHead>{t("guardrails.columns.kind")}</TableHead>
                     <TableHead>{t("guardrails.columns.enabled")}</TableHead>
                     <TableHead>{t("guardrails.columns.severity")}</TableHead>
@@ -443,8 +442,11 @@ function RulesCard({ rules }: { rules: GuardrailRuleDto[] }) {
                           <span className="font-medium">{r.label}</span>
                           {r.modifiedFromDefault ? <ModifiedChip /> : null}
                         </div>
+                        {/* La clé sous le nom, comme sur la carte mobile : en
+                            colonne propre elle poussait les gestes hors du
+                            cadre. */}
+                        <span className="font-mono text-xs text-muted-foreground">{r.key}</span>
                       </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">{r.key}</TableCell>
                       <TableCell>
                         <span className="flex items-center gap-0.5">
                           <KindBadge kind={r.kind} />
@@ -454,11 +456,11 @@ function RulesCard({ rules }: { rules: GuardrailRuleDto[] }) {
                       <TableCell>
                         <RuleEnabledSwitch rule={r} />
                       </TableCell>
-                      <TableCell className="w-48">
+                      <TableCell className="w-44">
                         <RuleSeveritySelect rule={r} />
                       </TableCell>
                       <TableCell className="text-right">
-                        <span className="flex items-center justify-end">
+                        <span className="flex items-center justify-end whitespace-nowrap">
                           <RuleEditButton rule={r} onEdit={setEditing} />
                           <RuleResetButton rule={r} />
                           <RuleDeleteButton rule={r} />

@@ -29,7 +29,9 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { analyzeSms } from "@/lib/sms/segments";
 import { cn } from "@/lib/utils";
+import { EDITOR_TAB_LOOK } from "@/components/look";
 import { ApiError, api } from "../api";
+import { TabHead, useTabHead } from "./layout";
 import type { TabProps } from "./types";
 
 type Verdict = {
@@ -152,6 +154,7 @@ function closesConversation(result: TurnResult | undefined): boolean {
  */
 export function SandboxTab({ data }: TabProps) {
   const t = useTranslations("assistants");
+  const head = useTabHead("sandbox");
   const router = useRouter();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [inbound, setInbound] = useState("");
@@ -302,6 +305,8 @@ export function SandboxTab({ data }: TabProps) {
 
   return (
     <div className="space-y-4">
+      <TabHead look={EDITOR_TAB_LOOK.sandbox} title={head.title} hint={head.hint} />
+
       <Alert>
         <AlertTriangleIcon />
         <AlertDescription>{t("sandbox.disclaimer")}</AlertDescription>
