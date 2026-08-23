@@ -98,6 +98,12 @@ export async function LandingPage() {
             <Link href="/terms" className="hover:text-foreground hover:underline">
               {t("terms")}
             </Link>
+            {/* La référence d'intégration se trouve depuis l'extérieur ou pas
+                du tout : celui qui la cherche n'a pas de compte, et n'a donc
+                que cette page pour tomber dessus. */}
+            <Link href="/developers" className="hover:text-foreground hover:underline">
+              {t("developers")}
+            </Link>
             <Link href="/login" className="hover:text-foreground hover:underline">
               {t("signIn")}
             </Link>

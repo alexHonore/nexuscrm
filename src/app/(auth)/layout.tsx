@@ -31,6 +31,10 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
         <Link href="/terms" className={legalLinkClass}>
           {tLegal("terms.short")}
         </Link>
+        <span aria-hidden>·</span>
+        <Link href="/developers" className={legalLinkClass}>
+          {tLegal("developers")}
+        </Link>
       </nav>
     </main>
   );

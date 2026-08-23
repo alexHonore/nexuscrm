@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
-import { getLocale } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { DevelopersContent } from "@/components/developers/developers-content";
 import { TOOL_DEFS } from "@/lib/agent/tools";
 import { CAMPAIGN_FIELD_DOCS, campaignFieldText } from "@/lib/campaigns/docs";
@@ -64,6 +64,10 @@ export default async function DevelopersPage({
     lang === "en" || lang === "fr" ? lang : docLocale(await getLocale());
 
   const T = pageText(locale);
+  // Le pied reprend les liens publics des autres pages : sans lui, la
+  // référence est un cul-de-sac — on y arrive par un lien partagé et on n'a
+  // aucun moyen de rejoindre le reste du site.
+  const tLegal = await getTranslations("legal");
 
   // Date fixe : les exemples sont identiques d'une visite à l'autre, donc
   // comparables entre deux personnes qui lisent la page en même temps.
@@ -138,6 +142,23 @@ export default async function DevelopersPage({
           }}
         />
       </main>
+
+      <footer className="mt-6 border-t bg-muted/30">
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-8 text-sm text-muted-foreground md:px-6">
+          <span>© {new Date().getFullYear()} Groupe Nexus</span>
+          <nav className="flex flex-wrap gap-4">
+            <Link href="/privacy" className="hover:text-foreground hover:underline">
+              {tLegal("privacy.short")}
+            </Link>
+            <Link href="/terms" className="hover:text-foreground hover:underline">
+              {tLegal("terms.short")}
+            </Link>
+            <Link href="/login" className="hover:text-foreground hover:underline">
+              {tLegal("backToApp")}
+            </Link>
+          </nav>
+        </div>
+      </footer>
     </>
   );
 }

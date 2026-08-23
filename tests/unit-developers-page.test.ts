@@ -106,6 +106,41 @@ describe("référence développeurs — ce qui ne doit JAMAIS sortir", () => {
     expect(source("src/proxy.ts")).toContain('pathname === "/developers"');
   });
 
+  it("chaque surface publique mène à la référence", () => {
+    // Une page publique qu'aucun lien public n'atteint est une page privée
+    // avec une adresse devinable : celui qui la cherche n'a pas de compte, et
+    // n'a donc que ces trois pieds de page pour tomber dessus.
+    for (const file of [
+      "src/app/landing.tsx",
+      "src/app/(legal)/legal-shell.tsx",
+      "src/app/(auth)/layout.tsx",
+    ]) {
+      expect(source(file), file).toContain('href="/developers"');
+    }
+  });
+
+  it("le libellé du lien existe dans les deux langues, dans les deux namespaces", () => {
+    // Deux pieds de page, deux namespaces : `home` pour l'accueil, `legal`
+    // pour les pages légales et la connexion. Un seul traduit laisserait fuir
+    // une clé brute sur la moitié des écrans publics.
+    for (const ns of ["home", "legal"]) {
+      for (const locale of ["fr", "en"]) {
+        const messages = JSON.parse(source(`messages/${locale}/${ns}.json`)) as Record<
+          string,
+          unknown
+        >;
+        expect(messages.developers, `${locale}/${ns}.developers`).toBeTruthy();
+      }
+    }
+  });
+
+  it("la référence n'est pas un cul-de-sac : son pied ramène au reste du site", () => {
+    const page = source("src/app/developers/page.tsx");
+    for (const href of ["/privacy", "/terms", "/login"]) {
+      expect(page, href).toContain(`href="${href}"`);
+    }
+  });
+
   it("aucun exemple ne porte de secret ressemblant à une vraie clé", () => {
     // Un exemple se copie-colle. Celui qui contient une clé plausible finit
     // dans un dépôt public, et personne ne se demande d'où elle venait.

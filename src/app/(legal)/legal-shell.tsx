@@ -54,6 +54,9 @@ export async function LegalShell({
             <Link href="/terms" className="hover:text-foreground hover:underline">
               {t("terms.short")}
             </Link>
+            <Link href="/developers" className="hover:text-foreground hover:underline">
+              {t("developers")}
+            </Link>
             <Link href="/login" className="hover:text-foreground hover:underline">
               {t("backToApp")}
             </Link>
