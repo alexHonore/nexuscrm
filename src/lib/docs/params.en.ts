@@ -363,6 +363,18 @@ export const PARAM_DOCS_EN: Record<string, ParamDocText> = {
     effect: "Only the checked tools are presented to the model on each turn.",
     pitfalls: "Offering seven tools to a model that cannot handle them fails silently and looks like a prompt bug — the model picker shows tool support for exactly this reason.",
   },
+  "tools.read_client": {
+    label: "\"read_client\" tool",
+    what: "Reads the contact record — name, city, project, timing, budget, category, source, last contact, notes and the qualification already known.",
+    why: "The assistant enters the conversation KNOWING who it is talking to, instead of re-asking questions the record already answers. Read-only, scoped to this conversation's contact.",
+    pitfalls: "Turning it off does not stop the assistant from writing, but it then starts from scratch every conversation, blind to what the CRM already knows.",
+  },
+  "tools.read_client_comments": {
+    label: "\"read_client_comments\" tool",
+    what: "Reads the internal notes the team left on the record (the sub-tool of read_client).",
+    why: "\"Serious, call back after 5pm\", \"already has a broker but open\": the human context a caller wrote after a call, that no lead form carries. Read-only.",
+    pitfalls: "These notes are INTERNAL: the assistant is instructed never to quote them verbatim to the person. Turn it off if those notes should not influence the assistant's replies.",
+  },
   "tools.get_slots": {
     label: "\"get_slots\" tool",
     what: "Returns the broker's REAL availability.",

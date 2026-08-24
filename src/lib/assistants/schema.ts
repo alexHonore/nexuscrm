@@ -59,6 +59,22 @@ export const TYPE_MANDATED_FIELDS: Record<GoalType, QualificationField[]> = {
 
 /** The 8 agent tools. Runtime handlers arrive in phase 4; the suite stubs them. */
 export const ASSISTANT_TOOLS = [
+  /**
+   * Lire la fiche du contact — nom, ville, projet, échéance, budget,
+   * catégorie, source, dernier contact, notes, qualification déjà connue.
+   *
+   * L'assistant arrive alors dans la conversation en SACHANT à qui il parle,
+   * plutôt qu'en reposant des questions dont la réponse dort déjà sur la fiche.
+   * Lecture seule, bornée à la fiche du contact de CETTE conversation.
+   */
+  "read_client",
+  /**
+   * Lire les notes internes de l'équipe sur la fiche — le sous-outil de
+   * `read_client`. Ce qu'un téléphoniste a écrit après un appel (« sérieux,
+   * rappeler après 17 h », « a déjà un courtier mais ouvert ») donne un
+   * contexte qu'aucun formulaire de lead ne porte. Lecture seule, bornée.
+   */
+  "read_client_comments",
   "get_slots",
   "book_meeting",
   "update_qualification",

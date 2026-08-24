@@ -35,6 +35,7 @@ import {
   type SlotPreference,
 } from "@/lib/booking/provider";
 import { missingFieldsError, parseToolArgs } from "./tools";
+import { formatClientComments, formatClientContext } from "./client-context";
 
 /** Fuseau des libellés — celui de l'app (voir AGENTS.md). */
 const SLOT_TZ = "America/Toronto";
@@ -256,6 +257,20 @@ export function simulateToolCall(
       return { ...base, ok: true, content: `book_meeting : confirmé pour ${args.slotIso}` };
     }
 
+    case "read_client": {
+      // À l'essai, la seule chose « au dossier » est la qualification recueillie
+      // dans le bac à sable — pas de fiche réelle. On la rend avec le MÊME
+      // formateur qu'en production ; réponse neutre, le modèle n'apprend pas
+      // qu'il est à l'essai.
+      return { ...base, ok: true, content: formatClientContext({ qualification: ctx.qualification }) };
+    }
+
+    case "read_client_comments": {
+      // Un contact d'essai n'a pas de notes internes : la réponse honnête est
+      // « aucune note », exactement ce que la production renverrait ici.
+      return { ...base, ok: true, content: formatClientComments([]) };
+    }
+
     case "set_category": {
       // Rien n'est écrit ici, et le modèle ne doit pas l'apprendre : un modèle
       // qui se sait à l'essai ne se comporte plus comme en production. La
@@ -302,6 +317,10 @@ export function simulatedToolResult(name: string, done: Set<string>): string {
       return `get_slots : ${simulatedSlotsText(2)}`;
     case "book_meeting":
       return "book_meeting : confirmé";
+    case "read_client":
+      return formatClientContext({});
+    case "read_client_comments":
+      return formatClientComments([]);
     case "stop":
     case "handoff":
       return "";

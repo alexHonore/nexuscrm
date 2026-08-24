@@ -568,6 +568,23 @@ const objections: ParamDoc[] = [
 
 const TOOL_DOCS: { name: string; whatFr: string; whyFr: string; pitfallsFr: string }[] = [
   {
+    name: "read_client",
+    whatFr:
+      "Lit la fiche du contact — nom, ville, projet, échéance, budget, catégorie, source, dernier contact, notes et qualification déjà connue.",
+    whyFr:
+      "L'assistant arrive dans la conversation en SACHANT à qui il parle, au lieu de reposer des questions dont la réponse dort déjà sur la fiche. Lecture seule, bornée à la fiche du contact de cette conversation.",
+    pitfallsFr:
+      "Le désactiver n'empêche pas l'assistant d'écrire, mais il repart alors de zéro à chaque conversation, aveugle à ce que le CRM sait déjà.",
+  },
+  {
+    name: "read_client_comments",
+    whatFr: "Lit les notes internes que l'équipe a laissées sur la fiche (le sous-outil de read_client).",
+    whyFr:
+      "« Sérieux, rappeler après 17 h », « a déjà un courtier mais ouvert » : le contexte humain qu'un téléphoniste a écrit après un appel, qu'aucun formulaire de lead ne porte. Lecture seule.",
+    pitfallsFr:
+      "Ces notes sont INTERNES : l'assistant est instruit de ne pas les citer mot pour mot à la personne. Le désactiver si ces notes ne doivent pas influencer les réponses de l'assistant.",
+  },
+  {
     name: "get_slots",
     whatFr: "Retourne les disponibilités RÉELLES du courtier.",
     whyFr:

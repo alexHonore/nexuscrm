@@ -1,8 +1,8 @@
 import "server-only";
-import { and, asc, eq, inArray, isNull, notExists, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, notExists, sql } from "drizzle-orm";
 import { formatInTimeZone } from "date-fns-tz";
 import { db } from "@/db";
-import { clients, followups, users } from "@/db/schema";
+import { categories, clients, comments, followups, sources, users } from "@/db/schema";
 import {
   agentEvents,
   agentTurnTraces,
@@ -36,6 +36,7 @@ import { detectOptOut } from "@/lib/sms/optout";
 import { DEFAULT_QUIET_HOURS } from "@/lib/sms/quiet-hours";
 import { classifyInbound, type Classification } from "./classify";
 import { contactValue, qualificationText } from "./contact-data";
+import { CLIENT_COMMENTS_MAX, formatClientComments, formatClientContext } from "./client-context";
 import { applyRefusal, requiredFieldsFor, rungNeedsSlots, type Rung } from "./goal";
 import { renderTemplate } from "./render";
 import { DEFAULT_TURN_INSTRUCTIONS } from "./templates";
@@ -251,6 +252,59 @@ async function executeTools(input: {
     }
 
     switch (name) {
+      case "read_client": {
+        // Lecture seule, bornée à la fiche de CETTE conversation : le modèle ne
+        // fournit aucun identifiant, il ne peut donc pas lire une autre fiche.
+        const client = await db.query.clients.findFirst({
+          where: eq(clients.id, input.clientId),
+        });
+        if (!client) {
+          record("read_client : fiche introuvable.");
+          break;
+        }
+        const [category, source] = await Promise.all([
+          client.categoryId
+            ? db.query.categories.findFirst({ where: eq(categories.id, client.categoryId) })
+            : Promise.resolve(null),
+          client.sourceId
+            ? db.query.sources.findFirst({ where: eq(sources.id, client.sourceId) })
+            : Promise.resolve(null),
+        ]);
+        input.effects.push({ name, ok: true });
+        record(
+          formatClientContext({
+            fullName: client.fullName,
+            city: client.city,
+            projectType: client.projectType,
+            timing: client.timing,
+            budget: client.budget,
+            email: client.email,
+            categoryLabel: category ? category.nameFr : null,
+            sourceLabel: source ? source.name : null,
+            lastContactedAt: client.lastContactedAt,
+            notes: client.notes,
+            qualification: input.qualification,
+          }),
+        );
+        break;
+      }
+
+      case "read_client_comments": {
+        // Les notes internes de l'équipe, les plus récentes d'abord — bornées
+        // en nombre à la mise en forme. On en lit une de plus que le plafond
+        // pour pouvoir signaler « + N plus anciennes ».
+        const rows = await db
+          .select({ body: comments.body, createdAt: comments.createdAt, authorName: users.name })
+          .from(comments)
+          .leftJoin(users, eq(comments.userId, users.id))
+          .where(eq(comments.clientId, input.clientId))
+          .orderBy(desc(comments.createdAt))
+          .limit(CLIENT_COMMENTS_MAX + 1);
+        input.effects.push({ name, ok: true });
+        record(formatClientComments(rows));
+        break;
+      }
+
       case "get_slots": {
         const { count, preference } = parsed.args as { count: number; preference: SlotPreference };
         if (!input.rung.goal.appointmentType) {

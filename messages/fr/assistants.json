@@ -497,7 +497,9 @@
     "handoff": "Passer à un humain",
     "transfer_assistant": "Transférer vers un autre assistant",
     "close_conversation": "Clore la conversation",
-    "set_category": "Ranger la fiche"
+    "set_category": "Ranger la fiche",
+    "read_client": "Consulter la fiche du contact",
+    "read_client_comments": "Lire les notes internes"
   },
   "cancel": "Annuler",
   "goalTypeHint": {
@@ -943,7 +945,9 @@
         "handoff": "Passe immédiatement la main à un humain : le fil est marqué « à traiter », l'IA se tait.",
         "transfer_assistant": "Confie le fil à un autre assistant configuré (identifiant fourni dans le contexte).",
         "close_conversation": "Clôt le fil avec un résultat précis : objectif atteint, disqualifié, pas intéressé.",
-        "set_category": "Range la fiche dans une catégorie du pipeline (Long terme, Non qualifié…) selon vos règles de classement."
+        "set_category": "Range la fiche dans une catégorie du pipeline (Long terme, Non qualifié…) selon vos règles de classement.",
+        "read_client": "Consulter la fiche du contact",
+        "read_client_comments": "Lire les notes internes de l’équipe"
       }
     },
     "sending": {

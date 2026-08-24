@@ -24,6 +24,13 @@ import { contactValue } from "./contact-data";
 
 // ── Schémas d'arguments (validation modèle → handler) ───────────────────────
 
+/**
+ * Outils de LECTURE — aucun argument. Un modèle appelle parfois un outil sans
+ * corps ou avec des clés parasites : `.default({})` accepte `undefined`, et
+ * les clés inconnues sont retirées, pour ne jamais refuser une simple lecture.
+ */
+const noArgsSchema = z.object({}).default({});
+
 const getSlotsArgsSchema = z.object({
   count: z.number().int().min(1).max(3).default(2),
   /** Contrainte exprimée par la personne — « juste la fin de semaine ». */
@@ -88,6 +95,8 @@ const closeConversationArgsSchema = z.object({
  * modèle avant qu'un handler ne s'exécute (voir `parseToolArgs`).
  */
 export const TOOL_ARG_SCHEMAS: Record<AssistantTool, z.ZodType> = {
+  read_client: noArgsSchema,
+  read_client_comments: noArgsSchema,
   get_slots: getSlotsArgsSchema,
   book_meeting: bookMeetingArgsSchema,
   update_qualification: updateQualificationArgsSchema,
@@ -109,6 +118,30 @@ const QUALIFICATION_FIELDS_LIST = QUALIFICATION_FIELDS.join(", ");
  * fait) — c'est ce texte qui pilote réellement le comportement.
  */
 export const TOOL_DEFS: Record<AssistantTool, ToolDef> = {
+  read_client: {
+    name: "read_client",
+    description:
+      "Consulte la fiche du contact pour SAVOIR à qui tu parles avant de poser des questions : nom, ville, type de projet, échéance, budget, catégorie, source, dernier contact, notes et qualification déjà connue. Appelle cet outil AU DÉBUT si tu as besoin de contexte — n'invente jamais un profil, et ne redemande pas une information que la fiche te donne ici. Lecture seule : rien n'est modifié.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+  },
+
+  read_client_comments: {
+    name: "read_client_comments",
+    description:
+      "Lit les NOTES INTERNES que l'équipe a laissées sur la fiche (les plus récentes d'abord) — ce qu'un téléphoniste a observé lors d'un échange précédent, un détail de contexte qu'aucun formulaire ne porte. Utile en complément de read_client quand tu veux comprendre l'historique humain du contact. Ces notes sont internes : ne les cite jamais mot pour mot à la personne, sers-t'en pour ajuster ton approche. Lecture seule.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+  },
+
   get_slots: {
     name: "get_slots",
     description:

@@ -178,12 +178,21 @@ export function briefToConfig(
     },
     knowledge: { claims: brief.claims ?? [] },
     objectionPacks: packs,
-    // « stop » et « handoff » toujours ; les outils d'agenda seulement si
-    // l'objectif réserve quelque chose — offrir `book_meeting` à un assistant
-    // qui ne réserve pas produit des appels d'outil qui échouent.
+    // `read_client` (+ ses notes) toujours : savoir à qui on parle profite à
+    // tout assistant. « stop » et « handoff » toujours ; les outils d'agenda
+    // seulement si l'objectif réserve quelque chose — offrir `book_meeting` à
+    // un assistant qui ne réserve pas produit des appels d'outil qui échouent.
     tools: books
-      ? ["get_slots", "book_meeting", "update_qualification", "stop", "handoff"]
-      : ["update_qualification", "schedule_followup", "stop", "handoff"],
+      ? [
+          "read_client",
+          "read_client_comments",
+          "get_slots",
+          "book_meeting",
+          "update_qualification",
+          "stop",
+          "handoff",
+        ]
+      : ["read_client", "read_client_comments", "update_qualification", "schedule_followup", "stop", "handoff"],
     // Le modèle n'est PAS décidé ici : il est choisi à la dernière étape de la
     // création (voir `withChosenModel`). Le défaut du schéma ne sert qu'à
     // rendre l'objet valide entre-temps.

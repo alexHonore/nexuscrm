@@ -497,7 +497,9 @@
     "handoff": "Hand off to a human",
     "transfer_assistant": "Transfer to another assistant",
     "close_conversation": "Close the conversation",
-    "set_category": "File the record"
+    "set_category": "File the record",
+    "read_client": "Read the contact record",
+    "read_client_comments": "Read internal notes"
   },
   "cancel": "Cancel",
   "goalTypeHint": {
@@ -943,7 +945,9 @@
         "handoff": "Hands over to a human immediately: the thread is flagged \"needs attention\", the AI goes quiet.",
         "transfer_assistant": "Hands the thread to another configured assistant (id provided in context).",
         "close_conversation": "Closes the thread with a specific outcome: goal reached, disqualified, not interested.",
-        "set_category": "Files the record into a pipeline category (Long term, Not qualified…) according to your classification rules."
+        "set_category": "Files the record into a pipeline category (Long term, Not qualified…) according to your classification rules.",
+        "read_client": "Read the contact record",
+        "read_client_comments": "Read the team’s internal notes"
       }
     },
     "sending": {

@@ -18,6 +18,7 @@ import {
   makeConversation,
   makeSmsNumber,
   makeCategory,
+  makeSource,
   makeUser,
   resetDb,
   seedSystemCategories,
@@ -35,7 +36,7 @@ import {
   scheduledJobs,
   suppressions,
 } from "@/db/schema-sms";
-import { auditLogs, categories, clients, followups, notifications } from "@/db/schema";
+import { auditLogs, categories, clients, comments, followups, notifications } from "@/db/schema";
 import { setSetting } from "@/lib/settings";
 import { assistantConfigSchema } from "@/lib/assistants/schema";
 import type { LLMResult } from "@/lib/llm/types";
@@ -1294,5 +1295,120 @@ describe("réponses en file et sortants jamais reçus (revue)", () => {
     });
     expect(result.outcome).toBe("skipped_no_assistant");
     expect(await testDb.select().from(notifications)).toHaveLength(0);
+  });
+});
+
+// ── Outils de LECTURE : la fiche et les notes internes reviennent au modèle ───
+
+/**
+ * Un tour où le modèle appelle UN outil de lecture puis rédige. Le compteur
+ * vide `generatorToolCalls` après le premier appel (comme les tests d'agenda),
+ * pour que l'outil ne soit joué qu'une fois et que le dernier appel générateur
+ * porte le résultat en message `tool`.
+ */
+async function toolMessageAfter(conversationId: string, toolName: string): Promise<string> {
+  llm.generatorToolCalls = [{ id: "r1", name: toolName, arguments: {} }];
+  llm.generatorSequence = ["", "Merci, c'est noté."];
+  let calls = 0;
+  llm.onGenerate = async () => {
+    calls += 1;
+    if (calls >= 2) llm.generatorToolCalls = [];
+  };
+  await runTurn(conversationId);
+  const generatorCalls = llm.calls.filter((c) => c.model === "generator-model");
+  const msgs = (generatorCalls[generatorCalls.length - 1]?.messages ?? []) as {
+    role: string;
+    name?: string;
+    content: string;
+  }[];
+  return msgs.find((m) => m.role === "tool" && m.name === toolName)?.content ?? "";
+}
+
+describe("outils de lecture (read_client / read_client_comments)", () => {
+  beforeEach(async () => {
+    await resetDb();
+    llm.generatorText = "Merci, c'est noté.";
+    llm.generatorToolCalls = [];
+    llm.generatorSequence = [];
+    llm.onGenerate = null;
+    llm.generatorError = null;
+    llm.truncated = false;
+  });
+
+  it("read_client renvoie au modèle ce que la fiche sait déjà (labels de catégorie/source résolus)", async () => {
+    const { conversation, client } = await scene();
+    const category = await makeCategory({ nameFr: "À rappeler", nameEn: "Callback" });
+    const source = await makeSource({ name: "Facebook" });
+    await testDb
+      .update(clients)
+      .set({
+        city: "Lévis",
+        projectType: "achat",
+        timing: "6 mois",
+        notes: "Client VIP",
+        categoryId: category.id,
+        sourceId: source.id,
+      })
+      .where(eq(clients.id, client.id));
+    await inbound(conversation.id, "Bonjour");
+
+    const content = await toolMessageAfter(conversation.id, "read_client");
+    expect(content).toContain("Marie Tremblay");
+    expect(content).toContain("Lévis");
+    expect(content).toContain("achat");
+    expect(content).toContain("6 mois");
+    expect(content).toContain("À rappeler"); // libellé, pas l'id
+    expect(content).toContain("Facebook");
+    expect(content).toContain("Client VIP");
+  });
+
+  it("read_client_comments renvoie les notes internes récentes d'abord, mentions réduites au nom", async () => {
+    const { conversation, client } = await scene();
+    const author = await makeUser({ name: "Alex Honoré", email: `a-${Math.random().toString(16).slice(2)}@x.test` });
+    const other = await makeUser({ name: "Marie Agent", email: `m-${Math.random().toString(16).slice(2)}@x.test` });
+    await testDb.insert(comments).values([
+      {
+        clientId: client.id,
+        userId: author.id,
+        body: "A déjà un courtier mais reste ouvert.",
+        createdAt: new Date("2026-08-05T12:00:00Z"),
+      },
+      {
+        clientId: client.id,
+        userId: author.id,
+        body: `Sérieux — à confirmer avec @[Marie Agent](${other.id}) demain.`,
+        createdAt: new Date("2026-08-12T15:00:00Z"),
+      },
+    ]);
+    await inbound(conversation.id, "Bonjour");
+
+    const content = await toolMessageAfter(conversation.id, "read_client_comments");
+    expect(content).toContain("2 note(s) interne(s)");
+    expect(content).toContain("Alex Honoré");
+    // Récente d'abord : la note du 12 précède celle du 5.
+    expect(content.indexOf("Sérieux")).toBeLessThan(content.indexOf("A déjà un courtier"));
+    // La mention @[Marie Agent](id) est réduite au nom, l'id ne fuit pas.
+    expect(content).toContain("Marie Agent");
+    expect(content).not.toContain(other.id);
+    expect(content).not.toContain("@[");
+  });
+
+  it("read_client_comments sur une fiche sans note : le dit franchement", async () => {
+    const { conversation } = await scene();
+    await inbound(conversation.id, "Bonjour");
+    const content = await toolMessageAfter(conversation.id, "read_client_comments");
+    expect(content).toContain("aucune note interne");
+  });
+
+  it("read_client ne lit QUE la fiche de la conversation (aucun id fourni par le modèle)", async () => {
+    const { conversation, client } = await scene();
+    // Une AUTRE fiche, avec un secret : elle ne doit jamais apparaître.
+    await makeClient({ fullName: "Autre Personne", phone: "+15145550199", notes: "SECRET-VOISIN" });
+    await inbound(conversation.id, "Bonjour");
+    const content = await toolMessageAfter(conversation.id, "read_client");
+    expect(content).toContain("Marie Tremblay");
+    expect(content).not.toContain("SECRET-VOISIN");
+    expect(content).not.toContain("Autre Personne");
+    void client;
   });
 });
