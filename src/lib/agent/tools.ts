@@ -20,6 +20,7 @@ import { z } from "zod";
 import { ASSISTANT_TOOLS, QUALIFICATION_FIELDS, type AssistantTool } from "@/lib/assistants/schema";
 import type { ToolDef } from "@/lib/llm/types";
 import { SLOT_PREFERENCES } from "@/lib/booking/provider";
+import { contactValue } from "./contact-data";
 
 // ── Schémas d'arguments (validation modèle → handler) ───────────────────────
 
@@ -41,8 +42,11 @@ const updateQualificationArgsSchema = z.object({
    * fois en pratique). `z.record` avec des clés enum exige les 8 clés en zod
    * v4 (vérifié) ; `z.partialRecord` est la forme qui accepte réellement un
    * sous-ensemble, et rejette toujours une clé hors vocabulaire.
+   *
+   * Les valeurs sont conservées sur la conversation et réinjectées dans le
+   * prompt système à chaque tour : une ligne, bornées (`contact-data.ts`).
    */
-  fields: z.partialRecord(z.enum(QUALIFICATION_FIELDS), z.string()),
+  fields: z.partialRecord(z.enum(QUALIFICATION_FIELDS), z.string().transform((v) => contactValue(v))),
 });
 
 const scheduleFollowupArgsSchema = z.object({

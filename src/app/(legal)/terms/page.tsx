@@ -1,9 +1,15 @@
 import type { Metadata } from "next";
-import { getTranslations } from "next-intl/server";
-import { LegalShell, P, Section, UL } from "../legal-shell";
+import { LegalShell, P, Section, UL, legalTranslator, resolveLegalLocale } from "../legal-shell";
 
-export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslations("legal");
+/**
+ * Page PUBLIQUE : la langue se force par `?lang=` (lecteur sans cookie —
+ * vérification Google, lien partagé), le cookie ne sert que de repli.
+ */
+type PageProps = { searchParams: Promise<{ lang?: string }> };
+
+export async function generateMetadata({ searchParams }: PageProps): Promise<Metadata> {
+  const { lang } = await searchParams;
+  const t = await legalTranslator(await resolveLegalLocale(lang));
   return {
     title: t("terms.title"),
     description: t("terms.intro"),
@@ -11,12 +17,14 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default async function TermsPage() {
-  const t = await getTranslations("legal");
+export default async function TermsPage({ searchParams }: PageProps) {
+  const { lang } = await searchParams;
+  const locale = await resolveLegalLocale(lang);
+  const t = await legalTranslator(locale);
   const list = (key: string): string[] => t.raw(key) as string[];
 
   return (
-    <LegalShell title={t("terms.title")} updated={t("updatedDate")}>
+    <LegalShell locale={locale} title={t("terms.title")} updated={t("updatedDate")}>
       <P>{t("terms.intro")}</P>
 
       <Section heading={t("terms.service.h")}>

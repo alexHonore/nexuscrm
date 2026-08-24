@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, notExists, sql } from "drizzle-orm";
 import { formatInTimeZone } from "date-fns-tz";
 import { db } from "@/db";
 import { clients, followups, users } from "@/db/schema";
@@ -11,9 +11,11 @@ import {
   campaigns,
   conversations,
   messages,
+  scheduledJobs,
 } from "@/db/schema-sms";
 import { assistantRowToConfig, type AssistantConfig } from "@/lib/assistants/schema";
 import { logAudit } from "@/lib/audit";
+import { categoryEntryPatch } from "@/lib/dispositions";
 import { notifyCategoryChanged } from "@/lib/campaigns-server/match";
 import { resolveClassification } from "@/lib/classification-server";
 import { resolvedRulesFor } from "@/lib/assistants/service";
@@ -33,6 +35,7 @@ import { notifyHumans } from "@/lib/sms-server/notify";
 import { detectOptOut } from "@/lib/sms/optout";
 import { DEFAULT_QUIET_HOURS } from "@/lib/sms/quiet-hours";
 import { classifyInbound, type Classification } from "./classify";
+import { contactValue, qualificationText } from "./contact-data";
 import { applyRefusal, requiredFieldsFor, rungNeedsSlots, type Rung } from "./goal";
 import { renderTemplate } from "./render";
 import { DEFAULT_TURN_INSTRUCTIONS } from "./templates";
@@ -71,6 +74,18 @@ const APP_TZ = process.env.APP_TIMEZONE ?? "America/Toronto";
 
 /** Outils dont l'effet est irréversible : joués une seule fois par tour. */
 const SIDE_EFFECT_TOOLS = new Set(["book_meeting", "stop", "handoff", "schedule_followup"]);
+
+/**
+ * Statuts d'un sortant que la personne n'a JAMAIS reçu : refusé par la porte
+ * d'envoi (interrupteur, numéro supprimé, bac à sable), rejeté par Twilio, ou
+ * non livré par l'opérateur. La rangée reste visible dans le fil pour le
+ * téléphoniste — mais le modèle ne doit pas relire « comme je vous le disais »
+ * un message qui n'est jamais parti, ni le compter dans son budget de tours.
+ * « unknown » (délai réseau) n'en fait pas partie : Twilio l'a peut-être livré.
+ */
+const UNDELIVERED_STATUSES = ["skipped", "failed", "undelivered", "canceled"] as const;
+const undelivered = (m: { direction: string; status: string | null }): boolean =>
+  m.direction === "out" && (UNDELIVERED_STATUSES as readonly string[]).includes(m.status ?? "");
 
 export type TurnOutcome =
   | "sent"
@@ -333,7 +348,9 @@ async function executeTools(input: {
 
         await db
           .update(clients)
-          .set({ categoryId: target.id, updatedAt: new Date() })
+          // MÊME point d'entrée que le classement à la main : entrer dans « Ne
+          // pas appeler (LNNTE) » pose clients.doNotCall (categoryEntryPatch).
+          .set({ ...categoryEntryPatch({ id: target.id, key: args.categoryKey }), updatedAt: new Date() })
           .where(eq(clients.id, input.clientId));
 
         // `userId: null` — personne n'a cliqué. Le motif cité par le modèle
@@ -418,6 +435,18 @@ async function executeTools(input: {
           note: args.note ?? "Rappel demandé par SMS (assistant)",
           createdById: null,
         });
+        // La colonne dénormalisée suit, comme pour un rappel posé à la main
+        // (filtres « en retard / aujourd'hui / à venir », pastille du
+        // pipeline, export). Sans elle, le rappel existait mais la fiche
+        // restait « sans rappel » partout sauf au tableau de bord. Calcul en
+        // base — la fiche lue en phase 1 peut être périmée.
+        await db
+          .update(clients)
+          .set({
+            nextFollowupAt: sql`least(coalesce(${clients.nextFollowupAt}, ${when.toISOString()}::timestamptz), ${when.toISOString()}::timestamptz)`,
+            updatedAt: new Date(),
+          })
+          .where(eq(clients.id, input.clientId));
         record(`schedule_followup : rappel posé pour ${args.whenIso}`);
         break;
       }
@@ -550,14 +579,27 @@ export async function runTurn(
   const assistantRow = await db.query.assistants.findFirst({
     where: eq(assistants.id, conversation.activeAssistantId),
   });
-  if (!assistantRow?.compiledPrompt) {
-    return { outcome: "skipped_no_assistant", conversationId, reason: "assistant_not_compiled" };
-  }
-  // Seul un assistant ACTIF parle. Un brouillon ou un assistant archivé qui
-  // reste « actif » sur d'anciens fils contournerait la porte d'activation —
-  // suite rouge, prompt périmé — exactement ce qu'elle empêche.
-  if (assistantRow.status !== "active") {
-    return { outcome: "skipped_no_assistant", conversationId, reason: "assistant_inactive" };
+  // Seul un assistant ACTIF et compilé parle. Un brouillon ou un assistant
+  // archivé qui reste « actif » sur d'anciens fils contournerait la porte
+  // d'activation — suite rouge, prompt périmé — exactement ce qu'elle empêche.
+  //
+  // Mais le webhook entrant a cru que l'IA répondrait (un assistant est
+  // épinglé) et n'a prévenu personne : sans ce relais, le message du contact
+  // restait dans l'inbox sans réponse ET sans notification. Quand il y a un
+  // entrant à traiter, ce sont donc les humains qui le reprennent — une fois
+  // par rafale, le job étant réglé « skipped ». Un tour proactif (barreau de
+  // campagne) ne prévient pas : personne n'attend de réponse.
+  if (!assistantRow?.compiledPrompt || assistantRow.status !== "active") {
+    const reason = !assistantRow?.compiledPrompt ? "assistant_not_compiled" : "assistant_inactive";
+    if (!proactive) {
+      await notifyHumans({
+        conversationId,
+        clientId: conversation.clientId,
+        kind: "inbound",
+        reason: "",
+      }).catch(() => 0);
+    }
+    return { outcome: "skipped_no_assistant", conversationId, reason };
   }
 
   const config = assistantRowToConfig(assistantRow);
@@ -635,7 +677,7 @@ export async function runTurn(
     trace: Record<string, unknown>;
     conversationPatch?: Partial<typeof conversations.$inferInsert>;
     events?: { type: string; payload?: Record<string, unknown> }[];
-    send?: { body: string; delayMs: number };
+    send?: { body: string; delayMs: number; model?: string | null };
     qualification?: Record<string, unknown>;
     reason?: string;
     /**
@@ -737,6 +779,12 @@ export async function runTurn(
               automated: true,
               aiGenerated: true,
               sentById: null,
+              // L'identité de CELUI qui a parlé, figée sur la rangée `messages`
+              // à l'envoi : l'assistant actif du fil change au transfert, et
+              // les traces de tour sont purgées après 30 jours.
+              assistantId: assistantRow.id,
+              assistantVersion: assistantRow.version,
+              model: input.send.model ?? null,
             },
           },
           tx,
@@ -884,8 +932,46 @@ export async function runTurn(
     });
   }
 
+  // Réponses encore EN FILE : une réponse d'agent n'existe dans `messages`
+  // qu'au moment où son job `send_sms` s'exécute — 30 à 90 s après le tour
+  // (délai humanisé), ou le lendemain matin hors heures de politesse. Un
+  // deuxième entrant arrivé entre-temps obtient son propre tour, qui ne
+  // voyait pas la réponse sur le point de partir : il se réintroduisait, et
+  // la personne recevait deux réponses indépendantes à vingt secondes d'écart.
+  // On relit donc les envois vivants de ce fil (pas encore de rangée
+  // `messages`) : ils entrent dans l'historique ET dans le budget de tours.
+  const queuedSends = await db
+    .select({
+      id: scheduledJobs.id,
+      payload: scheduledJobs.payload,
+      createdAt: scheduledJobs.createdAt,
+    })
+    .from(scheduledJobs)
+    .where(
+      and(
+        eq(scheduledJobs.type, "send_sms"),
+        inArray(scheduledJobs.status, ["pending", "running"]),
+        sql`${scheduledJobs.payload}->>'conversationId' = ${conversationId}`,
+        // Un job déjà matérialisé (rangée-intention écrite) est dans `messages`.
+        notExists(db.select({ id: messages.id }).from(messages).where(eq(messages.jobId, scheduledJobs.id))),
+      ),
+    )
+    .orderBy(asc(scheduledJobs.createdAt));
+  const queuedReplies = queuedSends
+    .map((job) => {
+      const payload = job.payload as { body?: unknown; source?: unknown };
+      return {
+        body: typeof payload.body === "string" ? payload.body : "",
+        source: typeof payload.source === "string" ? payload.source : "",
+        createdAt: job.createdAt,
+      };
+    })
+    .filter((job) => job.body !== "");
+
   // Budget de tours : seuls les messages de l'AGENT comptent — la réponse
   // manuelle d'un téléphoniste ne doit pas grignoter le budget de l'assistant.
+  // Et seuls ceux que la personne a pu recevoir : un envoi sauté ou refusé
+  // n'est pas un tour parlé.
   const [turnCount] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(messages)
@@ -894,9 +980,11 @@ export async function runTurn(
         eq(messages.conversationId, conversationId),
         eq(messages.direction, "out"),
         eq(messages.source, "agent"),
+        sql`coalesce(${messages.status}, '') not in ${UNDELIVERED_STATUSES}`,
       ),
     );
-  const turnsUsed = turnCount?.n ?? 0;
+  const turnsUsed =
+    (turnCount?.n ?? 0) + queuedReplies.filter((job) => job.source === "agent").length;
 
   if (turnsUsed >= config.approach.maxTurns || downgrade.exhausted || classification.wantsHuman) {
     const reason = classification.wantsHuman
@@ -937,15 +1025,15 @@ export async function runTurn(
 
   const runtimeBlock = assistantRow.includeRuntimeLayer
     ? renderTemplate(assistantRow.turnInstructions ?? DEFAULT_TURN_INSTRUCTIONS, {
-        "lead.prenom": (client?.fullName ?? "").split(/\s+/)[0] ?? "",
-        "lead.source": client?.projectType ?? "",
-        "lead.besoin": client?.projectType ?? "",
-        "lead.secteur": client?.city ?? "",
-        "lead.budget": client?.budget ?? "",
-        qualification:
-          Object.entries(qualification)
-            .map(([k, v]) => `${k}=${String(v)}`)
-            .join(", ") || "aucune",
+        // Tout ce qui vient du contact (formulaire de lead, SMS classés) est
+        // borné et mis entre guillemets : une VALEUR dans le prompt système,
+        // jamais une consigne — voir `contact-data.ts`.
+        "lead.prenom": contactValue((client?.fullName ?? "").split(/\s+/)[0] ?? ""),
+        "lead.source": contactValue(client?.projectType),
+        "lead.besoin": contactValue(client?.projectType),
+        "lead.secteur": contactValue(client?.city),
+        "lead.budget": contactValue(client?.budget),
+        qualification: qualificationText(qualification),
         "goal.type": rung.goal.type,
         "goal.rung": rung.key,
         "goal.required_fields": requiredFieldsFor(rung).join(", ") || "aucune",
@@ -971,13 +1059,25 @@ export async function runTurn(
     .where(eq(messages.conversationId, conversationId))
     .orderBy(asc(messages.createdAt));
   const consumed = new Set(inboundIds);
-  const messageArray: LLMMessage[] = [
+  // Les rangées du fil ET les réponses encore en file, dans l'ordre où elles
+  // ont été écrites : une réponse mise en file entre deux entrants se lit
+  // entre eux. Un sortant jamais reçu (sauté, refusé, non livré) n'y est pas.
+  const transcript: { createdAt: Date; role: "assistant" | "user"; content: string }[] = [
     ...history
-      .filter((m) => !consumed.has(m.id))
+      .filter((m) => !consumed.has(m.id) && !undelivered(m))
       .map((m) => ({
+        createdAt: m.createdAt,
         role: m.direction === "out" ? ("assistant" as const) : ("user" as const),
         content: m.body,
       })),
+    ...queuedReplies.map((job) => ({
+      createdAt: job.createdAt,
+      role: "assistant" as const,
+      content: job.body,
+    })),
+  ].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  const messageArray: LLMMessage[] = [
+    ...transcript.map(({ role, content }) => ({ role, content })),
     { role: "user" as const, content: userTurn },
   ];
 
@@ -1359,7 +1459,7 @@ export async function runTurn(
     },
     events,
     qualification,
-    send: { body: draft, delayMs: replyDelayMs(config.approach.replySpeed) },
+    send: { body: draft, delayMs: replyDelayMs(config.approach.replySpeed), model: result.modelServed ?? null },
     ...(bookedNow
       ? { enrollmentOutcome: { status: "booked" as const, endReason: "booked" } }
       : closedOutcome === "goal_reached"

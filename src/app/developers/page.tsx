@@ -114,6 +114,7 @@ export default async function DevelopersPage({
           text={T}
           data={{
             baseUrl: await baseUrl(),
+            locale,
             endpoints: API_ENDPOINTS.map((e) => apiEndpointText(e, locale)),
             // `listParamDocs` — le registre NU. Voir la note en tête de fichier.
             params: listParamDocs().map((d) =>

@@ -586,7 +586,7 @@ describe("GET /api/cron/followup-reminders", () => {
     expect(byUser.has(inactive.id)).toBe(false);
   });
 
-  it("ne duplique pas au second passage (dédoublonnage sur les non-lues)", async () => {
+  it("ne duplique pas au second passage (un seul rappel par fenêtre)", async () => {
     const alice = await makeUser({ name: "Alice", email: "a@nexus.test" });
     const client = await makeClient({ fullName: "Jean Bouchard", phone: "+14185550001" });
     await testDb.insert(followups).values({
@@ -603,11 +603,13 @@ describe("GET /api/cron/followup-reminders", () => {
     expect(second).toEqual({ scanned: 1, created: 0 });
     expect(await testDb.select().from(notifications)).toHaveLength(1);
 
-    // Une fois la notification lue, le rappel suivant en recrée une (comportement documenté).
+    // Un seul rappel par fenêtre, LU ou NON : marquer la notification lue ne
+    // relance PAS le rappel (sinon un suivi non traité re-notifie à chaque
+    // passage du cron). Dédoublonnage sur (userId, followup_due, lien).
     await testDb.update(notifications).set({ readAt: new Date() });
     const third = await (await followupCron(cronRequest("/api/cron/followup-reminders"))).json();
-    expect(third).toEqual({ scanned: 1, created: 1 });
-    expect(await testDb.select().from(notifications)).toHaveLength(2);
+    expect(third).toEqual({ scanned: 1, created: 0 });
+    expect(await testDb.select().from(notifications)).toHaveLength(1);
   });
 
   it("ne notifie jamais un suivi complété", async () => {

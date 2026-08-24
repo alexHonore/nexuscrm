@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { clients } from "@/db/schema";
 import { conversations, messages, smsNumbers } from "@/db/schema-sms";
 import { sendSmsPayloadSchema, type JobOutcome, type ScheduledJob } from "@/lib/jobs/types";
+import { TwilioSendError } from "@/lib/sms/provider";
 import { DEFAULT_QUIET_HOURS, isWithinSendWindow, nextSendTime } from "@/lib/sms/quiet-hours";
 import { analyzeSms } from "@/lib/sms/segments";
 import type { SendResult } from "@/lib/sms/types";
@@ -105,6 +106,9 @@ export async function handleSendSms(
       source: payload.source,
       aiGenerated: payload.aiGenerated,
       sentById: payload.sentById,
+      assistantId: payload.assistantId,
+      assistantVersion: payload.assistantVersion,
+      model: payload.model,
       segments: analysis.segments,
       encoding: analysis.encoding,
     })
@@ -120,18 +124,23 @@ export async function handleSendSms(
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // Trois cas, trois réponses :
-    //  · 5xx de Twilio : rien n'est parti, la reprise avec temporisation est
-    //    sûre — la rangée s'efface et la file réessaie ;
-    //  · 4xx de Twilio (numéro invalide, ligne fixe…) : refus DÉFINITIF, on le
-    //    dit dans le fil et on prévient ;
-    //  · délai ou réseau : Twilio a PEUT-ÊTRE accepté — renvoyer ferait un
-    //    doublon. On marque « unknown », on prévient, on n'insiste pas.
-    if (/twilio_send_failed: http 5\d\d/.test(message)) {
+    // Trois cas, trois réponses — tranchés sur le statut HTTP que porte
+    // l'erreur typée du transport (`TwilioSendError`), jamais sur le texte :
+    // Twilio met un corps JSON `{ code, message }` autant sur un 400 que sur
+    // un 500, le message ne suffit pas à les distinguer.
+    //  · 5xx ou 429 de Twilio : rien n'est parti, la reprise avec
+    //    temporisation est sûre — la rangée s'efface et la file réessaie ;
+    //  · autre 4xx de Twilio (numéro invalide, ligne fixe, désabonné…) : refus
+    //    DÉFINITIF, on le dit dans le fil et on prévient ;
+    //  · délai ou réseau (aucun statut) : Twilio a PEUT-ÊTRE accepté —
+    //    renvoyer ferait un doublon. On marque « unknown », on prévient, on
+    //    n'insiste pas.
+    const status = err instanceof TwilioSendError ? err.status : null;
+    if (status !== null && (status >= 500 || status === 429)) {
       await db.delete(messages).where(eq(messages.id, intent.id));
       throw err;
     }
-    const synchronousRejection = /twilio_send_failed: http 4\d\d/.test(message);
+    const synchronousRejection = status !== null && status >= 400 && status < 500;
     const reason = synchronousRejection ? "provider_rejected" : "transport_error";
     await db
       .update(messages)

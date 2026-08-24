@@ -1,5 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
@@ -12,6 +13,10 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
   const admin = await apiAdmin();
   if (admin instanceof NextResponse) return admin;
   const { id } = await ctx.params;
+  // Colonne uuid : un identifiant mal formé ferait lever Postgres (500).
+  if (!z.uuid().safeParse(id).success) {
+    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+  }
 
   const target = await db.query.users.findFirst({ where: eq(users.id, id) });
   if (!target) return NextResponse.json({ error: "not_found" }, { status: 404 });

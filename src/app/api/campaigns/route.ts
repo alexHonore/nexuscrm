@@ -5,6 +5,18 @@ import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { campaignConfigSchema } from "@/lib/campaigns/schema";
 import { listCampaignsWithCounts } from "@/lib/campaigns-server/list";
+import { isForeignKeyViolation } from "@/lib/db-errors";
+
+/**
+ * Un assistant ou un numéro inconnu passe zod (c'est un UUID) et fait sauter
+ * la clé étrangère : on le dit proprement (409) au lieu d'un 500 — même code
+ * que PATCH /api/campaigns/:id.
+ */
+function missingReference(err: unknown): "assistant_not_found" | "sms_number_not_found" | null {
+  if (isForeignKeyViolation(err, "campaigns_assistant_id_assistants_id_fk")) return "assistant_not_found";
+  if (isForeignKeyViolation(err, "campaigns_sms_number_id_sms_numbers_id_fk")) return "sms_number_not_found";
+  return null;
+}
 
 /** GET /api/campaigns — liste avec le décompte des inscriptions par état. */
 export async function GET() {
@@ -34,25 +46,32 @@ export async function POST(req: Request) {
   }
   const config = parsed.data;
 
-  const [row] = await db
-    .insert(campaigns)
-    .values({
-      name: config.name,
-      description: config.description,
-      status: "draft",
-      assistantId: config.assistantId,
-      smsNumberId: config.smsNumberId,
-      trigger: config.trigger,
-      audience: config.audience,
-      ladder: config.ladder,
-      variants: config.variants,
-      dailyEnrollmentCap: config.dailyEnrollmentCap,
-      totalEnrollmentCap: config.totalEnrollmentCap,
-      startsAt: config.startsAt,
-      endsAt: config.endsAt,
-      createdById: admin.id,
-    })
-    .returning({ id: campaigns.id, name: campaigns.name });
+  let row: { id: string; name: string };
+  try {
+    [row] = await db
+      .insert(campaigns)
+      .values({
+        name: config.name,
+        description: config.description,
+        status: "draft",
+        assistantId: config.assistantId,
+        smsNumberId: config.smsNumberId,
+        trigger: config.trigger,
+        audience: config.audience,
+        ladder: config.ladder,
+        variants: config.variants,
+        dailyEnrollmentCap: config.dailyEnrollmentCap,
+        totalEnrollmentCap: config.totalEnrollmentCap,
+        startsAt: config.startsAt,
+        endsAt: config.endsAt,
+        createdById: admin.id,
+      })
+      .returning({ id: campaigns.id, name: campaigns.name });
+  } catch (err) {
+    const missing = missingReference(err);
+    if (missing) return NextResponse.json({ error: missing }, { status: 409 });
+    throw err;
+  }
 
   await logAudit({
     userId: admin.id,

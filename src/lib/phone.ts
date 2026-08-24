@@ -33,10 +33,17 @@ export function formatPhone(e164: string | null | undefined): string {
   return e164;
 }
 
-/** Loose match key for incoming-call lookup: last 10 digits. */
+/**
+ * Clé de rapprochement souple (appel entrant, SMS, CDR, lead) : les 10 DERNIERS
+ * chiffres, ou `null` s'il y en a moins. Jamais de clé plus courte : un numéro
+ * local à 7 chiffres (« 476-1542 ») donnerait une clé qui, en suffixe
+ * (`LIKE '%4761542'`), rattacherait n'importe quelle fiche se terminant ainsi
+ * (+1418…, +1514…) — un lead fondu dans la fiche d'un inconnu. Sous 10
+ * chiffres, l'appelant se rabat sur l'égalité E.164 exacte ou ne rattache pas.
+ */
 export function phoneMatchKey(input: string | null | undefined): string | null {
   if (!input) return null;
   const digits = input.replace(/\D/g, "");
-  if (digits.length < 7) return null;
+  if (digits.length < 10) return null;
   return digits.slice(-10);
 }

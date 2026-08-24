@@ -343,6 +343,29 @@ describe("filtres et tris avancés de /api/clients/list", () => {
     expect((await listItems("createdBefore=2026-02-30")).total).toBe(4);
     expect((await listItems("updatedAfter=2026-02-30")).total).toBe(4);
   });
+
+  it("page et ids hors plage ne font pas planter la requête (200, pas 500)", async () => {
+    // Un OFFSET de 5e21 sort en « 5e+21 » du pilote (bigint invalide) et un id
+    // à 11 chiffres déborde l'int4 : Postgres refusait et la route répondait
+    // 500. On borne la page et on ignore les ids impossibles, comme les autres
+    // jetons inconnus.
+    const admin = await makeUser({ role: "admin" });
+    const cat = await makeCategory();
+    const src = await makeSource();
+    await makeClient({ fullName: "Classée", categoryId: cat.id, sourceId: src.id });
+    await makeClient({ fullName: "Vierge" });
+    await login(admin);
+
+    const far = await listItems("page=100000000000000000000");
+    expect(far.items).toEqual([]);
+    expect(far.total).toBe(2);
+
+    // Jetons impossibles ignorés ; le jeton valide à côté s'applique toujours.
+    expect((await listItems("categoryId=99999999999")).total).toBe(2);
+    expect((await listItems("sourceId=99999999999,2147483648")).total).toBe(2);
+    expect(await names(`categoryId=99999999999,${cat.id}`)).toEqual(["Classée"]);
+    expect(await names(`sourceId=0,${src.id}`)).toEqual(["Classée"]);
+  });
 });
 
 describe("changement de source (admin seulement)", () => {

@@ -57,6 +57,30 @@ export function categoryDispositionValue(cat: { id: number; key: string | null }
   return cat.key ?? `cat:${cat.id}`;
 }
 
+/** Clé de la catégorie système « Ne pas appeler (LNNTE) ». */
+export const DNCL_CATEGORY_KEY = "dncl";
+
+/**
+ * Colonnes de `clients` à écrire quand une fiche ENTRE dans une catégorie —
+ * la MÊME règle pour la disposition d'après-appel, la liste déroulante de
+ * l'en-tête, le glisser-déposer du pipeline et les actions en masse.
+ *
+ * Entrer dans « Ne pas appeler (LNNTE) » pose `clients.doNotCall`, le gate
+ * ABSOLU (bouton d'appel, filtre « Ne pas appeler », export, campagnes SMS).
+ * En SORTIR ne le retire PAS : c'est le comportement historique de la
+ * disposition d'après-appel, et un drapeau de conformité ne se lève pas par un
+ * glisser-déposer ou un choix de liste — il reste posé jusqu'à décision
+ * explicite de l'exploitant.
+ */
+export function categoryEntryPatch(
+  target: { id: number; key: string | null } | null,
+): { categoryId: number | null; doNotCall?: true } {
+  return {
+    categoryId: target?.id ?? null,
+    ...(target?.key === DNCL_CATEGORY_KEY ? { doNotCall: true as const } : {}),
+  };
+}
+
 /**
  * Couleur de texte lisible sur un aplat de la couleur donnée (luma YIQ) :
  * les statuts Notion peuvent être jaune/lime clair — du blanc y serait illisible.

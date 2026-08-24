@@ -54,6 +54,7 @@ const didsRoute = await import("@/app/api/admin/voipms/dids/route");
 const bookingSettingsRoute = await import("@/app/api/admin/settings/booking/route");
 const { getSetting, setSetting } = await import("@/lib/settings");
 const { verifyPassword } = await import("@/lib/auth/password");
+const { flushAfterResponse } = await import("@/lib/after-response");
 
 // ── Session ──────────────────────────────────────────────────────────────────
 
@@ -90,6 +91,11 @@ describe("opérations d'administration", () => {
   beforeEach(async () => {
     await resetDb();
     logout();
+  });
+  afterEach(async () => {
+    // Vider le travail différé (bilan d'export) TANT QUE les comptes existent :
+    // après le resetDb du test suivant, il échouerait en violation de FK.
+    await flushAfterResponse();
   });
   afterAll(closeDb);
 

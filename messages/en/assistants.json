@@ -202,7 +202,10 @@
     "created": "Assistant created",
     "deleted": "Assistant deleted",
     "archived": "Assistant archived",
-    "deactivated": "Assistant deactivated — back to draft"
+    "deactivated": "Assistant deactivated — back to draft",
+    "errors": {
+      "inUseByCampaigns": "Cannot delete: {count} campaign(s) still point to this assistant. Re-point them first."
+    }
   },
   "editor": {
     "back": "Assistants",
@@ -460,7 +463,8 @@
       "unknown_tool": "A tool in the file does not exist in this installation: it was removed.",
       "docs_ignored": "The file's annotations are ignored: documentation comes from this installation.",
       "model_defaulted": "The file names no model: the default one is applied. Check the Model tab before activating the assistant — it is what decides the cost of every message.",
-      "blocks_defaulted": "Some configuration blocks were missing from the file: the defaults apply. Check the identity (organization, broker) before activating — those are the names that go out in the SMS."
+      "blocks_defaulted": "Some configuration blocks were missing from the file: the defaults apply. Check the identity (organization, broker) before activating — those are the names that go out in the SMS.",
+      "unknown_binding_path": "This binding targets a path this configuration does not have: it is ignored."
     },
     "needExample": "Need a starting point?",
     "downloadExample": "Download a valid example"

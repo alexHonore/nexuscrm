@@ -11,6 +11,7 @@ import {
   MapPinIcon,
   PhoneCallIcon,
   PhoneMissedIcon,
+  PhoneOffIcon,
   VideoIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -93,6 +94,7 @@ export default async function DashboardPage() {
         fromNumber: calls.fromNumber,
         clientId: clients.id,
         clientName: clients.fullName,
+        clientDoNotCall: clients.doNotCall,
       })
       .from(calls)
       .leftJoin(clients, eq(clients.id, calls.clientId))
@@ -155,6 +157,7 @@ export default async function DashboardPage() {
       locale: dfnsLocale,
     }),
     overdue,
+    doNotCall: f.client?.doNotCall ?? false,
   });
 
   const overdueItems = pendingFollowups.filter((f) => f.dueAt < now).map((f) => toItem(f, true));
@@ -334,13 +337,27 @@ export default async function DashboardPage() {
                         {g.count > 1 ? <> · {t("missedCalls.attempts", { count: g.count })}</> : null}
                       </p>
                     </div>
-                    <RedialButton
-                      number={g.latest.fromNumber ?? ""}
-                      clientId={g.latest.clientId ?? undefined}
-                      clientName={g.latest.clientName ?? undefined}
-                      iconOnly
-                      className="shrink-0"
-                    />
+                    {g.latest.clientDoNotCall ? (
+                      // Fiche « Ne pas appeler » : pas de rappel en un geste —
+                      // même règle que l'en-tête de la fiche et le pipeline.
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="size-11 shrink-0 rounded-full"
+                        aria-label={t("missedCalls.doNotCall")}
+                        disabled
+                      >
+                        <PhoneOffIcon className="size-4.5 text-destructive" />
+                      </Button>
+                    ) : (
+                      <RedialButton
+                        number={g.latest.fromNumber ?? ""}
+                        clientId={g.latest.clientId ?? undefined}
+                        clientName={g.latest.clientName ?? undefined}
+                        iconOnly
+                        className="shrink-0"
+                      />
+                    )}
                   </li>
                 ))}
               </ul>

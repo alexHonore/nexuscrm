@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { categories, clients } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
+import { categoryEntryPatch } from "@/lib/dispositions";
 import { readJson } from "../../../_helpers";
 
 const schema = z.object({ targetId: z.number().int().nullable() });
@@ -31,14 +32,17 @@ export async function POST(req: Request, ctx: Ctx) {
   if (!source) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   if (body.targetId === id) return NextResponse.json({ error: "invalid_target" }, { status: 400 });
+  let dest: { id: number; key: string | null } | null = null;
   if (body.targetId !== null) {
-    const dest = await db.query.categories.findFirst({ where: eq(categories.id, body.targetId) });
+    dest = (await db.query.categories.findFirst({ where: eq(categories.id, body.targetId) })) ?? null;
     if (!dest) return NextResponse.json({ error: "invalid_target" }, { status: 400 });
   }
 
   const moved = await db
     .update(clients)
-    .set({ categoryId: body.targetId })
+    // MÊME règle d'entrée que partout ailleurs : déplacer des fiches vers
+    // « Ne pas appeler (LNNTE) » pose clients.doNotCall sur chacune.
+    .set(categoryEntryPatch(dest))
     .where(eq(clients.categoryId, id))
     .returning({ id: clients.id });
 

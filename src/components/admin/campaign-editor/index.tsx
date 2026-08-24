@@ -76,7 +76,18 @@ export function CampaignEditor({ data }: { data: CampaignEditorData }) {
       toast.success(t("editor.saved"));
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : t("editor.errors.save"));
+      // Une référence disparue (assistant / numéro re-pointé ailleurs) a sa
+      // phrase : le message brut « HTTP 409 » ne dit rien à corriger.
+      const code = err instanceof ApiError ? err.code : "";
+      toast.error(
+        code === "assistant_not_found"
+          ? t("editor.errors.assistantNotFound")
+          : code === "sms_number_not_found"
+            ? t("editor.errors.smsNumberNotFound")
+            : err instanceof ApiError
+              ? err.message
+              : t("editor.errors.save"),
+      );
     } finally {
       setBusy(null);
     }

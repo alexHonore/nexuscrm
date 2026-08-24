@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { QUALIFICATION_FIELDS } from "@/lib/assistants/schema";
 import { detectOptOut } from "@/lib/sms/optout";
+import { contactValue } from "./contact-data";
 
 /**
  * Classification d'un tour entrant (§12.4) — appel séparé au modèle
@@ -31,7 +32,12 @@ export const classificationSchema = z.object({
   /** Champs de qualification extraits du message. */
   // partialRecord : les clés sont contraintes à QUALIFICATION_FIELDS mais
   // aucune n'est obligatoire — un message ne révèle presque jamais tout.
-  qualification: z.partialRecord(z.enum(QUALIFICATION_FIELDS), z.string()).default({}),
+  // Les VALEURS sont du texte du contact qui finira dans le prompt système :
+  // une ligne, bornée — tronquée plutôt que refusée, sinon une valeur trop
+  // longue rendrait toute la classification illisible et effacerait un refus.
+  qualification: z
+    .partialRecord(z.enum(QUALIFICATION_FIELDS), z.string().transform((v) => contactValue(v)))
+    .default({}),
   /** La personne demande explicitement à parler à un humain. */
   wantsHuman: z.boolean().default(false),
   /** Message incompréhensible (compté pour l'escalade après trois de suite). */

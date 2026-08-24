@@ -7,6 +7,7 @@ import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { campaignConfigSchema, campaignRowToConfig } from "@/lib/campaigns/schema";
 import { closeCampaignEnrollments } from "@/lib/campaigns-server/lifecycle";
+import { isForeignKeyViolation } from "@/lib/db-errors";
 
 const CAMPAIGN_STATUSES = ["draft", "active", "paused", "archived"] as const;
 
@@ -14,6 +15,17 @@ const patchSchema = z.object({
   config: campaignConfigSchema.optional(),
   status: z.enum(CAMPAIGN_STATUSES).optional(),
 });
+
+/**
+ * Un assistant ou un numéro inconnu passe zod (c'est un UUID) et fait sauter
+ * la clé étrangère : on le dit proprement (409) au lieu d'un 500. Couvre aussi
+ * l'éditeur resté ouvert pendant qu'on supprimait le numéro dans un autre onglet.
+ */
+function missingReference(err: unknown): "assistant_not_found" | "sms_number_not_found" | null {
+  if (isForeignKeyViolation(err, "campaigns_assistant_id_assistants_id_fk")) return "assistant_not_found";
+  if (isForeignKeyViolation(err, "campaigns_sms_number_id_sms_numbers_id_fk")) return "sms_number_not_found";
+  return null;
+}
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const admin = await apiAdmin();
@@ -110,16 +122,6 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   const config = parsed.data.config;
   const nextStatus = parsed.data.status ?? row.status;
 
-  // Un assistant inconnu passe zod (c'est un UUID) et ferait sauter la clé
-  // étrangère : on le dit proprement au lieu d'un 500.
-  if (config?.assistantId) {
-    const exists = await db.query.assistants.findFirst({
-      where: eq(assistants.id, config.assistantId),
-      columns: { id: true },
-    });
-    if (!exists) return NextResponse.json({ error: "assistant_not_found" }, { status: 409 });
-  }
-
   if (nextStatus === "active") {
     // La configuration qui sera ACTIVE : celle envoyée, sinon celle en base.
     const effective = config ?? campaignRowToConfig(row);
@@ -127,29 +129,35 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     if (problem) return NextResponse.json({ error: problem }, { status: 409 });
   }
 
-  await db
-    .update(campaigns)
-    .set({
-      ...(config
-        ? {
-            name: config.name,
-            description: config.description,
-            assistantId: config.assistantId,
-            smsNumberId: config.smsNumberId,
-            trigger: config.trigger,
-            audience: config.audience,
-            ladder: config.ladder,
-            variants: config.variants,
-            dailyEnrollmentCap: config.dailyEnrollmentCap,
-            totalEnrollmentCap: config.totalEnrollmentCap,
-            startsAt: config.startsAt,
-            endsAt: config.endsAt,
-          }
-        : {}),
-      ...(parsed.data.status ? { status: parsed.data.status } : {}),
-      updatedAt: new Date(),
-    })
-    .where(eq(campaigns.id, id));
+  try {
+    await db
+      .update(campaigns)
+      .set({
+        ...(config
+          ? {
+              name: config.name,
+              description: config.description,
+              assistantId: config.assistantId,
+              smsNumberId: config.smsNumberId,
+              trigger: config.trigger,
+              audience: config.audience,
+              ladder: config.ladder,
+              variants: config.variants,
+              dailyEnrollmentCap: config.dailyEnrollmentCap,
+              totalEnrollmentCap: config.totalEnrollmentCap,
+              startsAt: config.startsAt,
+              endsAt: config.endsAt,
+            }
+          : {}),
+        ...(parsed.data.status ? { status: parsed.data.status } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(campaigns.id, id));
+  } catch (err) {
+    const missing = missingReference(err);
+    if (missing) return NextResponse.json({ error: missing }, { status: 409 });
+    throw err;
+  }
 
   const closed =
     parsed.data.status === "archived" && row.status !== "archived"

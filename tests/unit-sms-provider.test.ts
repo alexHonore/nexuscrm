@@ -11,6 +11,7 @@ import {
   createTwilioTransport,
   parseAllowlist,
   resolveSmsMode,
+  TwilioSendError,
   type SmsProviderDeps,
 } from "@/lib/sms/provider";
 import type { Clock, Logger, SendGate, SendInput, SuppressionStore } from "@/lib/sms/types";
@@ -323,34 +324,70 @@ describe("createTwilioTransport", () => {
     expect(form.has("StatusCallback")).toBe(false);
   });
 
-  it("non-2xx avec erreur JSON Twilio → throw avec le code Twilio", async () => {
+  it("non-2xx avec erreur JSON Twilio → TwilioSendError portant statut HTTP ET code Twilio", async () => {
     const { fetchFn } = makeFetch(
       400,
       JSON.stringify({ code: 21211, message: "Invalid 'To' Phone Number", status: 400 }),
     );
     const transport = createTwilioTransport({ ...cfg, fetchFn });
 
-    await expect(
-      transport({ to: "+15145551234", body: "Salut!", idempotencyKey: "k3" }),
-    ).rejects.toThrow("twilio_send_failed: 21211 Invalid 'To' Phone Number");
+    const err = await transport({ to: "+15145551234", body: "Salut!", idempotencyKey: "k3" }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(TwilioSendError);
+    expect(err).toMatchObject({
+      status: 400,
+      code: 21211,
+      message: "twilio_send_failed: http 400 21211 Invalid 'To' Phone Number",
+    });
   });
 
-  it("non-2xx au corps illisible → throw avec le statut HTTP", async () => {
+  it("5xx AVEC corps JSON Twilio (le cas réel) → le statut reste lisible : 500, code 20500", async () => {
+    // Twilio met un corps JSON sur ses 5xx aussi — avant, le message ne
+    // disait que « 20500 Internal Server Error » et la file ne reconnaissait
+    // plus une panne à retenter.
+    const { fetchFn } = makeFetch(
+      500,
+      JSON.stringify({ code: 20500, message: "Internal Server Error", status: 500 }),
+    );
+    const transport = createTwilioTransport({ ...cfg, fetchFn });
+
+    const err = await transport({ to: "+15145551234", body: "Salut!", idempotencyKey: "k3b" }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(TwilioSendError);
+    expect(err).toMatchObject({
+      status: 500,
+      code: 20500,
+      message: "twilio_send_failed: http 500 20500 Internal Server Error",
+    });
+  });
+
+  it("non-2xx au corps illisible → TwilioSendError avec le statut HTTP seul", async () => {
     const { fetchFn } = makeFetch(500, "Internal Server Error");
     const transport = createTwilioTransport({ ...cfg, fetchFn });
 
-    await expect(
-      transport({ to: "+15145551234", body: "Salut!", idempotencyKey: "k4" }),
-    ).rejects.toThrow("twilio_send_failed: http 500");
+    const err = await transport({ to: "+15145551234", body: "Salut!", idempotencyKey: "k4" }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(TwilioSendError);
+    expect(err).toMatchObject({ status: 500, code: null, message: "twilio_send_failed: http 500" });
   });
 
-  it("2xx sans sid exploitable → throw malformed_response", async () => {
+  it("2xx sans sid exploitable → throw malformed_response (PAS un TwilioSendError : Twilio a peut-être accepté)", async () => {
     const { fetchFn } = makeFetch(200, "pas du json");
     const transport = createTwilioTransport({ ...cfg, fetchFn });
 
-    await expect(
-      transport({ to: "+15145551234", body: "Salut!", idempotencyKey: "k5" }),
-    ).rejects.toThrow("twilio_send_failed: http 200 malformed_response");
+    const err = await transport({ to: "+15145551234", body: "Salut!", idempotencyKey: "k5" }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(TwilioSendError);
+    expect((err as Error).message).toBe("twilio_send_failed: http 200 malformed_response");
   });
 
   it("arme un signal d'abandon sur chaque appel (plafond de temps)", async () => {
@@ -371,9 +408,13 @@ describe("createTwilioTransport", () => {
       });
     const transport = createTwilioTransport({ ...cfg, fetchFn, timeoutMs: 20 });
 
-    await expect(
-      transport({ to: "+15145551234", body: "Salut!", idempotencyKey: "k7" }),
-    ).rejects.toThrow("twilio_send_failed: timeout after 20ms");
+    const err = await transport({ to: "+15145551234", body: "Salut!", idempotencyKey: "k7" }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    // Délai = issue INCONNUE, pas un refus de Twilio : jamais de statut HTTP.
+    expect(err).not.toBeInstanceOf(TwilioSendError);
+    expect((err as Error).message).toBe("twilio_send_failed: timeout after 20ms");
   });
 
   it("une panne réseau ordinaire remonte telle quelle", async () => {

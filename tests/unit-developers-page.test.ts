@@ -40,6 +40,7 @@ const NOW = new Date("2026-01-01T12:00:00.000Z");
 function data(locale: DocLocale): DevData {
   return {
     baseUrl: "https://crm.example.com",
+    locale,
     endpoints: API_ENDPOINTS.map((e) => apiEndpointText(e, locale)),
     params: listParamDocs().map((d) => resolveParamDoc({ ...d, overridden: false }, locale)),
     campaignFields: CAMPAIGN_FIELD_DOCS.map((f) => ({
@@ -196,6 +197,30 @@ describe("référence développeurs — le contrat qu'elle promet", () => {
 });
 
 describe("référence développeurs — les deux langues", () => {
+  it("la spécification JSON sort en anglais avec ?lang=en", async () => {
+    const { GET } = await import("@/app/api/docs/public/route");
+    const en = (await (await GET(new Request("http://localhost/api/docs/public?lang=en"))).json()) as {
+      locale: string;
+      auth: { note: string };
+      endpoints: { summary: string }[];
+    };
+    expect(en.locale).toBe("en");
+    expect(en.auth.note).toMatch(/^Send the key/);
+    expect(en.endpoints[0].summary).not.toContain("Déposer");
+
+    const fr = (await (await GET(new Request("http://localhost/api/docs/public"))).json()) as {
+      locale: string;
+    };
+    expect(fr.locale).toBe("fr");
+  });
+
+  it("la spécification n'est pas figée au build : sinon ?lang= n'arrive jamais", () => {
+    // En `force-static`, Next retire la chaîne de requête avant d'appeler le
+    // gestionnaire : `lang` vaut toujours null et l'anglais est mort. Appeler
+    // GET() en test contourne ce mandataire — seule la source le trahit.
+    expect(code("src/app/api/docs/public/route.ts")).not.toContain("force-static");
+  });
+
   it("chaque point d'entrée est traduit, champ par champ et code par code", () => {
     // Le français est la source ; l'anglais retomberait dessus en silence.
     for (const e of API_ENDPOINTS) {

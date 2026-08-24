@@ -34,10 +34,15 @@ export function runAfterResponse(work: () => Promise<void>): void {
     }
   };
 
+  // Le travail démarre UNE seule fois, quel que soit le mécanisme de survie :
+  // c'est cette même promesse qu'on confie à `after()` et, s'il lève (hors
+  // contexte de requête), qu'on garde traçable. Avant, `after(guarded())`
+  // évaluait l'appel AVANT que `after()` puisse refuser — et le repli relançait
+  // le travail une seconde fois, en parallèle, sans jamais attendre la première.
+  const promise: Promise<void> = guarded().finally(() => pending.delete(promise));
   try {
-    after(guarded());
+    after(promise);
   } catch {
-    const promise = guarded().finally(() => pending.delete(promise));
     pending.add(promise);
   }
 }

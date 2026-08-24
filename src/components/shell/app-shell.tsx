@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useTransition } from "react";
 import { logoutAction, setLocaleAction } from "@/app/actions";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -332,6 +332,11 @@ function UserMenu({
   compact?: boolean;
 }) {
   const t = useTranslations("common");
+  // La langue EFFECTIVE de l'écran (cookie NEXT_LOCALE), pas `user.locale` :
+  // quand la préférence en base diverge du cookie (compte créé en anglais,
+  // navigateur neuf), le bouton proposait la langue déjà affichée et le
+  // premier clic ne changeait rien.
+  const locale = useLocale();
   const pathname = usePathname();
   return (
     <DropdownMenu>
@@ -412,10 +417,10 @@ function UserMenu({
         ) : null}
         <DropdownMenuItem
           className={cn(compact && "h-11")}
-          onClick={() => onSwitchLocale(user.locale === "fr" ? "en" : "fr")}
+          onClick={() => onSwitchLocale(locale === "fr" ? "en" : "fr")}
         >
           <Globe className="size-4" />
-          {user.locale === "fr" ? "English" : "Français"}
+          {locale === "fr" ? "English" : "Français"}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem

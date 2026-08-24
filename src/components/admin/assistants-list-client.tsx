@@ -39,7 +39,7 @@ import {
 import { EmptyState } from "@/components/ui/empty-state";
 import { ASSISTANT_STATUS_LOOK, GOAL_LOOK, LookIcon, type Look } from "@/components/look";
 import type { GoalType } from "@/lib/assistants/schema";
-import { api } from "./api";
+import { ApiError, api } from "./api";
 import { AssistantImportDialog } from "./assistant-import-dialog";
 import { AssistantCreateDialog } from "./assistant-create";
 
@@ -108,8 +108,15 @@ export function AssistantsListClient({
       toast.success(res.deleted ? t("list.deleted") : t("list.archived"));
       setTarget(null);
       router.refresh();
-    } catch {
-      toast.error(t("editor.errors.save"));
+    } catch (err) {
+      // 409 in_use : des campagnes pointent encore l'assistant — on le dit,
+      // avec le nombre à re-pointer, plutôt qu'un « impossible d'enregistrer ».
+      if (err instanceof ApiError && err.code === "in_use") {
+        const count = typeof err.data.campaigns === "number" ? err.data.campaigns : 0;
+        toast.error(t("list.errors.inUseByCampaigns", { count }));
+      } else {
+        toast.error(t("editor.errors.save"));
+      }
     } finally {
       setBusy(false);
     }

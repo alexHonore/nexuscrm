@@ -25,16 +25,62 @@ export const CAMPAIGN_EXPORT_FORMAT = "nexus.campaign/v1";
 export const CAMPAIGN_BINDING_KINDS = ["assistant", "sms_number", "category", "source", "user"] as const;
 export type CampaignBindingKind = (typeof CAMPAIGN_BINDING_KINDS)[number];
 
-export const campaignBindingSchema = z.object({
-  /** Chemin dans la config ; un suffixe « [] » désigne un élément de liste. */
-  path: z.string().min(1),
-  kind: z.enum(CAMPAIGN_BINDING_KINDS),
-  /** Valeur d'origine — conservée pour information seulement, jamais réutilisée. */
-  sourceValue: z.string().nullable(),
-  /** De quoi reconnaître la cible dans une autre base (nom, E.164, courriel). */
-  label: z.string().default(""),
-  hint: z.string().default(""),
-});
+/**
+ * Chemin de liaison → sorte attendue. LA table, partagée entre l'export (qui
+ * l'émet) et l'import (qui l'exige) : sans elle, une liaison « assistantId »
+ * déclarée `kind: "user"` était validée contre le catalogue des UTILISATEURS,
+ * puis son uuid écrit dans `assistantId` — le schéma passait (un uuid en vaut
+ * un autre) et tout échouait au FK, en 500, APRÈS la prévisualisation. Pire :
+ * un uuid d'assistant dans `audience.assignedToIds` s'enregistrait sans bruit
+ * et la campagne ne joignait plus personne.
+ */
+export const CAMPAIGN_BINDING_PATHS = {
+  assistantId: "assistant",
+  smsNumberId: "sms_number",
+  "trigger.sourceIds[]": "source",
+  "trigger.toCategoryIds[]": "category",
+  "audience.categoryIds[]": "category",
+  "audience.sourceIds[]": "source",
+  "audience.assignedToIds[]": "user",
+} as const satisfies Record<string, CampaignBindingKind>;
+type CampaignBindingPath = keyof typeof CAMPAIGN_BINDING_PATHS;
+
+/** La sorte que ce chemin attend — `undefined` pour un chemin inconnu. */
+function expectedKind(path: string): CampaignBindingKind | undefined {
+  return Object.hasOwn(CAMPAIGN_BINDING_PATHS, path)
+    ? CAMPAIGN_BINDING_PATHS[path as CampaignBindingPath]
+    : undefined;
+}
+
+export const campaignBindingSchema = z
+  .object({
+    /** Chemin dans la config ; un suffixe « [] » désigne un élément de liste. */
+    path: z.string().min(1),
+    kind: z.enum(CAMPAIGN_BINDING_KINDS),
+    /** Valeur d'origine — conservée pour information seulement, jamais réutilisée. */
+    sourceValue: z.string().nullable(),
+    /** De quoi reconnaître la cible dans une autre base (nom, E.164, courriel). */
+    label: z.string().default(""),
+    hint: z.string().default(""),
+  })
+  // Refusé À LA LECTURE, avec le chemin exact : c'est une erreur de fichier,
+  // et la route la rend en 400 exploitable au lieu d'un 500 au commit.
+  .superRefine((binding, ctx) => {
+    const expected = expectedKind(binding.path);
+    if (expected === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["path"],
+        message: `liaison « ${binding.path} » : ce chemin n'est pas un chemin de liaison connu`,
+      });
+    } else if (expected !== binding.kind) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["kind"],
+        message: `liaison « ${binding.path} » : attend une cible « ${expected} », le fichier dit « ${binding.kind} »`,
+      });
+    }
+  });
 export type CampaignBinding = z.infer<typeof campaignBindingSchema>;
 
 const docBlockSchema = z.object({
@@ -98,36 +144,40 @@ export function buildCampaignBundle(input: BuildCampaignBundleInput): CampaignBu
   const config: CampaignConfig = JSON.parse(JSON.stringify(input.config));
   const bindings: CampaignBinding[] = [];
 
-  const bindOne = (path: string, kind: CampaignBindingKind, value: string | null) => {
+  // La sorte vient de la TABLE, jamais d'un littéral au point d'appel : un
+  // export qui divergerait de ce que l'import exige serait refusé à l'arrivée.
+  const bindOne = (path: CampaignBindingPath, value: string | null) => {
     if (!value) return;
+    const kind = CAMPAIGN_BINDING_PATHS[path];
     bindings.push({ path, kind, sourceValue: value, ...labelFor(input.labels, kind, value) });
   };
-  const bindList = (path: string, kind: CampaignBindingKind, values: (string | number)[]) => {
+  const bindList = (path: CampaignBindingPath, values: (string | number)[]) => {
+    const kind = CAMPAIGN_BINDING_PATHS[path];
     for (const v of values) {
       const id = String(v);
-      bindings.push({ path: `${path}[]`, kind, sourceValue: id, ...labelFor(input.labels, kind, id) });
+      bindings.push({ path, kind, sourceValue: id, ...labelFor(input.labels, kind, id) });
     }
   };
 
-  bindOne("assistantId", "assistant", config.assistantId);
+  bindOne("assistantId", config.assistantId);
   config.assistantId = null;
-  bindOne("smsNumberId", "sms_number", config.smsNumberId);
+  bindOne("smsNumberId", config.smsNumberId);
   config.smsNumberId = null;
 
   if (config.trigger.kind === "lead_created") {
-    bindList("trigger.sourceIds", "source", config.trigger.sourceIds);
+    bindList("trigger.sourceIds[]", config.trigger.sourceIds);
     config.trigger.sourceIds = [];
   }
   if (config.trigger.kind === "category_changed") {
-    bindList("trigger.toCategoryIds", "category", config.trigger.toCategoryIds);
+    bindList("trigger.toCategoryIds[]", config.trigger.toCategoryIds);
     config.trigger.toCategoryIds = [];
   }
 
-  bindList("audience.categoryIds", "category", config.audience.categoryIds);
+  bindList("audience.categoryIds[]", config.audience.categoryIds);
   config.audience.categoryIds = [];
-  bindList("audience.sourceIds", "source", config.audience.sourceIds);
+  bindList("audience.sourceIds[]", config.audience.sourceIds);
   config.audience.sourceIds = [];
-  bindList("audience.assignedToIds", "user", config.audience.assignedToIds);
+  bindList("audience.assignedToIds[]", config.audience.assignedToIds);
   config.audience.assignedToIds = [];
 
   const bundle: CampaignBundle = {
@@ -315,7 +365,12 @@ export function planCampaignImport(
   for (const binding of bundle.bindings) {
     const key = binding.sourceValue ?? binding.path;
     let target: string | null;
-    if (Object.hasOwn(resolution, key)) {
+    if (expectedKind(binding.path) !== binding.kind) {
+      // Ceinture en plus de la bretelle du schéma : appelé directement, sans
+      // `parseCampaignBundle`, un chemin inconnu ou une sorte qui ne colle pas
+      // ne doit RIEN écrire — la liaison tombe dans l'avertissement existant.
+      target = null;
+    } else if (Object.hasOwn(resolution, key)) {
       target = resolution[key];
     } else {
       target = autoResolve(binding, catalog);

@@ -802,6 +802,34 @@ describe("statut, outils et pannes (revue)", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].note).toBe("rappel demandé");
     expect(rows[0].assignedToId).not.toBeNull();
+    // La colonne dénormalisée suit, comme pour un rappel posé à la main :
+    // sans elle, les filtres « à venir », la pastille du pipeline et l'export
+    // ne voyaient pas le rappel de l'assistant.
+    const fiche = await testDb.query.clients.findFirst({ where: eq(clients.id, client.id) });
+    expect(fiche!.nextFollowupAt?.toISOString()).toBe(monday);
+  });
+
+  it("schedule_followup n'AVANCE jamais un rappel déjà plus proche", async () => {
+    const { conversation, client } = await scene();
+    // La fiche a déjà un rappel demain : celui de l'assistant (dans 3 jours)
+    // ne doit pas le repousser — `nextFollowupAt` est le PLUS PROCHE.
+    const demain = new Date(Date.now() + 24 * 3600 * 1000);
+    await testDb.update(clients).set({ nextFollowupAt: demain }).where(eq(clients.id, client.id));
+    await inbound(conversation.id, "Rappelez-moi la semaine prochaine");
+    const later = new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString();
+    llm.generatorToolCalls = [
+      { id: "c1", name: "schedule_followup", arguments: { whenIso: later, note: "plus tard" } },
+    ];
+    llm.generatorSequence = ["", "C'est noté, je vous relance la semaine prochaine!"];
+    let calls = 0;
+    llm.onGenerate = async () => {
+      calls += 1;
+      if (calls >= 2) llm.generatorToolCalls = [];
+    };
+
+    expect((await runTurn(conversation.id)).outcome).toBe("sent");
+    const fiche = await testDb.query.clients.findFirst({ where: eq(clients.id, client.id) });
+    expect(fiche!.nextFollowupAt?.toISOString()).toBe(demain.toISOString());
   });
 
   it("close_conversation FERME le fil après l'envoi et clôt l'inscription", async () => {
@@ -994,7 +1022,10 @@ describe("câblage inter-domaines (revue)", () => {
     expect((await runTurn(conversation.id)).outcome).toBe("sent");
     const [job] = (await jobsFor(conversation.id)).filter((j) => j.type === "send_sms");
     const { handleSendSms } = await import("@/lib/jobs/handlers/send-sms");
-    expect(await handleSendSms(job)).toMatchObject({ outcome: "done" });
+    // Horloge fixée un lundi 11 h (Toronto) : lancé le soir, le handler
+    // reportait l'envoi aux heures de politesse et le test devenait flou.
+    const midday = () => new Date("2026-08-24T15:00:00.000Z");
+    expect(await handleSendSms(job, midday)).toMatchObject({ outcome: "done" });
     const row = await testDb.query.clients.findFirst({ where: eq(clients.id, client.id) });
     // En dry_run rien ne part vraiment : la date ne bouge donc pas.
     expect(row!.lastContactedAt).toBeNull();
@@ -1155,5 +1186,113 @@ describe("set_category — l'assistant range la fiche", () => {
     await runTurn(conversation.id);
 
     expect(await testDb.select().from(auditLogs)).toHaveLength(0);
+  });
+});
+
+// ── Réponses encore en file et sortants jamais reçus (revue) ─────────────────
+
+describe("réponses en file et sortants jamais reçus (revue)", () => {
+  beforeEach(async () => {
+    await resetDb();
+    llm.generatorText = "Parfait! Préférez-vous jeudi 14 h ou vendredi 18 h 30?";
+    llm.generatorToolCalls = [];
+    llm.generatorSequence = [];
+    llm.onGenerate = null;
+    llm.generatorError = null;
+    llm.truncated = false;
+    llm.classifierJson = '{"refusal":"none","qualification":{}}';
+    llm.judgeJson = '{"passed":true,"reason":"conforme"}';
+    llm.calls = [];
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  it("une réponse ENCORE EN FILE est lue par le tour suivant — historique et budget", async () => {
+    // R1 n'existe dans `messages` qu'au moment où son job `send_sms` s'exécute
+    // (30-90 s plus tard). Sans relecture des envois vivants, un deuxième
+    // entrant obtenait un tour aveugle : le modèle se réintroduisait et la
+    // personne recevait deux réponses indépendantes.
+    const { conversation } = await scene();
+    await inbound(conversation.id, "Allo?");
+    expect((await runTurn(conversation.id)).outcome).toBe("sent");
+
+    // R1 attend son envoi : job en file, AUCUNE rangée sortante encore.
+    const sends = (await jobsFor(conversation.id)).filter((j) => j.type === "send_sms");
+    expect(sends).toHaveLength(1);
+    expect(await testDb.select().from(messages).where(eq(messages.direction, "out"))).toHaveLength(0);
+
+    // Deuxième entrant AVANT que R1 ne parte.
+    await inbound(conversation.id, "C'est pour vendre ma maison");
+    llm.calls = [];
+    expect((await runTurn(conversation.id)).outcome).toBe("sent");
+
+    // Le générateur du tour 2 a lu R1 comme un message de l'assistant, à sa
+    // place chronologique : après « Allo? », avant le deuxième entrant.
+    const r1 = "Parfait! Préférez-vous jeudi 14 h ou vendredi 18 h 30?";
+    const call = llm.calls.find((c) => c.model === "generator-model");
+    const msgs = call!.messages as { role: string; content: string }[];
+    const idxM1 = msgs.findIndex((m) => m.role === "user" && m.content === "Allo?");
+    const idxR1 = msgs.findIndex((m) => m.role === "assistant" && m.content === r1);
+    expect(idxM1).toBeGreaterThanOrEqual(0);
+    expect(idxR1).toBeGreaterThan(idxM1);
+
+    // Et le budget la compte : le tour 2 n'est PAS un « premier message ».
+    const traces = await testDb.select().from(agentTurnTraces);
+    expect(traces.some((t) => (t.runtimeBlock ?? "").includes("Messages utilisés : 1/16"))).toBe(true);
+  });
+
+  it("un sortant jamais reçu (sauté, refusé) ne revient ni dans l'historique ni dans le budget", async () => {
+    // Depuis la revue, un envoi refusé LAISSE une rangée visible dans le fil
+    // (interrupteur, numéro supprimé, rejet Twilio). Le modèle, lui, ne doit
+    // pas relire « comme je vous le disais » un message jamais parti.
+    const { conversation } = await scene();
+    await testDb.insert(messages).values({
+      conversationId: conversation.id,
+      direction: "out",
+      body: "Je vous écrivais pendant l'incident.",
+      source: "agent",
+      aiGenerated: true,
+      status: "skipped",
+      skipReason: "kill_switch",
+    });
+    await inbound(conversation.id, "Allo?");
+    expect((await runTurn(conversation.id)).outcome).toBe("sent");
+
+    const call = llm.calls.find((c) => c.model === "generator-model");
+    const msgs = call!.messages as { role: string; content: string }[];
+    expect(msgs.some((m) => m.content.includes("pendant l'incident"))).toBe(false);
+    // Budget intact : c'est toujours le PREMIER message de l'assistant.
+    const [trace] = await testDb.select().from(agentTurnTraces);
+    expect(trace.runtimeBlock).toContain("Messages utilisés : 0/16");
+  });
+
+  it("assistant plus actif + entrant : le tour se tait mais PRÉVIENT les humains", async () => {
+    // Le webhook a cru que l'IA répondrait (un assistant est épinglé) et n'a
+    // prévenu personne. Sans ce relais, le message restait dans l'inbox sans
+    // réponse ET sans notification.
+    const { conversation, assistant } = await scene();
+    await testDb.update(assistants).set({ status: "draft" }).where(eq(assistants.id, assistant.id));
+    await inbound(conversation.id, "Allo, on se voit quand?");
+
+    const result = await runTurn(conversation.id);
+    expect(result.outcome).toBe("skipped_no_assistant");
+    expect(result.reason).toBe("assistant_inactive");
+
+    const notes = await testDb.select().from(notifications);
+    expect(notes.length).toBeGreaterThan(0);
+    expect(notes.every((n) => n.type === "sms_inbound")).toBe(true);
+    // Rien n'est consommé : le message attend un humain, pas une reprise.
+    const [msg] = await testDb.select().from(messages).where(eq(messages.direction, "in"));
+    expect(msg.processedAt).toBeNull();
+  });
+
+  it("assistant plus actif, tour PROACTIF : silence — personne n'attend de réponse", async () => {
+    const { conversation, assistant, enrollment } = await outreachScene();
+    await testDb.update(assistants).set({ status: "draft" }).where(eq(assistants.id, assistant.id));
+
+    const result = await runTurn(conversation.id, {
+      outreach: { enrollmentId: enrollment.id, step: 0 },
+    });
+    expect(result.outcome).toBe("skipped_no_assistant");
+    expect(await testDb.select().from(notifications)).toHaveLength(0);
   });
 });

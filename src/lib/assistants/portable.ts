@@ -50,16 +50,43 @@ export const EXPORT_FORMAT = "nexus.assistant/v1";
 export const BINDING_KINDS = ["user", "objection_pack"] as const;
 export type BindingKind = (typeof BINDING_KINDS)[number];
 
-export const bindingSchema = z.object({
-  /** Chemin dans la config, ou « objectionPacks[] » pour un élément de liste. */
-  path: z.string().min(1),
-  kind: z.enum(BINDING_KINDS),
-  /** Valeur d'origine — conservée pour information seulement, jamais réutilisée. */
-  sourceValue: z.string().nullable(),
-  /** De quoi reconnaître la cible dans une autre base. */
-  label: z.string().default(""),
-  hint: z.string().default(""),
-});
+/**
+ * Chemins de liaison admis, par sorte — la MÊME grammaire que l'export émet.
+ *
+ * Le chemin vient du FICHIER et il est ensuite PARCOURU pour écrire dans la
+ * config : sans cette liste, un chemin « __proto__.hasOwnProperty » remontait
+ * jusqu'à Object.prototype et l'assignation corrompait le processus entier —
+ * dès la PRÉVISUALISATION, avant tout écran de confirmation. On refuse donc à
+ * la lecture tout chemin qu'un export ne peut pas produire.
+ */
+const USER_BINDING_PATH_RE =
+  /^(identity\.brokerUserId|goal\.primary\.withUserId|goal\.fallbacks\[\d+\]\.withUserId)$/;
+const PACK_BINDING_PATH = "objectionPacks[]";
+
+export const bindingSchema = z
+  .object({
+    /** Chemin dans la config, ou « objectionPacks[] » pour un élément de liste. */
+    path: z.string().min(1),
+    kind: z.enum(BINDING_KINDS),
+    /** Valeur d'origine — conservée pour information seulement, jamais réutilisée. */
+    sourceValue: z.string().nullable(),
+    /** De quoi reconnaître la cible dans une autre base. */
+    label: z.string().default(""),
+    hint: z.string().default(""),
+  })
+  .superRefine((binding, ctx) => {
+    const ok =
+      binding.kind === "user"
+        ? USER_BINDING_PATH_RE.test(binding.path)
+        : binding.path === PACK_BINDING_PATH;
+    if (!ok) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["path"],
+        message: `liaison « ${binding.path} » (${binding.kind}) : ce chemin n'est pas un chemin de liaison connu`,
+      });
+    }
+  });
 export type Binding = z.infer<typeof bindingSchema>;
 
 // ── Règles et fixtures transportables ────────────────────────────────────────
@@ -243,11 +270,21 @@ export function userBindingPaths(config: AssistantConfig): string[] {
   return paths;
 }
 
+/**
+ * Segments qui remontent la chaîne de prototypes — jamais légitimes dans une
+ * config. Un accès « config["__proto__"] » rend Object.prototype, et écrire
+ * dedans empoisonne TOUT le processus, pas seulement cet import. Ceinture en
+ * plus de la bretelle du schéma : `writePath` est aussi appelable directement.
+ */
+const FORBIDDEN_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+
 function readPath(config: AssistantConfig, path: string): string | null {
   const parts = path.replace(/\[(\d+)\]/g, ".$1").split(".");
   let node: unknown = config;
   for (const part of parts) {
     if (node === null || typeof node !== "object") return null;
+    // Propriétés PROPRES seulement : ni « __proto__ », ni un héritage quelconque.
+    if (FORBIDDEN_SEGMENTS.has(part) || !Object.hasOwn(node, part)) return null;
     node = (node as Record<string, unknown>)[part];
   }
   return typeof node === "string" ? node : null;
@@ -256,9 +293,14 @@ function readPath(config: AssistantConfig, path: string): string | null {
 function writePath(config: AssistantConfig, path: string, value: string | null): void {
   const parts = path.replace(/\[(\d+)\]/g, ".$1").split(".");
   const last = parts.pop()!;
+  if (FORBIDDEN_SEGMENTS.has(last)) return;
   let node: unknown = config;
   for (const part of parts) {
     if (node === null || typeof node !== "object") return;
+    // Mêmes gardes qu'en lecture : on ne descend que dans ce que la config
+    // possède en PROPRE. (La cible finale, elle, peut être créée : un fichier
+    // écrit à la main omet « withUserId » que la résolution vient remplir.)
+    if (FORBIDDEN_SEGMENTS.has(part) || !Object.hasOwn(node, part)) return;
     node = (node as Record<string, unknown>)[part];
   }
   if (node && typeof node === "object") (node as Record<string, unknown>)[last] = value;
@@ -405,6 +447,7 @@ export interface ImportWarning {
     | "model_defaulted"
     | "blocks_defaulted"
     | "unknown_tool"
+    | "unknown_binding_path"
     | "docs_ignored";
   messageFr: string;
   path?: string;
@@ -494,8 +537,21 @@ export function planImport(
   const config: AssistantConfig = JSON.parse(JSON.stringify(bundle.assistant));
   const warnings: ImportWarning[] = [];
 
+  // Seuls les chemins que l'export de CETTE config aurait produits sont
+  // écrits : le schéma refuse déjà les chemins hors grammaire, mais un
+  // « goal.fallbacks[7].withUserId » sur une config à deux replis la passe —
+  // et `planImport` reste sûr même appelé sans passer par `parseBundle`.
+  const allowedPaths = new Set(userBindingPaths(config));
   for (const binding of bundle.bindings) {
     if (binding.kind !== "user") continue;
+    if (!allowedPaths.has(binding.path)) {
+      warnings.push({
+        code: "unknown_binding_path",
+        path: binding.path,
+        messageFr: `La liaison « ${binding.label || binding.path} » vise un chemin que cette config n'a pas : elle est ignorée.`,
+      });
+      continue;
+    }
     const chosen = binding.sourceValue !== null ? resolution[binding.sourceValue] : null;
     const resolved = chosen && catalog.userIds.has(chosen) ? chosen : null;
     writePath(config, binding.path, resolved);

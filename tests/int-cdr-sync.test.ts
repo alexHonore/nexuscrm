@@ -277,6 +277,84 @@ describe("synchronisation CDR", () => {
     expect(row.direction).toBe("outbound");
     expect(await testDb.select().from(notifications)).toHaveLength(0);
   });
+
+  // ── Changement d'heure ─────────────────────────────────────────────────────
+  // voip.ms renvoie l'heure LOCALE de Toronto ; la synchro tourne sur hier +
+  // aujourd'hui. Chaque ligne doit être lue avec le décalage valable À SON
+  // instant — pas celui du premier jour de la plage, sinon le dimanche du
+  // changement tout le jour est décalé d'une heure et chaque appel du webphone
+  // se dédouble (l'heuristique ne voit rien à ±3 min).
+
+  it("passage à l'heure avancée (2026-03-08) : un appel du webphone le jour J est rattaché, pas dédoublé", async () => {
+    const me = await makeLineUser();
+    // 10:30 EDT le 8 mars = 14:30Z — journalisé par le webphone sans providerCallId.
+    const startedAt = new Date("2026-03-08T14:30:00.000Z");
+    await testDb.insert(calls).values({
+      userId: me.id,
+      direction: "outbound",
+      fromNumber: DID,
+      toNumber: "+14187778888",
+      startedAt,
+      endedAt: new Date(startedAt.getTime() + 60_000),
+      provider: "voipms",
+    });
+    vi.mocked(getCdr).mockResolvedValue([
+      cdrRow({
+        uniqueid: "dst-spring",
+        callerid: "4189065924",
+        destination: "4187778888",
+        date: "2026-03-08 10:30:12",
+        disposition: "ANSWERED",
+        seconds: "60",
+      }),
+    ]);
+
+    const result = await syncCdrRange("2026-03-07", "2026-03-08");
+    expect(result.errors).toEqual([]);
+    expect(result.counts.matchedHeuristic).toBe(1);
+    expect(result.counts.inserted).toBe(0);
+
+    const rows = await testDb.select().from(calls);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].providerCallId).toBe("dst-spring");
+  });
+
+  it("retour à l'heure normale (2026-11-01) : même chose dans l'autre sens", async () => {
+    const me = await makeLineUser();
+    // 10:00 EST le 1er novembre = 15:00Z.
+    const startedAt = new Date("2026-11-01T15:00:00.000Z");
+    await testDb.insert(calls).values({
+      userId: me.id,
+      direction: "inbound",
+      fromNumber: "+14185551234",
+      toNumber: DID,
+      startedAt,
+      endedAt: startedAt,
+      provider: "voipms",
+    });
+    vi.mocked(getCdr).mockResolvedValue([cdrRow({ uniqueid: "dst-fall", date: "2026-11-01 10:00:05" })]);
+
+    const result = await syncCdrRange("2026-10-31", "2026-11-01");
+    expect(result.counts.matchedHeuristic).toBe(1);
+    expect(result.counts.inserted).toBe(0);
+    expect((await testDb.select().from(calls))[0].providerCallId).toBe("dst-fall");
+  });
+
+  it("une plage qui enjambe le changement : chaque ligne garde SON décalage (−4 puis −5)", async () => {
+    await makeLineUser();
+    vi.mocked(getCdr).mockResolvedValue([
+      cdrRow({ uniqueid: "before", date: "2026-10-31 10:00:00", callerid: "4181110000" }),
+      cdrRow({ uniqueid: "after", date: "2026-11-01 10:00:00", callerid: "4182220000" }),
+    ]);
+
+    const result = await syncCdrRange("2026-10-31", "2026-11-01");
+    expect(result.counts.inserted).toBe(2);
+
+    const rows = await testDb.select().from(calls);
+    const byId = new Map(rows.map((r) => [r.providerCallId, r]));
+    expect(byId.get("before")?.startedAt.toISOString()).toBe("2026-10-31T14:00:00.000Z"); // EDT
+    expect(byId.get("after")?.startedAt.toISOString()).toBe("2026-11-01T15:00:00.000Z"); // EST
+  });
 });
 
 describe("collapseCrossAccountLegs", () => {

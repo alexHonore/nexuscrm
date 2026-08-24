@@ -107,7 +107,8 @@
     "submit": "Créer le client",
     "cancel": "Annuler",
     "success": "Client créé",
-    "invalidPhone": "Numéro de téléphone invalide"
+    "invalidPhone": "Numéro de téléphone invalide",
+    "invalidPhoneAlt": "Autre téléphone invalide"
   },
   "delete": {
     "label": "Supprimer",
@@ -137,7 +138,8 @@
     "sectionProject": "Projet",
     "save": "Enregistrer",
     "saved": "Modifications enregistrées",
-    "invalidPhone": "Numéro de téléphone invalide"
+    "invalidPhone": "Numéro de téléphone invalide",
+    "invalidPhoneAlt": "Autre téléphone invalide"
   },
   "followups": {
     "title": "Suivis",

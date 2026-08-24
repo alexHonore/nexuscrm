@@ -71,6 +71,7 @@ import { applyResetAction, requestResetAction } from "@/app/(auth)/forgot-passwo
 import { getCurrentUser, requireAdmin, requireUser } from "@/lib/auth/guards";
 import { createSession, destroySession, readSession, SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { sha256Hex } from "@/lib/crypto";
+import { sendEmail } from "@/lib/email";
 import { verifyPassword } from "@/lib/auth/password";
 
 // ── Utilitaires ──────────────────────────────────────────────────────────────
@@ -346,6 +347,68 @@ describe("limitation des tentatives de connexion", () => {
     await expectLoginRedirect(loginForm(user.email, user.plainPassword!));
     expect(sessionCookie()).toBeDefined();
   });
+
+  it("une rafale SIMULTANÉE ne dépasse pas la limite (compteur atomique)", async () => {
+    const user = await makeUser({ email: "rafale@nexus.test" });
+
+    const results = await Promise.all(
+      Array.from({ length: 30 }, () => failLogin(user.email)),
+    );
+
+    // Exactement 10 tentatives ont été vérifiées, les 20 autres refusées d'emblée.
+    expect(results.filter((r) => r?.error === "invalid")).toHaveLength(10);
+    expect(results.filter((r) => r?.error === "throttled")).toHaveLength(20);
+
+    const [row] = await testDb
+      .select()
+      .from(loginThrottle)
+      .where(eq(loginThrottle.key, `email:${user.email}`));
+    expect(row.count).toBe(30);
+    expect(sessionCookie()).toBeUndefined();
+  });
+
+  it("les connexions RÉUSSIES ne consomment pas de tentatives (bureau derrière une même IP)", async () => {
+    ctx.headers = new Headers({ "x-forwarded-for": "203.0.113.42" });
+    const equipe = await Promise.all(
+      Array.from({ length: 3 }, (_, i) => makeUser({ email: `equipe${i}@nexus.test` })),
+    );
+
+    // 12 connexions réussies depuis la même IP publique : toutes passent.
+    for (let i = 0; i < 12; i++) {
+      const u = equipe[i % equipe.length];
+      ctx.cookies.clear();
+      await expectLoginRedirect(loginForm(u.email, u.plainPassword!));
+    }
+
+    const rows = await testDb.select().from(loginThrottle);
+    for (const row of rows) expect(row.count).toBe(0);
+
+    // Et un échec isolé se compte toujours, sans être gonflé par les succès.
+    expect(await failLogin(equipe[0].email)).toEqual({ error: "invalid" });
+    const [ipRow] = await testDb
+      .select()
+      .from(loginThrottle)
+      .where(eq(loginThrottle.key, "ip:203.0.113.42"));
+    expect(ipRow.count).toBe(1);
+  });
+
+  it("une connexion réussie purge les lignes du limiteur expirées depuis plus d'un jour", async () => {
+    const user = await makeUser({ email: "purge@nexus.test" });
+    const now = Date.now();
+    await testDb.insert(loginThrottle).values([
+      { key: "email:vieux@nexus.test", count: 10, resetAt: new Date(now - 2 * 24 * 60 * 60_000) },
+      { key: "ip:198.51.100.9", count: 3, resetAt: new Date(now - 25 * 60 * 60_000) },
+      { key: "email:recent@nexus.test", count: 10, resetAt: new Date(now - 60 * 60_000) },
+      { key: "reset-mail:actif@nexus.test", count: 2, resetAt: new Date(now + 10 * 60_000) },
+    ]);
+
+    await expectLoginRedirect(loginForm(user.email, user.plainPassword!));
+
+    const keys = (await testDb.select().from(loginThrottle)).map((r) => r.key).sort();
+    expect(keys).toEqual(
+      ["email:recent@nexus.test", `email:${user.email}`, "reset-mail:actif@nexus.test"].sort(),
+    );
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -533,6 +596,25 @@ describe("mot de passe oublié — demande", () => {
 
     expect(sentEmails).toHaveLength(0);
     expect(await testDb.select().from(passwordResets)).toHaveLength(0);
+  });
+
+  it("répond AUSSI succès quand l'envoi du courriel échoue (pas d'oracle), et le consigne", async () => {
+    const user = await makeUser({ email: "rebond@nexus.test" });
+    vi.mocked(sendEmail).mockRejectedValueOnce(new Error("Resend 403: sandbox sender"));
+
+    const res = await requestResetAction(null, resetForm(user.email));
+
+    // Même réponse que pour un compte inconnu : l'échec d'envoi ne révèle rien.
+    expect(res).toEqual({ done: true });
+    expect(sentEmails).toHaveLength(0);
+
+    const actions = await auditActions();
+    expect(actions).toContain("password.reset_email_failed");
+    expect(actions).not.toContain("password.reset_requested");
+    const rows = await testDb.select().from(auditLogs);
+    const failed = rows.find((r) => r.action === "password.reset_email_failed");
+    expect(failed!.userId).toBe(user.id);
+    expect(failed!.detail).toMatchObject({ message: expect.stringContaining("Resend 403") });
   });
 
   it("limite les demandes répétées (5 par fenêtre)", async () => {

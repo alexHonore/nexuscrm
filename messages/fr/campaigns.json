@@ -258,7 +258,9 @@
       "enroll": "Impossible d'inscrire",
       "preview": "Impossible de calculer l'audience",
       "assistantInactive": "Un barreau laisse l'assistant rédiger : choisissez un assistant actif.",
-      "noSender": "Aucun numéro d'envoi actif — la campagne n'aurait rien pour écrire."
+      "noSender": "Aucun numéro d'envoi actif — la campagne n'aurait rien pour écrire.",
+      "assistantNotFound": "L'assistant choisi n'existe plus. Rechargez la page et choisissez-en un autre.",
+      "smsNumberNotFound": "Le numéro d'envoi choisi n'existe plus. Rechargez la page et choisissez-en un autre."
     },
     "export": "Exporter"
   },

@@ -258,7 +258,9 @@
       "enroll": "Could not enroll",
       "preview": "Could not compute the audience",
       "assistantInactive": "A rung lets the assistant write: pick an active assistant.",
-      "noSender": "No active sending number — the campaign would have nothing to write from."
+      "noSender": "No active sending number — the campaign would have nothing to write from.",
+      "assistantNotFound": "The selected assistant no longer exists. Reload the page and pick another.",
+      "smsNumberNotFound": "The selected sending number no longer exists. Reload the page and pick another."
     },
     "export": "Export"
   },

@@ -13,8 +13,13 @@ import { normalizePhone, phoneMatchKey } from "@/lib/phone";
  *   - TwiML App « Voice Request URL » → https://<app>/api/telephony/twiml
  *   - Numéro Twilio « A call comes in » → la même TwiML App
  *
- * Sortant (SDK navigateur) : From = "client:user-<uid>", params To + CallerId
- *   → <Dial callerId><Number>To</Number></Dial>
+ * Sortant (SDK navigateur) : From = "client:user-<uid>", param To
+ *   → <Dial callerId=DID de <uid>><Number>To</Number></Dial>
+ *   L'identité vient du jeton signé par /api/telephony/twilio-token : c'est
+ *   ELLE qui dit qui appelle. Le DID présenté est relu en base à partir d'elle,
+ *   jamais pris dans les paramètres du navigateur (un « CallerId » envoyé par le
+ *   SDK serait celui que l'utilisateur veut, pas le sien), et un utilisateur
+ *   désactivé est refusé même si son jeton d'une heure court encore.
  * Entrant (PSTN vers un DID Twilio) : To = numéro appelé
  *   → on route vers l'identité du navigateur de l'utilisateur qui possède ce DID
  *   → <Dial><Client>user-<uid></Client></Dial>
@@ -69,6 +74,23 @@ function isValidTwilioSignature(req: NextRequest, params: URLSearchParams): bool
   const a = Buffer.from(expected);
   const b = Buffer.from(signature);
   return a.length === b.length && timingSafeEqual(a, b);
+}
+
+const CLIENT_IDENTITY_RE =
+  /^client:user-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+/**
+ * L'utilisateur derrière une identité navigateur « client:user-<uid> ». L'uid
+ * est vérifié avant la requête : `users.id` est un uuid, une chaîne quelconque
+ * ferait planter le cast côté Postgres.
+ */
+async function outboundOwner(from: string) {
+  const uid = CLIENT_IDENTITY_RE.exec(from)?.[1];
+  if (!uid) return undefined;
+  return db.query.users.findFirst({
+    where: eq(users.id, uid),
+    columns: { id: true, isActive: true, didNumber: true },
+  });
 }
 
 /**
@@ -174,11 +196,18 @@ export async function POST(req: NextRequest) {
   // ── Sortant : appel lancé par le SDK navigateur (device.connect) ──
   if (from.startsWith("client:")) {
     const dest = normalizePhone(to);
-    const callerId = normalizePhone(params.get("CallerId"));
     if (!dest) return twiml("<Reject/>");
-    const callerAttr = callerId ? ` callerId="${xmlEscape(callerId)}"` : "";
+
+    // Le propriétaire de la ligne, d'après l'identité du jeton — et lui seul.
+    // Un utilisateur inconnu ou désactivé ne compose plus, même avec un jeton
+    // encore valide ; sans DID attitré, rien à présenter : Twilio refuserait
+    // de toute façon un Dial PSTN sans callerId.
+    const owner = await outboundOwner(from);
+    const callerId = owner?.isActive ? normalizePhone(owner.didNumber) : null;
+    if (!callerId) return twiml("<Reject/>");
     return twiml(
-      `<Dial${callerAttr} answerOnBridge="true"><Number>${xmlEscape(dest)}</Number></Dial>`,
+      `<Dial callerId="${xmlEscape(callerId)}" answerOnBridge="true">` +
+        `<Number>${xmlEscape(dest)}</Number></Dial>`,
     );
   }
 

@@ -26,6 +26,8 @@ vi.mock("next/headers", () => ({
 
 const actions = await import("@/app/(app)/profile/actions");
 const { verifyPassword } = await import("@/lib/auth/password");
+const { getCurrentUser } = await import("@/lib/auth/guards");
+const { readSession } = await import("@/lib/auth/session");
 
 async function login(user: { id: string; role: "admin" | "caller"; tokenVersion: number }) {
   const token = await new SignJWT({
@@ -124,5 +126,35 @@ describe("mon profil", () => {
       .from(auditLogs)
       .where(and(eq(auditLogs.action, "user.password_change"), eq(auditLogs.entityId, me.id)));
     expect(audits).toHaveLength(1);
+  });
+
+  it("un changement de mot de passe révoque les AUTRES sessions et réémet la sienne", async () => {
+    const me = await makeUser({});
+    await login(me); // remember: true
+    const stolen = CTX.jar.get("nexus_session")!;
+
+    // Un mauvais mot de passe actuel ne touche ni à tokenVersion ni au cookie.
+    await actions.changePasswordAction({ current: "mauvais", next: "NouveauPass1" });
+    let [row] = await testDb.select().from(users).where(eq(users.id, me.id));
+    expect(row.tokenVersion).toBe(me.tokenVersion);
+    expect(CTX.jar.get("nexus_session")).toBe(stolen);
+
+    expect(
+      await actions.changePasswordAction({ current: me.plainPassword!, next: "NouveauPass1" }),
+    ).toEqual({ ok: true });
+
+    [row] = await testDb.select().from(users).where(eq(users.id, me.id));
+    expect(row.tokenVersion).toBe(me.tokenVersion + 1);
+
+    // Le navigateur courant a reçu un nouveau cookie, toujours valide, qui
+    // conserve « se souvenir de moi ».
+    const fresh = CTX.jar.get("nexus_session")!;
+    expect(fresh).not.toBe(stolen);
+    expect(await readSession()).toMatchObject({ uid: me.id, tv: me.tokenVersion + 1, remember: true });
+    expect((await getCurrentUser())?.id).toBe(me.id);
+
+    // L'ancien jeton (autre appareil, cookie volé) ne résout plus.
+    CTX.jar.set("nexus_session", stolen);
+    expect(await getCurrentUser()).toBeNull();
   });
 });

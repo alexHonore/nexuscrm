@@ -19,6 +19,8 @@ import {
 import { getCurrentUser } from "@/lib/auth/guards";
 import { notifyCategoryChanged, notifyCategoryChanges } from "@/lib/campaigns-server/match";
 import { diffFields, getClientIp, logAudit, type AuditChanges } from "@/lib/audit";
+import { isForeignKeyViolation } from "@/lib/db-errors";
+import { categoryEntryPatch } from "@/lib/dispositions";
 import { cancelEvent } from "@/lib/google";
 import { normalizePhone } from "@/lib/phone";
 import {
@@ -31,7 +33,10 @@ import { BULK_MAX } from "@/lib/bulk";
 
 export type ActionResult =
   | { ok: true; id?: string }
-  | { ok: false; error: "invalid" | "invalidPhone" | "forbidden" | "notFound" };
+  | {
+      ok: false;
+      error: "invalid" | "invalidPhone" | "invalidPhoneAlt" | "forbidden" | "notFound";
+    };
 
 /** Résultat des actions en masse : nombre de fiches réellement modifiées. */
 export type BulkResult =
@@ -128,7 +133,21 @@ export async function createClientAction(input: ClientFormInput): Promise<Action
 
   const phone = normalizePhone(data.phone);
   if (!phone) return { ok: false, error: "invalidPhone" };
+  // Même exigence que le numéro principal : un « autre téléphone » saisi mais
+  // inutilisable est refusé, pas enregistré NULL en silence.
   const phoneAlt = data.phoneAlt ? normalizePhone(data.phoneAlt) : null;
+  if (data.phoneAlt && !phoneAlt) return { ok: false, error: "invalidPhoneAlt" };
+
+  // Catégorie résolue AVANT l'écriture : sa clé décide des effets d'entrée
+  // (« Ne pas appeler » → doNotCall) ; une catégorie disparue répond notFound.
+  const category =
+    data.categoryId == null
+      ? null
+      : ((await db.query.categories.findFirst({
+          where: eq(categories.id, data.categoryId),
+          columns: { id: true, key: true },
+        })) ?? null);
+  if (data.categoryId != null && !category) return NOT_FOUND;
 
   const values = {
     fullName: data.fullName,
@@ -141,16 +160,24 @@ export async function createClientAction(input: ClientFormInput): Promise<Action
     projectType: data.projectType,
     timing: data.timing,
     budget: data.budget,
-    categoryId: data.categoryId ?? null,
+    ...categoryEntryPatch(category),
     sourceId: data.sourceId ?? null,
     assignedToId: data.assignedToId ?? null,
     notes: data.notes,
   };
 
-  const [created] = await db
-    .insert(clients)
-    .values({ ...values, createdById: user.id })
-    .returning({ id: clients.id });
+  // Source / responsable supprimés entre-temps (vieil onglet) : la base refuse
+  // la référence — on répond notFound au lieu de planter l'action.
+  let created: { id: string };
+  try {
+    [created] = await db
+      .insert(clients)
+      .values({ ...values, createdById: user.id })
+      .returning({ id: clients.id });
+  } catch (err) {
+    if (isForeignKeyViolation(err)) return NOT_FOUND;
+    throw err;
+  }
 
   // Création : « rien → valeur » pour chaque champ renseigné.
   const changes = diffFields(null, values, CLIENT_AUDIT_FIELDS);
@@ -183,7 +210,11 @@ export async function updateClientAction(
 
   const phone = normalizePhone(data.phone);
   if (!phone) return { ok: false, error: "invalidPhone" };
+  // Même exigence que le numéro principal : un « autre téléphone » saisi mais
+  // inutilisable est refusé, pas enregistré NULL en silence (ce qui effaçait
+  // aussi l'ancien numéro tout en affichant « Enregistré »).
   const phoneAlt = data.phoneAlt ? normalizePhone(data.phoneAlt) : null;
+  if (data.phoneAlt && !phoneAlt) return { ok: false, error: "invalidPhoneAlt" };
 
   const patch = {
     fullName: data.fullName,
@@ -202,10 +233,17 @@ export async function updateClientAction(
     ...(user.role === "admin" ? { assignedToId: data.assignedToId ?? null } : {}),
   };
 
-  await db
-    .update(clients)
-    .set({ ...patch, updatedAt: new Date() })
-    .where(eq(clients.id, clientId));
+  // Source / responsable supprimés entre-temps (vieil onglet) : la base refuse
+  // la référence — on répond notFound au lieu de planter l'action.
+  try {
+    await db
+      .update(clients)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(eq(clients.id, clientId));
+  } catch (err) {
+    if (isForeignKeyViolation(err)) return NOT_FOUND;
+    throw err;
+  }
 
   const changes = diffFields(existing, { ...existing, ...patch }, CLIENT_AUDIT_FIELDS);
   await logAudit({
@@ -228,13 +266,24 @@ export async function setClientCategoryAction(
   if (!user) return FORBIDDEN;
   if (!z.string().uuid().safeParse(clientId).success) return INVALID;
   if (categoryId !== null && !Number.isInteger(categoryId)) return INVALID;
+  // Cible résolue AVANT l'écriture : un statut supprimé entre-temps (vieil
+  // onglet) répond notFound au lieu d'une violation de clé étrangère, et sa
+  // clé décide des effets d'entrée (« Ne pas appeler » → doNotCall).
+  const target =
+    categoryId === null
+      ? null
+      : ((await db.query.categories.findFirst({
+          where: eq(categories.id, categoryId),
+          columns: { id: true, key: true },
+        })) ?? null);
+  if (categoryId !== null && !target) return NOT_FOUND;
 
   const existing = await db.query.clients.findFirst({ where: eq(clients.id, clientId) });
   if (!existing) return NOT_FOUND;
 
   await db
     .update(clients)
-    .set({ categoryId, updatedAt: new Date() })
+    .set({ ...categoryEntryPatch(target), updatedAt: new Date() })
     .where(eq(clients.id, clientId));
 
   const changes = diffFields(existing, { categoryId }, ["categoryId"]);
@@ -297,6 +346,10 @@ export async function assignClientAction(
   if (!user || user.role !== "admin") return FORBIDDEN;
   if (!z.string().uuid().safeParse(clientId).success) return INVALID;
   if (assignedToId !== null && !z.string().uuid().safeParse(assignedToId).success) return INVALID;
+  if (assignedToId !== null) {
+    const target = await db.query.users.findFirst({ where: eq(users.id, assignedToId) });
+    if (!target) return NOT_FOUND;
+  }
 
   const existing = await db.query.clients.findFirst({ where: eq(clients.id, clientId) });
   if (!existing) return NOT_FOUND;
@@ -480,10 +533,15 @@ export async function bulkSetClientsCategoryAction(
   const ids = bulkIdsSchema.safeParse(clientIds);
   if (!ids.success) return INVALID;
   if (categoryId !== null && !Number.isInteger(categoryId)) return INVALID;
-  if (categoryId !== null) {
-    const target = await db.query.categories.findFirst({ where: eq(categories.id, categoryId) });
-    if (!target) return NOT_FOUND;
-  }
+  // La clé de la cible décide des effets d'entrée (« Ne pas appeler » → doNotCall).
+  const target =
+    categoryId === null
+      ? null
+      : ((await db.query.categories.findFirst({
+          where: eq(categories.id, categoryId),
+          columns: { id: true, key: true },
+        })) ?? null);
+  if (categoryId !== null && !target) return NOT_FOUND;
 
   const existing = await db
     .select({ id: clients.id, categoryId: clients.categoryId })
@@ -494,7 +552,7 @@ export async function bulkSetClientsCategoryAction(
   if (changed.length > 0) {
     await db
       .update(clients)
-      .set({ categoryId, updatedAt: new Date() })
+      .set({ ...categoryEntryPatch(target), updatedAt: new Date() })
       .where(
         inArray(
           clients.id,

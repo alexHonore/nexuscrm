@@ -361,6 +361,96 @@ describe("POST /api/webhooks/leads", () => {
       expect(rows).toHaveLength(1);
       expect(rows[0].body).toBe("Client existant recontacté — (418) 476-1542 — via n8n Facebook");
     });
+
+    it("RÉGRESSION : un numéro court (7 chiffres) ne se fond PAS dans la fiche d'un inconnu", async () => {
+      // « 476-1542 » devient « +4761542 » ; en suffixe (LIKE '%4761542') il
+      // rattachait n'importe quelle fiche se terminant ainsi : le lead était
+      // perdu, et la fiche de Marie recevait le courriel et la ville de Jean.
+      await makeKey(KEY);
+      const marie = await makeClient({
+        fullName: "Marie T.",
+        phone: "+15144761542",
+        email: null,
+        city: null,
+        meta: { origine: "notion" },
+      });
+
+      const res = await POST(
+        leadRequest(
+          {
+            name: "Jean Test",
+            phone: "476-1542",
+            email: "jean@example.com",
+            city: "Lévis",
+          },
+          { "x-api-key": KEY },
+        ),
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { created: boolean; clientId: string };
+      expect(body.created).toBe(true);
+      expect(body.clientId).not.toBe(marie.id);
+
+      const all = await testDb.select().from(clients);
+      expect(all).toHaveLength(2);
+      const [marieAfter] = await testDb.select().from(clients).where(eq(clients.id, marie.id));
+      expect(marieAfter.email).toBeNull();
+      expect(marieAfter.city).toBeNull();
+      expect(marieAfter.meta).toEqual({ origine: "notion" });
+      const [jean] = await testDb.select().from(clients).where(eq(clients.id, body.clientId));
+      expect(jean.fullName).toBe("Jean Test");
+      expect(jean.phone).toBe("+4761542");
+      expect(jean.email).toBe("jean@example.com");
+    });
+
+    it("un numéro court renvoyé deux fois dédoublonne quand même (E.164 exact)", async () => {
+      await makeKey(KEY);
+      const first = await POST(leadRequest({ name: "Jean", phone: "476-1542" }, { "x-api-key": KEY }));
+      const second = await POST(leadRequest({ name: "Jean", phone: "476-1542" }, { "x-api-key": KEY }));
+      const a = (await first.json()) as { created: boolean; clientId: string };
+      const b = (await second.json()) as { created: boolean; clientId: string };
+      expect(a.created).toBe(true);
+      expect(b.created).toBe(false);
+      expect(b.clientId).toBe(a.clientId);
+      expect(await testDb.select().from(clients)).toHaveLength(1);
+    });
+
+    it("préfère l'E.164 exact quand deux fiches partagent les 10 derniers chiffres", async () => {
+      await makeKey(KEY);
+      // Créée AVANT, pour que l'ordre d'insertion ne puisse pas expliquer le choix.
+      await makeClient({ fullName: "Homonyme étranger", phone: "+334184761542" });
+      const exact = await makeClient({ fullName: "Marie T.", phone: "+14184761542" });
+
+      const res = await POST(leadRequest(facebookPayload(), { "x-api-key": KEY }));
+      await expect(res.json()).resolves.toMatchObject({ created: false, clientId: exact.id });
+    });
+
+    it("RÉGRESSION : deux livraisons SIMULTANÉES du même lead ne créent qu'UNE fiche", async () => {
+      // Relance n8n pendant que la première est en vol, double envoi Facebook,
+      // formulaire soumis deux fois : avant, chacune lisait « aucune fiche » et
+      // insérait la sienne — deux clients, deux inscriptions de campagne.
+      const admin = await makeUser({ role: "admin", locale: "fr" });
+      await makeKey(KEY);
+
+      const responses = await Promise.all(
+        [1, 2, 3].map(() => POST(leadRequest(facebookPayload(), { "x-api-key": KEY }))),
+      );
+      const bodies = (await Promise.all(responses.map((r) => r.json()))) as {
+        ok: boolean;
+        created: boolean;
+        clientId: string;
+      }[];
+      expect(responses.map((r) => r.status)).toEqual([200, 200, 200]);
+
+      const all = await testDb.select().from(clients);
+      expect(all).toHaveLength(1);
+      expect(bodies.filter((b) => b.created)).toHaveLength(1);
+      expect(new Set(bodies.map((b) => b.clientId))).toEqual(new Set([all[0].id]));
+      // Chaque livraison a bien été traitée (une notification chacune), sur la même fiche.
+      const notifs = await testDb.select().from(notifications).where(eq(notifications.userId, admin.id));
+      expect(notifs).toHaveLength(3);
+      expect(new Set(notifs.map((n) => n.link))).toEqual(new Set([`/clients/${all[0].id}`]));
+    });
   });
 
   // ── Validation ────────────────────────────────────────────────────────────

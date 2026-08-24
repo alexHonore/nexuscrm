@@ -343,8 +343,10 @@ export async function markConversationHandledAction(
 }
 
 /**
- * Assigner un fil à quelqu'un. Un téléphoniste peut se l'attribuer ; seul un
- * administrateur peut l'attribuer à AUTRUI — même règle que les fiches clients.
+ * Assigner un fil à quelqu'un. Un téléphoniste peut se l'attribuer, ou
+ * RELÂCHER un fil qu'il tient (ou que personne ne tient) ; seul un
+ * administrateur peut l'attribuer à AUTRUI ou désattribuer le fil d'un
+ * collègue — même règle que les fiches clients.
  */
 export async function assignConversationAction(input: {
   conversationId: string;
@@ -355,14 +357,17 @@ export async function assignConversationAction(input: {
   if (!z.uuid().safeParse(input.conversationId).success) return INVALID;
   if (input.userId !== null && !z.uuid().safeParse(input.userId).success) return INVALID;
 
-  if (user.role !== "admin" && input.userId !== null && input.userId !== user.id) {
-    return FORBIDDEN;
-  }
-
   const thread = await db.query.conversations.findFirst({
     where: eq(conversations.id, input.conversationId),
   });
   if (!thread) return NOT_FOUND;
+
+  if (user.role !== "admin") {
+    const releasesOwn =
+      input.userId === null &&
+      (thread.assignedToId === null || thread.assignedToId === user.id);
+    if (input.userId !== user.id && !releasesOwn) return FORBIDDEN;
+  }
 
   await db
     .update(conversations)

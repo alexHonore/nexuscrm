@@ -168,8 +168,18 @@ describe("phone — phoneMatchKey", () => {
     expect(phoneMatchKey("+41791234567")).toBe("1791234567");
   });
 
-  it("accepte un numéro de 7 chiffres (local) et le renvoie tel quel", () => {
-    expect(phoneMatchKey("476-1542")).toBe("4761542");
+  it("RÉGRESSION (corrigé) : jamais de clé plus courte que 10 chiffres", () => {
+    // Un numéro local à 7 chiffres (« 476-1542 ») donnait la clé « 4761542 » :
+    // en suffixe (LIKE '%4761542'), elle rattachait n'importe quelle fiche se
+    // terminant ainsi (+14184761542, +15144761542…) — un lead fondu dans la
+    // fiche d'un inconnu. Sous 10 chiffres, pas de clé : l'appelant se rabat
+    // sur l'E.164 exact ou ne rattache pas.
+    expect(phoneMatchKey("476-1542")).toBeNull();
+    expect(phoneMatchKey("+4761542")).toBeNull();
+    expect(phoneMatchKey("84761542")).toBeNull();
+    expect(phoneMatchKey("184761542")).toBeNull();
+    // Dix chiffres exactement : la clé complète.
+    expect(phoneMatchKey("4184761542")).toBe("4184761542");
   });
 
   it.each([
@@ -177,6 +187,8 @@ describe("phone — phoneMatchKey", () => {
     ["undefined", undefined],
     ["chaîne vide", ""],
     ["6 chiffres", "476154"],
+    ["7 chiffres (local sans indicatif)", "4761542"],
+    ["9 chiffres", "184761542"],
     ["ponctuation seulement", "()-. "],
     ["lettres", "NEXUS"],
   ])("renvoie null pour %s", (_label, input) => {

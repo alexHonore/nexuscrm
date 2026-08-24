@@ -32,7 +32,6 @@ export class TwilioEngine implements TelephonyEngine {
   private call: Call | null = null;
   private active: ActiveCall | null = null;
   private events: TelephonyEvents | null = null;
-  private config: EngineConfig = {};
   private registration: RegistrationState = "unregistered";
   /** Sourdine voulue par l'utilisateur — restaurée à la reprise d'attente. */
   private userMuted = false;
@@ -43,7 +42,6 @@ export class TwilioEngine implements TelephonyEngine {
   }
 
   async init(config: EngineConfig, events: TelephonyEvents): Promise<void> {
-    this.config = config;
     this.events = events;
     this.setRegistration("registering");
 
@@ -89,10 +87,10 @@ export class TwilioEngine implements TelephonyEngine {
     }
 
     this.active = { direction: "outbound", remoteNumber: number, startedAt: new Date() };
-    // Les params sont relayés à /api/telephony/twiml (To + CallerId = DID de l'utilisateur).
-    const call = await this.device.connect({
-      params: { To: number, CallerId: this.config.callerId ?? "" },
-    });
+    // Seul `To` est relayé à /api/telephony/twiml : le DID présenté est relu
+    // côté serveur d'après l'identité du jeton, jamais envoyé d'ici — un
+    // paramètre du navigateur dirait le numéro qu'on VEUT, pas celui qu'on A.
+    const call = await this.device.connect({ params: { To: number } });
     this.attachCall(call);
     this.events?.onCallStateChange("connecting", this.active);
   }

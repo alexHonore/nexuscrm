@@ -2,7 +2,15 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
-import { campaignEnrollments, campaignTouches, campaigns, conversations, smsNumbers, suppressions } from "@/db/schema-sms";
+import {
+  assistants,
+  campaignEnrollments,
+  campaignTouches,
+  campaigns,
+  conversations,
+  smsNumbers,
+  suppressions,
+} from "@/db/schema-sms";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { campaignRowToConfig } from "@/lib/campaigns/schema";
 import {
@@ -41,10 +49,18 @@ import { settingsSendGate } from "@/lib/sms-server";
  * réel du lendemain.
  */
 
+/**
+ * Retenue propre à l'envoi : le barreau est « l'assistant rédige » et
+ * l'assistant qui prendrait le tour n'est pas actif (brouillon, archivé, non
+ * compilé). Même code que la porte d'activation de la campagne — elle ne vaut
+ * qu'au moment d'activer, et un assistant se désactive très bien après.
+ */
+export const ASSISTANT_INACTIVE = "assistant_inactive" as const;
+
 export interface TouchResult {
   sent: boolean;
   step: number;
-  refusal?: TouchRefusal;
+  refusal?: TouchRefusal | typeof ASSISTANT_INACTIVE;
   /** Prochain barreau planifié, quand il y en a un. */
   nextAt?: Date | null;
 }
@@ -169,6 +185,31 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
 
   const opener = variantBody(config.variants, enrollment.variant);
   const body = bodyForStep(config.ladder, step, opener);
+
+  // Barreau « l'assistant rédige » : celui qui prendra le tour est l'assistant
+  // déjà épinglé sur le fil, sinon celui de la campagne. S'il n'est pas actif
+  // et compilé, le tour se terminerait « pas d'assistant » — et le barreau,
+  // déjà écrit et déjà avancé, serait consommé pour rien, rangée après
+  // rangée jusqu'à « échelle épuisée », sans un SMS ni une alerte. On RETIENT
+  // donc le barreau comme pour un numéro manquant : il repart à la
+  // réactivation. (Sans aucun assistant désigné, la porte d'activation de la
+  // campagne a déjà refusé ; on laisse le tour trancher.)
+  if (body === AGENT_WRITES) {
+    const assistantId = conversation?.activeAssistantId ?? campaignRow.assistantId;
+    if (assistantId !== null) {
+      const assistant = await db.query.assistants.findFirst({
+        where: eq(assistants.id, assistantId),
+        columns: { status: true, compiledPrompt: true },
+      });
+      if (!assistant || assistant.status !== "active" || !assistant.compiledPrompt) {
+        return defer(enrollment, new Date(now.getTime() + RETRY_MS), {
+          sent: false,
+          step,
+          refusal: ASSISTANT_INACTIVE,
+        });
+      }
+    }
+  }
 
   const nextStep = step + 1;
   // `now` est bien l'instant d'envoi : on n'arrive ici que dans la fenêtre

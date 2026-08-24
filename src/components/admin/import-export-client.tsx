@@ -43,7 +43,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { api } from "./api";
+import { ApiError, api } from "./api";
 import type { OptionDto } from "./types";
 
 /** Pastille d'icône commune aux en-têtes des cartes Import / Export. */
@@ -277,8 +277,14 @@ export function ImportCard({
       setResult(totals);
       setRejected(collected);
       toast.success(t("importExport.import.done"));
-    } catch {
-      toast.error(t("genericError"));
+    } catch (err) {
+      // 422 invalid_default : une valeur par défaut (catégorie/source/assigné)
+      // a été supprimée depuis le chargement — la liste déroulante est périmée.
+      if (err instanceof ApiError && err.code === "invalid_default") {
+        toast.error(t("importExport.import.invalidDefault"));
+      } else {
+        toast.error(t("genericError"));
+      }
     } finally {
       setProgress(null);
     }

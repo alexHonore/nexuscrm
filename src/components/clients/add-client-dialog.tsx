@@ -108,6 +108,8 @@ export function AddClientDialog({
         if (res.id) router.push(`/clients/${res.id}`);
       } else if (res.error === "invalidPhone") {
         toast.error(t("create.invalidPhone"));
+      } else if (res.error === "invalidPhoneAlt") {
+        toast.error(t("create.invalidPhoneAlt"));
       } else if (res.error === "forbidden") {
         toast.error(t("errors.forbidden"));
       } else {

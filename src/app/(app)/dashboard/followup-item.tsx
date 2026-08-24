@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckIcon, PhoneIcon, UserRoundIcon } from "lucide-react";
+import { CheckIcon, PhoneIcon, PhoneOffIcon, UserRoundIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -20,6 +20,8 @@ export type FollowupItemData = {
   note: string | null;
   dueLabel: string;
   overdue: boolean;
+  /** `clients.doNotCall` — gate ABSOLU : le bouton d'appel reste désactivé. */
+  doNotCall: boolean;
 };
 
 export function FollowupItem({ item }: { item: FollowupItemData }) {
@@ -48,8 +50,17 @@ export function FollowupItem({ item }: { item: FollowupItemData }) {
       )}
     >
       <div className="min-w-0 flex-1">
-        <Link href={`/clients/${item.clientId}`} className="block truncate text-sm font-medium hover:underline">
-          {item.clientName}
+        <Link
+          href={`/clients/${item.clientId}`}
+          className="flex items-center gap-1.5 text-sm font-medium hover:underline"
+        >
+          {item.doNotCall ? (
+            <PhoneOffIcon
+              aria-label={t("followups.doNotCall")}
+              className="size-3.5 shrink-0 text-destructive"
+            />
+          ) : null}
+          <span className="truncate">{item.clientName}</span>
         </Link>
         <p className="truncate text-xs text-muted-foreground">
           <span className={cn("font-medium tabular-nums", item.overdue && "text-destructive")}>
@@ -64,8 +75,10 @@ export function FollowupItem({ item }: { item: FollowupItemData }) {
         <Button
           variant="ghost"
           className="size-11 rounded-full bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 hover:text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-400 dark:hover:bg-emerald-500/25 dark:hover:text-emerald-300"
-          aria-label={t("followups.call")}
-          disabled={!ready}
+          aria-label={item.doNotCall ? t("followups.doNotCall") : t("followups.call")}
+          // Même règle que l'en-tête de la fiche et la carte du pipeline :
+          // une fiche « Ne pas appeler » ne se compose pas d'un geste.
+          disabled={!ready || item.doNotCall}
           onClick={() => dial({ number: item.phone, clientId: item.clientId, clientName: item.clientName })}
         >
           <PhoneIcon className="size-5" />

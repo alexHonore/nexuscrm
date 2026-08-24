@@ -39,8 +39,15 @@ vi.mock("next/headers", () => ({
   }),
   headers: async () => new Headers(),
 }));
+// La vraie file, derrière un espion : un seul test lui fait échouer UN appel
+// pour simuler un pépin BD entre l'insertion du message et le tour d'agent.
+vi.mock("@/lib/jobs/queue", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/jobs/queue")>();
+  return { ...actual, enqueueJob: vi.fn(actual.enqueueJob) };
+});
 
 const { POST } = await import("@/app/api/webhooks/twilio/inbound/route");
+const { enqueueJob } = await import("@/lib/jobs/queue");
 
 // La route valide la signature sur l'URL publique (NEXT_PUBLIC_APP_URL) — on
 // signe exactement la même, sinon 403 (dans .env.test le port n'est pas 3000).
@@ -107,6 +114,21 @@ describe("POST /api/webhooks/twilio/inbound", () => {
     expect(await testDb.select().from(conversations)).toHaveLength(0);
     expect(await testDb.select().from(suppressions)).toHaveLength(0);
     expect(await testDb.select().from(smsNumbers)).toHaveLength(0);
+  });
+
+  it("une rafale de signatures invalides n'écrit qu'UNE rangée d'audit par fenêtre", async () => {
+    // La route est publique : sans borne, n'importe qui faisait grossir
+    // audit_logs d'une rangée par requête anonyme. Le signal « URL Twilio mal
+    // configurée » reste visible (la première rangée), les suivantes sont tues.
+    for (let i = 0; i < 3; i++) {
+      const res = await POST(inboundRequest(inboundForm(), { signature: "pas-la-bonne-signature" }));
+      expect(res.status).toBe(403);
+    }
+    const logs = await testDb
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "sms.webhook_invalid_signature"));
+    expect(logs).toHaveLength(1);
   });
 
   it("enregistre le message d'un client connu et crée conversation + ligne SMS", async () => {
@@ -279,6 +301,78 @@ describe("POST /api/webhooks/twilio/inbound", () => {
       .where(eq(auditLogs.action, "sms.optout"));
     expect(logs).toHaveLength(1);
     expect(logs[0].entityId).toBe(client.id);
+  });
+
+  it("RÉGRESSION : un numéro court ne se rattache PAS à une fiche qui finit par les mêmes chiffres", async () => {
+    // « +5550142 » (7 chiffres) donnait la clé « 5550142 » et LIKE '%5550142'
+    // rattachait la fiche +15145550142 : le texto d'un inconnu atterrissait
+    // dans le fil de Marie. Sous 10 chiffres, seul l'E.164 exact compte.
+    await makeClient({ fullName: "Marie Tremblay", phone: FROM });
+    await makeSmsNumber({ e164: TO });
+
+    const res = await POST(inboundRequest(inboundForm({ From: "+5550142" })));
+    expect(res.status).toBe(200);
+
+    expect(await testDb.select().from(conversations)).toHaveLength(0);
+    expect(await testDb.select().from(messages)).toHaveLength(0);
+    const logs = await testDb
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "sms.inbound_unmatched"));
+    expect(logs).toHaveLength(1);
+  });
+
+  it("RÉGRESSION : un échec après l'insertion annule la rangée, et la relivraison refait tout", async () => {
+    // Avant : rangée `messages` écrite, puis pépin BD (pooler) avant le tour
+    // d'agent → 500 ; Twilio relivrait, butait sur le conflit de MessageSid et
+    // sautait marquage + tour : texto en base, jamais signalé, jamais répondu.
+    await makeUser({ role: "admin", locale: "fr" });
+    await makeClient({ phone: FROM });
+    await makeSmsNumber({ e164: TO });
+    const [assistant] = await testDb
+      .insert(assistants)
+      .values({
+        name: "Assistant reprise",
+        identity: {},
+        goal: { primary: { type: "qualify_only" }, fallbacks: [] },
+        approach: {},
+        model: {},
+      })
+      .returning();
+
+    // Premier message : crée la conversation ; on y attache l'assistant et un
+    // humain la « traite » (plus rien à signaler).
+    await POST(inboundRequest(inboundForm({ MessageSid: SID + "f", Body: "Allo" })));
+    const [conv] = await testDb.select().from(conversations);
+    await testDb
+      .update(conversations)
+      .set({ activeAssistantId: assistant.id, needsAttention: false, attentionReason: null })
+      .where(eq(conversations.id, conv.id));
+
+    // Pépin BD simulé : la mise en file du tour échoue UNE fois.
+    vi.mocked(enqueueJob).mockRejectedValueOnce(new Error("CONNECTION_CLOSED"));
+    await expect(
+      POST(inboundRequest(inboundForm({ MessageSid: SID + "g", Body: "je veux vendre" }))),
+    ).rejects.toThrow("CONNECTION_CLOSED");
+
+    // Rien à moitié : pas de rangée orpheline, fil non re-signalé.
+    expect(await testDb.select().from(messages).where(eq(messages.twilioSid, SID + "g"))).toHaveLength(0);
+    const [mid] = await testDb.select().from(conversations);
+    expect(mid.needsAttention).toBe(false);
+    expect((await testDb.select().from(scheduledJobs)).filter((j) => j.type === "agent_turn")).toHaveLength(0);
+
+    // Twilio relivre le même MessageSid : tout est refait d'un bloc.
+    const retry = await POST(
+      inboundRequest(inboundForm({ MessageSid: SID + "g", Body: "je veux vendre" })),
+    );
+    expect(retry.status).toBe(200);
+    expect(await testDb.select().from(messages).where(eq(messages.twilioSid, SID + "g"))).toHaveLength(1);
+    const [after] = await testDb.select().from(conversations);
+    expect(after.needsAttention).toBe(true);
+    expect(after.attentionReason).toBe("inbound");
+    const turns = (await testDb.select().from(scheduledJobs)).filter((j) => j.type === "agent_turn");
+    expect(turns).toHaveLength(1);
+    expect(turns[0].dedupeKey).toBe(`turn:${conv.id}`);
   });
 
   it("numéro inconnu : répond 200, ne crée AUCUN client ni conversation, et trace", async () => {

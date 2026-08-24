@@ -46,7 +46,7 @@
     "deactivate": "Deactivate",
     "activate": "Activate",
     "deleteTitle": "Delete {name}?",
-    "deleteDesc": "This action is permanent. Clients assigned to them will be unassigned (no client will be deleted). Their call history, comments, follow-ups and appointments will be deleted.",
+    "deleteDesc": "This action is permanent. Clients assigned to them will be unassigned (no client will be deleted). An account with history (calls, appointments, follow-ups or comments) cannot be deleted: deactivate it instead.",
     "deleteConfirm": "Delete permanently",
     "deleted": "User deleted",
     "voip": {
@@ -185,7 +185,8 @@
       "cannot_demote_self": "You cannot remove your own administrator role.",
       "cannot_delete_self": "You cannot delete your own account.",
       "invalid_did": "Invalid number (DID).",
-      "has_activity": "This user has history (calls, appointments or follow-ups) that would be destroyed. Deactivate the account instead to keep the data."
+      "has_activity": "This user has history (calls, appointments, follow-ups or comments) that would be destroyed. Deactivate the account instead to keep the data.",
+      "user_not_found": "The target user no longer exists. Reload the page."
     },
     "credentialsTitle": "Login credentials",
     "emailTypoHint": "Did you mean {suggestion}?",
@@ -293,6 +294,7 @@
       "phoneRequired": "The Phone column is required.",
       "run": "Import {count, plural, one {# row} other {# rows}}",
       "done": "Import finished",
+      "invalidDefault": "One of the default values (category, source or assignee) no longer exists. Reload the page, pick another one and run the import again.",
       "result": {
         "created": "Created",
         "updated": "Updated",
@@ -596,6 +598,7 @@
       "from": "Before",
       "to": "After",
       "count": "Count",
+      "partial": "Interrupted",
       "counts": "Counts",
       "filters": "Filters",
       "range": "Range",

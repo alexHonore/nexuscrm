@@ -1,4 +1,4 @@
-import { and, eq, like, or, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { categories, clients, notifications, sources, users, webhookKeys } from "@/db/schema";
@@ -7,6 +7,7 @@ import { runAfterResponse } from "@/lib/after-response";
 import { logAudit } from "@/lib/audit";
 import { sha256Hex } from "@/lib/crypto";
 import { formatPhone, normalizePhone, phoneMatchKey } from "@/lib/phone";
+import { clientPhoneMatch } from "@/lib/webhooks/client-match";
 import {
   LEAD_FIELD_ALIASES,
   LEAD_MAX_BODY_BYTES,
@@ -146,50 +147,55 @@ export async function POST(req: Request) {
 
   const newCategory = await db.query.categories.findFirst({ where: eq(categories.key, "new") });
 
-  // ── Dédoublonnage par téléphone (10 derniers chiffres) — principal ET secondaire ──
-  const matchKey = phoneMatchKey(phone);
-  const existing = matchKey
-    ? await db.query.clients.findFirst({
-        where: or(like(clients.phone, `%${matchKey}`), like(clients.phoneAlt, `%${matchKey}`)),
-      })
-    : undefined;
+  // ── Dédoublonnage par téléphone — E.164 exact, sinon les 10 derniers
+  // chiffres (principal ET secondaire), jamais une clé plus courte. ──
+  // Recherche et écriture sous UN verrou consultatif transactionnel par numéro :
+  // deux livraisons du même lead à quelques millisecondes (relance n8n,
+  // double envoi Facebook, formulaire soumis deux fois) lisaient toutes deux
+  // « aucune fiche » et créaient deux clients — puis deux inscriptions de
+  // campagne, deux SMS d'ouverture. La seconde attend la première, la voit, et
+  // prend la branche « existant ». Le verrou tombe avec la transaction, y
+  // compris sur un pooler en mode transaction (même motif que enroll.ts).
+  const lockKey = `lead:${phoneMatchKey(phone) ?? phone}`;
+  const phoneMatch = clientPhoneMatch(phone);
+  const { clientId, created, clientName, assignedToId } = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${lockKey}))`);
+    const existing = await tx.query.clients.findFirst({
+      where: phoneMatch.where,
+      orderBy: phoneMatch.orderBy,
+    });
 
-  let clientId: string;
-  let created: boolean;
-  let clientName: string;
-  let assignedToId: string | null;
+    if (existing) {
+      const set: Partial<typeof clients.$inferInsert> = { updatedAt: new Date() };
+      if (!existing.timing && fields.timing) set.timing = fields.timing;
+      if (!existing.projectType && fields.projectType) set.projectType = fields.projectType;
+      if (!existing.email && fields.email) set.email = fields.email;
+      if (!existing.city && fields.city) set.city = fields.city;
+      // Catégorie « Non contacté » SEULEMENT si le client n'a aucune catégorie.
+      if (existing.categoryId == null && newCategory) set.categoryId = newCategory.id;
+      // Trace du nouveau lead dans meta (les commentaires exigent un utilisateur).
+      const prevMeta =
+        typeof existing.meta === "object" && existing.meta !== null && !Array.isArray(existing.meta)
+          ? (existing.meta as Record<string, unknown>)
+          : {};
+      set.meta = {
+        ...prevMeta,
+        lastWebhook: { at: new Date().toISOString(), keyName: key.name, payload: root },
+      };
+      await tx.update(clients).set(set).where(eq(clients.id, existing.id));
+      return {
+        clientId: existing.id,
+        created: false,
+        clientName: existing.fullName,
+        assignedToId: existing.assignedToId,
+      };
+    }
 
-  if (existing) {
-    created = false;
-    clientId = existing.id;
-    clientName = existing.fullName;
-    assignedToId = existing.assignedToId;
-
-    const set: Partial<typeof clients.$inferInsert> = { updatedAt: new Date() };
-    if (!existing.timing && fields.timing) set.timing = fields.timing;
-    if (!existing.projectType && fields.projectType) set.projectType = fields.projectType;
-    if (!existing.email && fields.email) set.email = fields.email;
-    if (!existing.city && fields.city) set.city = fields.city;
-    // Catégorie « Non contacté » SEULEMENT si le client n'a aucune catégorie.
-    if (existing.categoryId == null && newCategory) set.categoryId = newCategory.id;
-    // Trace du nouveau lead dans meta (les commentaires exigent un utilisateur).
-    const prevMeta =
-      typeof existing.meta === "object" && existing.meta !== null && !Array.isArray(existing.meta)
-        ? (existing.meta as Record<string, unknown>)
-        : {};
-    set.meta = {
-      ...prevMeta,
-      lastWebhook: { at: new Date().toISOString(), keyName: key.name, payload: root },
-    };
-    await db.update(clients).set(set).where(eq(clients.id, existing.id));
-  } else {
-    created = true;
-    clientName = fields.name || formatPhone(phone);
-    assignedToId = defaultAssignedToId;
-    const [inserted] = await db
+    const name = fields.name || formatPhone(phone);
+    const [inserted] = await tx
       .insert(clients)
       .values({
-        fullName: clientName,
+        fullName: name,
         phone,
         email: fields.email ?? null,
         city: fields.city ?? null,
@@ -199,12 +205,17 @@ export async function POST(req: Request) {
         language: "fr",
         categoryId: defaultCategoryId ?? newCategory?.id ?? null,
         sourceId,
-        assignedToId,
+        assignedToId: defaultAssignedToId,
         meta: root,
       })
       .returning({ id: clients.id });
-    clientId = inserted.id;
-  }
+    return {
+      clientId: inserted.id,
+      created: true,
+      clientName: name,
+      assignedToId: defaultAssignedToId,
+    };
+  });
 
   // ── Notifications : tous les admins actifs + l'assigné (dans LEUR langue) ──
   const admins = await db.query.users.findMany({

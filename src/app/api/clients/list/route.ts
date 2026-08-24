@@ -34,7 +34,12 @@ import { apiUser } from "@/lib/auth/guards";
 import { APP_TZ, torontoDayRange } from "@/components/clients/timezone";
 
 const MAX_PAGE_SIZE = 50;
+/** Au-delà, l'OFFSET dépasse ce que le pilote sérialise proprement (500) — on borne. */
+const MAX_PAGE = 1_000_000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Identifiant int4 (catégorie, source) : un id hors plage ferait planter Postgres. */
+const INT4_MAX = 2_147_483_647;
+const INT4_RE = /^[1-9]\d{0,9}$/;
 
 /** « Aucun » explicite pour categoryId / sourceId / assignedToId. */
 const NONE = "none";
@@ -49,6 +54,14 @@ function tokens(raw: string): string[] {
     .map((s) => s.trim())
     .filter(Boolean)
     .slice(0, 50);
+}
+
+/** Jetons qui sont des ids int4 valides — les autres sont ignorés, pas refusés. */
+function int4Ids(list: string[]): number[] {
+  return list
+    .filter((v) => INT4_RE.test(v))
+    .map(Number)
+    .filter((n) => n <= INT4_MAX);
 }
 
 // Bornes des filtres de dates (yyyy-mm-dd), interprétées en heure de Toronto —
@@ -175,7 +188,7 @@ export async function GET(req: NextRequest) {
   const sort: SortKey | "activity" =
     sortParam in SORT_COLUMNS ? (sortParam as SortKey) : "activity";
   const dir = sp.get("dir") === "asc" ? "asc" : "desc";
-  const page = Math.max(1, Number.parseInt(sp.get("page") ?? "", 10) || 1);
+  const page = Math.min(MAX_PAGE, Math.max(1, Number.parseInt(sp.get("page") ?? "", 10) || 1));
   const pageSize = Math.min(
     MAX_PAGE_SIZE,
     Math.max(1, Number.parseInt(sp.get("pageSize") ?? "", 10) || MAX_PAGE_SIZE),
@@ -207,14 +220,14 @@ export async function GET(req: NextRequest) {
   }
 
   const catTokens = tokens(categoryParam);
-  const catIds = catTokens.filter((v) => /^\d+$/.test(v)).map(Number);
+  const catIds = int4Ids(catTokens);
   pushOr(
     catIds.length > 0 ? inArray(clients.categoryId, catIds) : undefined,
     catTokens.includes(NONE) ? isNull(clients.categoryId) : undefined,
   );
 
   const srcTokens = tokens(sourceParam);
-  const srcIds = srcTokens.filter((v) => /^\d+$/.test(v)).map(Number);
+  const srcIds = int4Ids(srcTokens);
   pushOr(
     srcIds.length > 0 ? inArray(clients.sourceId, srcIds) : undefined,
     srcTokens.includes(NONE) ? isNull(clients.sourceId) : undefined,

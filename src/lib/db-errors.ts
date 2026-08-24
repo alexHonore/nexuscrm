@@ -7,6 +7,7 @@
  */
 
 const UNIQUE_VIOLATION = "23505";
+const FOREIGN_KEY_VIOLATION = "23503";
 
 type PgLikeError = { code?: unknown; constraint_name?: unknown; constraint?: unknown; message?: unknown };
 
@@ -18,22 +19,42 @@ function* chain(err: unknown): Generator<PgLikeError> {
   }
 }
 
-/** Vrai si l'erreur est une violation de contrainte d'unicité (optionnellement précise). */
-export function isUniqueViolation(err: unknown, constraint?: string): boolean {
+function constraintName(link: PgLikeError): string | null {
+  return (
+    (typeof link.constraint_name === "string" && link.constraint_name) ||
+    (typeof link.constraint === "string" && link.constraint) ||
+    null
+  );
+}
+
+function matches(
+  err: unknown,
+  code: string,
+  messageMarker: string,
+  constraint: string | undefined,
+): boolean {
   for (const link of chain(err)) {
-    const code = typeof link.code === "string" ? link.code : null;
-    const name =
-      (typeof link.constraint_name === "string" && link.constraint_name) ||
-      (typeof link.constraint === "string" && link.constraint) ||
-      null;
+    const linkCode = typeof link.code === "string" ? link.code : null;
+    const name = constraintName(link);
     const message = typeof link.message === "string" ? link.message : "";
 
-    const isUnique =
-      code === UNIQUE_VIOLATION ||
-      message.includes("duplicate key value violates unique constraint");
-    if (!isUnique) continue;
+    const hit = linkCode === code || message.includes(messageMarker);
+    if (!hit) continue;
     if (!constraint) return true;
     if (name === constraint || message.includes(constraint)) return true;
   }
   return false;
+}
+
+/** Vrai si l'erreur est une violation de contrainte d'unicité (optionnellement précise). */
+export function isUniqueViolation(err: unknown, constraint?: string): boolean {
+  return matches(err, UNIQUE_VIOLATION, "duplicate key value violates unique constraint", constraint);
+}
+
+/**
+ * Vrai si l'erreur est une violation de clé étrangère (optionnellement précise) :
+ * référence vers une ligne inexistante, ou suppression d'une ligne encore référencée.
+ */
+export function isForeignKeyViolation(err: unknown, constraint?: string): boolean {
+  return matches(err, FOREIGN_KEY_VIOLATION, "violates foreign key constraint", constraint);
 }

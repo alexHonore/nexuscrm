@@ -83,7 +83,7 @@ import {
   type CreateAppointmentInput,
 } from "@/app/(app)/appointments/actions";
 import { GET as availabilityGET } from "@/app/api/availability/route";
-import { appointments, auditLogs, clients, comments, notifications } from "@/db/schema";
+import { appointments, auditLogs, clients, comments, notifications, users } from "@/db/schema";
 import { setSetting } from "@/lib/settings";
 import {
   closeDb,
@@ -284,6 +284,63 @@ describe("createAppointment", () => {
     const [client] = await testDb.select().from(clients).where(eq(clients.id, ids.client));
     expect(client.email).toBe("ancien@exemple.ca");
     expect(googleMock.createBookingEvent.mock.calls[0][0].clientEmail).toBe("ancien@exemple.ca");
+  });
+
+  it.each(["aucun", "a@x.com, b@y.com", "n/a"])(
+    "un courriel de fiche mal formé (« %s ») n'est PAS envoyé à Google et la fiche n'est pas touchée",
+    async (junk) => {
+      // Fiche importée (Notion/CSV, webhook) : `clients.email` est du texte libre.
+      await testDb.update(clients).set({ email: junk }).where(eq(clients.id, ids.client));
+
+      // Le téléphoniste efface le champ (le dialogue le signale invalide) → "".
+      const res = await createAppointment(input({ email: "" }));
+      expect(res).toMatchObject({ ok: true, googleSynced: true, warning: null });
+
+      // Aucun participant client : l'évènement (et le lien Meet) survit.
+      expect(googleMock.createBookingEvent.mock.calls[0][0].clientEmail).toBeNull();
+      // Le journal ne prétend pas qu'un courriel a été confirmé.
+      const [row] = await testDb.select().from(comments);
+      expect(row.body).not.toContain("Courriel :");
+      // La valeur stockée n'est ni envoyée ni réécrite.
+      const [client] = await testDb.select().from(clients).where(eq(clients.id, ids.client));
+      expect(client.email).toBe(junk);
+    },
+  );
+
+  it("journalise la réécriture de la fiche (courriel, catégorie, projet…) en client.update avec avant → après", async () => {
+    const res = await createAppointment(input({ email: "corrige@exemple.ca" }));
+    if (!res.ok) throw new Error("booking failed");
+
+    const logs = await testDb
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.action, "client.update"), eq(auditLogs.entity, "client")));
+    expect(logs).toHaveLength(1);
+    expect(logs[0].userId).toBe(ids.caller);
+    expect(logs[0].entityId).toBe(ids.client);
+    const detail = logs[0].detail as {
+      via: string;
+      appointmentId: string;
+      changes: Record<string, { from: unknown; to: unknown }>;
+    };
+    expect(detail.via).toBe("booking");
+    expect(detail.appointmentId).toBe(res.appointmentId);
+    expect(detail.changes.email).toEqual({ from: "ancien@exemple.ca", to: "corrige@exemple.ca" });
+    expect(detail.changes.categoryId.to).toBe(ids.bookedCategoryId);
+    expect(detail.changes.projectType).toEqual({ from: null, to: "acheter" });
+    expect(detail.changes.timing).toEqual({ from: null, to: "0-3 mois" });
+    expect(detail.changes.city).toEqual({ from: null, to: "Québec" });
+  });
+
+  it("une seconde réservation sans changement de fiche n'écrit PAS de client.update vide", async () => {
+    await createAppointment(input({ email: "corrige@exemple.ca" }));
+    await createAppointment(input({ email: "corrige@exemple.ca", startsAt: SLOT_B }));
+    const logs = await testDb
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "client.update"));
+    // La première réservation a tout changé ; la seconde ne change rien.
+    expect(logs).toHaveLength(1);
   });
 
   it("journalise l'action dans l'audit", async () => {
@@ -548,7 +605,7 @@ describe("createAppointment — Google indisponible", () => {
     expect(client.categoryId).toBe(ids.bookedCategoryId);
   });
 
-  it("GoogleNotConnectedError : notification système aux admins", async () => {
+  it("GoogleNotConnectedError : notification système aux admins (→ Réglages, « non connecté »)", async () => {
     googleMock.createBookingEvent.mockRejectedValue(new googleMock.GoogleNotConnectedError());
     await createAppointment(input());
 
@@ -559,9 +616,12 @@ describe("createAppointment — Google indisponible", () => {
     expect(systemNotifs).toHaveLength(1);
     expect(systemNotifs[0].userId).toBe(ids.admin);
     expect(systemNotifs[0].link).toBe("/admin/settings");
+    expect(systemNotifs[0].title).toBe("Google Agenda non connecté");
+    expect(systemNotifs[0].body).toContain("Marie Tremblay");
+    expect(systemNotifs[0].body).toContain("Connectez votre compte");
   });
 
-  it("erreur générique : RDV créé + notification système aux admins", async () => {
+  it("erreur générique : RDV créé + notification système DISTINCTE (compte connecté, pas « non connecté »)", async () => {
     googleMock.createBookingEvent.mockRejectedValue(new Error("503 backend error"));
 
     const res = await createAppointment(input());
@@ -582,7 +642,25 @@ describe("createAppointment — Google indisponible", () => {
     const system = notifs.filter((n) => n.type === "system");
     expect(system).toHaveLength(1);
     expect(system[0].userId).toBe(ids.admin);
-    expect(system[0].link).toBe("/admin/settings");
+    // Le compte EST connecté : on n'envoie pas le courtier reconnecter Google.
+    expect(system[0].title).not.toBe("Google Agenda non connecté");
+    expect(system[0].title).toBe("Synchronisation Google Agenda échouée");
+    expect(system[0].body).not.toContain("Connectez votre compte");
+    expect(system[0].body).toContain("Marie Tremblay");
+    expect(system[0].link).toBe("/appointments");
+  });
+
+  it("la notification système suit la langue de l'admin destinataire", async () => {
+    await testDb.update(users).set({ locale: "en" }).where(eq(users.id, ids.admin));
+    googleMock.createBookingEvent.mockRejectedValue(new Error("503 backend error"));
+    await createAppointment(input());
+
+    const [system] = await testDb
+      .select()
+      .from(notifications)
+      .where(eq(notifications.type, "system"));
+    expect(system.title).toBe("Google Calendar sync failed");
+    expect(system.body).toContain("Marie Tremblay");
   });
 
   it("Google injoignable au calcul des disponibilités : la réservation échoue (pas de double réservation silencieuse)", async () => {

@@ -1,6 +1,7 @@
 import "server-only";
 import { and, eq, gte, like, lt, or, sql } from "drizzle-orm";
-import { dayStartUtc } from "@/components/analytics/period";
+import { fromZonedTime } from "date-fns-tz";
+import { APP_TZ, dayStartUtc } from "@/components/analytics/period";
 import { missedCallNotification } from "@/components/clients/notification-content";
 import { db } from "@/db";
 import { calls, clients, notifications, users } from "@/db/schema";
@@ -10,8 +11,6 @@ import {
   getCallRecordings,
   getCdr,
   recordingRef,
-  torontoUtcOffsetHours,
-  utcOffsetSuffix,
   type VoipMsRecording,
 } from "@/lib/voipms";
 
@@ -192,11 +191,14 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
     if (errors.length < MAX_ERRORS) errors.push(msg);
   };
 
-  // Les CDR sont demandés ET ré-interprétés dans le fuseau réel de Toronto à
-  // cette date (EDT -4 / EST -5) — un décalage figé fausserait l'heuristique.
-  const offsetSuffix = utcOffsetSuffix(torontoUtcOffsetHours(dateFrom));
+  // voip.ms renvoie l'heure LOCALE de Toronto, heure avancée déjà appliquée.
+  // Chaque horodatage est ré-interprété dans le fuseau réel À SON instant
+  // (EDT -4 / EST -5), pas avec le décalage du premier jour de la plage : la
+  // synchro tourne toujours sur hier + aujourd'hui, et le dimanche du
+  // changement d'heure un décalage figé aurait décalé d'une heure tous les
+  // appels du jour — hors de l'heuristique à ±3 min, donc dédoublés.
   const parseCdrDate = (raw: string): Date | null => {
-    const d = new Date(`${raw.replace(" ", "T")}${offsetSuffix}`);
+    const d = fromZonedTime(raw.replace(" ", "T"), APP_TZ);
     return Number.isNaN(d.getTime()) ? null : d;
   };
 

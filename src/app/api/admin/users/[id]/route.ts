@@ -2,7 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
-import { appointments, calls, followups, users } from "@/db/schema";
+import { appointments, calls, comments, followups, users } from "@/db/schema";
 import { diffFields, logAudit, secretChange } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { isUniqueViolation } from "@/lib/db-errors";
@@ -44,6 +44,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
   const admin = await apiAdmin();
   if (admin instanceof NextResponse) return admin;
   const { id } = await ctx.params;
+  // Colonne uuid : un identifiant mal formé ferait lever Postgres (500).
+  if (!z.uuid().safeParse(id).success) {
+    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+  }
 
   const body = await readJson(req, patchSchema);
   if (body instanceof NextResponse) return body;
@@ -154,6 +158,9 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   const admin = await apiAdmin();
   if (admin instanceof NextResponse) return admin;
   const { id } = await ctx.params;
+  if (!z.uuid().safeParse(id).success) {
+    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+  }
 
   if (id === admin.id) {
     return NextResponse.json({ error: "cannot_delete_self" }, { status: 400 });
@@ -162,13 +169,15 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   if (!target) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   // Refus si l'utilisateur a un historique : les FK en cascade détruiraient ses
-  // appels, rendez-vous et relances (KPI, RDV à venir). Désactiver plutôt.
-  const [callCount, appointmentCount, followupCount] = await Promise.all([
+  // appels, rendez-vous, relances (KPI, RDV à venir) et les commentaires qu'il
+  // a laissés sur les fiches clients (historique du dossier). Désactiver plutôt.
+  const [callCount, appointmentCount, followupCount, commentCount] = await Promise.all([
     db.$count(calls, eq(calls.userId, id)),
     db.$count(appointments, eq(appointments.userId, id)),
     db.$count(followups, eq(followups.assignedToId, id)),
+    db.$count(comments, eq(comments.userId, id)),
   ]);
-  if (callCount + appointmentCount + followupCount > 0) {
+  if (callCount + appointmentCount + followupCount + commentCount > 0) {
     return NextResponse.json({ error: "has_activity" }, { status: 409 });
   }
 

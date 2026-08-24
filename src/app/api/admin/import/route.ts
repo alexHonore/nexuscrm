@@ -2,9 +2,10 @@ import { eq, inArray } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
-import { categories, clients } from "@/db/schema";
+import { categories, clients, sources, users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
+import { isForeignKeyViolation } from "@/lib/db-errors";
 import { formatPhone, normalizePhone } from "@/lib/phone";
 import { readJson } from "../_helpers";
 
@@ -52,6 +53,56 @@ export type ImportIssue = {
   existingId?: string;
 };
 
+type DefaultField = "categoryId" | "sourceId" | "assignedToId";
+
+/** Réponse 422 quand une valeur par défaut pointe vers une ligne qui n'existe plus. */
+function invalidDefault(field: DefaultField): NextResponse {
+  return NextResponse.json({ error: "invalid_default", field }, { status: 422 });
+}
+
+/** Contrainte de clé étrangère de `clients` → champ par défaut fautif. */
+const FK_TO_FIELD: Record<string, DefaultField> = {
+  clients_category_id_categories_id_fk: "categoryId",
+  clients_source_id_sources_id_fk: "sourceId",
+  clients_assigned_to_id_users_id_fk: "assignedToId",
+};
+
+/**
+ * Les valeurs par défaut (catégorie, source, assigné) sont de vraies clés
+ * étrangères : une catégorie / source / un compte supprimé entre l'ouverture
+ * de la page et l'envoi du lot ferait lever Postgres sur TOUT le lot (500 nu,
+ * sans le motif ligne à ligne que ce module promet). On refuse donc d'emblée,
+ * en nommant le champ, comme le fait le webhook de leads.
+ */
+async function missingDefault(defaults: {
+  categoryId?: number | null;
+  sourceId?: number | null;
+  assignedToId?: string | null;
+}): Promise<DefaultField | null> {
+  if (defaults.categoryId != null) {
+    const cat = await db.query.categories.findFirst({
+      where: eq(categories.id, defaults.categoryId),
+      columns: { id: true },
+    });
+    if (!cat) return "categoryId";
+  }
+  if (defaults.sourceId != null) {
+    const src = await db.query.sources.findFirst({
+      where: eq(sources.id, defaults.sourceId),
+      columns: { id: true },
+    });
+    if (!src) return "sourceId";
+  }
+  if (defaults.assignedToId != null) {
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, defaults.assignedToId),
+      columns: { id: true },
+    });
+    if (!user) return "assignedToId";
+  }
+  return null;
+}
+
 /**
  * Import CSV — reçoit des lots (max 500 lignes) déjà mappés côté client.
  * Lignes sans téléphone exploitable → invalid. Doublons par téléphone (E.164),
@@ -64,6 +115,9 @@ export async function POST(req: Request) {
 
   const body = await readJson(req, bodySchema);
   if (body instanceof NextResponse) return body;
+
+  const missing = await missingDefault(body.defaults);
+  if (missing) return invalidDefault(missing);
 
   const counts = { created: 0, updated: 0, skipped: 0, invalid: 0 };
   const issues: ImportIssue[] = [];
@@ -117,6 +171,7 @@ export async function POST(req: Request) {
   const existingByPhone = new Map(existing.map((e) => [e.phone, e.id]));
 
   const toInsert: (typeof clients.$inferInsert)[] = [];
+  const toUpdate: { id: string; set: Partial<typeof clients.$inferInsert> }[] = [];
 
   for (const { phone, row, index } of prepared) {
     const existingId = existingByPhone.get(phone);
@@ -148,8 +203,7 @@ export async function POST(req: Request) {
       if (row.notes) set.notes = row.notes;
       if (body.defaults.sourceId != null) set.sourceId = body.defaults.sourceId;
       if (body.defaults.assignedToId != null) set.assignedToId = body.defaults.assignedToId;
-      await db.update(clients).set(set).where(eq(clients.id, existingId));
-      counts.updated++;
+      toUpdate.push({ id: existingId, set });
       continue;
     }
 
@@ -173,10 +227,26 @@ export async function POST(req: Request) {
     });
   }
 
-  if (toInsert.length > 0) {
-    await db.insert(clients).values(toInsert);
-    counts.created += toInsert.length;
+  // Un lot est tout ou rien : sans transaction, une mise à jour déjà écrite
+  // survivrait à l'échec de l'insertion qui suit, et l'admin ne verrait ni
+  // compte ni journal pour ce qui a pourtant été appliqué.
+  try {
+    await db.transaction(async (tx) => {
+      for (const { id, set } of toUpdate) {
+        await tx.update(clients).set(set).where(eq(clients.id, id));
+      }
+      if (toInsert.length > 0) await tx.insert(clients).values(toInsert);
+    });
+  } catch (err) {
+    // Filet pour la course « supprimé entre la vérification et l'écriture ».
+    if (isForeignKeyViolation(err)) {
+      const field = Object.entries(FK_TO_FIELD).find(([name]) => isForeignKeyViolation(err, name));
+      if (field) return invalidDefault(field[1]);
+    }
+    throw err;
   }
+  counts.updated += toUpdate.length;
+  counts.created += toInsert.length;
 
   await logAudit({
     userId: admin.id,

@@ -31,7 +31,14 @@ export async function POST(req: Request) {
   if (body instanceof NextResponse) return body;
 
   const current = await getSetting("booking");
-  const next = bookingSettingsSchema.parse({ ...current, ...body });
+  // Les bornes par champ sont déjà tenues par `patchSchema` ; la règle entre
+  // champs (début < fin) ne se vérifie que sur le réglage RECOMPOSÉ — même
+  // réponse 422 que `readJson` plutôt qu'un 500.
+  const merged = bookingSettingsSchema.safeParse({ ...current, ...body });
+  if (!merged.success) {
+    return NextResponse.json({ error: "validation", issues: merged.error.issues }, { status: 422 });
+  }
+  const next = merged.data;
   await setSetting("booking", next);
 
   const changes = diffFields(current, next, BOOKING_FIELDS);

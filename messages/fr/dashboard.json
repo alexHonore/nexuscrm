@@ -19,7 +19,8 @@
     "call": "Appeler",
     "open": "Ouvrir la fiche",
     "markDone": "Terminer",
-    "done": "Suivi terminé"
+    "done": "Suivi terminé",
+    "doNotCall": "Ne pas appeler"
   },
   "appointments": {
     "title": "Prochains rendez-vous",
@@ -37,6 +38,7 @@
   "missedCalls": {
     "title": "Appels manqués à rappeler",
     "viewAll": "Tout voir",
-    "attempts": "{count, plural, one {# appel manqué} other {# appels manqués}}"
+    "attempts": "{count, plural, one {# appel manqué} other {# appels manqués}}",
+    "doNotCall": "Ne pas appeler"
   }
 }

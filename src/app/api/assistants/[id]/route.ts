@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { agentTurnTraces, assistants, conversations, messages } from "@/db/schema-sms";
+import { agentTurnTraces, assistants, campaigns, conversations, messages } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { diffConfig } from "@/lib/assistants/changes";
@@ -136,6 +136,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
  * suppression ne casserait rien, elle effacerait SILENCIEUSEMENT l'auteur de
  * chaque message qu'il a écrit. Un fil du mois dernier doit rester relisible
  * avec l'assistant qui l'a rédigé — on archive donc au lieu de supprimer.
+ * Un assistant jamais utilisé mais choisi par une campagne n'est pas supprimé
+ * non plus : 409 `in_use`, avec le nombre de campagnes à re-pointer d'abord.
  */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const admin = await apiAdmin();
@@ -181,6 +183,19 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
       },
     });
     return NextResponse.json({ archived: true, deleted: false });
+  }
+
+  // Jamais utilisé, mais choisi par une campagne : la clé étrangère de
+  // `campaigns.assistant_id` est en « restrict » — la suppression sauterait en
+  // 500 sans rien dire. On refuse en nommant le nombre de campagnes, comme pour
+  // un paquet d'objections encore rattaché : le geste suivant (re-pointer ou
+  // retirer la campagne) devient évident.
+  const [inCampaigns] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(campaigns)
+    .where(eq(campaigns.assistantId, id));
+  if ((inCampaigns?.n ?? 0) > 0) {
+    return NextResponse.json({ error: "in_use", campaigns: inCampaigns.n }, { status: 409 });
   }
 
   await db.delete(assistants).where(eq(assistants.id, id));

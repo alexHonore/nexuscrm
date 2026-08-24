@@ -24,6 +24,7 @@ export function errorMessage(t: Tr, err: unknown): string {
       "cannot_delete_self",
       "invalid_did",
       "has_activity",
+      "user_not_found",
     ];
     if (known.includes(code)) return t(`users.errors.${code}`);
     if (code === "voipms") {

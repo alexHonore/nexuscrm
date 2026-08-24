@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
@@ -8,6 +8,7 @@ import { users } from "@/db/schema";
 import { diffFields, logAudit } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth/guards";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { createSession, readSession } from "@/lib/auth/session";
 
 export type ProfileResult =
   | { ok: true }
@@ -61,7 +62,8 @@ export async function updateProfileAction(input: {
 /**
  * Changement de mot de passe par son détenteur — exige le mot de passe actuel.
  * Mêmes règles et même action d'audit que la route admin
- * (POST /api/admin/password) : min 8, sessions existantes conservées.
+ * (POST /api/admin/password) : min 8, et toutes les AUTRES sessions sont
+ * révoquées (tokenVersion) — seul le navigateur courant reçoit un nouveau cookie.
  */
 export async function changePasswordAction(input: {
   current: string;
@@ -78,10 +80,24 @@ export async function changePasswordAction(input: {
   const ok = await verifyPassword(parsed.data.current, user.passwordHash);
   if (!ok) return { ok: false, error: "wrongPassword" };
 
-  await db
+  const [row] = await db
     .update(users)
-    .set({ passwordHash: await hashPassword(parsed.data.next), updatedAt: new Date() })
-    .where(eq(users.id, user.id));
+    .set({
+      passwordHash: await hashPassword(parsed.data.next),
+      // Invalide les sessions existantes (cookie volé, appareil partagé)…
+      tokenVersion: sql`${users.tokenVersion} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, user.id))
+    .returning({ tokenVersion: users.tokenVersion });
+  // …et réémet la session courante pour que CE navigateur reste connecté.
+  const session = await readSession();
+  await createSession({
+    uid: user.id,
+    role: user.role,
+    tv: row.tokenVersion,
+    remember: session?.remember ?? false,
+  });
   await logAudit({
     userId: user.id,
     action: "user.password_change",

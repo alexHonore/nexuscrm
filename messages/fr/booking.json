@@ -98,6 +98,16 @@
     "cancelled": "Rendez-vous annulé",
     "cancelError": "Impossible d'annuler le rendez-vous"
   },
+  "notifications": {
+    "googleNotConnected": {
+      "title": "Google Agenda non connecté",
+      "body": "Le rendez-vous de {name} ({when}) n'a pas été ajouté à Google Agenda. Connectez votre compte dans Réglages."
+    },
+    "googleSyncFailed": {
+      "title": "Synchronisation Google Agenda échouée",
+      "body": "Le rendez-vous de {name} ({when}) n'a pas pu être ajouté à Google Agenda (erreur Google, compte connecté). Vérifiez le courriel du client, puis ajoutez l'évènement à l'agenda à la main."
+    }
+  },
   "actions": {
     "next": "Continuer",
     "back": "Retour"

@@ -1,6 +1,7 @@
 import "server-only";
 import { randomUUID } from "crypto";
 import { google, type calendar_v3 } from "googleapis";
+import { z } from "zod";
 import { decryptSecret } from "@/lib/crypto";
 import { getSetting } from "@/lib/settings";
 
@@ -49,6 +50,38 @@ export class GoogleNotConnectedError extends Error {
     super("Google Calendar is not connected");
     this.name = "GoogleNotConnectedError";
   }
+}
+
+/**
+ * Levée quand Google répond 200 à FreeBusy mais signale une erreur POUR le
+ * calendrier demandé (`calendars[id].errors`, ex. `notFound` : agenda
+ * supprimé, partage retiré, identifiant périmé). Ce n'est PAS une absence de
+ * connexion : `computeAvailability` doit la laisser remonter (fail closed)
+ * au lieu de prendre la liste `busy` vide pour « toute la journée est libre ».
+ */
+export class GoogleCalendarUnavailableError extends Error {
+  constructor(
+    readonly calendarId: string,
+    readonly reasons: string[],
+  ) {
+    super(
+      `Google FreeBusy failed for calendar ${calendarId}: ${reasons.length > 0 ? reasons.join(", ") : "missing"}`,
+    );
+    this.name = "GoogleCalendarUnavailableError";
+  }
+}
+
+/**
+ * Courriel acceptable comme participant d'un évènement Google, ou `null`.
+ * `clients.email` est du texte libre (import, webhook, fiche) : « aucun »,
+ * « a@x.com, b@y.com » ou une phrase dictée au texteur feraient rejeter TOUT
+ * l'évènement par Google (400 « Invalid attendee email ») — on l'écarte plutôt
+ * que de perdre l'agenda et le lien Meet.
+ */
+export function validAttendeeEmail(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return null;
+  return z.email().safeParse(trimmed).success ? trimmed : null;
 }
 
 /** Name of the short-lived httpOnly cookie carrying the OAuth state nonce. */
@@ -137,7 +170,16 @@ export async function freeBusy(timeMin: Date, timeMax: Date): Promise<BusyInterv
   // Google may key the response by the resolved calendar email instead of "primary".
   const calendars = res.data.calendars ?? {};
   const entry = calendars[calendarId] ?? Object.values(calendars)[0];
-  return (entry?.busy ?? [])
+  // Google répond 200 même quand il n'a PAS pu calculer l'agenda demandé
+  // (`errors: [{ reason: "notFound" }]`, `busy: []`). Une liste vide ici ne
+  // veut pas dire « libre » : on échoue, l'appelant ferme la réservation.
+  if (!entry || (entry.errors?.length ?? 0) > 0) {
+    throw new GoogleCalendarUnavailableError(
+      calendarId,
+      (entry?.errors ?? []).map((e) => e.reason ?? e.domain ?? "unknown"),
+    );
+  }
+  return (entry.busy ?? [])
     .filter((b) => b.start && b.end)
     .map((b) => ({ start: new Date(b.start as string), end: new Date(b.end as string) }));
 }
@@ -166,13 +208,19 @@ export type BookingEventResult = {
   htmlLink: string | null;
 };
 
-/** Participants de l'évènement : client + courtier, dédoublonnés (insensible à la casse). */
+/**
+ * Participants de l'évènement : client + courtier, dédoublonnés (insensible à
+ * la casse). Un courriel client mal formé est IGNORÉ (voir
+ * `validAttendeeEmail`) : mieux vaut un évènement sans ce participant que pas
+ * d'évènement du tout.
+ */
 export function bookingEventAttendees(
   clientEmail?: string | null,
   brokerEmail?: string | null,
 ): { email: string }[] {
-  const attendees = clientEmail ? [{ email: clientEmail }] : [];
-  if (brokerEmail && brokerEmail.toLowerCase() !== (clientEmail ?? "").toLowerCase()) {
+  const client = validAttendeeEmail(clientEmail);
+  const attendees = client ? [{ email: client }] : [];
+  if (brokerEmail && brokerEmail.toLowerCase() !== (client ?? "").toLowerCase()) {
     attendees.push({ email: brokerEmail });
   }
   return attendees;
@@ -233,7 +281,17 @@ export async function createBookingEvent(input: BookingEventInput): Promise<Book
   };
 }
 
-/** Delete the event on the admin's calendar (guests are notified). */
+/**
+ * Delete the event on the admin's calendar (guests are notified).
+ *
+ * LIMITE CONNUE : `appointments` ne mémorise que `googleEventId`, pas le
+ * calendrier où l'évènement a été créé. Si l'admin a changé de calendrier
+ * (réglages, ou reconnexion qui remet « primary ») entre la réservation et
+ * l'annulation, Google répond 404 sur le calendrier COURANT et l'évènement
+ * reste sur l'ancien — les invités ne sont pas prévenus. On le consigne au
+ * lieu de le taire ; la vraie correction demande une colonne
+ * `appointments.google_calendar_id` (schéma gelé).
+ */
 export async function cancelEvent(eventId: string): Promise<void> {
   const { calendar, calendarId } = await getAuthedCalendar();
   try {
@@ -241,7 +299,14 @@ export async function cancelEvent(eventId: string): Promise<void> {
   } catch (err) {
     // Already deleted on Google's side → treat as success.
     const status = (err as { code?: number; status?: number })?.code ?? (err as { status?: number })?.status;
-    if (status === 404 || status === 410) return;
+    if (status === 404 || status === 410) {
+      console.warn("google event not found on the configured calendar (already deleted, or created on another calendar)", {
+        calendarId,
+        eventId,
+        status,
+      });
+      return;
+    }
     throw err;
   }
 }

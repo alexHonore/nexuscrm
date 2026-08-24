@@ -1,19 +1,43 @@
 import Link from "next/link";
+import { createTranslator } from "next-intl";
+import { getLocale } from "next-intl/server";
 import { cn } from "@/lib/utils";
-import { getLocale, getTranslations } from "next-intl/server";
+
+/**
+ * Ces pages existent pour des lecteurs SANS compte ni cookie (vérification
+ * OAuth de Google, visiteur anonyme) : la langue doit donc pouvoir se forcer
+ * par l'adresse — `?lang=` — comme sur /developers. Le cookie `NEXT_LOCALE`
+ * ne sert que de repli, et `src/i18n/request.ts` (gelé) ignore une locale
+ * explicite passée à `getTranslations` : on charge donc les messages du
+ * namespace « legal » nous-mêmes.
+ */
+export type LegalLocale = "fr" | "en";
+
+/** `?lang=` d'abord, cookie ensuite, français sinon. */
+export async function resolveLegalLocale(lang: string | undefined): Promise<LegalLocale> {
+  if (lang === "en" || lang === "fr") return lang;
+  return (await getLocale()) === "en" ? "en" : "fr";
+}
+
+/** Traducteur du namespace « legal » pour une langue EXPLICITE. */
+export async function legalTranslator(locale: LegalLocale) {
+  const messages = (await import(`../../../messages/${locale}/legal.json`)).default;
+  return createTranslator({ locale, messages: { legal: messages }, namespace: "legal" });
+}
 
 /** Coquille commune aux pages légales publiques (confidentialité, conditions). */
 export async function LegalShell({
+  locale,
   title,
   updated,
   children,
 }: {
+  locale: LegalLocale;
   title: string;
   updated: string;
   children: React.ReactNode;
 }) {
-  const t = await getTranslations("legal");
-  const locale = await getLocale();
+  const t = await legalTranslator(locale);
   const other = locale === "en" ? "fr" : "en";
 
   return (
@@ -26,6 +50,8 @@ export async function LegalShell({
             </span>
             <span className="text-base font-semibold tracking-tight">Groupe Nexus</span>
           </Link>
+          {/* Un lien, pas un bouton : la page doit rester partageable dans la
+              langue où on l'a lue — même choix que /developers. */}
           <Link
             href={`?lang=${other}`}
             className="text-sm font-medium text-primary hover:underline"
@@ -48,10 +74,15 @@ export async function LegalShell({
         <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-3 px-5 py-6 text-sm text-muted-foreground">
           <span>© {new Date().getFullYear()} Groupe Nexus</span>
           <nav className="flex gap-4">
-            <Link href="/privacy" className="hover:text-foreground hover:underline">
+            {/* Les deux pages légales se relient dans la langue COURANTE :
+                sans `?lang=`, passer de /privacy?lang=en à /terms retombait
+                en français pour le lecteur sans cookie. Le lien /developers
+                reste NU : unit-developers-page.test.ts vérifie ce libellé
+                exact, et cette page résout sa langue elle-même. */}
+            <Link href={`/privacy?lang=${locale}`} className="hover:text-foreground hover:underline">
               {t("privacy.short")}
             </Link>
-            <Link href="/terms" className="hover:text-foreground hover:underline">
+            <Link href={`/terms?lang=${locale}`} className="hover:text-foreground hover:underline">
               {t("terms.short")}
             </Link>
             <Link href="/developers" className="hover:text-foreground hover:underline">

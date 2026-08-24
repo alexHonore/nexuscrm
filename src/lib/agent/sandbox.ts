@@ -14,6 +14,7 @@ import { getLlmProvider } from "@/lib/llm-server";
 import { APP_TZ } from "@/components/clients/timezone";
 import { DEFAULT_QUIET_HOURS } from "@/lib/sms/quiet-hours";
 import { classifyInbound } from "./classify";
+import { contactValue, qualificationText } from "./contact-data";
 import { applyRefusal, requiredFieldsFor, rungNeedsSlots } from "./goal";
 import { outreachInstructionText } from "./opening";
 import { renderTemplate } from "./render";
@@ -358,15 +359,14 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
 
   const runtimeBlock = row.includeRuntimeLayer
     ? renderTemplate(row.turnInstructions ?? DEFAULT_TURN_INSTRUCTIONS, {
-        "lead.prenom": input.lead?.firstName ?? "",
-        "lead.source": input.lead?.projectType ?? "",
-        "lead.besoin": input.lead?.projectType ?? "",
-        "lead.secteur": input.lead?.city ?? "",
-        "lead.budget": input.lead?.budget ?? "",
-        qualification:
-          Object.entries(qualification)
-            .map(([k, v]) => `${k}=${String(v)}`)
-            .join(", ") || "aucune",
+        // Mêmes bornes et mêmes guillemets qu'en production (`contact-data.ts`) :
+        // ce que le modèle lit à l'essai est ce qu'il lira en vrai.
+        "lead.prenom": contactValue(input.lead?.firstName),
+        "lead.source": contactValue(input.lead?.projectType),
+        "lead.besoin": contactValue(input.lead?.projectType),
+        "lead.secteur": contactValue(input.lead?.city),
+        "lead.budget": contactValue(input.lead?.budget),
+        qualification: qualificationText(qualification),
         "goal.type": rung.goal.type,
         "goal.rung": rung.key,
         "goal.required_fields": requiredFieldsFor(rung).join(", ") || "aucune",

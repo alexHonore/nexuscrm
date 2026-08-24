@@ -27,7 +27,13 @@ import {
  * peut faire ramer depuis l'extérieur.
  */
 
-export const dynamic = "force-static";
+/**
+ * Rendue à la demande, PAS figée au build : en `force-static`, Next sert la
+ * requête sans sa chaîne de requête et `?lang=en` n'arrive jamais ici — la
+ * référence anglaise n'existait pas. Le contenu ne dépend que du code, alors
+ * l'en-tête de cache ci-dessous suffit à garder la route bon marché.
+ */
+export const dynamic = "force-dynamic";
 
 export function GET(req: Request) {
   const url = new URL(req.url);
@@ -113,8 +119,9 @@ export function GET(req: Request) {
 
   return NextResponse.json(body, {
     headers: {
-      // Contenu figé au build : il ne dépend que du code. Un cache long évite
-      // qu'un outil qui interroge en boucle réveille une fonction pour rien.
+      // Contenu qui ne dépend que du code (et de `?lang=`, partie de la clé de
+      // cache). Un cache long évite qu'un outil qui interroge en boucle
+      // réveille une fonction pour rien.
       "cache-control": "public, max-age=3600, s-maxage=86400",
       // Les outils s'écrivent depuis un navigateur (un carnet, une console) :
       // sans CORS, la première tentative échoue sans dire pourquoi.

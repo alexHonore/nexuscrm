@@ -46,7 +46,7 @@
     "deactivate": "Désactiver",
     "activate": "Activer",
     "deleteTitle": "Supprimer {name} ?",
-    "deleteDesc": "Cette action est définitive. Les clients qui lui sont assignés seront désassignés (aucun client ne sera supprimé). Son historique d'appels, ses commentaires, ses rappels et ses rendez-vous seront supprimés.",
+    "deleteDesc": "Cette action est définitive. Les clients qui lui sont assignés seront désassignés (aucun client ne sera supprimé). Un compte qui a un historique (appels, rendez-vous, relances ou commentaires) ne peut pas être supprimé : désactivez-le plutôt.",
     "deleteConfirm": "Supprimer définitivement",
     "deleted": "Utilisateur supprimé",
     "voip": {
@@ -185,7 +185,8 @@
       "cannot_demote_self": "Vous ne pouvez pas retirer votre propre rôle d'administrateur.",
       "cannot_delete_self": "Vous ne pouvez pas supprimer votre propre compte.",
       "invalid_did": "Numéro (DID) invalide.",
-      "has_activity": "Cet utilisateur a un historique (appels, rendez-vous ou relances) qui serait détruit. Désactivez plutôt son compte pour conserver les données."
+      "has_activity": "Cet utilisateur a un historique (appels, rendez-vous, relances ou commentaires) qui serait détruit. Désactivez plutôt son compte pour conserver les données.",
+      "user_not_found": "L'utilisateur ciblé n'existe plus. Rechargez la page."
     },
     "credentialsTitle": "Identifiants de connexion",
     "emailTypoHint": "Vouliez-vous dire {suggestion} ?",
@@ -293,6 +294,7 @@
       "phoneRequired": "La colonne Téléphone est obligatoire.",
       "run": "Importer {count, plural, one {# ligne} other {# lignes}}",
       "done": "Import terminé",
+      "invalidDefault": "Une des valeurs par défaut (catégorie, source ou assigné) n'existe plus. Rechargez la page, choisissez-en une autre et relancez l'import.",
       "result": {
         "created": "Créés",
         "updated": "Mis à jour",
@@ -596,6 +598,7 @@
       "from": "Avant",
       "to": "Après",
       "count": "Nombre",
+      "partial": "Interrompu",
       "counts": "Décompte",
       "filters": "Filtres",
       "range": "Période",

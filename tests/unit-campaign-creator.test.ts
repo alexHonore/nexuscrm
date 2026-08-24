@@ -13,6 +13,8 @@ import {
   campaignCreatorReplySchema,
   type CampaignBrief,
 } from "@/lib/campaigns/creator";
+import { bodyForStep } from "@/lib/campaigns/ladder";
+import { variantBody } from "@/lib/campaigns/variants";
 
 const brief = (o: Partial<CampaignBrief> = {}): CampaignBrief =>
   campaignBriefSchema.parse({ trigger: "scheduled", ...o });
@@ -59,6 +61,25 @@ describe("brief → configuration de campagne", () => {
     expect(config.variants[0].body).toBe("Bonjour.");
     expect(config.variants[1].body).toBe("");
     expect(config.variants.reduce((sum, v) => sum + v.weight, 0)).toBe(100);
+
+    // Ce que le MOTEUR enverra, pas seulement ce que le tableau contient : une
+    // variante au corps vide retombe sur l'ouverture du barreau 0. Si celle-ci
+    // portait le texte dicté, les deux branches envoyaient le même SMS — le
+    // test annonçait une mesure qui n'existait pas. Le barreau 0 reste donc
+    // sans texte (l'assistant rédige), et seule « dictee » porte le texte.
+    expect(config.ladder[0].body).toBeNull();
+    const dictee = bodyForStep(config.ladder, 0, variantBody(config.variants, "dictee"));
+    const redigee = bodyForStep(config.ladder, 0, variantBody(config.variants, "redigee"));
+    expect(dictee).toBe("Bonjour.");
+    expect(redigee).toBeNull();
+    // Les relances ne sont pas touchées par le test.
+    expect(config.ladder.slice(1).every((step) => step.body === null)).toBe(true);
+  });
+
+  it("sans test A/B, le texte dicté reste sur le barreau 0", () => {
+    const config = briefToCampaignConfig(brief({ abTest: false, opener: "Bonjour." }));
+    expect(config.ladder[0].body).toBe("Bonjour.");
+    expect(config.variants).toEqual([]);
   });
 
   it("chaque déclencheur produit sa forme discriminée", () => {

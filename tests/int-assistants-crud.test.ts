@@ -21,8 +21,9 @@ import {
   resetDb,
   testDb,
 } from "./helpers/db";
-import { assistants, messages } from "@/db/schema-sms";
+import { assistants, campaigns, messages } from "@/db/schema-sms";
 import { assistantConfigSchema } from "@/lib/assistants/schema";
+import { campaignConfigSchema } from "@/lib/campaigns/schema";
 
 const ctx = vi.hoisted(() => ({ cookies: new Map<string, string>() }));
 
@@ -264,6 +265,43 @@ describe("retrait", () => {
     // Et l'auteur du message est intact.
     const [msg] = await testDb.select().from(messages);
     expect(msg.assistantId).toBe(id);
+  });
+
+  it("un brouillon choisi par une campagne n'est pas supprimé : 409 in_use, pas 500", async () => {
+    // La clé étrangère de `campaigns.assistant_id` est en « restrict » : sans
+    // garde, la suppression sautait en 500 et l'écran disait « erreur
+    // d'enregistrement ». On nomme le nombre de campagnes à re-pointer.
+    const { id } = await createAssistant();
+    const config = campaignConfigSchema.parse({
+      name: "Réactivation",
+      trigger: { kind: "manual" },
+      ladder: [{ delayHours: 0, body: null, label: "" }],
+      assistantId: id,
+    });
+    await testDb.insert(campaigns).values({
+      name: config.name,
+      status: "draft",
+      assistantId: id,
+      smsNumberId: null,
+      trigger: config.trigger,
+      audience: config.audience,
+      ladder: config.ladder,
+      variants: config.variants,
+      dailyEnrollmentCap: config.dailyEnrollmentCap,
+      totalEnrollmentCap: config.totalEnrollmentCap,
+      startsAt: config.startsAt,
+      endsAt: config.endsAt,
+    });
+
+    const res = await single.DELETE(req(`/api/assistants/${id}`, "DELETE"), {
+      params: Promise.resolve({ id }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "in_use", campaigns: 1 });
+
+    // Rien n'a bougé : ni supprimé, ni archivé en douce.
+    const row = await testDb.query.assistants.findFirst({ where: eq(assistants.id, id) });
+    expect(row!.status).toBe("draft");
   });
 
   it("un assistant rattaché à une conversation en cours est archivé", async () => {

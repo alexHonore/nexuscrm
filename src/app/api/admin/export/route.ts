@@ -2,8 +2,10 @@ import { fromZonedTime } from "date-fns-tz";
 import { and, asc, eq, gt, gte, lte, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { db } from "@/db";
 import { categories, clients, sources, users } from "@/db/schema";
+import { runAfterResponse } from "@/lib/after-response";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 
@@ -30,11 +32,52 @@ const HEADERS = [
   "createdAt",
 ] as const;
 
+/**
+ * Début de formule tableur (CWE-1236) : Excel, Numbers, LibreOffice et Sheets
+ * ÉVALUENT une cellule qui commence par = @ TAB CR, ou par + / - — même entre
+ * guillemets. Ces cellules viennent en partie de l'extérieur (formulaire de
+ * lead via le webhook, notes des téléphonistes) : on les neutralise d'une
+ * apostrophe en tête (convention OWASP) et on les force entre guillemets.
+ *
+ * Exception : un nombre signé pur (« +14184761542 » en E.164, « -3 ») ne peut
+ * rien invoquer — il reste tel quel, lisible et réimportable.
+ */
+const FORMULA_START = /^\s*(?:[=@\t\r]|[+-](?!\d+$))/;
+
 function csvCell(value: unknown): string {
   if (value === null || value === undefined) return "";
-  const s = value instanceof Date ? value.toISOString() : String(value);
-  if (/[",\n\r;]/.test(s)) return `"${s.replaceAll('"', '""')}"`;
-  return s;
+  const raw = value instanceof Date ? value.toISOString() : String(value);
+  const neutralised = FORMULA_START.test(raw) ? `'${raw}` : raw;
+  if (neutralised !== raw || /[",\n\r;]/.test(neutralised)) {
+    return `"${neutralised.replaceAll('"', '""')}"`;
+  }
+  return neutralised;
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TZ = "America/Toronto";
+
+/**
+ * Filtres de l'URL — validés AVANT d'ouvrir le flux : une fois les en-têtes
+ * partis (200, pièce jointe), une valeur qui fait lever Postgres ne peut plus
+ * devenir un 4xx, seulement un téléchargement tronqué.
+ */
+const querySchema = z.object({
+  categoryId: z.string().regex(/^\d+$/).transform(Number).optional(),
+  sourceId: z.string().regex(/^\d+$/).transform(Number).optional(),
+  assignedToId: z.uuid().optional(),
+  from: z.string().regex(DATE_RE).optional(),
+  to: z.string().regex(DATE_RE).optional(),
+});
+type ExportQuery = z.infer<typeof querySchema>;
+
+/**
+ * Borne d'une journée en heure de Toronto (DST géré par date-fns-tz), ou null
+ * si la date n'existe pas (2026-02-30) : le pilote ne sait pas sérialiser ça.
+ */
+function dayBound(day: string, suffix: "T00:00:00" | "T23:59:59.999"): Date | null {
+  const d = fromZonedTime(`${day}${suffix}`, TZ);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 /**
@@ -46,29 +89,61 @@ export async function GET(req: Request) {
   if (admin instanceof NextResponse) return admin;
 
   const url = new URL(req.url);
-  const categoryId = url.searchParams.get("categoryId");
-  const sourceId = url.searchParams.get("sourceId");
-  const assignedToId = url.searchParams.get("assignedToId");
-  const from = url.searchParams.get("from");
-  const to = url.searchParams.get("to");
+  // Un paramètre vide (« ?from= ») vaut « pas de filtre », comme avant.
+  const raw: Record<string, string> = {};
+  for (const key of ["categoryId", "sourceId", "assignedToId", "from", "to"] as const) {
+    const value = url.searchParams.get(key);
+    if (value) raw[key] = value;
+  }
+  const parsed = querySchema.safeParse(raw);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "validation", issues: parsed.error.issues }, { status: 422 });
+  }
+  const query: ExportQuery = parsed.data;
+  const fromDate = query.from ? dayBound(query.from, "T00:00:00") : undefined;
+  const toDate = query.to ? dayBound(query.to, "T23:59:59.999") : undefined;
+  if (fromDate === null || toDate === null) {
+    const issues = [{ path: [fromDate === null ? "from" : "to"], message: "invalid_date" }];
+    return NextResponse.json({ error: "validation", issues }, { status: 422 });
+  }
 
   const filters: SQL[] = [];
-  if (categoryId) filters.push(eq(clients.categoryId, Number(categoryId)));
-  if (sourceId) filters.push(eq(clients.sourceId, Number(sourceId)));
-  if (assignedToId) filters.push(eq(clients.assignedToId, assignedToId));
-  // Bornes interprétées en heure de Toronto (DST géré par date-fns-tz).
-  if (from) filters.push(gte(clients.createdAt, fromZonedTime(`${from}T00:00:00`, "America/Toronto")));
-  if (to) filters.push(lte(clients.createdAt, fromZonedTime(`${to}T23:59:59.999`, "America/Toronto")));
+  if (query.categoryId !== undefined) filters.push(eq(clients.categoryId, query.categoryId));
+  if (query.sourceId !== undefined) filters.push(eq(clients.sourceId, query.sourceId));
+  if (query.assignedToId) filters.push(eq(clients.assignedToId, query.assignedToId));
+  if (fromDate) filters.push(gte(clients.createdAt, fromDate));
+  if (toDate) filters.push(lte(clients.createdAt, toDate));
+
+  // Journalisé AVANT le premier octet : un export interrompu (connexion
+  // coupée, requête en échec à mi-parcours) a déjà livré des données
+  // personnelles — il doit laisser une trace quoi qu'il arrive.
+  const auditFilters = {
+    categoryId: query.categoryId ?? null,
+    sourceId: query.sourceId ?? null,
+    assignedToId: query.assignedToId ?? null,
+    from: query.from ?? null,
+    to: query.to ?? null,
+  };
+  await logAudit({
+    userId: admin.id,
+    action: "export.csv",
+    entity: "clients",
+    detail: { filters: auditFilters },
+  });
 
   const assignedUser = alias(users, "assigned_user");
   const encoder = new TextEncoder();
   let exported = 0;
+  let finish!: (partial: boolean) => void;
+  const finished = new Promise<boolean>((resolve) => {
+    finish = resolve;
+  });
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      // BOM UTF-8 pour qu'Excel détecte l'encodage.
-      controller.enqueue(encoder.encode("\uFEFF" + HEADERS.join(",") + "\r\n"));
       try {
+        // BOM UTF-8 pour qu'Excel détecte l'encodage.
+        controller.enqueue(encoder.encode("\uFEFF" + HEADERS.join(",") + "\r\n"));
         const CHUNK = 500;
         let lastId: string | null = null;
         for (;;) {
@@ -123,21 +198,26 @@ export async function GET(req: Request) {
           if (rows.length < CHUNK) break;
         }
         controller.close();
+        finish(false);
       } catch (err) {
+        // Connexion coupée (le flux refuse alors d'écrire) ou requête en échec :
+        // ce qui est déjà parti est parti — on le consigne comme partiel.
+        finish(true);
         controller.error(err);
-        return;
       }
-
-      await logAudit({
-        userId: admin.id,
-        action: "export.csv",
-        entity: "clients",
-        detail: {
-          count: exported,
-          filters: { categoryId, sourceId, assignedToId, from, to },
-        },
-      });
     },
+  });
+
+  // Bilan une fois le flux terminé, réussi ou non : combien de fiches sont
+  // sorties. `after()` garde la fonction en vie jusqu'à l'écriture.
+  runAfterResponse(async () => {
+    const partial = await finished;
+    await logAudit({
+      userId: admin.id,
+      action: "export.csv",
+      entity: "clients",
+      detail: { count: exported, partial, filters: auditFilters },
+    });
   });
 
   const date = new Date().toISOString().slice(0, 10);

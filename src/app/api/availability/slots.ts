@@ -1,5 +1,5 @@
 import "server-only";
-import { addDays, addMinutes } from "date-fns";
+import { addMinutes } from "date-fns";
 import { fromZonedTime } from "date-fns-tz";
 import { and, eq, gt, lt, ne } from "drizzle-orm";
 import { db } from "@/db";
@@ -90,7 +90,13 @@ export async function computeAvailability(
   const windowStart = fromZonedTime(`${date}T${settings.startHour}:00`, tz);
   const windowEnd = fromZonedTime(`${date}T${settings.endHour}:00`, tz);
   const dayStart = fromZonedTime(`${date}T00:00:00`, tz);
-  const dayEnd = addDays(dayStart, 1);
+  // Minuit local du LENDEMAIN, par arithmétique calendaire sur la chaîne de
+  // date (jamais `addDays` sur l'instant : il compte 24 h dans le fuseau du
+  // PROCESSUS — UTC en production — et rate la 25e heure du jour de retour à
+  // l'heure normale, donc tout évènement Google de 23 h à minuit ce jour-là).
+  const nextDate = new Date(`${date}T00:00:00Z`);
+  nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+  const dayEnd = fromZonedTime(`${nextDate.toISOString().slice(0, 10)}T00:00:00`, tz);
   if (windowEnd <= windowStart) return { ...base, slots: [], googleConnected: true };
 
   // 1) Google busy blocks (whole day so the buffer never misses an edge).

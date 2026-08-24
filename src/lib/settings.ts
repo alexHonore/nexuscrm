@@ -6,24 +6,56 @@ import { settings } from "@/db/schema";
 
 // ── Schemas des réglages ─────────────────────────────────────────────────────
 
-export const bookingSettingsSchema = z.object({
-  /** Jours réservables, 0 = dimanche … 6 = samedi */
-  days: z.array(z.number().min(0).max(6)).default([0, 1, 2, 3, 4, 5, 6]),
-  startHour: z.string().default("06:00"),
-  endHour: z.string().default("23:00"),
-  meetDurationMin: z.number().default(30),
-  inPersonDurationMin: z.number().default(60),
-  bufferMin: z.number().default(15),
-  timezone: z.string().default("America/Toronto"),
-  inPersonDefaultLocation: z.string().default(""),
-  /**
-   * Courriel du courtier, invité à chaque rendez-vous. Il reçoit ainsi une
-   * vraie invitation dès que le compte Google connecté n'est pas ce courriel
-   * (l'organisateur, lui, ne reçoit jamais de courriel — l'évènement apparaît
-   * directement sur son agenda). Chaîne vide = personne d'autre n'est invité.
-   */
-  brokerEmail: z.email().or(z.literal("")).default("info@alexhonore.com"),
-});
+/** Heure murale « HH:MM » (24 h) — ce que produit `<input type="time">`. */
+const HOUR_MINUTE_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * Fuseau IANA reconnu par le moteur (ou chaîne vide = repli sur
+ * America/Toronto, que les lecteurs appliquent déjà). Un fuseau inventé ne
+ * fait pas échouer `fromZonedTime` — il rend une Invalid Date qui vide
+ * silencieusement les disponibilités, puis fait planter l'affichage.
+ */
+function isKnownTimeZone(tz: string): boolean {
+  if (tz === "") return true;
+  try {
+    new Intl.DateTimeFormat("en-CA", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Bornes serveur des réglages de réservation. Elles sont la SEULE garde : le
+ * formulaire admin n'est pas un `<form>` (ses `min`/`max` HTML ne s'appliquent
+ * jamais) et un champ vidé y devient « » ou 0 — valeurs qui, stockées,
+ * vidaient toutes les disponibilités sans la moindre erreur.
+ */
+export const bookingSettingsSchema = z
+  .object({
+    /** Jours réservables, 0 = dimanche … 6 = samedi */
+    days: z.array(z.number().int().min(0).max(6)).default([0, 1, 2, 3, 4, 5, 6]),
+    startHour: z.string().regex(HOUR_MINUTE_RE).default("06:00"),
+    endHour: z.string().regex(HOUR_MINUTE_RE).default("23:00"),
+    meetDurationMin: z.number().int().min(5).max(480).default(30),
+    inPersonDurationMin: z.number().int().min(5).max(480).default(60),
+    bufferMin: z.number().int().min(0).max(480).default(15),
+    timezone: z.string().refine(isKnownTimeZone, "unknown_timezone").default("America/Toronto"),
+    inPersonDefaultLocation: z.string().default(""),
+    /**
+     * Courriel du courtier, invité à chaque rendez-vous. Il reçoit ainsi une
+     * vraie invitation dès que le compte Google connecté n'est pas ce courriel
+     * (l'organisateur, lui, ne reçoit jamais de courriel — l'évènement apparaît
+     * directement sur son agenda). Chaîne vide = personne d'autre n'est invité.
+     */
+    brokerEmail: z.email().or(z.literal("")).default("info@alexhonore.com"),
+  })
+  // « HH:MM » se compare en texte ; une fenêtre vide ou inversée n'a aucun sens
+  // (et rendrait zéro créneau pour tout le monde, sans explication).
+  .refine((s) => s.startHour < s.endHour, {
+    message: "end_before_start",
+    path: ["endHour"],
+  });
 export type BookingSettings = z.infer<typeof bookingSettingsSchema>;
 
 export const googleSettingsSchema = z.object({

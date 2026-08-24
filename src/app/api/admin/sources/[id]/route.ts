@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { clients, sources } from "@/db/schema";
 import { diffFields, logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
+import { isUniqueViolation } from "@/lib/db-errors";
 import { AbortDelete, abortDeleteResponse, readJson, readReassignTarget } from "../../_helpers";
 
 const patchSchema = z.object({
@@ -43,8 +44,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
     return NextResponse.json({ source: updated });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "";
-    if (message.includes("sources_name_unique") || message.includes("duplicate key")) {
+    // Drizzle enveloppe l'erreur Postgres : le nom de la contrainte n'est que
+    // dans `cause` — d'où le détecteur partagé, jamais un test sur le message.
+    if (isUniqueViolation(err, "sources_name_unique")) {
       return NextResponse.json({ error: "name_taken" }, { status: 409 });
     }
     throw err;

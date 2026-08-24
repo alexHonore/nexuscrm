@@ -97,11 +97,19 @@ function fallbackName(brief: CampaignBrief): string {
 export function briefToCampaignConfig(brief: CampaignBrief): CampaignConfig {
   const followUps = brief.followUps ?? 1;
   const daysBetween = brief.daysBetween ?? 3;
+  // Un test A/B n'existe qu'avec une ouverture dictée à opposer au texte
+  // rédigé — voir `variants` plus bas.
+  const abTest = Boolean(brief.abTest && brief.opener);
 
   const ladder = [
     // Le barreau 0 part tout de suite ; les heures de politesse le décalent au
     // besoin, ce n'est pas à la campagne de le prévoir.
-    { delayHours: 0, body: brief.opener ?? null, label: "ouverture" },
+    //
+    // En test A/B, le barreau 0 reste SANS texte : le moteur lit une variante
+    // au corps vide comme « l'ouverture du barreau 0 » — si celle-ci portait
+    // déjà le texte dicté, les deux branches envoyaient le même SMS et le test
+    // n'en était pas un. Le texte dicté vit alors dans la variante « dictee ».
+    { delayHours: 0, body: abTest ? null : (brief.opener ?? null), label: "ouverture" },
     ...Array.from({ length: followUps }, (_, i) => ({
       delayHours: daysBetween * HOURS_PER_DAY,
       // Les relances sont rédigées par l'assistant : elles doivent tenir
@@ -115,13 +123,14 @@ export function briefToCampaignConfig(brief: CampaignBrief): CampaignConfig {
   // au corps vide retombent toutes les deux sur le barreau 0 : la campagne
   // annoncerait un test et n'en ferait aucun. Sans ouverture dictée, on laisse
   // le tableau vide — l'onglet A/B de l'éditeur sert exactement à ça.
-  const variants =
-    brief.abTest && brief.opener
-      ? [
-          { key: "dictee", weight: 50, body: brief.opener },
-          { key: "redigee", weight: 50, body: "" },
-        ]
-      : [];
+  // « dictee » porte le texte ; « redigee » (corps vide) retombe sur le barreau
+  // 0, laissé sans texte ci-dessus : c'est l'assistant qui écrit.
+  const variants = abTest
+    ? [
+        { key: "dictee", weight: 50, body: brief.opener },
+        { key: "redigee", weight: 50, body: "" },
+      ]
+    : [];
 
   const trigger =
     brief.trigger === "lead_created"

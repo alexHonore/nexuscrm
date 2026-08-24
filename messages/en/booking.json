@@ -98,6 +98,16 @@
     "cancelled": "Appointment cancelled",
     "cancelError": "Could not cancel the appointment"
   },
+  "notifications": {
+    "googleNotConnected": {
+      "title": "Google Calendar not connected",
+      "body": "The appointment for {name} ({when}) was not added to Google Calendar. Connect your account in Settings."
+    },
+    "googleSyncFailed": {
+      "title": "Google Calendar sync failed",
+      "body": "The appointment for {name} ({when}) could not be added to Google Calendar (Google error, account connected). Check the client's e-mail, then add the event to the calendar by hand."
+    }
+  },
   "actions": {
     "next": "Continue",
     "back": "Back"

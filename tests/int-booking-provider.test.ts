@@ -51,7 +51,7 @@ vi.mock("@/lib/google", async (importOriginal) => {
 // ── Imports produit (après les mocks) ────────────────────────────────────────
 
 import { getInternalBookingProvider } from "@/lib/booking/internal";
-import { appointments, clients } from "@/db/schema";
+import { appointments, auditLogs, clients } from "@/db/schema";
 import {
   closeDb,
   makeClient,
@@ -226,6 +226,73 @@ describe("BookingProvider interne — book", () => {
     const [client] = await testDb.select().from(clients).where(eq(clients.id, ids.client));
     expect(client.categoryId).toBe(ids.bookedCategoryId);
     expect(client.email).toBe("confirme@exemple.ca");
+  });
+
+  it.each(["jean point tremblay arobase gmail", "pas de courriel", "Mon courriel c'est marie@exemple.ca merci"])(
+    "un courriel dicté au modèle mais invalide (« %s ») n'est ni stocké ni envoyé à Google",
+    async (junk) => {
+      const result = await booking.book({
+        clientId: ids.client,
+        conversationId: ids.conversationId,
+        type: "meet",
+        slotIso: SLOT,
+        email: junk,
+      });
+      expect(result.ok).toBe(true);
+
+      // Le rendez-vous part quand même sur l'agenda (sans participant client
+      // plutôt que pas d'évènement du tout), avec le courriel VALIDE de la fiche.
+      expect(googleMock.createBookingEvent).toHaveBeenCalledTimes(1);
+      expect(googleMock.createBookingEvent.mock.calls[0][0].clientEmail).toBe("ancien@exemple.ca");
+
+      // `clients.email` n'est jamais écrasé par autre chose qu'une adresse.
+      const [client] = await testDb.select().from(clients).where(eq(clients.id, ids.client));
+      expect(client.email).toBe("ancien@exemple.ca");
+      expect(client.categoryId).toBe(ids.bookedCategoryId);
+    },
+  );
+
+  it("un courriel de fiche mal formé n'est pas envoyé à Google non plus", async () => {
+    await testDb.update(clients).set({ email: "aucun" }).where(eq(clients.id, ids.client));
+    const result = await booking.book({
+      clientId: ids.client,
+      conversationId: ids.conversationId,
+      type: "meet",
+      slotIso: SLOT,
+    });
+    expect(result.ok).toBe(true);
+    expect(googleMock.createBookingEvent.mock.calls[0][0].clientEmail).toBeNull();
+  });
+
+  it("journalise la réécriture de la fiche (courriel, catégorie) en client.update, au nom du propriétaire du RDV", async () => {
+    const result = await booking.book({
+      clientId: ids.client,
+      conversationId: ids.conversationId,
+      type: "meet",
+      slotIso: SLOT,
+      email: "confirme@exemple.ca",
+    });
+    if (!result.ok) throw new Error("booking failed");
+
+    const logs = await testDb
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "client.update"));
+    expect(logs).toHaveLength(1);
+    expect(logs[0].userId).toBe(ids.admin);
+    expect(logs[0].entity).toBe("client");
+    expect(logs[0].entityId).toBe(ids.client);
+    const detail = logs[0].detail as {
+      via: string;
+      appointmentId: string;
+      conversationId: string;
+      changes: Record<string, { from: unknown; to: unknown }>;
+    };
+    expect(detail.via).toBe("sms_agent");
+    expect(detail.appointmentId).toBe(result.appointmentId);
+    expect(detail.conversationId).toBe(ids.conversationId);
+    expect(detail.changes.email).toEqual({ from: "ancien@exemple.ca", to: "confirme@exemple.ca" });
+    expect(detail.changes.categoryId.to).toBe(ids.bookedCategoryId);
   });
 
   it("Google indisponible : le rendez-vous est quand même créé (googleEventId reste null)", async () => {

@@ -19,7 +19,8 @@
     "call": "Call",
     "open": "Open client",
     "markDone": "Mark done",
-    "done": "Follow-up completed"
+    "done": "Follow-up completed",
+    "doNotCall": "Do not call"
   },
   "appointments": {
     "title": "Upcoming appointments",
@@ -37,6 +38,7 @@
   "missedCalls": {
     "title": "Missed calls to return",
     "viewAll": "View all",
-    "attempts": "{count, plural, one {# missed call} other {# missed calls}}"
+    "attempts": "{count, plural, one {# missed call} other {# missed calls}}",
+    "doNotCall": "Do not call"
   }
 }

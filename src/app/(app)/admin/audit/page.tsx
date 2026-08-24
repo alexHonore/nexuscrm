@@ -57,9 +57,22 @@ function ActionBadge({ family, label }: { family: AuditActionFamily; label: stri
 
 const TZ = AUDIT_TZ;
 const PAGE_SIZE = 50;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function first(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
+}
+
+/**
+ * Borne d'une journée (heure de Toronto) à partir d'un paramètre d'URL, ou
+ * undefined s'il est absent, mal formé ou désigne un jour qui n'existe pas
+ * (2026-02-30) — le pilote ne sait pas sérialiser une date invalide et la page
+ * tomberait en erreur au lieu d'ignorer le filtre.
+ */
+function dayBound(value: string | undefined, suffix: string): Date | undefined {
+  if (!value || !DATE_RE.test(value)) return undefined;
+  const d = fromZonedTime(`${value}${suffix}`, TZ);
+  return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
 export default async function AdminAuditPage({
@@ -71,17 +84,22 @@ export default async function AdminAuditPage({
   const [t, locale, params] = await Promise.all([getTranslations("admin"), getLocale(), searchParams]);
   const dateLocale = locale === "fr" ? fr : enCA;
 
+  // Paramètres d'URL validés : un filtre mal formé (uuid ou date) est ignoré
+  // plutôt qu'envoyé à Postgres, qui refuserait et ferait tomber la page.
   const action = first(params.action);
-  const userId = first(params.userId);
-  const from = first(params.from);
-  const to = first(params.to);
+  const userIdParam = first(params.userId);
+  const userId = isUuid(userIdParam) ? userIdParam : undefined;
+  const fromDate = dayBound(first(params.from), "T00:00:00");
+  const toDate = dayBound(first(params.to), "T23:59:59.999");
+  const from = fromDate ? first(params.from) : undefined;
+  const to = toDate ? first(params.to) : undefined;
   const page = Math.max(1, Number(first(params.page)) || 1);
 
   const filters: SQL[] = [];
   if (action) filters.push(like(auditLogs.action, `${action}%`));
   if (userId) filters.push(eq(auditLogs.userId, userId));
-  if (from) filters.push(gte(auditLogs.createdAt, fromZonedTime(`${from}T00:00:00`, TZ)));
-  if (to) filters.push(lte(auditLogs.createdAt, fromZonedTime(`${to}T23:59:59.999`, TZ)));
+  if (fromDate) filters.push(gte(auditLogs.createdAt, fromDate));
+  if (toDate) filters.push(lte(auditLogs.createdAt, toDate));
   const where = filters.length > 0 ? and(...filters) : undefined;
 
   // Les tables de correspondance (utilisateurs, catégories, sources) sont

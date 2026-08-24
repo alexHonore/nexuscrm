@@ -25,8 +25,13 @@ import { and, asc, eq, gt, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { appointments, categories, clients, users } from "@/db/schema";
 import { computeAvailability, durationFor } from "@/app/api/availability/slots";
-import { logAudit } from "@/lib/audit";
-import { bookingEventTitle, createBookingEvent, GoogleNotConnectedError } from "@/lib/google";
+import { diffFields, logAudit } from "@/lib/audit";
+import {
+  bookingEventTitle,
+  createBookingEvent,
+  GoogleNotConnectedError,
+  validAttendeeEmail,
+} from "@/lib/google";
 import { getSetting } from "@/lib/settings";
 import { notifyCategoryChanged } from "@/lib/campaigns-server/match";
 import {
@@ -193,8 +198,14 @@ async function book(input: BookInput): Promise<BookResult> {
     return { ok: false, error: "slot_taken" };
   }
 
-  const newEmail = input.email?.trim().toLowerCase() || null;
-  const clientEmail = newEmail ?? client.email;
+  // Le courriel vient DU MODÈLE (argument d'outil) : « jean point tremblay
+  // arobase gmail » ou une phrase entière y passent aussi facilement qu'une
+  // vraie adresse. On ne garde qu'une adresse valide — jamais autre chose
+  // n'est écrit dans `clients.email` ni envoyé à Google comme participant ;
+  // sinon on réserve sans participant (même repli que la réservation
+  // manuelle) plutôt que de perdre l'évènement et le lien Meet.
+  const newEmail = validAttendeeEmail(input.email?.trim().toLowerCase());
+  const clientEmail = newEmail ?? validAttendeeEmail(client.email);
   const location =
     input.type === "inperson" ? settings.inPersonDefaultLocation || client.address || null : null;
 
@@ -276,17 +287,38 @@ async function book(input: BookInput): Promise<BookResult> {
   // ── Bascule le client en catégorie « booked » (même comportement que la
   // réservation manuelle) et confirme le courriel recueilli, le cas échéant.
   const bookedCategory = await db.query.categories.findFirst({ where: eq(categories.key, "booked") });
+  const clientPatch = {
+    ...(newEmail && newEmail !== client.email ? { email: newEmail } : {}),
+    ...(bookedCategory ? { categoryId: bookedCategory.id } : {}),
+  };
   await db
     .update(clients)
-    .set({
-      ...(newEmail && newEmail !== client.email ? { email: newEmail } : {}),
-      ...(bookedCategory ? { categoryId: bookedCategory.id } : {}),
-      updatedAt: new Date(),
-    })
+    .set({ ...clientPatch, updatedAt: new Date() })
     .where(eq(clients.id, client.id));
   // Le passage en « Rendez-vous » est un changement de catégorie comme un
   // autre : les campagnes « changement de catégorie » doivent le voir.
   if (bookedCategory) notifyCategoryChanged(client.id, client.categoryId, bookedCategory.id);
+
+  // Même trace avant → après que la réservation manuelle et que la fiche :
+  // on sait QUI (l'agent, au nom de `ownerId`) a changé le courriel et la
+  // catégorie, et depuis quelles valeurs.
+  const clientChanges = diffFields(client, { ...client, ...clientPatch }, ["email", "categoryId"]);
+  if (clientChanges) {
+    await logAudit({
+      userId: ownerId,
+      action: "client.update",
+      entity: "client",
+      entityId: client.id,
+      detail: {
+        fullName: client.fullName,
+        phone: client.phone,
+        via: "sms_agent",
+        appointmentId,
+        conversationId: input.conversationId,
+        changes: clientChanges,
+      },
+    });
+  }
 
   await logAudit({
     userId: ownerId,

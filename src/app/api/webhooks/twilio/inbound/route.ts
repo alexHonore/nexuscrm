@@ -1,11 +1,12 @@
-import { and, eq, isNull, like, or } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
-import { clients } from "@/db/schema";
+import { auditLogs } from "@/db/schema";
 import { assistants, conversations, messages, smsNumbers, suppressions } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
-import { normalizePhone, phoneMatchKey } from "@/lib/phone";
+import { normalizePhone } from "@/lib/phone";
+import { clientPhoneMatch } from "@/lib/webhooks/client-match";
 import { markEnrollmentsReplied, markEnrollmentsStopped } from "@/lib/campaigns-server/inbound";
 import { detectOptOut } from "@/lib/sms/optout";
 import { analyzeSms } from "@/lib/sms/segments";
@@ -29,11 +30,22 @@ import { kickDispatch } from "@/lib/jobs/kick";
  *
  * Pas d'apiUser ici (requête serveur-à-serveur) : l'authenticité est vérifiée
  * via la signature X-Twilio-Signature. Toutes les écritures sont idempotentes ;
- * une vraie erreur BD remonte en 500 exprès pour que Twilio retente.
+ * une vraie erreur BD remonte en 500 exprès pour que Twilio retente. Pour que
+ * cette relivraison serve à quelque chose, la rangée `messages`, le marquage du
+ * fil et le tour d'agent sont validés ENSEMBLE : un échec entre les deux ne
+ * laisse jamais un texto enregistré mais jamais signalé ni répondu.
  */
 
 /** Fenetre de debounce d'une rafale de SMS entrants. */
 const AGENT_TURN_DEBOUNCE_MS = 10_000;
+
+/**
+ * Une signature invalide est journalisée dans l'audit au plus une fois par
+ * fenêtre : la route est publique, et sans cette borne n'importe qui pouvait
+ * faire grossir `audit_logs` d'une rangée par requête anonyme.
+ */
+const INVALID_SIGNATURE_AUDIT_WINDOW_MS = 10 * 60_000;
+const INVALID_SIGNATURE_ACTION = "sms.webhook_invalid_signature";
 
 const inboundSchema = z.object({
   MessageSid: z.string().min(1),
@@ -65,14 +77,32 @@ export async function POST(req: NextRequest) {
     // Une signature invalide est le plus souvent une URL mal configurée chez
     // Twilio (NEXT_PUBLIC_APP_URL ≠ l'URL appelée) : chaque STOP, chaque
     // réponse serait rejetée en silence. On le journalise pour que la page de
-    // mise en service et l'audit le montrent.
-    await logAudit({
-      userId: null,
-      action: "sms.webhook_invalid_signature",
-      entity: "message",
-      detail: { path: "/api/webhooks/twilio/inbound", hasToken: Boolean(process.env.TWILIO_AUTH_TOKEN) },
-    });
-    console.log(JSON.stringify({ ts: new Date().toISOString(), level: "warn", msg: "sms.webhook_invalid_signature" }));
+    // mise en service et l'audit le montrent — une rangée par fenêtre suffit à
+    // le dire, et borne ce qu'un inconnu peut écrire ici. Un pépin BD sur
+    // cette lecture ne change pas la réponse : 403 quoi qu'il arrive.
+    let recentlyAudited = false;
+    try {
+      recentlyAudited = Boolean(
+        await db.query.auditLogs.findFirst({
+          where: and(
+            eq(auditLogs.action, INVALID_SIGNATURE_ACTION),
+            gt(auditLogs.createdAt, new Date(Date.now() - INVALID_SIGNATURE_AUDIT_WINDOW_MS)),
+          ),
+          columns: { id: true },
+        }),
+      );
+    } catch {
+      recentlyAudited = true;
+    }
+    if (!recentlyAudited) {
+      await logAudit({
+        userId: null,
+        action: INVALID_SIGNATURE_ACTION,
+        entity: "message",
+        detail: { path: "/api/webhooks/twilio/inbound", hasToken: Boolean(process.env.TWILIO_AUTH_TOKEN) },
+      });
+    }
+    console.log(JSON.stringify({ ts: new Date().toISOString(), level: "warn", msg: INVALID_SIGNATURE_ACTION }));
     return NextResponse.json({ error: "invalid_signature" }, { status: 403 });
   }
 
@@ -108,15 +138,15 @@ export async function POST(req: NextRequest) {
       .onConflictDoNothing();
   }
 
-  // ── Correspondance client (10 derniers chiffres, principal ET secondaire) —
-  // jamais de création automatique depuis un SMS entrant. ──
-  const matchKey = phoneMatchKey(from);
-  const client = matchKey
-    ? await db.query.clients.findFirst({
-        where: or(like(clients.phone, `%${matchKey}`), like(clients.phoneAlt, `%${matchKey}`)),
-        columns: { id: true, fullName: true, assignedToId: true },
-      })
-    : undefined;
+  // ── Correspondance client (E.164 exact, sinon 10 derniers chiffres — jamais
+  // moins —, principal ET secondaire) ; jamais de création automatique depuis
+  // un SMS entrant. ──
+  const phoneMatch = clientPhoneMatch(from);
+  const client = await db.query.clients.findFirst({
+    where: phoneMatch.where,
+    orderBy: phoneMatch.orderBy,
+    columns: { id: true, fullName: true, assignedToId: true },
+  });
   if (!client) {
     await logAudit({
       userId: null,
@@ -200,29 +230,43 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Les humains sont prévenus quand c'est À EUX de répondre : pas
+  // d'assistant, IA en pause, ou désabonnement. Quand l'assistant va
+  // répondre, c'est lui qui prévient en cas de passage à l'humain, de
+  // blocage ou de panne — sinon chaque texto réveillait tout le monde pour
+  // rien et l'inbox ne voulait plus rien dire.
+  const aiWillHandle =
+    !optOut.optOut && conversation.aiEnabled && conversation.activeAssistantId !== null;
+
   // ── Rangée du message — idempotente sur MessageSid : une relivraison Twilio
   // produit exactement UNE rangée (et aucune seconde notification). ──
+  // Rangée, marquage « à traiter » et tour d'agent vivent ou meurent ENSEMBLE :
+  // écrits séparément, un pépin après l'insertion laissait le texto en base
+  // mais jamais signalé ni répondu — la relivraison Twilio (500 → retente)
+  // butait sur le conflit de MessageSid et sautait tout le reste. Ici, un échec
+  // annule aussi la rangée, et la relivraison refait tout.
   const analysis = analyzeSms(Body);
-  const inserted = await db
-    .insert(messages)
-    .values({
-      conversationId: conversation.id,
-      direction: "in",
-      body: Body,
-      twilioSid: MessageSid,
-      status: "received",
-      source: "human",
-      segments: analysis.segments,
-      encoding: analysis.encoding,
-    })
-    .onConflictDoNothing({ target: messages.twilioSid })
-    .returning({ id: messages.id });
+  const inserted = await db.transaction(async (tx) => {
+    const rows = await tx
+      .insert(messages)
+      .values({
+        conversationId: conversation.id,
+        direction: "in",
+        body: Body,
+        twilioSid: MessageSid,
+        status: "received",
+        source: "human",
+        segments: analysis.segments,
+        encoding: analysis.encoding,
+      })
+      .onConflictDoNothing({ target: messages.twilioSid })
+      .returning({ id: messages.id });
+    if (rows.length === 0) return false;
 
-  if (inserted.length > 0) {
     // Marquage « à traiter » seulement quand la rangée est nouvelle : une
     // relivraison Twilio ne doit pas re-signaler une conversation qu'un humain
     // vient de traiter.
-    await db
+    await tx
       .update(conversations)
       .set({
         lastInboundAt: now,
@@ -234,51 +278,76 @@ export async function POST(req: NextRequest) {
       })
       .where(eq(conversations.id, conversation.id));
 
-    // Les inscriptions de campagne sont réglées TOUT DE SUITE, pas au prochain
-    // barreau. Une échelle qui se termine avant que la personne réponde
-    // resterait « completed » et sa réponse ne compterait dans aucune variante :
-    // le taux de réponse d'un test A/B serait sous-estimé exactement là où on
-    // compare. Un désabonnement, lui, arrête TOUTES ses inscriptions — le refus
-    // porte sur le numéro, pas sur une campagne.
-    if (optOut.optOut) {
-      await markEnrollmentsStopped(client.id, now);
-    } else {
-      await markEnrollmentsReplied(conversation.id, now);
-    }
-
-    // Les humains sont prévenus quand c'est À EUX de répondre : pas
-    // d'assistant, IA en pause, ou désabonnement. Quand l'assistant va
-    // répondre, c'est lui qui prévient en cas de passage à l'humain, de
-    // blocage ou de panne — sinon chaque texto réveillait tout le monde pour
-    // rien et l'inbox ne voulait plus rien dire.
-    const aiWillHandle =
-      !optOut.optOut && conversation.aiEnabled && conversation.activeAssistantId !== null;
-    if (!aiWillHandle) {
-      await notifyHumans({
-        conversationId: conversation.id,
-        clientId: client.id,
-        kind: optOut.optOut ? "stopped" : "inbound",
-        reason: optOut.optOut ? "désabonnement" : "",
-      });
-    }
-
     // -- Tour d'agent, debounce --------------------------------------------
     // La cle de dedoublonnage `turn:<conversation>` fait que trois SMS en
     // quatre secondes REPOUSSENT le meme job au lieu d'en creer trois : une
     // rafale = une seule reponse. Les 10 s laissent le temps a la suite d'une
     // pensee d'arriver. Un fil mis en pause par un humain n'en programme pas :
     // le runtime sortirait de toute facon, autant ne pas creer le job.
-    if (!optOut.optOut && conversation.aiEnabled && conversation.activeAssistantId) {
-      await enqueueJob({
-        type: "agent_turn",
-        runAt: new Date(now.getTime() + AGENT_TURN_DEBOUNCE_MS),
-        payload: { conversationId: conversation.id },
-        dedupeKey: `turn:${conversation.id}`,
-      });
-      // Chemin rapide : le tour part des la reponse envoyee, sans attendre le
-      // cron de la minute (qui reste le filet de securite).
-      kickDispatch();
+    if (aiWillHandle) {
+      await enqueueJob(
+        {
+          type: "agent_turn",
+          runAt: new Date(now.getTime() + AGENT_TURN_DEBOUNCE_MS),
+          payload: { conversationId: conversation.id },
+          dedupeKey: `turn:${conversation.id}`,
+        },
+        tx,
+      );
     }
+    return true;
+  });
+
+  if (inserted) {
+    // Après validation : ce qui suit ne conditionne ni la rangée, ni le
+    // marquage, ni le tour — et se rattrape tout seul (le prochain barreau lit
+    // `lastInboundAt` pour clore une inscription répondue ; un STOP est déjà
+    // dans `suppressions`). Un échec ici est journalisé, pas remonté : un 500
+    // ferait retenter Twilio sur un MessageSid déjà en base, donc sans effet.
+    const afterCommit = async (step: string, run: () => Promise<unknown>) => {
+      try {
+        await run();
+      } catch (err) {
+        console.error(
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            level: "error",
+            msg: "sms.inbound_after_commit_failed",
+            step,
+            conversationId: conversation.id,
+            messageSid: MessageSid,
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      }
+    };
+
+    // Les inscriptions de campagne sont réglées TOUT DE SUITE, pas au prochain
+    // barreau. Une échelle qui se termine avant que la personne réponde
+    // resterait « completed » et sa réponse ne compterait dans aucune variante :
+    // le taux de réponse d'un test A/B serait sous-estimé exactement là où on
+    // compare. Un désabonnement, lui, arrête TOUTES ses inscriptions — le refus
+    // porte sur le numéro, pas sur une campagne.
+    await afterCommit("enrollments", () =>
+      optOut.optOut
+        ? markEnrollmentsStopped(client.id, now)
+        : markEnrollmentsReplied(conversation.id, now),
+    );
+
+    if (!aiWillHandle) {
+      await afterCommit("notify", () =>
+        notifyHumans({
+          conversationId: conversation.id,
+          clientId: client.id,
+          kind: optOut.optOut ? "stopped" : "inbound",
+          reason: optOut.optOut ? "désabonnement" : "",
+        }),
+      );
+    }
+
+    // Chemin rapide : le tour part des la reponse envoyee, sans attendre le
+    // cron de la minute (qui reste le filet de securite).
+    if (aiWillHandle) kickDispatch();
   }
 
   return twiml();

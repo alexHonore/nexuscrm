@@ -1,12 +1,12 @@
 "use server";
 
-import { and, eq, gt, sql } from "drizzle-orm";
+import { eq, inArray, lt, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/db";
 import { loginThrottle, users } from "@/db/schema";
 import { getClientIp, logAudit } from "@/lib/audit";
-import { verifyPassword } from "@/lib/auth/password";
+import { DUMMY_PASSWORD_HASH, verifyPassword } from "@/lib/auth/password";
 import { createSession } from "@/lib/auth/session";
 
 const loginSchema = z.object({
@@ -19,27 +19,47 @@ export type LoginState = { error: "invalid" | "disabled" | "throttled" } | null;
 
 const MAX_ATTEMPTS = 10;
 const WINDOW_MIN = 15;
+/** Une ligne de limiteur expirée depuis plus longtemps ne sert plus à rien. */
+const PURGE_AFTER_MS = 24 * 60 * 60_000;
 
-async function isThrottled(key: string): Promise<boolean> {
-  const row = await db.query.loginThrottle.findFirst({
-    where: and(eq(loginThrottle.key, key), gt(loginThrottle.resetAt, new Date())),
-  });
-  return (row?.count ?? 0) >= MAX_ATTEMPTS;
-}
-
-async function bumpThrottle(key: string): Promise<void> {
-  const resetAt = new Date(Date.now() + WINDOW_MIN * 60_000);
-  await db
+/**
+ * Incrémente le compteur d'une clé et renvoie la valeur obtenue — en UNE seule
+ * instruction (upsert + RETURNING) : des requêtes simultanées lisent des
+ * valeurs strictement croissantes, une rafale ne peut donc pas passer sous la
+ * limite le temps d'une comparaison bcrypt. L'horloge est celle de
+ * l'application (comme `resetAt`), pas celle de la base.
+ */
+async function bumpThrottle(key: string): Promise<number> {
+  const now = new Date();
+  const resetAt = new Date(now.getTime() + WINDOW_MIN * 60_000);
+  const [row] = await db
     .insert(loginThrottle)
     .values({ key, count: 1, resetAt })
     .onConflictDoUpdate({
       target: loginThrottle.key,
       set: {
         // Fenêtre expirée → repartir à 1, sinon incrémenter.
-        count: sql`CASE WHEN ${loginThrottle.resetAt} < now() THEN 1 ELSE ${loginThrottle.count} + 1 END`,
-        resetAt: sql`CASE WHEN ${loginThrottle.resetAt} < now() THEN ${resetAt.toISOString()}::timestamptz ELSE ${loginThrottle.resetAt} END`,
+        count: sql`CASE WHEN ${loginThrottle.resetAt} < ${now.toISOString()}::timestamptz THEN 1 ELSE ${loginThrottle.count} + 1 END`,
+        resetAt: sql`CASE WHEN ${loginThrottle.resetAt} < ${now.toISOString()}::timestamptz THEN ${resetAt.toISOString()}::timestamptz ELSE ${loginThrottle.resetAt} END`,
       },
-    });
+    })
+    .returning({ count: loginThrottle.count });
+  return row.count;
+}
+
+/** Bon mot de passe : la tentative n'était pas une devinette, on la rend. */
+async function releaseThrottle(keys: string[]): Promise<void> {
+  await db
+    .update(loginThrottle)
+    .set({ count: sql`GREATEST(${loginThrottle.count} - 1, 0)` })
+    .where(inArray(loginThrottle.key, keys));
+}
+
+/** Purge les lignes expirées depuis plus d'un jour — la table ne doit pas enfler. */
+async function purgeExpiredThrottle(): Promise<void> {
+  await db
+    .delete(loginThrottle)
+    .where(lt(loginThrottle.resetAt, new Date(Date.now() - PURGE_AFTER_MS)));
 }
 
 export async function loginAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
@@ -55,22 +75,26 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   // par IP au lieu de mettre tout le monde sous une clé partagée type « ::1 ».
   const ip = await getClientIp();
   const ipKey = ip ? `ip:${ip}` : null;
+  const throttleKeys = [...(ipKey !== null ? [ipKey] : []), `email:${email}`];
 
-  if ((ipKey !== null && (await isThrottled(ipKey))) || (await isThrottled(`email:${email}`))) {
-    return { error: "throttled" };
-  }
+  // Compter AVANT de vérifier : un compteur lu puis incrémenté après bcrypt
+  // laisserait passer toute une rafale simultanée sous la limite.
+  const counts = await Promise.all(throttleKeys.map(bumpThrottle));
+  if (counts.some((count) => count > MAX_ATTEMPTS)) return { error: "throttled" };
 
   const user = await db.query.users.findFirst({ where: eq(users.email, email) });
-  const valid = user ? await verifyPassword(password, user.passwordHash) : false;
+  // Comparaison bcrypt même sans compte (empreinte factice) : le temps de
+  // réponse ne doit pas dire si l'adresse existe.
+  const ok = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
+  const valid = !!user && ok;
 
   if (!user || !valid) {
-    await Promise.all([
-      ...(ipKey !== null ? [bumpThrottle(ipKey)] : []),
-      bumpThrottle(`email:${email}`),
-    ]);
     await logAudit({ action: "login.failed", detail: { email } });
     return { error: "invalid" };
   }
+  // Seuls les échecs comptent : on rend la tentative que l'on vient de compter.
+  await releaseThrottle(throttleKeys);
+
   if (!user.isActive) {
     await logAudit({ userId: user.id, action: "login.disabled" });
     return { error: "disabled" };
@@ -78,6 +102,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
 
   await createSession({ uid: user.id, role: user.role, tv: user.tokenVersion, remember });
   await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
+  await purgeExpiredThrottle();
   await logAudit({ userId: user.id, action: "login.success" });
 
   redirect("/dashboard");

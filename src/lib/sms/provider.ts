@@ -129,16 +129,43 @@ const twilioErrorSchema = z.object({
   message: z.string(),
 });
 
-function describeTwilioError(status: number, bodyText: string): string {
+/**
+ * Refus ou panne de Twilio (réponse non-2xx). Porte le statut HTTP et le code
+ * Twilio de façon STRUCTURÉE : c'est sur `status` que la file décide de la
+ * reprise (5xx / 429 = rien n'est parti, on réessaie ; autre 4xx = refus
+ * définitif). Le texte du message n'est là que pour les humains et le journal
+ * — Twilio renvoie un corps JSON `{ code, message }` autant sur un 400 que
+ * sur un 500, donc le statut n'y est jamais lisible à coup sûr.
+ */
+export class TwilioSendError extends Error {
+  constructor(
+    /** Statut HTTP de la réponse Twilio (400 refus, 429 limite, 500 panne…). */
+    public readonly status: number,
+    /** Code d'erreur Twilio (21211, 21610, 20500…) quand le corps en porte un. */
+    public readonly code: number | string | null,
+    message: string,
+  ) {
+    super(message);
+    this.name = "TwilioSendError";
+  }
+}
+
+function twilioSendError(status: number, bodyText: string): TwilioSendError {
   let json: unknown = null;
   try {
     json = JSON.parse(bodyText);
   } catch {
-    // corps non JSON — on retombe sur le statut HTTP
+    // corps non JSON — on retombe sur le statut HTTP seul
   }
   const parsed = twilioErrorSchema.safeParse(json);
-  if (parsed.success) return `${parsed.data.code} ${parsed.data.message}`;
-  return `http ${status}`;
+  if (parsed.success) {
+    return new TwilioSendError(
+      status,
+      parsed.data.code,
+      `twilio_send_failed: http ${status} ${parsed.data.code} ${parsed.data.message}`,
+    );
+  }
+  return new TwilioSendError(status, null, `twilio_send_failed: http ${status}`);
 }
 
 /**
@@ -199,9 +226,7 @@ export function createTwilioTransport(cfg: {
     }
 
     const text = await res.text();
-    if (!res.ok) {
-      throw new Error(`twilio_send_failed: ${describeTwilioError(res.status, text)}`);
-    }
+    if (!res.ok) throw twilioSendError(res.status, text);
 
     let json: unknown = null;
     try {

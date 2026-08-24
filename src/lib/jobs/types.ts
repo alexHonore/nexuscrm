@@ -28,6 +28,16 @@ export const sendSmsPayloadSchema = z.object({
   automated: z.boolean().default(true),
   aiGenerated: z.boolean().default(false),
   sentById: z.uuid().nullable().default(null),
+  /**
+   * Qui a écrit ce texte, quand c'est un assistant : l'identité ET la version
+   * sont figées sur la rangée `messages` (c'est elle qui garde le souvenir de
+   * celui qui a parlé — l'assistant actif d'un fil change au transfert, et
+   * les traces de tour sont purgées après 30 jours). Null = humain / système.
+   */
+  assistantId: z.uuid().nullable().default(null),
+  assistantVersion: z.number().int().nullable().default(null),
+  /** Modèle réellement servi (peut différer du modèle demandé : repli). */
+  model: z.string().nullable().default(null),
 });
 export type SendSmsPayload = z.infer<typeof sendSmsPayloadSchema>;
 

@@ -202,7 +202,10 @@
     "created": "Assistant créé",
     "deleted": "Assistant supprimé",
     "archived": "Assistant archivé",
-    "deactivated": "Assistant désactivé — repassé en brouillon"
+    "deactivated": "Assistant désactivé — repassé en brouillon",
+    "errors": {
+      "inUseByCampaigns": "Impossible de supprimer : {count} campagne(s) pointent encore cet assistant. Repointez-les d'abord."
+    }
   },
   "editor": {
     "back": "Assistants",
@@ -460,7 +463,8 @@
       "unknown_tool": "Un outil du fichier n'existe pas dans cette installation : il a été retiré.",
       "docs_ignored": "Les annotations du fichier sont ignorées : la documentation vient de cette installation.",
       "model_defaulted": "Le fichier ne nomme aucun modèle : celui par défaut est appliqué. Vérifiez l'onglet Modèle avant d'activer l'assistant — c'est lui qui décide du coût de chaque message.",
-      "blocks_defaulted": "Des blocs de configuration manquaient dans le fichier : les valeurs par défaut s'appliquent. Relisez l'identité (organisation, courtier) avant d'activer — ce sont les noms qui partent dans les SMS."
+      "blocks_defaulted": "Des blocs de configuration manquaient dans le fichier : les valeurs par défaut s'appliquent. Relisez l'identité (organisation, courtier) avant d'activer — ce sont les noms qui partent dans les SMS.",
+      "unknown_binding_path": "Cette liaison vise un chemin que la configuration n'a pas : elle est ignorée."
     },
     "needExample": "Besoin d'un point de départ ?",
     "downloadExample": "Télécharger un exemple valide"

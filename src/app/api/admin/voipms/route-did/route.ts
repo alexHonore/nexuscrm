@@ -18,6 +18,9 @@ const schema = z.object({
   userId: z.uuid().optional(),
 });
 
+/** Interrompt (et annule) la transaction d'assignation : l'utilisateur n'existe plus. */
+class TargetVanished extends Error {}
+
 /** Route un DID vers un sous-compte (setDIDRouting) + met à jour l'utilisateur. */
 export async function POST(req: Request) {
   const admin = await apiAdmin();
@@ -28,6 +31,18 @@ export async function POST(req: Request) {
 
   const didE164 = normalizePhone(body.did);
   if (!didE164) return NextResponse.json({ error: "invalid_did" }, { status: 422 });
+
+  // L'utilisateur visé doit exister AVANT de toucher à voip.ms ou de retirer le
+  // numéro à son détenteur actuel : un identifiant périmé (compte supprimé,
+  // onglet resté ouvert) laisserait sinon le DID à personne — voip.ms déjà
+  // re-routé et l'ancien détenteur dépouillé en silence.
+  if (body.userId) {
+    const target = await db.query.users.findFirst({
+      where: eq(users.id, body.userId),
+      columns: { id: true },
+    });
+    if (!target) return NextResponse.json({ error: "user_not_found" }, { status: 404 });
+  }
 
   try {
     await routeDidToSubAccount(body.did, body.account);
@@ -50,14 +65,24 @@ export async function POST(req: Request) {
   let released: { id: string; name: string; email: string }[] = [];
   if (body.userId) {
     const userId = body.userId;
-    released = await db.transaction(async (tx) => {
-      const freed = await releaseDidFromOthers(tx, didE164, userId);
-      await tx
-        .update(users)
-        .set({ didNumber: didE164, updatedAt: new Date() })
-        .where(eq(users.id, userId));
-      return freed;
-    });
+    try {
+      released = await db.transaction(async (tx) => {
+        const [assigned] = await tx
+          .update(users)
+          .set({ didNumber: didE164, updatedAt: new Date() })
+          .where(eq(users.id, userId))
+          .returning({ id: users.id });
+        // Disparu entre la vérification et l'écriture : on annule tout plutôt
+        // que de retirer le numéro à son détenteur sans le donner à personne.
+        if (!assigned) throw new TargetVanished();
+        return releaseDidFromOthers(tx, didE164, userId);
+      });
+    } catch (err) {
+      if (err instanceof TargetVanished) {
+        return NextResponse.json({ error: "user_not_found" }, { status: 404 });
+      }
+      throw err;
+    }
   }
 
   await logAudit({

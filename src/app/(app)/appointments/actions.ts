@@ -8,17 +8,19 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
 import { appointments, categories, clients, comments, notifications, users } from "@/db/schema";
-import { logAudit } from "@/lib/audit";
+import { diffFields, logAudit } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth/guards";
 import {
   bookingEventTitle,
   cancelEvent,
   createBookingEvent,
   GoogleNotConnectedError,
+  validAttendeeEmail,
 } from "@/lib/google";
 import { formatPhone } from "@/lib/phone";
 import { getSetting } from "@/lib/settings";
 import { computeAvailability, durationFor } from "@/app/api/availability/slots";
+import enBooking from "../../../../messages/en/booking.json";
 import frBooking from "../../../../messages/fr/booking.json";
 import { notifyCategoryChanged } from "@/lib/campaigns-server/match";
 
@@ -78,6 +80,39 @@ const FORM_LABELS = {
 function label<K extends string>(map: Record<K, string>, code: string): string {
   return (map as Record<string, string | undefined>)[code] ?? code;
 }
+
+/**
+ * Textes des notifications « Google Agenda » adressées aux admins, dans la
+ * langue du DESTINATAIRE (pas celle de l'auteur) — même principe que
+ * `notificationContent` (`src/components/clients/notification-content.ts`),
+ * les chaînes vivant ici dans `messages/{fr,en}/booking.json`.
+ */
+const GOOGLE_NOTIFICATIONS = { fr: frBooking.notifications, en: enBooking.notifications } as const;
+type GoogleNotificationKey = keyof typeof GOOGLE_NOTIFICATIONS.fr;
+
+function googleNotificationText(
+  locale: "fr" | "en",
+  key: GoogleNotificationKey,
+  vars: Record<string, string>,
+): { title: string; body: string } {
+  const entry = GOOGLE_NOTIFICATIONS[locale][key];
+  const fill = (text: string) =>
+    Object.entries(vars).reduce((acc, [name, value]) => acc.replaceAll(`{${name}}`, value), text);
+  return { title: fill(entry.title), body: fill(entry.body) };
+}
+
+/**
+ * Champs de la fiche client que la réservation peut réécrire — le journal
+ * d'audit consigne l'avant → après (même règle que `clients/actions.ts`).
+ */
+const BOOKING_CLIENT_AUDIT_FIELDS = [
+  "email",
+  "projectType",
+  "timing",
+  "budget",
+  "city",
+  "categoryId",
+] as const;
 
 /** « jeudi 13 août 2026 à 14 h 00 » (fuseau d'affichage de l'équipe). */
 function frenchWhen(date: Date, tz: string): string {
@@ -227,7 +262,10 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
   }
 
   const newEmail = data.email ? data.email.trim().toLowerCase() : null;
-  const clientEmail = newEmail ?? client.email;
+  // Repli sur le courriel de la fiche SEULEMENT s'il est exploitable : une
+  // valeur libre (« aucun », deux adresses…) ferait rejeter l'évènement par
+  // Google — on réserve alors sans ce participant plutôt que sans agenda.
+  const clientEmail = newEmail ?? validAttendeeEmail(client.email);
   const location =
     data.type === "inperson"
       ? data.location?.trim() || settings.inPersonDefaultLocation || client.address || null
@@ -305,20 +343,39 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
 
   // ── Update the client record. ──
   const bookedCategory = await db.query.categories.findFirst({ where: eq(categories.key, "booked") });
+  const clientPatch = {
+    qualification,
+    ...(newEmail && newEmail !== client.email ? { email: newEmail } : {}),
+    projectType: qualification.projectType,
+    ...(qualification.timing ? { timing: TIMING_LABELS[qualification.timing] } : {}),
+    ...(qualification.budget ? { budget: BUDGET_LABELS[qualification.budget] } : {}),
+    ...(qualification.sector ? { city: qualification.sector } : {}),
+    ...(bookedCategory ? { categoryId: bookedCategory.id } : {}),
+  };
   await db
     .update(clients)
-    .set({
-      qualification,
-      ...(newEmail && newEmail !== client.email ? { email: newEmail } : {}),
-      projectType: qualification.projectType,
-      ...(qualification.timing ? { timing: TIMING_LABELS[qualification.timing] } : {}),
-      ...(qualification.budget ? { budget: BUDGET_LABELS[qualification.budget] } : {}),
-      ...(qualification.sector ? { city: qualification.sector } : {}),
-      ...(bookedCategory ? { categoryId: bookedCategory.id } : {}),
-      updatedAt: new Date(),
-    })
+    .set({ ...clientPatch, updatedAt: new Date() })
     .where(eq(clients.id, client.id));
   if (bookedCategory) notifyCategoryChanged(client.id, client.categoryId, bookedCategory.id);
+
+  // La réservation réécrit la fiche (courriel, catégorie, projet…) : elle
+  // laisse la même trace avant → après qu'une modification depuis la fiche.
+  const clientChanges = diffFields(client, { ...client, ...clientPatch }, BOOKING_CLIENT_AUDIT_FIELDS);
+  if (clientChanges) {
+    await logAudit({
+      userId: user.id,
+      action: "client.update",
+      entity: "client",
+      entityId: client.id,
+      detail: {
+        fullName: client.fullName,
+        phone: client.phone,
+        via: "booking",
+        appointmentId,
+        changes: clientChanges,
+      },
+    });
+  }
 
   // ── Journal dans le fil de commentaires (le courtier le relit plus tard). ──
   await logClientComment(
@@ -360,19 +417,18 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
     link: "/appointments",
   });
   if (warning) {
+    // Deux causes, deux remèdes : « non connecté » → Réglages ; « échec de
+    // synchronisation » (compte connecté, mais Google a refusé l'évènement) →
+    // vérifier la fiche / ajouter l'évènement à la main. Dire au courtier de
+    // reconnecter un compte qui l'est déjà l'enverrait sur une fausse piste.
+    const key = warning === "google_not_connected" ? "googleNotConnected" : "googleSyncFailed";
     await notifyAdmins({
       actorId: user.id,
       type: "system",
       includeActor: true,
-      fr: {
-        title: "Google Agenda non connecté",
-        body: `Le rendez-vous de ${client.fullName} (${whenFr}) n'a pas été ajouté à Google Agenda. Connectez votre compte dans Réglages.`,
-      },
-      en: {
-        title: "Google Calendar not connected",
-        body: `The appointment for ${client.fullName} (${whenEn}) was not added to Google Calendar. Connect your account in Settings.`,
-      },
-      link: "/admin/settings",
+      fr: googleNotificationText("fr", key, { name: client.fullName, when: whenFr }),
+      en: googleNotificationText("en", key, { name: client.fullName, when: whenEn }),
+      link: warning === "google_not_connected" ? "/admin/settings" : "/appointments",
     });
   }
 

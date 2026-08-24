@@ -20,8 +20,9 @@ import {
   resetDb,
   testDb,
 } from "./helpers/db";
-import { conversations, messages, scheduledJobs, suppressions } from "@/db/schema-sms";
+import { assistants, conversations, messages, promptCores, scheduledJobs, suppressions } from "@/db/schema-sms";
 import { RETRY_BACKOFF_MS, type SendSmsPayload } from "@/lib/jobs/types";
+import { TwilioSendError } from "@/lib/sms/provider";
 import type { SendInput, SendResult } from "@/lib/sms/types";
 
 // ── Stubs d'environnement Next (aucune logique produit n'est simulée) ────────
@@ -102,6 +103,9 @@ function sendPayload(
     automated: true,
     aiGenerated: false,
     sentById: null,
+    assistantId: null,
+    assistantVersion: null,
+    model: null,
     ...overrides,
   };
 }
@@ -129,6 +133,8 @@ function cronRequest(authorization?: string): NextRequest {
 describe("dispatcher de la file (runDispatchCycle + /api/cron/dispatch)", () => {
   beforeEach(async () => {
     await resetDb();
+    // Noyau de prompt : la porte d'activation exige une version à jour.
+    await testDb.insert(promptCores).values({ version: 1, body: "# RÔLE" }).onConflictDoNothing();
     // SMS_MODE absent ⇒ dry_run — jamais de SMS réel dans les tests.
     delete process.env.SMS_MODE;
   });
@@ -363,12 +369,16 @@ describe("dispatcher de la file (runDispatchCycle + /api/cron/dispatch)", () => 
     expect((await runDispatchCycle()).claimed).toBe(0);
   });
 
-  it("panne du fournisseur : failJob avec backoff — pending, +1 min, aucune rangée", async () => {
+  it("panne du fournisseur (5xx, corps JSON Twilio) : failJob avec backoff — pending, +1 min, aucune rangée", async () => {
     freezeAt(IN_WINDOW);
     const { conversation } = await seedThread();
     const { id } = await enqueueDue(sendPayload(conversation));
+    // Forme RÉELLE d'une panne Twilio : HTTP 500 avec corps {code:20500,…} —
+    // le transport la lève typée, statut compris. Avant, le handler ne
+    // reconnaissait qu'un texte « http 5xx » que Twilio ne produit jamais
+    // (son corps JSON gagnait), et la panne finissait en « unknown » définitif.
     providerMock.sendOverride = async () => {
-      throw new Error("twilio_send_failed: http 500");
+      throw new TwilioSendError(500, 20500, "twilio_send_failed: http 500 20500 Internal Server Error");
     };
 
     const counts = await runDispatchCycle();
@@ -377,9 +387,133 @@ describe("dispatcher de la file (runDispatchCycle + /api/cron/dispatch)", () => 
     const job = await getJob(id);
     expect(job.status).toBe("pending"); // retenté au prochain cycle, pas définitif
     expect(job.attempts).toBe(1);
-    expect(job.lastError).toBe("twilio_send_failed: http 500");
+    expect(job.lastError).toBe("twilio_send_failed: http 500 20500 Internal Server Error");
     expect(job.runAt.getTime()).toBe(IN_WINDOW.getTime() + RETRY_BACKOFF_MS[0]);
     expect(await testDb.select().from(messages)).toHaveLength(0);
+  });
+
+  it("limite de débit Twilio (429) : même reprise avec backoff qu'une panne", async () => {
+    freezeAt(IN_WINDOW);
+    const { conversation } = await seedThread();
+    const { id } = await enqueueDue(sendPayload(conversation));
+    providerMock.sendOverride = async () => {
+      throw new TwilioSendError(429, 20429, "twilio_send_failed: http 429 20429 Too Many Requests");
+    };
+
+    const counts = await runDispatchCycle();
+    expect(counts).toMatchObject({ claimed: 1, failed: 1, done: 0 });
+
+    const job = await getJob(id);
+    expect(job.status).toBe("pending");
+    expect(job.runAt.getTime()).toBe(IN_WINDOW.getTime() + RETRY_BACKOFF_MS[0]);
+    expect(await testDb.select().from(messages)).toHaveLength(0);
+  });
+
+  it("refus 4xx de Twilio (numéro invalide) : rangée « failed / provider_rejected », définitif, humains prévenus", async () => {
+    freezeAt(IN_WINDOW);
+    const { conversation } = await seedThread();
+    const { id } = await enqueueDue(sendPayload(conversation));
+    providerMock.sendOverride = async () => {
+      throw new TwilioSendError(400, 21211, "twilio_send_failed: http 400 21211 Invalid 'To' Phone Number");
+    };
+
+    const counts = await runDispatchCycle();
+    expect(counts).toMatchObject({ claimed: 1, failed: 1, done: 0 });
+
+    const job = await getJob(id);
+    expect(job.status).toBe("failed"); // définitif : réessayer un numéro invalide ne sert à rien
+    expect(job.lastError).toBe("twilio_send_failed: http 400 21211 Invalid 'To' Phone Number");
+
+    const rows = await testDb.select().from(messages);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("failed");
+    expect(rows[0].skipReason).toBe(
+      "provider_rejected: twilio_send_failed: http 400 21211 Invalid 'To' Phone Number",
+    );
+    const [conv] = await testDb
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, conversation.id));
+    expect(conv.needsAttention).toBe(true);
+    expect(conv.attentionReason).toBe("send_failed");
+  });
+
+  it("délai ou panne réseau (aucun statut HTTP) : rangée « unknown / transport_error », jamais renvoyé", async () => {
+    freezeAt(IN_WINDOW);
+    const { conversation } = await seedThread();
+    const { id } = await enqueueDue(sendPayload(conversation));
+    // Twilio a PEUT-ÊTRE accepté : renvoyer ferait un doublon chez le client.
+    providerMock.sendOverride = async () => {
+      throw new Error("twilio_send_failed: timeout after 15000ms");
+    };
+
+    const counts = await runDispatchCycle();
+    expect(counts).toMatchObject({ claimed: 1, failed: 1, done: 0 });
+
+    expect((await getJob(id)).status).toBe("failed");
+    const rows = await testDb.select().from(messages);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("unknown");
+    expect(rows[0].skipReason).toBe("transport_error: twilio_send_failed: timeout after 15000ms");
+    // Un second cycle ne rappelle pas le transport : la rangée garde le job.
+    expect((await runDispatchCycle()).claimed).toBe(0);
+    expect(await testDb.select().from(messages)).toHaveLength(1);
+  });
+
+  // ── Attribution à l'assistant ──────────────────────────────────────────────
+
+  it("un envoi d'assistant fige QUI a écrit : assistant_id, version et modèle sur la rangée", async () => {
+    freezeAt(IN_WINDOW);
+    const { conversation } = await seedThread();
+    const [assistant] = await testDb
+      .insert(assistants)
+      .values({
+        name: "Léa",
+        status: "active",
+        identity: {},
+        goal: {},
+        approach: {},
+        model: {},
+        // Satisfait la porte d'activation (trigger assistants_activation_gate).
+        compiledPrompt: "PROMPT COMPILÉ (test)",
+        compiledCoreVersion: 1,
+        compiledAt: new Date(),
+        needsRecompile: false,
+        suitePassed: true,
+      })
+      .returning();
+    await enqueueDue(
+      sendPayload(conversation, {
+        source: "agent",
+        aiGenerated: true,
+        assistantId: assistant.id,
+        assistantVersion: 3,
+        model: "anthropic/claude-sonnet-4",
+      }),
+    );
+
+    expect(await runDispatchCycle()).toMatchObject({ claimed: 1, done: 1 });
+
+    const [row] = await testDb.select().from(messages);
+    expect(row).toMatchObject({
+      source: "agent",
+      assistantId: assistant.id,
+      assistantVersion: 3,
+      model: "anthropic/claude-sonnet-4",
+    });
+  });
+
+  it("un envoi humain ou d'ouverture reste sans attribution d'assistant (champs optionnels)", async () => {
+    freezeAt(IN_WINDOW);
+    const { conversation } = await seedThread();
+    // Charge utile SANS les champs d'attribution — ce qu'écrivent encore les
+    // anciens producteurs : la valeur par défaut est null, pas un rejet.
+    const { assistantId: _a, assistantVersion: _v, model: _m, ...legacy } = sendPayload(conversation);
+    await enqueueDue(legacy);
+
+    expect(await runDispatchCycle()).toMatchObject({ claimed: 1, done: 1 });
+    const [row] = await testDb.select().from(messages);
+    expect(row).toMatchObject({ assistantId: null, assistantVersion: null, model: null });
   });
 
   // ── Concurrence (§21) ──────────────────────────────────────────────────────

@@ -299,11 +299,13 @@ describe("fenêtre horaire et fuseau", () => {
     }
   });
 
-  it("ne renvoie rien si endHour <= startHour", async () => {
-    await setBooking({ startHour: "18:00", endHour: "09:00" });
-    expect(await slotsOf("2026-08-10")).toEqual([]);
-    await setBooking({ startHour: "09:00", endHour: "09:00" });
-    expect(await slotsOf("2026-08-10")).toEqual([]);
+  it("une fenêtre inversée ou vide (endHour <= startHour) est REFUSÉE par le schéma des réglages", () => {
+    // Avant : stockée telle quelle, elle rendait zéro créneau pour tout le
+    // monde sans la moindre erreur. `computeAvailability` garde sa garde
+    // « windowEnd <= windowStart » en défense, mais l'état n'est plus atteignable.
+    expect(bookingSettingsSchema.safeParse({ startHour: "18:00", endHour: "09:00" }).success).toBe(false);
+    expect(bookingSettingsSchema.safeParse({ startHour: "09:00", endHour: "09:00" }).success).toBe(false);
+    expect(bookingSettingsSchema.safeParse({ startHour: "09:00", endHour: "09:30" }).success).toBe(true);
   });
 
   it("les créneaux sont strictement croissants et sans doublon", async () => {
@@ -904,5 +906,70 @@ describe("changement d'heure — retour à l'heure normale (2026-11-01)", () => 
     expect(dst).toHaveLength(34);
     expect(labels(dst)).toEqual(labels(normal));
     expect(new Set(labels(dst)).size).toBe(34); // aucune étiquette dupliquée
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Fenêtre FreeBusy = journée LOCALE complète, quel que soit le fuseau du
+// PROCESSUS (Vercel tourne en UTC). `addDays` sur l'instant comptait 24 h
+// dans le fuseau du processus : la 25e heure du 1er novembre n'était jamais
+// demandée à Google, et un évènement de 23 h ce jour-là ne bloquait pas le
+// créneau de 22 h 30 malgré le tampon.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("fenêtre FreeBusy — journée locale complète, processus en UTC (prod)", () => {
+  const previousTz = process.env.TZ;
+
+  beforeEach(async () => {
+    // Node relit TZ à l'affectation : on reproduit exactement l'environnement de prod.
+    process.env.TZ = "UTC";
+    await loginAs();
+  });
+
+  afterEach(() => {
+    if (previousTz === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTz;
+  });
+
+  it("2026-11-01 (25 h) : la borne haute est minuit local du lendemain, pas +24 h", async () => {
+    now("2026-10-25T12:00:00Z");
+    await setBooking({ bufferMin: 0 });
+    await call("2026-11-01");
+    const [min, max] = H.freeBusy.mock.calls[0];
+    expect(min.toISOString()).toBe(at("2026-11-01T00:00:00").toISOString());
+    expect(max.toISOString()).toBe(at("2026-11-02T00:00:00").toISOString());
+    expect((max.getTime() - min.getTime()) / 3_600_000).toBe(25);
+  });
+
+  it("2026-03-08 (23 h) : idem, la journée courte est couverte exactement", async () => {
+    now("2026-03-01T12:00:00Z");
+    await setBooking({ bufferMin: 0 });
+    await call("2026-03-08");
+    const [min, max] = H.freeBusy.mock.calls[0];
+    expect(max.toISOString()).toBe(at("2026-03-09T00:00:00").toISOString());
+    expect((max.getTime() - min.getTime()) / 3_600_000).toBe(23);
+  });
+
+  it("un jour ordinaire garde ses 24 h", async () => {
+    await setBooking({ bufferMin: 0 });
+    await call("2026-08-10");
+    const [min, max] = H.freeBusy.mock.calls[0];
+    expect(max.toISOString()).toBe(at("2026-08-11T00:00:00").toISOString());
+    expect((max.getTime() - min.getTime()) / 3_600_000).toBe(24);
+  });
+
+  it("un évènement Google à 23 h 05 le 1er novembre bloque le créneau de 22 h 30 (tampon 15 min)", async () => {
+    now("2026-10-25T12:00:00Z");
+    await setBooking({ bufferMin: 15 }); // fenêtre par défaut 06:00 → 23:00
+    // Google ne renvoie le bloc que s'il est DANS la fenêtre demandée — on
+    // simule sa réponse fidèlement : rien si la borne haute s'arrête avant.
+    const busyStart = at("2026-11-01T23:05:00");
+    const busyEnd = at("2026-11-01T23:35:00");
+    H.freeBusy.mockImplementation(async (_min: Date, max: Date) =>
+      busyStart < max ? [{ start: busyStart, end: busyEnd }] : [],
+    );
+    const slots = await slotsOf("2026-11-01");
+    expect(labels(slots)).not.toContain("22:30");
+    expect(labels(slots)).toContain("22:00");
   });
 });

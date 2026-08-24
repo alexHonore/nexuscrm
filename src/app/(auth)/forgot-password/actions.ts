@@ -20,25 +20,26 @@ const WINDOW_MIN = 15;
  */
 export type ForgotState = { done: true } | { error: "invalid" | "throttled" | "unavailable" } | null;
 
-async function throttled(key: string): Promise<boolean> {
-  const row = await db.query.loginThrottle.findFirst({
-    where: and(eq(loginThrottle.key, key), gt(loginThrottle.resetAt, new Date())),
-  });
-  return (row?.count ?? 0) >= MAX_REQUESTS;
-}
-
-async function bump(key: string): Promise<void> {
-  const resetAt = new Date(Date.now() + WINDOW_MIN * 60_000);
-  await db
+/**
+ * Incrémente le compteur d'une clé et renvoie la valeur obtenue — UNE seule
+ * instruction (upsert + RETURNING), donc des demandes simultanées ne peuvent
+ * pas toutes passer sous la limite. Horloge de l'application, comme `resetAt`.
+ */
+async function bump(key: string): Promise<number> {
+  const now = new Date();
+  const resetAt = new Date(now.getTime() + WINDOW_MIN * 60_000);
+  const [row] = await db
     .insert(loginThrottle)
     .values({ key, count: 1, resetAt })
     .onConflictDoUpdate({
       target: loginThrottle.key,
       set: {
-        count: dsql`CASE WHEN ${loginThrottle.resetAt} < now() THEN 1 ELSE ${loginThrottle.count} + 1 END`,
-        resetAt: dsql`CASE WHEN ${loginThrottle.resetAt} < now() THEN ${resetAt.toISOString()}::timestamptz ELSE ${loginThrottle.resetAt} END`,
+        count: dsql`CASE WHEN ${loginThrottle.resetAt} < ${now.toISOString()}::timestamptz THEN 1 ELSE ${loginThrottle.count} + 1 END`,
+        resetAt: dsql`CASE WHEN ${loginThrottle.resetAt} < ${now.toISOString()}::timestamptz THEN ${resetAt.toISOString()}::timestamptz ELSE ${loginThrottle.resetAt} END`,
       },
-    });
+    })
+    .returning({ count: loginThrottle.count });
+  return row.count;
 }
 
 export async function requestResetAction(_prev: ForgotState, formData: FormData): Promise<ForgotState> {
@@ -53,13 +54,11 @@ export async function requestResetAction(_prev: ForgotState, formData: FormData)
   // Pas d'IP exploitable → limiteur par IP ignoré (celui par courriel reste).
   const ip = await getClientIp();
   const ipKey = ip ? `reset-ip:${ip}` : null;
-  if ((ipKey !== null && (await throttled(ipKey))) || (await throttled(`reset-mail:${email}`))) {
-    return { error: "throttled" };
-  }
-  await Promise.all([
+  const counts = await Promise.all([
     ...(ipKey !== null ? [bump(ipKey)] : []),
     bump(`reset-mail:${email}`),
   ]);
+  if (counts.some((count) => count > MAX_REQUESTS)) return { error: "throttled" };
 
   const user = await db.query.users.findFirst({ where: eq(users.email, email) });
 
@@ -84,11 +83,19 @@ export async function requestResetAction(_prev: ForgotState, formData: FormData)
 
     try {
       await sendEmail({ to: user.email, ...mail });
-      await logAudit({ userId: user.id, action: "password.reset_requested" });
     } catch (err) {
+      // Même réponse que pour un compte inconnu : un échec d'envoi ne doit pas
+      // trahir l'existence de l'adresse. L'échec reste visible côté serveur et
+      // dans le journal d'audit (/admin/audit).
       console.error("reset email failed", err);
-      return { error: "unavailable" };
+      await logAudit({
+        userId: user.id,
+        action: "password.reset_email_failed",
+        detail: { message: err instanceof Error ? err.message : String(err) },
+      });
+      return { done: true };
     }
+    await logAudit({ userId: user.id, action: "password.reset_requested" });
   }
 
   return { done: true };

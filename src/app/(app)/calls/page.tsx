@@ -121,6 +121,7 @@ export default async function MyCallsPage({
         note: calls.note,
         clientId: clients.id,
         clientName: clients.fullName,
+        clientDoNotCall: clients.doNotCall,
       })
       .from(calls)
       .leftJoin(clients, eq(clients.id, calls.clientId))
@@ -206,7 +207,9 @@ export default async function MyCallsPage({
       clientId: row.clientId,
       clientName: row.clientName,
       numberDisplay: remoteNumber ? formatPhone(remoteNumber) : t("callsPage.list.unknownNumber"),
-      dialNumber: remoteNumber,
+      // Fiche « Ne pas appeler » : aucun « Rappeler » en un geste — même règle
+      // que l'en-tête de la fiche et le pipeline (clients.doNotCall est ABSOLU).
+      dialNumber: row.clientDoNotCall ? null : remoteNumber,
       durationLabel: mmss(row.durationSec),
       dispositionLabel: row.disposition
         ? (display?.label ??

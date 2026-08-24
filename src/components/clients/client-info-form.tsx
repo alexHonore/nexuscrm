@@ -115,6 +115,8 @@ export function ClientInfoForm({
         router.refresh();
       } else if (res.error === "invalidPhone") {
         toast.error(t("detail.invalidPhone"));
+      } else if (res.error === "invalidPhoneAlt") {
+        toast.error(t("detail.invalidPhoneAlt"));
       } else {
         toast.error(t("errors.generic"));
       }

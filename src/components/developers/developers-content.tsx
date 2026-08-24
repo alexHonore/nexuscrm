@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { ApiEndpointText, PageText } from "@/lib/docs/api";
 import { API_AUTH, curlExample } from "@/lib/docs/api";
-import type { ResolvedParamDoc } from "@/lib/docs/types";
+import type { DocLocale, ResolvedParamDoc } from "@/lib/docs/types";
 import type { CampaignFieldText } from "@/lib/campaigns/docs";
 import type { GuardrailKindText, SeverityText } from "@/lib/guardrails/docs";
 
@@ -18,6 +18,8 @@ import type { GuardrailKindText, SeverityText } from "@/lib/guardrails/docs";
 
 export interface DevData {
   baseUrl: string;
+  /** Langue résolue de la page — propage ?lang au lien vers la spec JSON. */
+  locale: DocLocale;
   endpoints: ApiEndpointText[];
   params: ResolvedParamDoc[];
   campaignFields: (CampaignFieldText & { path: string })[];
@@ -138,7 +140,7 @@ export function DevelopersContent({ text: T, data }: { text: PageText; data: Dev
         <Section id="spec" title={T.sections.spec}>
           <p className="text-sm text-muted-foreground">{T.spec.p1}</p>
           <a
-            href="/api/docs/public"
+            href={`/api/docs/public?lang=${data.locale}`}
             className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-primary hover:underline"
           >
             {T.spec.open}

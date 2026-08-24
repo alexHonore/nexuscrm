@@ -11,6 +11,20 @@ import { getTimezoneOffset } from "date-fns-tz";
 
 const DIRECT_URL = "https://voip.ms/api/v1/rest.php";
 
+/**
+ * Délai maximal d'UN appel à l'API voip.ms. Le proxy de la passerelle coupe
+ * déjà un amont muet après 90 s ; ce plafond couvre le reste du chemin (mode
+ * direct, réponse au compte-gouttes, passerelle elle-même muette) pour qu'une
+ * synchro n'attende jamais que Vercel la tue à maxDuration — sans réponse ni
+ * ligne d'audit. Réglable par VOIPMS_TIMEOUT_MS ; lu à chaque appel pour que
+ * les tests puissent le réduire.
+ */
+const DEFAULT_TIMEOUT_MS = 100_000;
+function timeoutMs(): number {
+  const fromEnv = Number(process.env.VOIPMS_TIMEOUT_MS);
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : DEFAULT_TIMEOUT_MS;
+}
+
 export class VoipMsError extends Error {
   constructor(
     public status: string,
@@ -48,7 +62,18 @@ export async function voipms<T = Record<string, unknown>>(
     headers["x-proxy-token"] = process.env.VOIPMS_API_PROXY_TOKEN;
   }
 
-  const res = await fetch(url, { headers, cache: "no-store" });
+  let res: Response;
+  try {
+    res = await fetch(url, { headers, cache: "no-store", signal: AbortSignal.timeout(timeoutMs()) });
+  } catch (err) {
+    // Abandon sur délai : erreur NORMALE, typée, que les appelants consignent
+    // (cdr-sync la range dans `errors` et passe au compte suivant) au lieu de
+    // pendre jusqu'à ce que la plateforme tue la fonction sans trace.
+    if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+      throw new VoipMsError("timeout", `voip.ms: aucune réponse en ${timeoutMs()} ms (${method})`);
+    }
+    throw err;
+  }
   if (!res.ok) throw new VoipMsError("http_error", `HTTP ${res.status}`);
   const json = (await res.json()) as { status: string } & T;
   if (json.status !== "success") throw new VoipMsError(json.status);
