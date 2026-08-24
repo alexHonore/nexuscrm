@@ -291,6 +291,11 @@
       "docs_ignored": "Les annotations « _docs » du fichier sont ignorées : la documentation vient de cette installation, pas du fichier importé."
     },
     "needExample": "Besoin d'un point de départ ?",
-    "downloadExample": "Télécharger un exemple valide"
+    "downloadExample": "Télécharger un exemple valide",
+    "fromFile": "Téléverser un fichier",
+    "fromPaste": "Coller le JSON",
+    "pasteLabel": "Contenu JSON",
+    "pastePlaceholder": "Collez ici le JSON exporté…",
+    "analyze": "Analyser le JSON"
   }
 }

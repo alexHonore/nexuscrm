@@ -467,7 +467,12 @@
       "unknown_binding_path": "This binding targets a path this configuration does not have: it is ignored."
     },
     "needExample": "Need a starting point?",
-    "downloadExample": "Download a valid example"
+    "downloadExample": "Download a valid example",
+    "fromFile": "Upload a file",
+    "fromPaste": "Paste JSON",
+    "pasteLabel": "JSON content",
+    "pastePlaceholder": "Paste the exported JSON here…",
+    "analyze": "Analyze JSON"
   },
   "goalType": {
     "video_meeting": "Video meeting",

@@ -467,7 +467,12 @@
       "unknown_binding_path": "Cette liaison vise un chemin que la configuration n'a pas : elle est ignorée."
     },
     "needExample": "Besoin d'un point de départ ?",
-    "downloadExample": "Télécharger un exemple valide"
+    "downloadExample": "Télécharger un exemple valide",
+    "fromFile": "Téléverser un fichier",
+    "fromPaste": "Coller le JSON",
+    "pasteLabel": "Contenu JSON",
+    "pastePlaceholder": "Collez ici le JSON exporté…",
+    "analyze": "Analyser le JSON"
   },
   "goalType": {
     "video_meeting": "Rencontre vidéo",

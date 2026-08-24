@@ -291,6 +291,11 @@
       "docs_ignored": "The file's \"_docs\" annotations are ignored: the documentation comes from this installation, not from the imported file."
     },
     "needExample": "Need a starting point?",
-    "downloadExample": "Download a valid example"
+    "downloadExample": "Download a valid example",
+    "fromFile": "Upload a file",
+    "fromPaste": "Paste JSON",
+    "pasteLabel": "JSON content",
+    "pastePlaceholder": "Paste the exported JSON here…",
+    "analyze": "Analyze JSON"
   }
 }

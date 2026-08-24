@@ -17,6 +17,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -57,6 +58,9 @@ export function AssistantImportDialog({ trigger }: { trigger: React.ReactNode })
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [open, setOpen] = useState(false);
+  // Deux façons d'apporter le même JSON : un fichier, ou un collage direct.
+  const [mode, setMode] = useState<"file" | "paste">("file");
+  const [pasted, setPasted] = useState("");
   const [bundle, setBundle] = useState<unknown>(null);
   // Le TEXTE du fichier, gardé pour situer chaque objection à sa ligne :
   // le serveur voit la forme, lui seul voit la mise en page.
@@ -72,22 +76,23 @@ export function AssistantImportDialog({ trigger }: { trigger: React.ReactNode })
     setPreview(null);
     setResolution({});
     setSource("");
+    setPasted("");
+    setMode("file");
     setIssues([]);
     setSyntax(null);
     if (fileRef.current) fileRef.current.value = "";
   };
 
-  const pick = async (file: File) => {
+  /**
+   * Le cœur commun aux deux entrées : le texte JSON est relu SANS rien écrire,
+   * puis prévisualisé. Fichier téléversé ou JSON collé, la suite est identique
+   * — un seul chemin de diagnostic, un seul chemin d'erreur.
+   */
+  const ingest = async (text: string) => {
     setBusy(true);
     setIssues([]);
     setSyntax(null);
-    const text = await file.text();
     setSource(text);
-    // Le champ est vidé TOUT DE SUITE : on lit le diagnostic, on corrige le
-    // fichier, on le reprend — et un navigateur ne renvoie pas d'évènement
-    // quand on rechoisit le même nom de fichier. Sans ça, la deuxième
-    // tentative ne se passait tout simplement rien.
-    if (fileRef.current) fileRef.current.value = "";
 
     let parsed: unknown;
     try {
@@ -119,6 +124,16 @@ export function AssistantImportDialog({ trigger }: { trigger: React.ReactNode })
     } finally {
       setBusy(false);
     }
+  };
+
+  const pick = async (file: File) => {
+    const text = await file.text();
+    // Le champ est vidé TOUT DE SUITE : on lit le diagnostic, on corrige le
+    // fichier, on le reprend — et un navigateur ne renvoie pas d'évènement
+    // quand on rechoisit le même nom de fichier. Sans ça, la deuxième
+    // tentative ne se passait tout simplement rien.
+    if (fileRef.current) fileRef.current.value = "";
+    await ingest(text);
   };
 
   const commit = async () => {
@@ -173,19 +188,70 @@ export function AssistantImportDialog({ trigger }: { trigger: React.ReactNode })
 
         {!preview ? (
           <div className="space-y-3">
-            <Label htmlFor="assistant-import-file">{t("import.pick")}</Label>
-            <input
-              ref={fileRef}
-              id="assistant-import-file"
-              type="file"
-              accept="application/json,.json"
-              disabled={busy}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void pick(file);
-              }}
-              className="block w-full min-h-11 rounded-md border border-input bg-transparent px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm"
-            />
+            {/* Deux entrées pour le même JSON : téléverser un fichier ou le
+                coller. La bascule ne fait que changer le champ montré. */}
+            <div className="grid grid-cols-2 gap-2" role="tablist">
+              <Button
+                type="button"
+                variant={mode === "file" ? "default" : "outline"}
+                size="sm"
+                disabled={busy}
+                aria-pressed={mode === "file"}
+                onClick={() => setMode("file")}
+              >
+                {t("import.fromFile")}
+              </Button>
+              <Button
+                type="button"
+                variant={mode === "paste" ? "default" : "outline"}
+                size="sm"
+                disabled={busy}
+                aria-pressed={mode === "paste"}
+                onClick={() => setMode("paste")}
+              >
+                {t("import.fromPaste")}
+              </Button>
+            </div>
+
+            {mode === "file" ? (
+              <>
+                <Label htmlFor="assistant-import-file">{t("import.pick")}</Label>
+                <input
+                  ref={fileRef}
+                  id="assistant-import-file"
+                  type="file"
+                  accept="application/json,.json"
+                  disabled={busy}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void pick(file);
+                  }}
+                  className="block w-full min-h-11 rounded-md border border-input bg-transparent px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm"
+                />
+              </>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="assistant-import-paste">{t("import.pasteLabel")}</Label>
+                <Textarea
+                  id="assistant-import-paste"
+                  value={pasted}
+                  disabled={busy}
+                  onChange={(e) => setPasted(e.target.value)}
+                  placeholder={t("import.pastePlaceholder")}
+                  className="min-h-40 font-mono text-xs"
+                  spellCheck={false}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={busy || pasted.trim() === ""}
+                  onClick={() => void ingest(pasted)}
+                >
+                  {busy ? <Loader2 className="animate-spin" /> : null} {t("import.analyze")}
+                </Button>
+              </div>
+            )}
+
             {busy ? (
               <p className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" /> {t("import.importing")}
