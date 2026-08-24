@@ -172,7 +172,7 @@ describe("onglets rendus isolément", () => {
 
   it("Inscriptions : un arrêt affiche son motif", () => {
     const html = wrap(
-      createElement(EnrollmentsTab, { ...tabProps, onEnroll: () => {}, enrolling: false }),
+      createElement(EnrollmentsTab, { ...tabProps, onEnroll: () => {}, enrolling: false, onAction: () => {}, actingId: null, onBulk: () => {}, bulkBusy: false, onAdded: () => {} }),
     );
     expect(html).toContain("Marie Tremblay");
     expect(html).toContain("Arrêtée");
@@ -181,6 +181,81 @@ describe("onglets rendus isolément", () => {
     expect(html).not.toContain(">suppressed<");
     // Et la colonne « Terminé » existe vraiment (la clé existait, pas la colonne).
     expect(html).toContain("Terminé");
+  });
+
+  it("Inscriptions : le client mène à sa fiche, et une inscription en vol s'actionne", () => {
+    const data: CampaignEditorData = {
+      ...DATA,
+      enrollments: [
+        {
+          id: "11111111-1111-4111-8111-111111111111",
+          clientId: "22222222-2222-4222-8222-222222222222",
+          clientName: "Jean Bouchard",
+          variant: "direct",
+          status: "active",
+          step: 1,
+          nextTouchAt: "2026-08-25T14:00:00.000Z",
+          endedAt: null,
+          endReason: null,
+        },
+      ],
+    };
+    const html = wrap(
+      createElement(EnrollmentsTab, {
+        ...tabProps,
+        data,
+        onEnroll: () => {},
+        enrolling: false,
+        onAction: () => {},
+        actingId: null,
+        onBulk: () => {},
+        bulkBusy: false,
+        onAdded: () => {},
+      }),
+    );
+    // Le nom mène à la fiche.
+    expect(html).toContain('href="/clients/22222222-2222-4222-8222-222222222222"');
+    // Un fil en vol propose pause et retrait.
+    expect(html).toContain("Mettre en pause");
+    expect(html).toContain("Retirer");
+  });
+
+  it("Inscriptions : une pause manuelle s'affiche « En pause » et propose « Reprendre »", () => {
+    const data: CampaignEditorData = {
+      ...DATA,
+      enrollments: [
+        {
+          id: "33333333-3333-4333-8333-333333333333",
+          clientId: "44444444-4444-4444-8444-444444444444",
+          clientName: "Paul Côté",
+          variant: "direct",
+          // L'état de pause : vivant, hors file, marqué — sans être terminé.
+          status: "active",
+          step: 1,
+          nextTouchAt: null,
+          endedAt: null,
+          endReason: "paused_by_admin",
+        },
+      ],
+    };
+    const html = wrap(
+      createElement(EnrollmentsTab, {
+        ...tabProps,
+        data,
+        onEnroll: () => {},
+        enrolling: false,
+        onAction: () => {},
+        actingId: null,
+        onBulk: () => {},
+        bulkBusy: false,
+        onAdded: () => {},
+      }),
+    );
+    expect(html).toContain("En pause");
+    expect(html).toContain("Reprendre");
+    // Le marqueur machine ne fuit jamais à l'écran, et la colonne « Terminé »
+    // reste vide (une pause n'est pas une fin).
+    expect(html).not.toContain("paused_by_admin");
   });
 
   it("Déclencheur : les QUATRE options sont visibles, chacune expliquée", () => {
@@ -205,7 +280,7 @@ describe("onglets rendus isolément", () => {
       wrap(createElement(LadderTab, tabProps)),
       wrap(createElement(VariantsTab, tabProps)),
       wrap(createElement(AudienceTab, tabProps)),
-      wrap(createElement(EnrollmentsTab, { ...tabProps, onEnroll: () => {}, enrolling: false })),
+      wrap(createElement(EnrollmentsTab, { ...tabProps, onEnroll: () => {}, enrolling: false, onAction: () => {}, actingId: null, onBulk: () => {}, bulkBusy: false, onAdded: () => {} })),
     ]) {
       expect(html).not.toContain("MISSING_MESSAGE");
       expect(html).not.toMatch(/editor\.[a-zA-Z]+\./);

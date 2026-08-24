@@ -125,7 +125,10 @@ async function makeCampaign(input: {
 async function makeEnrollment(campaignId: string, clientId: string) {
   const [row] = await testDb
     .insert(campaignEnrollments)
-    .values({ campaignId, clientId, status: "active", step: 0, enrolledAt: NOW })
+    // `nextTouchAt` posé (dû MAINTENANT) comme le fait enroll.ts en production :
+    // une inscription active a toujours une date de prochain barreau. Un null
+    // signifie « en pause » et runTouch ne l'enverrait pas (garde d'exécution).
+    .values({ campaignId, clientId, status: "active", step: 0, enrolledAt: NOW, nextTouchAt: NOW })
     .returning();
   return row;
 }

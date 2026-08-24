@@ -44,6 +44,10 @@ export function CampaignEditor({ data }: { data: CampaignEditorData }) {
   const [config, setConfig] = useState<CampaignConfig>(data.config);
   const [saved, setSaved] = useState<CampaignConfig>(data.config);
   const [busy, setBusy] = useState<null | "save" | "status" | "enroll">(null);
+  /** Inscription dont une action individuelle (pause/reprise/retrait) est en cours. */
+  const [actingEnrollment, setActingEnrollment] = useState<string | null>(null);
+  /** Une action en LOT (sur plusieurs inscriptions) est en cours. */
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const dirty = useMemo(() => JSON.stringify(config) !== JSON.stringify(saved), [config, saved]);
 
@@ -150,6 +154,61 @@ export function CampaignEditor({ data }: { data: CampaignEditorData }) {
       toast.error(t("editor.errors.enroll"));
     } finally {
       setBusy(null);
+    }
+  };
+
+  /** Pause / reprise / retrait d'UNE inscription. */
+  const enrollmentAction = async (
+    enrollmentId: string,
+    action: "pause" | "resume" | "remove",
+    clientName: string,
+  ) => {
+    // Le retrait sort le client de la campagne : on le confirme, nommément.
+    if (
+      action === "remove" &&
+      !window.confirm(t("editor.enrollments.removeConfirm", { name: clientName }))
+    ) {
+      return;
+    }
+    setActingEnrollment(enrollmentId);
+    try {
+      await api(`/api/campaigns/${data.id}/enrollments/${enrollmentId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action }),
+      });
+      const toastKey = { pause: "paused", resume: "resumed", remove: "removed" }[action];
+      toast.success(t(`editor.enrollments.toast.${toastKey}` as never));
+      router.refresh();
+    } catch {
+      toast.error(t("editor.enrollments.toast.failed"));
+    } finally {
+      setActingEnrollment(null);
+    }
+  };
+
+  /** Pause / reprise / retrait d'un LOT d'inscriptions sélectionnées. */
+  const enrollmentBulk = async (
+    enrollmentIds: string[],
+    action: "pause" | "resume" | "remove",
+  ) => {
+    if (
+      action === "remove" &&
+      !window.confirm(t("editor.enrollments.bulkRemoveConfirm", { count: enrollmentIds.length }))
+    ) {
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      const res = await api<{ done: number; failed: number }>(
+        `/api/campaigns/${data.id}/enrollments`,
+        { method: "PATCH", body: JSON.stringify({ action, enrollmentIds }) },
+      );
+      toast.success(t("editor.enrollments.toast.bulkDone", { done: res.done, failed: res.failed }));
+      router.refresh();
+    } catch {
+      toast.error(t("editor.enrollments.toast.failed"));
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -276,6 +335,13 @@ export function CampaignEditor({ data }: { data: CampaignEditorData }) {
             {...tabProps}
             onEnroll={() => void enroll()}
             enrolling={busy === "enroll"}
+            onAction={(enrollmentId, action, clientName) =>
+              void enrollmentAction(enrollmentId, action, clientName)
+            }
+            actingId={actingEnrollment}
+            onBulk={(ids, action) => void enrollmentBulk(ids, action)}
+            bulkBusy={bulkBusy}
+            onAdded={() => router.refresh()}
           />
         </TabsContent>
       </Tabs>

@@ -213,7 +213,8 @@
         "status": "Status",
         "step": "Rung",
         "next": "Next",
-        "ended": "Ended"
+        "ended": "Ended",
+        "actions": "Actions"
       },
       "status": {
         "pending": "Pending",
@@ -222,7 +223,8 @@
         "booked": "Booked",
         "completed": "Completed",
         "stopped": "Stopped",
-        "excluded": "Excluded"
+        "excluded": "Excluded",
+        "paused": "Paused"
       },
       "enrollNow": "Enroll the audience",
       "enrolling": "Enrolling…",
@@ -250,8 +252,32 @@
         "do_not_call": "Do not call",
         "live_conversation": "Conversation already in progress",
         "client_deleted": "Client deleted",
-        "campaign_archived": "Campaign archived"
-      }
+        "campaign_archived": "Campaign archived",
+        "removed_by_admin": "Removed by admin"
+      },
+      "pause": "Pause",
+      "resume": "Resume",
+      "remove": "Remove",
+      "removeConfirm": "Remove {name} from this campaign? This record will no longer receive any campaign message.",
+      "toast": {
+        "paused": "Enrollment paused.",
+        "resumed": "Enrollment resumed.",
+        "removed": "Client removed from the campaign.",
+        "failed": "Action not possible on this enrollment.",
+        "added": "{added} enrolled, {skipped} skipped.",
+        "bulkDone": "{done} enrollment(s) processed, {failed} skipped."
+      },
+      "addTrigger": "Add clients",
+      "addTitle": "Add clients to the campaign",
+      "addHint": "Search records and check the ones to enroll. Eligibility (number, opt-out, already enrolled) is checked per record.",
+      "addSearchPlaceholder": "Name, phone, city…",
+      "searching": "Searching…",
+      "addNone": "No record found.",
+      "addEmpty": "Type to search a record.",
+      "addButton": "Add ({count})",
+      "selected": "{count} selected",
+      "clearSelection": "Clear",
+      "bulkRemoveConfirm": "Remove {count} client(s) from this campaign? These records will no longer receive any campaign message."
     },
     "errors": {
       "save": "Could not save",

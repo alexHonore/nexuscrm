@@ -179,7 +179,16 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
   // envoi réussi trouve l'inscription déjà avancée d'un cran et expédie le
   // barreau suivant sur-le-champ — deux messages à quelques secondes d'écart,
   // exactement ce que les délais de l'échelle servent à éviter.
-  if (enrollment.nextTouchAt !== null && enrollment.nextTouchAt > now) {
+  //
+  // `next_touch_at` à null n'est PAS « dû maintenant » : c'est une inscription
+  // retirée de la file — une pause manuelle de l'administrateur (voir
+  // `enrollment-admin.ts`). La file ne la sélectionne plus, mais un job déjà
+  // en vol au moment de la pause (déjà réclamé, ou mis en file par le même
+  // cycle) atteindrait quand même ce point : sans ce garde, il enverrait le
+  // SMS et « dé-pauserait » l'inscription en silence. Ne rien envoyer, ne pas
+  // avancer l'échelle : la pause tient au niveau de l'EXÉCUTION, pas seulement
+  // de la sélection.
+  if (enrollment.nextTouchAt === null || enrollment.nextTouchAt > now) {
     return { sent: false, step, refusal: "not_due", nextAt: enrollment.nextTouchAt };
   }
 

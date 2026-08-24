@@ -361,6 +361,9 @@ export const CAMPAIGN_RUNG_LOOK: Record<string, Look> = {
 export const ENROLLMENT_STATUS_LOOK: Record<string, Look> = {
   pending: { color: TONE.raw, Icon: HourglassIcon },
   active: { color: "#3B82F6", Icon: ActivityIcon },
+  // Pause MANUELLE (admin) : inscrite mais retirée de la file — l'orange de la
+  // vigilance, comme la pause d'une campagne entière.
+  paused: { color: TONE.scrutiny, Icon: PauseIcon },
   replied: { color: "#10B981", Icon: MessageSquareReplyIcon },
   booked: { color: "#10B981", Icon: CalendarCheckIcon },
   completed: { color: TONE.raw, Icon: CircleCheckIcon },

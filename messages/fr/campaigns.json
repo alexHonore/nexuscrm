@@ -213,7 +213,8 @@
         "status": "État",
         "step": "Barreau",
         "next": "Prochain",
-        "ended": "Terminé"
+        "ended": "Terminé",
+        "actions": "Actions"
       },
       "status": {
         "pending": "En attente",
@@ -222,7 +223,8 @@
         "booked": "Rendez-vous",
         "completed": "Terminée",
         "stopped": "Arrêtée",
-        "excluded": "Écartée"
+        "excluded": "Écartée",
+        "paused": "En pause"
       },
       "enrollNow": "Inscrire l'audience",
       "enrolling": "Inscription…",
@@ -250,8 +252,32 @@
         "do_not_call": "Ne pas appeler",
         "live_conversation": "Conversation déjà en cours",
         "client_deleted": "Fiche supprimée",
-        "campaign_archived": "Campagne archivée"
-      }
+        "campaign_archived": "Campagne archivée",
+        "removed_by_admin": "Retiré par l’administrateur"
+      },
+      "pause": "Mettre en pause",
+      "resume": "Reprendre",
+      "remove": "Retirer",
+      "removeConfirm": "Retirer {name} de cette campagne ? Cette fiche ne recevra plus aucun message de la campagne.",
+      "toast": {
+        "paused": "Inscription mise en pause.",
+        "resumed": "Inscription reprise.",
+        "removed": "Client retiré de la campagne.",
+        "failed": "Action impossible sur cette inscription.",
+        "added": "{added} inscrit(s), {skipped} écarté(s).",
+        "bulkDone": "{done} inscription(s) traitée(s), {failed} ignorée(s)."
+      },
+      "addTrigger": "Ajouter des clients",
+      "addTitle": "Ajouter des clients à la campagne",
+      "addHint": "Cherchez des fiches et cochez celles à inscrire. L’éligibilité (numéro, désabonnement, déjà inscrite) est vérifiée fiche par fiche.",
+      "addSearchPlaceholder": "Nom, téléphone, ville…",
+      "searching": "Recherche…",
+      "addNone": "Aucune fiche trouvée.",
+      "addEmpty": "Tapez pour chercher une fiche.",
+      "addButton": "Ajouter ({count})",
+      "selected": "{count} sélectionnée(s)",
+      "clearSelection": "Désélectionner",
+      "bulkRemoveConfirm": "Retirer {count} client(s) de cette campagne ? Ces fiches ne recevront plus aucun message de la campagne."
     },
     "errors": {
       "save": "Impossible d'enregistrer",

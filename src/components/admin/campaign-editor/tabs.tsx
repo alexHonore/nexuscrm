@@ -1,6 +1,7 @@
 "use client";
 
-import { AlertTriangle, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, Loader2, Pause, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 import { useState } from "react";
@@ -40,6 +41,8 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { TRIGGER_KINDS } from "@/lib/campaigns/schema";
 import { planLadder } from "@/lib/campaigns/ladder";
+import { enrollmentInFlight, enrollmentPaused } from "@/lib/campaigns/enrollment-status";
+import { AddClientsDialog } from "./add-clients-dialog";
 import { analyzeSms } from "@/lib/sms/segments";
 import { cn } from "@/lib/utils";
 import { api } from "../api";
@@ -103,6 +106,10 @@ const END_REASONS = new Set([
   "live_conversation",
   "client_deleted",
   "campaign_archived",
+  // Retrait manuel par l'administrateur (removeEnrollment) : la fiche est close
+  // avec ce motif. « paused_by_admin » n'y figure PAS — une pause a
+  // `ended_at` null et n'atteint jamais la colonne « Terminé ».
+  "removed_by_admin",
 ]);
 
 /** Cases à cocher d'une liste d'identifiants — le motif se répète 4 fois. */
@@ -894,17 +901,105 @@ export function EnrollmentsTab({
   data,
   onEnroll,
   enrolling,
-}: CampaignTabProps & { onEnroll: () => void; enrolling: boolean }) {
+  onAction,
+  actingId,
+  onBulk,
+  bulkBusy,
+  onAdded,
+}: CampaignTabProps & {
+  onEnroll: () => void;
+  enrolling: boolean;
+  /** Pause / reprise / retrait d'UNE inscription. */
+  onAction: (enrollmentId: string, action: "pause" | "resume" | "remove", clientName: string) => void;
+  /** L'inscription dont une action est en cours — ses boutons tournent. */
+  actingId: string | null;
+  /** Action sur un LOT d'inscriptions sélectionnées. */
+  onBulk: (enrollmentIds: string[], action: "pause" | "resume" | "remove") => void;
+  /** Une action en lot est en cours. */
+  bulkBusy: boolean;
+  /** Des fiches viennent d'être ajoutées — recharger la liste. */
+  onAdded: () => void;
+}) {
   const t = useTranslations("campaigns");
+  // Sélection pour les actions en lot — uniquement des inscriptions EN VOL
+  // (les inscriptions closes ne s'actionnent pas).
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const inFlightIds = data.enrollments.filter((e) => enrollmentInFlight(e.status)).map((e) => e.id);
+  const allSelected = inFlightIds.length > 0 && inFlightIds.every((id) => selected.has(id));
+  const toggleOne = (id: string, on: boolean) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  const toggleAll = (on: boolean) => setSelected(on ? new Set(inFlightIds) : new Set());
+  const runBulk = (action: "pause" | "resume" | "remove") => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    onBulk(ids, action);
+    setSelected(new Set());
+  };
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {/* Ajouter des fiches précises — une par une ou en lot — indépendamment
+            des filtres d'audience. */}
+        <AddClientsDialog campaignId={data.id} onAdded={onAdded} />
         <Button onClick={onEnroll} disabled={enrolling} className="min-h-11 md:min-h-9">
           {enrolling ? <Loader2 className="animate-spin" /> : <Plus />}
           {enrolling ? t("editor.enrollments.enrolling") : t("editor.enrollments.enrollNow")}
         </Button>
       </div>
+
+      {/* Barre d'actions en lot — visible dès qu'une inscription est cochée. */}
+      {selected.size > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 p-2">
+          <span className="text-sm font-medium">
+            {t("editor.enrollments.selected", { count: selected.size })}
+          </span>
+          <div className="ml-auto flex flex-wrap gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-h-11 md:min-h-8"
+              disabled={bulkBusy}
+              onClick={() => runBulk("pause")}
+            >
+              {bulkBusy ? <Loader2 className="animate-spin" /> : <Pause />}
+              {t("editor.enrollments.pause")}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-h-11 md:min-h-8"
+              disabled={bulkBusy}
+              onClick={() => runBulk("resume")}
+            >
+              <Play /> {t("editor.enrollments.resume")}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-h-11 text-destructive md:min-h-8"
+              disabled={bulkBusy}
+              onClick={() => runBulk("remove")}
+            >
+              <Trash2 /> {t("editor.enrollments.remove")}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="min-h-11 md:min-h-8"
+              disabled={bulkBusy}
+              onClick={() => setSelected(new Set())}
+            >
+              {t("editor.enrollments.clearSelection")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {data.enrollments.length === 0 ? (
         <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
@@ -915,59 +1010,138 @@ export function EnrollmentsTab({
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8">
+                  {/* Tout cocher — seulement les inscriptions EN VOL. */}
+                  <Checkbox
+                    aria-label={t("editor.enrollments.selected", { count: inFlightIds.length })}
+                    checked={allSelected}
+                    disabled={inFlightIds.length === 0}
+                    onCheckedChange={(on) => toggleAll(Boolean(on))}
+                  />
+                </TableHead>
                 <TableHead>{t("editor.enrollments.columns.client")}</TableHead>
                 <TableHead>{t("editor.enrollments.columns.variant")}</TableHead>
                 <TableHead>{t("editor.enrollments.columns.status")}</TableHead>
                 <TableHead>{t("editor.enrollments.columns.step")}</TableHead>
                 <TableHead>{t("editor.enrollments.columns.next")}</TableHead>
                 <TableHead>{t("editor.enrollments.columns.ended")}</TableHead>
+                <TableHead className="text-right">
+                  {t("editor.enrollments.columns.actions")}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.enrollments.map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell className="max-w-40 truncate">{row.clientName}</TableCell>
-                  <TableCell>{row.variant || "—"}</TableCell>
-                  <TableCell>
-                    {/* « En cours » et « Arrêtée » sont opposés — l'un reçoit
-                        encore des SMS, l'autre n'en recevra plus jamais — et se
-                        ressemblaient en badges gris identiques. */}
-                    <LookBadge
-                      filled
-                      className="font-medium"
-                      // Un état inconnu (valeur écrite par un module futur)
-                      // reste lisible plutôt que de perdre sa pastille.
-                      look={ENROLLMENT_STATUS_LOOK[row.status] ?? ENROLLMENT_STATUS_LOOK.pending}
-                    >
-                      {t(`editor.enrollments.status.${row.status}` as never)}
-                    </LookBadge>
-                  </TableCell>
-                  <TableCell>{row.step}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {row.nextTouchAt
-                      ? new Date(row.nextTouchAt).toLocaleString("fr-CA", {
-                          timeZone: "America/Toronto",
-                        })
-                      : "—"}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {/* Le motif est une clé machine en base ; à l'écran, une phrase. */}
-                    {row.endReason
-                      ? END_REASONS.has(row.endReason)
-                        ? t(`editor.enrollments.endReason.${row.endReason}` as never)
-                        : row.endReason
-                      : "—"}
-                    {row.endedAt ? (
-                      <>
-                        {" · "}
-                        {new Date(row.endedAt).toLocaleDateString("fr-CA", {
-                          timeZone: "America/Toronto",
-                        })}
-                      </>
-                    ) : null}
-                  </TableCell>
-                </TableRow>
-              ))}
+              {data.enrollments.map((row) => {
+                // Une pause manuelle se lit sur trois champs (voir
+                // `enrollment-status.ts`) : on la montre comme un état à part,
+                // pas comme « en cours ».
+                const paused = enrollmentPaused(row);
+                const displayStatus = paused ? "paused" : row.status;
+                const inFlight = enrollmentInFlight(row.status);
+                const acting = actingId === row.id;
+                const anyActing = actingId !== null;
+                return (
+                  <TableRow key={row.id}>
+                    <TableCell>
+                      {/* Cochable seulement si l'inscription peut être actionnée. */}
+                      {inFlight ? (
+                        <Checkbox
+                          aria-label={row.clientName}
+                          checked={selected.has(row.id)}
+                          onCheckedChange={(on) => toggleOne(row.id, Boolean(on))}
+                        />
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="max-w-40 truncate">
+                      {/* Le nom mène à la fiche : « voir le client » d'un clic. */}
+                      <Link
+                        href={`/clients/${row.clientId}`}
+                        className="font-medium text-primary hover:underline"
+                      >
+                        {row.clientName}
+                      </Link>
+                    </TableCell>
+                    <TableCell>{row.variant || "—"}</TableCell>
+                    <TableCell>
+                      {/* « En cours » et « Arrêtée » sont opposés — l'un reçoit
+                          encore des SMS, l'autre n'en recevra plus jamais — et se
+                          ressemblaient en badges gris identiques. */}
+                      <LookBadge
+                        filled
+                        className="font-medium"
+                        // Un état inconnu (valeur écrite par un module futur)
+                        // reste lisible plutôt que de perdre sa pastille.
+                        look={ENROLLMENT_STATUS_LOOK[displayStatus] ?? ENROLLMENT_STATUS_LOOK.pending}
+                      >
+                        {t(`editor.enrollments.status.${displayStatus}` as never)}
+                      </LookBadge>
+                    </TableCell>
+                    <TableCell>{row.step}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {row.nextTouchAt
+                        ? new Date(row.nextTouchAt).toLocaleString("fr-CA", {
+                            timeZone: "America/Toronto",
+                          })
+                        : "—"}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {/* Le motif ne s'affiche que sur une inscription CLOSE
+                          (`endedAt` posé). Un fil en pause porte `end_reason`
+                          sans être terminé : il ne doit rien montrer ici. */}
+                      {row.endedAt ? (
+                        <>
+                          {row.endReason
+                            ? END_REASONS.has(row.endReason)
+                              ? t(`editor.enrollments.endReason.${row.endReason}` as never)
+                              : row.endReason
+                            : "—"}
+                          {" · "}
+                          {new Date(row.endedAt).toLocaleDateString("fr-CA", {
+                            timeZone: "America/Toronto",
+                          })}
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {inFlight ? (
+                        <div className="flex justify-end gap-1.5">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="min-h-11 md:min-h-8"
+                            disabled={anyActing}
+                            onClick={() =>
+                              onAction(row.id, paused ? "resume" : "pause", row.clientName)
+                            }
+                          >
+                            {acting ? (
+                              <Loader2 className="animate-spin" />
+                            ) : paused ? (
+                              <Play />
+                            ) : (
+                              <Pause />
+                            )}
+                            {paused ? t("editor.enrollments.resume") : t("editor.enrollments.pause")}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="min-h-11 text-destructive md:min-h-8"
+                            disabled={anyActing}
+                            onClick={() => onAction(row.id, "remove", row.clientName)}
+                          >
+                            <Trash2 /> {t("editor.enrollments.remove")}
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
