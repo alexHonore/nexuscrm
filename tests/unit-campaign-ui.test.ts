@@ -17,6 +17,9 @@ import type { CampaignEditorData } from "@/components/admin/campaign-editor/type
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 
 const { CampaignEditor } = await import("@/components/admin/campaign-editor");
+const { buildClientSearchQuery, hasAnyFilter } = await import(
+  "@/components/admin/campaign-editor/add-clients-dialog"
+);
 const { CampaignsListClient } = await import("@/components/admin/campaigns-list-client");
 const { LadderTab, VariantsTab, EnrollmentsTab, AudienceTab, TriggerTab } = await import(
   "@/components/admin/campaign-editor/tabs"
@@ -285,5 +288,40 @@ describe("onglets rendus isolément", () => {
       expect(html).not.toContain("MISSING_MESSAGE");
       expect(html).not.toMatch(/editor\.[a-zA-Z]+\./);
     }
+  });
+});
+
+describe("AddClientsDialog — recherche par filtres (pas seulement le nom)", () => {
+  it("hasAnyFilter est faux à vide, vrai dès qu'UN filtre est posé", () => {
+    const empty = { q: "", cats: [], srcs: [], assignees: [], never: false };
+    expect(hasAnyFilter(empty)).toBe(false);
+    expect(hasAnyFilter({ ...empty, cats: [3] })).toBe(true);
+    expect(hasAnyFilter({ ...empty, q: "  " })).toBe(false); // espaces seuls ≠ recherche
+    expect(hasAnyFilter({ ...empty, never: true })).toBe(true);
+  });
+
+  it("construit la requête /api/clients/list avec catégorie, source, assigné, statut", () => {
+    const query = buildClientSearchQuery({
+      q: "bouchard",
+      cats: [3, 7],
+      srcs: [2],
+      assignees: ["dddddddd-dddd-4ddd-8ddd-dddddddddddd"],
+      never: true,
+    });
+    const p = new URLSearchParams(query);
+    expect(p.get("q")).toBe("bouchard");
+    expect(p.get("categoryId")).toBe("3,7"); // le « statut » du pipeline
+    expect(p.get("sourceId")).toBe("2");
+    expect(p.get("assignedToId")).toBe("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+    expect(p.get("filter")).toBe("never");
+  });
+
+  it("un filtre vide n'ajoute pas son paramètre", () => {
+    const p = new URLSearchParams(
+      buildClientSearchQuery({ q: "", cats: [], srcs: [], assignees: [], never: false }),
+    );
+    expect(p.get("categoryId")).toBeNull();
+    expect(p.get("sourceId")).toBeNull();
+    expect(p.get("filter")).toBeNull();
   });
 });

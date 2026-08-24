@@ -273,11 +273,15 @@
       "addSearchPlaceholder": "Nom, téléphone, ville…",
       "searching": "Recherche…",
       "addNone": "Aucune fiche trouvée.",
-      "addEmpty": "Tapez pour chercher une fiche.",
+      "addEmpty": "Tapez un nom ou choisissez un filtre pour trouver des fiches.",
       "addButton": "Ajouter ({count})",
       "selected": "{count} sélectionnée(s)",
       "clearSelection": "Désélectionner",
-      "bulkRemoveConfirm": "Retirer {count} client(s) de cette campagne ? Ces fiches ne recevront plus aucun message de la campagne."
+      "bulkRemoveConfirm": "Retirer {count} client(s) de cette campagne ? Ces fiches ne recevront plus aucun message de la campagne.",
+      "filterCategory": "Catégorie",
+      "filterSource": "Source",
+      "filterAssignee": "Assigné à",
+      "filterNever": "Jamais contacté"
     },
     "errors": {
       "save": "Impossible d'enregistrer",

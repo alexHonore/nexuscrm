@@ -945,8 +945,14 @@ export function EnrollmentsTab({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         {/* Ajouter des fiches précises — une par une ou en lot — indépendamment
-            des filtres d'audience. */}
-        <AddClientsDialog campaignId={data.id} onAdded={onAdded} />
+            des filtres d'audience. Recherche par nom, catégorie, source, etc. */}
+        <AddClientsDialog
+          campaignId={data.id}
+          categories={data.categories}
+          sources={data.sources}
+          users={data.users}
+          onAdded={onAdded}
+        />
         <Button onClick={onEnroll} disabled={enrolling} className="min-h-11 md:min-h-9">
           {enrolling ? <Loader2 className="animate-spin" /> : <Plus />}
           {enrolling ? t("editor.enrollments.enrolling") : t("editor.enrollments.enrollNow")}

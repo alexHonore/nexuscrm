@@ -273,11 +273,15 @@
       "addSearchPlaceholder": "Name, phone, city…",
       "searching": "Searching…",
       "addNone": "No record found.",
-      "addEmpty": "Type to search a record.",
+      "addEmpty": "Type a name or pick a filter to find records.",
       "addButton": "Add ({count})",
       "selected": "{count} selected",
       "clearSelection": "Clear",
-      "bulkRemoveConfirm": "Remove {count} client(s) from this campaign? These records will no longer receive any campaign message."
+      "bulkRemoveConfirm": "Remove {count} client(s) from this campaign? These records will no longer receive any campaign message.",
+      "filterCategory": "Category",
+      "filterSource": "Source",
+      "filterAssignee": "Assigned to",
+      "filterNever": "Never contacted"
     },
     "errors": {
       "save": "Could not save",
