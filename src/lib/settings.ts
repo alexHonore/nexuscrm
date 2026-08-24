@@ -129,12 +129,24 @@ export const smsSettingsSchema = z.object({
 });
 export type SmsSettings = z.infer<typeof smsSettingsSchema>;
 
+export const consumptionSettingsSchema = z.object({
+  /**
+   * Coût ESTIMÉ d'un segment SMS (dollars US) — Twilio ne renvoie pas le prix
+   * par message dans ce qu'on stocke, donc la dépense SMS est une estimation :
+   * segments × ce taux. L'admin y met son tarif Twilio réel. ~0,0079 $/segment
+   * au Canada par défaut. La téléphonie voip.ms, elle, garde des coûts RÉELS.
+   */
+  smsSegmentCostUsd: z.number().min(0).max(10).default(0.0079),
+});
+export type ConsumptionSettings = z.infer<typeof consumptionSettingsSchema>;
+
 const SCHEMAS = {
   booking: bookingSettingsSchema,
   google: googleSettingsSchema,
   telephony: telephonySettingsSchema,
   sms: smsSettingsSchema,
   classification: classificationSettingsSchema,
+  consumption: consumptionSettingsSchema,
 } as const;
 
 export type SettingKey = keyof typeof SCHEMAS;

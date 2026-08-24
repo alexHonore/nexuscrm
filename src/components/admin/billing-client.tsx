@@ -38,6 +38,7 @@ import {
 import { formatPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 import { api, ApiError } from "./api";
+import { ConsumptionSections, type ConsumptionReport } from "./consumption-sections";
 import { errorMessage } from "./errors";
 
 /**
@@ -98,6 +99,11 @@ export function BillingClient() {
   const [report, setReport] = useState<UsageReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Consommation IA + SMS — vient de la base (rapide), chargée en parallèle du
+  // CDR voip.ms (lent) pour que ces sections s'affichent sans attendre l'API.
+  const [consumption, setConsumption] = useState<ConsumptionReport | null>(null);
+  const [consLoading, setConsLoading] = useState(false);
+  const [consError, setConsError] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<UsageRow | null>(null);
   const [cancelling, setCancelling] = useState(false);
   /** Derniers chiffres tapés par l'admin pour confirmer la résiliation. */
@@ -141,14 +147,41 @@ export function BillingClient() {
     [t],
   );
 
+  /** Consommation IA + SMS depuis la base — rapide. Un échec est SIGNALÉ (pas
+   *  affiché comme « zéro » : sur une page de dépense, « rien » et « inconnu »
+   *  ne se confondent pas). */
+  const loadConsumption = useCallback(async (fromStr: string, toStr: string) => {
+    setConsLoading(true);
+    setConsError(false);
+    try {
+      setConsumption(
+        await api<ConsumptionReport>(`/api/admin/consumption?from=${fromStr}&to=${toStr}`),
+      );
+    } catch {
+      setConsumption(null);
+      setConsError(true);
+    } finally {
+      setConsLoading(false);
+    }
+  }, []);
+
+  /** Les deux sources d'une même période : voip.ms (lent) et la base (rapide). */
+  const loadAll = useCallback(
+    (fromStr: string, toStr: string) => {
+      void load(fromStr, toStr);
+      void loadConsumption(fromStr, toStr);
+    },
+    [load, loadConsumption],
+  );
+
   // Premier chargement seulement : les changements de période passent par les
-  // boutons, qui appellent `load` directement.
+  // boutons, qui appellent `loadAll` directement.
   const booted = useRef(false);
   useEffect(() => {
     if (booted.current) return;
     booted.current = true;
-    void load(from, to);
-  }, [load, from, to]);
+    loadAll(from, to);
+  }, [loadAll, from, to]);
 
   const applyPreset = (days: number) => {
     const toStr = todayStr();
@@ -156,12 +189,12 @@ export function BillingClient() {
     setPreset(days);
     setFrom(fromStr);
     setTo(toStr);
-    void load(fromStr, toStr);
+    loadAll(fromStr, toStr);
   };
 
   const applyCustom = () => {
     setPreset("custom");
-    void load(from, to);
+    loadAll(from, to);
   };
 
   const cancelNumber = async () => {
@@ -269,8 +302,20 @@ export function BillingClient() {
     },
   ];
 
+  // Total de la période, toutes sources : voip.ms (réel) + SMS (estimé) + IA (réel).
+  // Une source ne compte QUE si elle a répondu POUR LA PÉRIODE affichée : sinon
+  // le total mélangerait deux périodes (le CDR voip.ms est lent, la base rapide)
+  // ou compterait 0 $ une téléphonie encore en vol — un total qui ment.
+  const voipReady = !!report && report.from === from && report.to === to;
+  const consReady = !!consumption && consumption.from === from && consumption.to === to;
+  const voipCost = voipReady ? report.totals.cost : 0;
+  const aiCost = consReady ? consumption.ai.costUsd : 0;
+  const smsCost = consReady ? consumption.sms.estimatedCostUsd : 0;
+  const totalComplete = voipReady && consReady;
+  const grandTotal = voipCost + aiCost + smsCost;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {/* ── Période ── */}
       <div className="flex flex-wrap items-end gap-2">
         {PRESETS.map((days) => (
@@ -335,13 +380,47 @@ export function BillingClient() {
           variant="secondary"
           size="sm"
           className="min-h-11 md:min-h-8"
-          onClick={() => void load(from, to)}
+          onClick={() => loadAll(from, to)}
           disabled={loading}
         >
           {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
           {t("billing.refresh")}
         </Button>
       </div>
+
+      {/* ── Total de la période, toutes sources ── */}
+      <Card className="shadow-xs">
+        <CardContent className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs text-muted-foreground">{t("billing.grandTotal")}</p>
+            {/* Le total ne s'affiche en CHIFFRE que si les trois sources ont
+                répondu pour cette période. Sinon « — » : un total partiel
+                présenté comme complet serait pris pour la facture. */}
+            <p className="text-3xl font-semibold tabular-nums">
+              {totalComplete ? money(grandTotal) : "—"}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {totalComplete ? t("billing.grandTotalNote") : t("billing.totalPartial")}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-4 text-sm tabular-nums">
+            <span>
+              <span className="text-muted-foreground">{t("billing.sectionTelephony")} · </span>
+              {voipReady ? money(voipCost) : "—"}
+            </span>
+            <span>
+              <span className="text-muted-foreground">{t("billing.sectionSms")} · </span>
+              {consReady ? money(smsCost) : "—"}
+            </span>
+            <span>
+              <span className="text-muted-foreground">{t("billing.sectionAi")} · </span>
+              {consReady ? money(aiCost) : "—"}
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+
+      <h2 className="text-sm font-semibold">{t("billing.sectionTelephony")}</h2>
 
       {error ? (
         <div className="space-y-2 rounded-lg border p-3">
@@ -498,6 +577,16 @@ export function BillingClient() {
           ) : null}
         </CardContent>
       </Card>
+
+      {/* ── SMS (Twilio) et Assistants (IA) — depuis la base ── */}
+      <ConsumptionSections
+        data={consumption}
+        loading={consLoading}
+        error={consError}
+        money={money}
+        nf={nf}
+        onRateSaved={() => void loadConsumption(from, to)}
+      />
 
       {/* ── Résiliation d'un numéro (irréversible) ── */}
       <AlertDialog
