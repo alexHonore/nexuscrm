@@ -513,7 +513,8 @@
     "close_conversation": "Clore la conversation",
     "set_category": "Ranger la fiche",
     "read_client": "Consulter la fiche du contact",
-    "read_client_comments": "Lire les notes internes"
+    "read_client_comments": "Lire les notes internes",
+    "add_client_comment": "Écrire une note interne"
   },
   "cancel": "Annuler",
   "goalTypeHint": {
@@ -969,7 +970,8 @@
         "close_conversation": "Clôt le fil avec un résultat précis : objectif atteint, disqualifié, pas intéressé.",
         "set_category": "Range la fiche dans une catégorie du pipeline (Long terme, Non qualifié…) selon vos règles de classement.",
         "read_client": "Consulter la fiche du contact",
-        "read_client_comments": "Lire les notes internes de l’équipe"
+        "read_client_comments": "Lire les notes internes de l’équipe",
+        "add_client_comment": "Écrit une note interne sur la fiche — signée de l'assistant, jamais envoyée au contact."
       }
     },
     "sending": {

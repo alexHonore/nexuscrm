@@ -513,7 +513,8 @@
     "close_conversation": "Close the conversation",
     "set_category": "File the record",
     "read_client": "Read the contact record",
-    "read_client_comments": "Read internal notes"
+    "read_client_comments": "Read internal notes",
+    "add_client_comment": "Write an internal note"
   },
   "cancel": "Cancel",
   "goalTypeHint": {
@@ -969,7 +970,8 @@
         "close_conversation": "Closes the thread with a specific outcome: goal reached, disqualified, not interested.",
         "set_category": "Files the record into a pipeline category (Long term, Not qualified…) according to your classification rules.",
         "read_client": "Read the contact record",
-        "read_client_comments": "Read the team’s internal notes"
+        "read_client_comments": "Read the team’s internal notes",
+        "add_client_comment": "Writes an internal note on the record — signed by the assistant, never sent to the contact."
       }
     },
     "sending": {

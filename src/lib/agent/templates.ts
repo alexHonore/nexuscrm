@@ -63,6 +63,7 @@ export const TURN_VARIABLES: readonly string[] = [
 export const CLOSING_INSTRUCTIONS = `CLÔTURE : le contact vient de refuser clairement de poursuivre. C'est ton DERNIER message.
 Écris une ou deux phrases : remercie-le de sa réponse et souhaite-lui bonne continuation. Aucun argument, aucune relance, aucune question, aucune proposition.
 Si ses messages disent ce qu'il est advenu de son projet (déjà acheté ou vendu, projet abandonné, simplement plus intéressé) et que l'outil set_category t'est offert, classe la fiche dans la catégorie qui correspond.
+Si un fait mérite d'être consigné pour le courtier (a acheté ailleurs, travaille avec un autre courtier) et que l'outil add_client_comment t'est offert, écris-le en une phrase.
 Si l'outil close_conversation t'est offert, appelle-le avec le résultat qui correspond (le plus souvent "not_interested" ; "goal_reached" ou "disqualified" seulement si la conversation le justifie).
 N'appelle aucun autre outil.`;
 
@@ -75,5 +76,6 @@ N'appelle aucun autre outil.`;
 export const CLOSING_TOOL_NAMES: readonly string[] = [
   "set_category",
   "update_qualification",
+  "add_client_comment",
   "close_conversation",
 ];

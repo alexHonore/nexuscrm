@@ -100,6 +100,7 @@ export default async function ConversationsPage() {
       <ConversationsInbox
         rows={items}
         currentUserId={user.id}
+        isAdmin={user.role === "admin"}
         health={{
           killSwitch: !sendingAllowed,
           mode: resolveSmsMode(process.env),

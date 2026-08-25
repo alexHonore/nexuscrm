@@ -76,6 +76,14 @@ export const ASSISTANT_TOOLS = [
    * contexte qu'aucun formulaire de lead ne porte. Lecture seule, bornée.
    */
   "read_client_comments",
+  /**
+   * Écrire une note interne sur la fiche — le pendant ÉCRITURE de
+   * `read_client_comments`. Ce que le contact révèle par SMS (« a déjà un
+   * courtier mais ouvert », « a acheté ailleurs en juin ») mérite le même
+   * sort que ce qu'un téléphoniste note après un appel : sur la fiche, pas
+   * enterré dans le fil. Visible par l'équipe seulement, jamais envoyé.
+   */
+  "add_client_comment",
   "get_slots",
   "book_meeting",
   "update_qualification",

@@ -645,6 +645,14 @@ const TOOL_DOCS: { name: string; whatFr: string; whyFr: string; pitfallsFr: stri
       "Ces notes sont INTERNES : l'assistant est instruit de ne pas les citer mot pour mot à la personne. Le désactiver si ces notes ne doivent pas influencer les réponses de l'assistant.",
   },
   {
+    name: "add_client_comment",
+    whatFr: "Écrit une note interne sur la fiche — le pendant écriture de read_client_comments.",
+    whyFr:
+      "« A déjà un courtier mais reste ouverte », « a acheté ailleurs en juin » : ce que le contact révèle par SMS mérite le même sort que ce qu'un téléphoniste note après un appel — sur la fiche, pas enterré dans le fil. La note est signée de l'assistant et n'est jamais envoyée au contact.",
+    pitfallsFr:
+      "La note apparaît dans les commentaires de la fiche, attribuée à l'assigné (ou à un administrateur) mais SIGNÉE de l'assistant. Une note par tour au maximum.",
+  },
+  {
     name: "get_slots",
     whatFr: "Retourne les disponibilités RÉELLES du courtier.",
     whyFr:
@@ -668,9 +676,10 @@ const TOOL_DOCS: { name: string; whatFr: string; whyFr: string; pitfallsFr: stri
   },
   {
     name: "schedule_followup",
-    whatFr: "Programme une relance à une date convenue.",
-    whyFr: "« Rappelez-moi en juin » n'a de valeur que si quelque chose s'en souvient en juin.",
-    pitfallsFr: "Sans lui, les reports lointains sont perdus.",
+    whatFr: "Pose un rappel (une tâche pour le courtier) à la date convenue — ou au prochain matin si la personne n'a pas précisé de moment.",
+    whyFr:
+      "« Rappelez-moi en juin » n'a de valeur que si quelque chose s'en souvient en juin — et « appelez-moi » tout court doit devenir une tâche tout de suite, pas une question de plus.",
+    pitfallsFr: "Sans lui, les reports lointains et les demandes d'appel sont perdus.",
   },
   {
     name: "set_category",

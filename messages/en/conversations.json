@@ -86,6 +86,7 @@
       "attention": "To handle",
       "mine": "Mine",
       "paused": "AI paused",
+      "finished": "Finished",
       "all": "All"
     },
     "reason": {
@@ -121,7 +122,11 @@
     "markHandled": "Mark handled",
     "handled": "Conversation handled",
     "open": "Open the client",
-    "count": "{count} waiting"
+    "count": "{count} waiting",
+    "replay": {
+      "button": "Resume after an outage",
+      "done": "{count, plural, =0 {Nothing to resume — everything is up to date} one {# conversation relaunched} other {# conversations relaunched}}"
+    }
   },
   "health": {
     "title": "Engine health",

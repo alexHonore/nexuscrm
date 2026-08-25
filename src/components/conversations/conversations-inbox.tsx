@@ -9,6 +9,7 @@ import {
   MessageCircleIcon,
   MoonIcon,
   PowerOffIcon,
+  RotateCcwIcon,
   SunIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -51,8 +52,24 @@ export type EngineHealth = {
   suppressed: number;
 };
 
-type Filter = "attention" | "mine" | "paused" | "all";
+type Filter = "attention" | "mine" | "paused" | "finished" | "all";
 const POLL_MS = 25_000;
+
+/**
+ * Une conversation TERMINÉE — close par l'assistant, refus ferme, ou
+ * désabonnement. Elle a son onglet à elle : mêlée aux fils « à traiter »,
+ * elle noyait ce qui attend réellement une réponse (demande d'Alex,
+ * 2026-08-25) — le verdict est rendu, il n'y a rien à répondre.
+ */
+const FINISHED_REASONS = new Set([
+  "closed_goal_reached",
+  "closed_disqualified",
+  "closed_not_interested",
+  "hard_refusal",
+  "optout",
+]);
+const isFinished = (row: InboxRow) =>
+  row.attentionReason !== null && FINISHED_REASONS.has(row.attentionReason);
 
 /**
  * Boîte de réception.
@@ -67,10 +84,13 @@ export function ConversationsInbox({
   rows,
   currentUserId,
   health,
+  isAdmin = false,
 }: {
   rows: InboxRow[];
   currentUserId: string;
   health: EngineHealth;
+  /** Le rejeu après panne est un geste d'administrateur (l'API le refuse aux autres). */
+  isAdmin?: boolean;
 }) {
   const t = useTranslations("conversations");
   const locale = useLocale();
@@ -84,9 +104,12 @@ export function ConversationsInbox({
 
   const counts = useMemo(
     () => ({
-      attention: rows.filter((r) => r.needsAttention).length,
+      // « À traiter » = ce qui attend une RÉPONSE : les fils terminés (clos,
+      // refus, désabonnés) ont leur propre onglet et ne comptent pas ici.
+      attention: rows.filter((r) => r.needsAttention && !isFinished(r)).length,
       mine: rows.filter((r) => r.assignedToId === currentUserId).length,
-      paused: rows.filter((r) => !r.aiEnabled).length,
+      paused: rows.filter((r) => !r.aiEnabled && !isFinished(r)).length,
+      finished: rows.filter(isFinished).length,
       all: rows.length,
     }),
     [rows, currentUserId],
@@ -95,11 +118,13 @@ export function ConversationsInbox({
   const visible = useMemo(() => {
     switch (filter) {
       case "attention":
-        return rows.filter((r) => r.needsAttention);
+        return rows.filter((r) => r.needsAttention && !isFinished(r));
       case "mine":
         return rows.filter((r) => r.assignedToId === currentUserId);
       case "paused":
-        return rows.filter((r) => !r.aiEnabled);
+        return rows.filter((r) => !r.aiEnabled && !isFinished(r));
+      case "finished":
+        return rows.filter(isFinished);
       case "all":
         return rows;
     }
@@ -116,6 +141,34 @@ export function ConversationsInbox({
       emitDataChange("sms");
       router.refresh();
     });
+  };
+
+  // Après une panne de modèle, les tours morts ne repartent pas seuls : ce
+  // bouton rejoue tout ce qui peut l'être (réponses, ouvertures de campagne,
+  // entrants orphelins). Idempotent — le presser « pour rien » ne fait rien.
+  const [replaying, setReplaying] = useState(false);
+  const replay = async () => {
+    setReplaying(true);
+    try {
+      const res = await fetch("/api/admin/sms/replay-llm-errors", { method: "POST" });
+      if (!res.ok) throw new Error(`replay_${res.status}`);
+      const d = (await res.json()) as {
+        replayedInbound: number;
+        replayedOutreach: number;
+        replayedOrphans: number;
+      };
+      toast.success(
+        t("inbox.replay.done", {
+          count: d.replayedInbound + d.replayedOutreach + d.replayedOrphans,
+        }),
+      );
+      emitDataChange("sms");
+      router.refresh();
+    } catch {
+      toast.error(t("error"));
+    } finally {
+      setReplaying(false);
+    }
   };
 
   const claim = (row: InboxRow) => {
@@ -137,9 +190,24 @@ export function ConversationsInbox({
     <div className="space-y-4">
       <HealthStrip health={health} attention={counts.attention} />
 
+      {isAdmin ? (
+        <div className="flex justify-end">
+          <Button
+            variant="outline"
+            size="sm"
+            className="min-h-11 md:min-h-9"
+            onClick={replay}
+            disabled={replaying}
+          >
+            <RotateCcwIcon className="size-4" aria-hidden />
+            {t("inbox.replay.button")}
+          </Button>
+        </div>
+      ) : null}
+
       <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
         <div className="flex w-max gap-2">
-          {(["attention", "mine", "paused", "all"] as const).map((key) => (
+          {(["attention", "mine", "paused", "finished", "all"] as const).map((key) => (
             <Button
               key={key}
               variant={filter === key ? "default" : "outline"}

@@ -403,6 +403,12 @@ export const PARAM_DOCS_EN: Record<string, ParamDocText> = {
     why: "\"Serious, call back after 5pm\", \"already has a broker but open\": the human context a caller wrote after a call, that no lead form carries. Read-only.",
     pitfalls: "These notes are INTERNAL: the assistant is instructed never to quote them verbatim to the person. Turn it off if those notes should not influence the assistant's replies.",
   },
+  "tools.add_client_comment": {
+    label: "\"add_client_comment\" tool",
+    what: "Writes an internal note on the record — the writing counterpart of read_client_comments.",
+    why: "\"Already has a broker but still open\", \"bought elsewhere in June\": what the contact reveals by SMS deserves the same fate as what a caller writes after a call — on the record, not buried in the thread. The note is signed by the assistant and never sent to the contact.",
+    pitfalls: "The note shows up in the record's comments, attributed to the assignee (or an admin) but SIGNED by the assistant. At most one note per turn.",
+  },
   "tools.get_slots": {
     label: "\"get_slots\" tool",
     what: "Returns the broker's REAL availability.",
@@ -423,9 +429,9 @@ export const PARAM_DOCS_EN: Record<string, ParamDocText> = {
   },
   "tools.schedule_followup": {
     label: "\"schedule_followup\" tool",
-    what: "Schedules a follow-up on an agreed date.",
-    why: "\"Call me back in June\" is only worth something if something remembers in June.",
-    pitfalls: "Without it, far-off postponements are lost.",
+    what: "Creates a follow-up (a task for the broker) on the agreed date — or next morning when the person gave no time.",
+    why: "\"Call me back in June\" is only worth something if something remembers in June — and a plain \"call me\" must become a task right away, not one more question.",
+    pitfalls: "Without it, far-off postponements and call-me requests are lost.",
   },
   "tools.set_category": {
     label: "Tool \"set_category\"",

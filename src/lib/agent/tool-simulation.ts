@@ -50,6 +50,7 @@ export const SIDE_EFFECT_TOOLS: ReadonlySet<string> = new Set([
   "stop",
   "handoff",
   "schedule_followup",
+  "add_client_comment",
 ]);
 
 /** Ces outils terminent le tour : rappeler le modèle ensuite ne sert à rien. */
@@ -284,6 +285,16 @@ export function simulateToolCall(
         content: `set_category : fiche classée dans « ${categoryKey} » (${reason}).`,
       };
     }
+
+    case "add_client_comment":
+      // La MÊME réponse qu'en production : le modèle ne doit pas apprendre
+      // qu'il est à l'essai, et rien n'est réellement écrit.
+      done.add(name);
+      return {
+        ...base,
+        ok: true,
+        content: "add_client_comment : note écrite sur la fiche (interne, jamais envoyée).",
+      };
 
     case "stop":
       done.add(name);

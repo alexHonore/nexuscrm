@@ -1,6 +1,6 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, isNull, notExists, sql } from "drizzle-orm";
-import { formatInTimeZone } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { db } from "@/db";
 import { categories, clients, comments, followups, sources, users } from "@/db/schema";
 import {
@@ -72,8 +72,77 @@ import { missingFieldsError, parseToolArgs, toolDefsFor } from "./tools";
 
 const APP_TZ = process.env.APP_TIMEZONE ?? "America/Toronto";
 
+/** Le prochain matin 9 h (heure de l'app) — le défaut d'un « rappelez-moi » sans moment. */
+function nextMorning(now: Date): Date {
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  return fromZonedTime(`${formatInTimeZone(tomorrow, APP_TZ, "yyyy-MM-dd")}T09:00:00`, APP_TZ);
+}
+
+/**
+ * Classement AUTOMATIQUE d'une fin de conversation.
+ *
+ * Une discussion TERMINÉE (clôture « pas intéressé » ou « non qualifié »,
+ * refus ferme) ne doit pas laisser sa fiche dormir parmi les vivantes — le
+ * pipeline doit suivre le verdict même quand le modèle n'a pas appelé
+ * set_category. Si set_category a agi ce tour, on n'y touche pas : le modèle
+ * en sait plus que cette mécanique (« a acheté ailleurs » → Transaction
+ * récente vaut mieux que « pas intéressé »).
+ *
+ * Les clés visées sont les catégories SYSTÈME du seed (`not_interested`,
+ * `not_qualified`) ; absentes de la base, on ne classe pas — un rangement ne
+ * fait jamais échouer un tour. Même point d'entrée que le classement à la
+ * main (categoryEntryPatch, audit, campagnes « changement de catégorie »).
+ */
+async function autoCategorizeClosedThread(input: {
+  clientId: string;
+  conversationId: string;
+  assistantId: string;
+  outcome: "not_interested" | "disqualified" | "hard_refusal";
+  effects: ToolEffect[];
+}): Promise<{ type: string; payload: Record<string, unknown> } | null> {
+  if (input.effects.some((e) => e.name === "set_category" && e.ok)) return null;
+  const key = input.outcome === "disqualified" ? "not_qualified" : "not_interested";
+  const target = await db.query.categories.findFirst({
+    where: eq(categories.key, key),
+    columns: { id: true },
+  });
+  if (!target) return null;
+  const previous = await db.query.clients.findFirst({
+    where: eq(clients.id, input.clientId),
+    columns: { categoryId: true },
+  });
+  if (previous?.categoryId === target.id) return null;
+
+  await db
+    .update(clients)
+    .set({ ...categoryEntryPatch({ id: target.id, key }), updatedAt: new Date() })
+    .where(eq(clients.id, input.clientId));
+  await logAudit({
+    userId: null,
+    action: "client.category",
+    entity: "client",
+    entityId: input.clientId,
+    detail: {
+      from: previous?.categoryId ?? null,
+      to: target.id,
+      via: "assistant_close",
+      outcome: input.outcome,
+      assistantId: input.assistantId,
+      conversationId: input.conversationId,
+    },
+  });
+  notifyCategoryChanged(input.clientId, previous?.categoryId ?? null, target.id);
+  return { type: "auto_categorized", payload: { key, outcome: input.outcome } };
+}
+
 /** Outils dont l'effet est irréversible : joués une seule fois par tour. */
-const SIDE_EFFECT_TOOLS = new Set(["book_meeting", "stop", "handoff", "schedule_followup"]);
+const SIDE_EFFECT_TOOLS = new Set([
+  "book_meeting",
+  "stop",
+  "handoff",
+  "schedule_followup",
+  "add_client_comment",
+]);
 
 /**
  * Statuts d'un sortant que la personne n'a JAMAIS reçu : refusé par la porte
@@ -220,6 +289,8 @@ async function executeTools(input: {
   clientAssignedToId: string | null;
   conversationId: string;
   currentAssistantId: string;
+  /** Le nom de l'assistant — signé dans les notes internes qu'il écrit. */
+  assistantName: string;
   qualification: Record<string, unknown>;
   /**
    * Les catégories que l'assistant a le droit de poser — la MÊME liste que
@@ -461,8 +532,11 @@ async function executeTools(input: {
         break;
       }
       case "schedule_followup": {
-        const args = parsed.args as { whenIso: string; note?: string };
-        const when = new Date(args.whenIso);
+        const args = parsed.args as { whenIso?: string; note?: string };
+        // « Rappelez-moi » sans moment est une demande complète : le rappel
+        // se pose au prochain matin (9 h, heure de l'app) au lieu de forcer
+        // le modèle à redemander une précision que la personne n'a pas donnée.
+        const when = args.whenIso ? new Date(args.whenIso) : nextMorning(new Date());
         if (Number.isNaN(when.getTime()) || when.getTime() < Date.now()) {
           input.effects.push({ name, ok: false, detail: "invalid_when" });
           record("schedule_followup : date invalide ou passée — demande une date précise à venir.");
@@ -503,7 +577,38 @@ async function executeTools(input: {
             updatedAt: new Date(),
           })
           .where(eq(clients.id, input.clientId));
-        record(`schedule_followup : rappel posé pour ${args.whenIso}`);
+        record(
+          args.whenIso
+            ? `schedule_followup : rappel posé pour ${args.whenIso}`
+            : `schedule_followup : rappel posé pour demain matin (aucun moment précisé par la personne)`,
+        );
+        break;
+      }
+      case "add_client_comment": {
+        const args = parsed.args as { text: string };
+        // Une note interne a un AUTEUR : la colonne l'exige. On l'attribue à
+        // l'assigné de la fiche (sinon un administrateur), et le corps SIGNE
+        // l'assistant — l'équipe ne doit jamais croire qu'un humain l'a écrite.
+        let authorId = input.clientAssignedToId;
+        if (!authorId) {
+          const admin = await db.query.users.findFirst({
+            where: and(eq(users.role, "admin"), eq(users.isActive, true)),
+            columns: { id: true },
+          });
+          authorId = admin?.id ?? null;
+        }
+        if (!authorId) {
+          input.effects.push({ name, ok: false, detail: "no_author" });
+          record("add_client_comment : aucun destinataire pour la note — continue sans noter.");
+          continue;
+        }
+        input.sideEffectsDone.add(name);
+        await db.insert(comments).values({
+          clientId: input.clientId,
+          userId: authorId,
+          body: `🤖 Assistant « ${input.assistantName} » : ${args.text}`,
+        });
+        record("add_client_comment : note écrite sur la fiche (interne, jamais envoyée).");
         break;
       }
       case "transfer_assistant": {
@@ -1255,6 +1360,7 @@ export async function runTurn(
         clientAssignedToId: client?.assignedToId ?? null,
         conversationId,
         currentAssistantId: assistantRow.id,
+        assistantName: config.name,
         qualification,
         // La MÊME liste que celle décrite dans le prompt : la résoudre ici
         // plutôt qu'au compilage suit un changement de règles sans attendre
@@ -1421,7 +1527,15 @@ export async function runTurn(
       // dégrade en « none » et l'assistant repartirait en argumentaire chez
       // quelqu'un qui vient de dire non — bien pire qu'un adieu sauté. Le
       // refus est réglé ici : entrants consommés, IA en pause, inscription
-      // stoppée, humains prévenus.
+      // stoppée, humains prévenus — et la fiche suit le verdict.
+      const autoCat = await autoCategorizeClosedThread({
+        clientId: conversation.clientId,
+        conversationId,
+        assistantId: assistantRow.id,
+        outcome: "hard_refusal",
+        effects,
+      });
+      if (autoCat) events.push(autoCat);
       return commit({
         outcome: "stopped",
         reason: "hard_refusal",
@@ -1463,7 +1577,15 @@ export async function runTurn(
   // Tour de clôture qui n'aboutit pas à un envoi (brouillon bloqué, vide ou
   // coupé) : l'ancien comportement — arrêt silencieux — reste le bon repli.
   // Jamais d'escalade : il n'y a rien à reprendre pour un humain après un non.
-  const silentClose = () => {
+  const silentClose = async () => {
+    const autoCat = await autoCategorizeClosedThread({
+      clientId: conversation.clientId,
+      conversationId,
+      assistantId: assistantRow.id,
+      outcome: "hard_refusal",
+      effects,
+    });
+    if (autoCat) events.push(autoCat);
     return commit({
       outcome: "stopped",
       reason: "hard_refusal",
@@ -1581,6 +1703,25 @@ export async function runTurn(
         : closedOutcome === "not_interested"
           ? "contact pas intéressé"
           : null;
+
+  // Une fin de conversation range sa fiche : « pas intéressé », « non
+  // qualifié » ou refus ferme — sauf si set_category a déjà mieux classé.
+  const closeVerdict =
+    closedOutcome === "not_interested" || closedOutcome === "disqualified"
+      ? closedOutcome
+      : closingHard
+        ? ("hard_refusal" as const)
+        : null;
+  if (closeVerdict) {
+    const autoCat = await autoCategorizeClosedThread({
+      clientId: conversation.clientId,
+      conversationId,
+      assistantId: assistantRow.id,
+      outcome: closeVerdict,
+      effects,
+    });
+    if (autoCat) events.push(autoCat);
+  }
 
   return commit({
     outcome: "sent",

@@ -29,6 +29,7 @@ import {
   MessageCircleQuestionMarkIcon,
   MessageSquareReplyIcon,
   MessageSquareTextIcon,
+  MessageSquarePlusIcon,
   MessagesSquareIcon,
   UserSearchIcon,
   PauseIcon,
@@ -168,6 +169,9 @@ export const TOOL_LOOK: Record<string, Look> = {
   // avant d'agir », une teinte indigo distincte des outils d'action.
   read_client: { color: "#6366F1", Icon: UserSearchIcon },
   read_client_comments: { color: "#4F46E5", Icon: MessagesSquareIcon },
+  // Écrire une note interne : l'action sœur de la lecture des notes — même
+  // famille visuelle, mais en ACTION (fuchsia), pas en consultation (indigo).
+  add_client_comment: { color: "#D946EF", Icon: MessageSquarePlusIcon },
   get_slots: { color: "#0EA5E9", Icon: CalendarClockIcon },
   book_meeting: { color: "#3B82F6", Icon: CalendarCheckIcon },
   update_qualification: { color: "#10B981", Icon: ListChecksIcon },

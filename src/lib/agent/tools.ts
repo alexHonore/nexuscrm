@@ -57,8 +57,17 @@ const updateQualificationArgsSchema = z.object({
 });
 
 const scheduleFollowupArgsSchema = z.object({
-  whenIso: z.string().min(1),
+  /**
+   * Optionnel : « rappelez-moi » sans moment précis est une demande complète —
+   * exiger une date forçait le modèle à REDEMANDER quand la personne venait
+   * de dire tout ce qu'elle voulait dire. Absent = prochain matin ouvré.
+   */
+  whenIso: z.string().min(1).optional(),
   note: z.string().max(300).optional(),
+});
+
+const addClientCommentArgsSchema = z.object({
+  text: z.string().trim().min(1).max(500),
 });
 
 /**
@@ -97,6 +106,7 @@ const closeConversationArgsSchema = z.object({
 export const TOOL_ARG_SCHEMAS: Record<AssistantTool, z.ZodType> = {
   read_client: noArgsSchema,
   read_client_comments: noArgsSchema,
+  add_client_comment: addClientCommentArgsSchema,
   get_slots: getSlotsArgsSchema,
   book_meeting: bookMeetingArgsSchema,
   update_qualification: updateQualificationArgsSchema,
@@ -138,6 +148,25 @@ export const TOOL_DEFS: Record<AssistantTool, ToolDef> = {
       type: "object",
       properties: {},
       required: [],
+      additionalProperties: false,
+    },
+  },
+
+  add_client_comment: {
+    name: "add_client_comment",
+    description:
+      "Écrit une NOTE INTERNE sur la fiche du contact — visible par l'équipe seulement, jamais envoyée à la personne. Sers-t'en pour consigner un fait utile au courtier qui ne tient pas dans la qualification : « a déjà un courtier mais reste ouverte », « a acheté ailleurs en juin », « préfère être jointe par courriel ». Une à deux phrases factuelles, dans les mots de la personne quand c'est possible ; n'invente rien et n'y mets aucun jugement.",
+    parameters: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+          minLength: 1,
+          maxLength: 500,
+          description: "La note, une à deux phrases factuelles.",
+        },
+      },
+      required: ["text"],
       additionalProperties: false,
     },
   },
@@ -214,14 +243,15 @@ export const TOOL_DEFS: Record<AssistantTool, ToolDef> = {
   schedule_followup: {
     name: "schedule_followup",
     description:
-      "Planifie un rappel à une date/heure précise lorsque la personne demande à être recontactée PLUS TARD plutôt que de réserver maintenant. N'invente pas d'heure : utilise ce que la personne a exprimé, reformulé en ISO 8601.",
+      "Planifie un rappel (une tâche pour le courtier) lorsque la personne demande à être recontactée ou appelée plutôt que de réserver maintenant. Si elle a exprimé un moment (« en juin », « après 17 h »), reformule-le en ISO 8601 dans whenIso — n'invente jamais une heure qu'elle n'a pas dite. Si elle demande simplement « rappelez-moi » ou « appelez-moi » SANS préciser de moment, appelle l'outil SANS whenIso : le rappel sera posé au prochain matin. Mets dans note ce qu'elle attend de ce rappel.",
     parameters: {
       type: "object",
       properties: {
         whenIso: {
           type: "string",
           minLength: 1,
-          description: "Date/heure ISO 8601 du rappel.",
+          description:
+            "Date/heure ISO 8601 du rappel — SEULEMENT si la personne a exprimé un moment. Omets ce champ sinon.",
         },
         note: {
           type: "string",
@@ -229,7 +259,7 @@ export const TOOL_DEFS: Record<AssistantTool, ToolDef> = {
           description: "Note de contexte utile pour la relance (optionnel).",
         },
       },
-      required: ["whenIso"],
+      required: [],
       additionalProperties: false,
     },
   },

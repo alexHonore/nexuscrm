@@ -421,6 +421,88 @@ describe("runTurn", () => {
     expect(notes.some((n) => n.type === "sms_stopped")).toBe(true);
   });
 
+  it("add_client_comment : la note atterrit sur la fiche, SIGNÉE de l'assistant", async () => {
+    const { conversation, client } = await scene();
+    await inbound(conversation.id, "J'ai déjà un courtier mais je reste ouvert");
+    llm.generatorToolCalls = [
+      { id: "c1", name: "add_client_comment", arguments: { text: "A déjà un courtier mais reste ouvert." } },
+    ];
+    llm.generatorSequence = ["", "Bien noté, merci de la précision!"];
+    let calls = 0;
+    llm.onGenerate = async () => {
+      calls += 1;
+      if (calls >= 2) llm.generatorToolCalls = [];
+    };
+
+    expect((await runTurn(conversation.id)).outcome).toBe("sent");
+    const rows = await testDb.select().from(comments).where(eq(comments.clientId, client.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].body).toContain("Assistant « Acheteur FB (test) »");
+    expect(rows[0].body).toContain("A déjà un courtier");
+    // L'auteur est un utilisateur réel (l'admin, la fiche n'étant pas assignée).
+    expect(rows[0].userId).not.toBeNull();
+  });
+
+  it("schedule_followup SANS moment : « appelez-moi » devient une tâche au prochain matin", async () => {
+    const { conversation, client } = await scene();
+    await inbound(conversation.id, "Appelez-moi svp");
+    llm.generatorToolCalls = [{ id: "c1", name: "schedule_followup", arguments: {} }];
+    llm.generatorSequence = ["", "Parfait, on vous appelle dès demain matin!"];
+    let calls = 0;
+    llm.onGenerate = async () => {
+      calls += 1;
+      if (calls >= 2) llm.generatorToolCalls = [];
+    };
+
+    expect((await runTurn(conversation.id)).outcome).toBe("sent");
+    const rows = await testDb.select().from(followups).where(eq(followups.clientId, client.id));
+    expect(rows).toHaveLength(1);
+    // Demain, 9 h heure de Toronto — jamais dans le passé.
+    expect(rows[0].dueAt.getTime()).toBeGreaterThan(Date.now());
+    expect(rows[0].dueAt.getTime()).toBeLessThan(Date.now() + 36 * 3600 * 1000);
+    expect(rows[0].assignedToId).not.toBeNull();
+  });
+
+  it("clôture sans set_category : la fiche est RANGÉE automatiquement (Pas intéressé)", async () => {
+    await seedSystemCategories();
+    const { conversation, client } = await outreachScene();
+    llm.classifierJson = '{"refusal":"hard"}';
+    llm.generatorText = "Merci de votre réponse, bonne continuation!";
+    await inbound(conversation.id, "non merci, plus intéressé");
+
+    expect((await runTurn(conversation.id)).outcome).toBe("sent");
+    const [row] = await testDb.select().from(clients).where(eq(clients.id, client.id));
+    const cats = await testDb.select().from(categories);
+    const notInterested = cats.find((c) => c.key === "not_interested")!;
+    expect(row.categoryId).toBe(notInterested.id);
+    expect(await eventsOf(conversation.id)).toContain("auto_categorized");
+    // Et l'audit dit pourquoi, sans prétendre qu'un humain a cliqué.
+    const logs = await testDb.select().from(auditLogs);
+    const entry = logs.find((l) => l.action === "client.category");
+    expect(entry?.userId).toBeNull();
+    expect((entry?.detail as { via: string }).via).toBe("assistant_close");
+  });
+
+  it("close_conversation « disqualified » range la fiche dans Non qualifié", async () => {
+    await seedSystemCategories();
+    const { conversation, client } = await outreachScene();
+    await inbound(conversation.id, "Je suis à Gaspé finalement");
+    llm.generatorToolCalls = [
+      { id: "c1", name: "close_conversation", arguments: { outcome: "disqualified" } },
+    ];
+    llm.generatorSequence = ["", "Merci de la précision — je vous souhaite bonne chance dans vos démarches!"];
+    let calls = 0;
+    llm.onGenerate = async () => {
+      calls += 1;
+      if (calls >= 2) llm.generatorToolCalls = [];
+    };
+
+    expect((await runTurn(conversation.id)).outcome).toBe("sent");
+    const [row] = await testDb.select().from(clients).where(eq(clients.id, client.id));
+    const cats = await testDb.select().from(categories);
+    expect(row.categoryId).toBe(cats.find((c) => c.key === "not_qualified")!.id);
+  });
+
   it("un appel d'outil NON OFFERT sur le tour de clôture est écarté, jamais exécuté", async () => {
     // Le modèle hallucine book_meeting pendant l'adieu : sans la borne
     // « l'offre n'est pas la permission », la réservation était tentée.

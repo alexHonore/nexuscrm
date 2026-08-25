@@ -186,13 +186,23 @@ export function briefToConfig(
       ? [
           "read_client",
           "read_client_comments",
+          "add_client_comment",
           "get_slots",
           "book_meeting",
           "update_qualification",
+          "schedule_followup",
           "stop",
           "handoff",
         ]
-      : ["read_client", "read_client_comments", "update_qualification", "schedule_followup", "stop", "handoff"],
+      : [
+          "read_client",
+          "read_client_comments",
+          "add_client_comment",
+          "update_qualification",
+          "schedule_followup",
+          "stop",
+          "handoff",
+        ],
     // Le modèle n'est PAS décidé ici : il est choisi à la dernière étape de la
     // création (voir `withChosenModel`). Le défaut du schéma ne sert qu'à
     // rendre l'objet valide entre-temps.
