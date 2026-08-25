@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_QUIET_HOURS, quietHoursSettingsSchema } from "@/lib/sms/quiet-hours";
 
 /**
  * Assistant configuration — the single zod source of truth shared by the DB
@@ -259,6 +260,14 @@ export const approachSchema = z.object({
   replySpeed: z.enum(["instant", "natural", "deliberate"]).default("natural"),
   /** Budget total de messages sortants de l'agent — au-delà : handoff (§12.5). */
   maxTurns: z.number().int().min(4).max(40).default(16),
+  /**
+   * Heures de travail de l'assistant : quand il a le droit d'écrire, par type
+   * de jour (heure locale du Québec). Hors fenêtre, tout envoi automatisé de CET
+   * assistant est reporté à la prochaine ouverture — jamais de texto à 3 h.
+   * Rangé dans `approach` (colonne JSONB existante) : propre à l'assistant, pas
+   * un réglage global. Défaut = heures de politesse d'origine.
+   */
+  quietHours: quietHoursSettingsSchema.default(DEFAULT_QUIET_HOURS),
 });
 export type ApproachConfig = z.infer<typeof approachSchema>;
 

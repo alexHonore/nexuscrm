@@ -20,8 +20,8 @@ import {
 } from "@/lib/campaigns/eligibility";
 import { bodyForStep, ladderExhausted, nextTouchAt } from "@/lib/campaigns/ladder";
 import { variantBody } from "@/lib/campaigns/variants";
-import { isWithinSendWindow, nextSendTime } from "@/lib/sms/quiet-hours";
-import { getSetting } from "@/lib/settings";
+import { isWithinSendWindow, nextSendTime, type QuietHours } from "@/lib/sms/quiet-hours";
+import { resolveQuietHours } from "@/lib/assistants/quiet-hours";
 import { settingsSendGate } from "@/lib/sms-server";
 
 /**
@@ -151,8 +151,10 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
     .where(and(eq(campaignTouches.enrollmentId, enrollment.id), eq(campaignTouches.step, step)))
     .limit(1);
 
-  // Fenêtre d'envoi réglée par l'admin (défaut : heures de politesse d'origine).
-  const quietHours = await getSetting("quietHours");
+  // Heures de travail de l'assistant qui prendrait ce barreau (défaut sinon).
+  const quietHours = await resolveQuietHours(
+    conversation?.activeAssistantId ?? campaignRow.assistantId,
+  );
   const decision = canSendTouch({
     campaignStatus: campaignRow.status,
     enrollmentStatus: enrollment.status,
@@ -173,10 +175,10 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
   });
 
   if (!decision.allowed) {
-    return handleRefusal(enrollment, decision.refusal, now);
+    return handleRefusal(enrollment, decision.refusal, now, quietHours);
   }
   // Le garde-type : `hasSender` vient d'être vérifié par la décision.
-  if (!smsNumber) return handleRefusal(enrollment, "no_sender", now);
+  if (!smsNumber) return handleRefusal(enrollment, "no_sender", now, quietHours);
 
   // Le barreau est-il DÛ? Sans cette question, un job rejoué juste après un
   // envoi réussi trouve l'inscription déjà avancée d'un cran et expédie le
@@ -282,6 +284,9 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
             automated: true,
             aiGenerated: false,
             sentById: null,
+            // La fenêtre d'envoi de CET assistant s'applique aussi au verrou
+            // final (`handleSendSms`) — cohérent avec la décision ci-dessus.
+            assistantId: campaignRow.assistantId,
           },
           // Espace de noms DISTINCT de celui du job `campaign_touch`
           // (`ctouch:…`). Avec la même clé, le job de barreau encore VIVANT
@@ -352,6 +357,7 @@ async function handleRefusal(
   enrollment: EnrollmentRow,
   refusal: TouchRefusal,
   now: Date,
+  quietHours: QuietHours,
 ): Promise<TouchResult> {
   const step = enrollment.step;
   const result: TouchResult = { sent: false, step, refusal };
@@ -372,7 +378,7 @@ async function handleRefusal(
     case "quiet_hours":
       // Prochaine ouverture de la fenêtre, avec le jitter de `nextSendTime` :
       // un lot reporté pendant la nuit part étalé le matin, pas en rafale.
-      return defer(enrollment, nextSendTime(now, await getSetting("quietHours")), result);
+      return defer(enrollment, nextSendTime(now, quietHours), result);
     case "kill_switch":
       return defer(enrollment, new Date(now.getTime() + KILL_SWITCH_RETRY_MS), result);
     case "ai_paused":

@@ -436,7 +436,16 @@
       "sectionTone": "Tone",
       "sectionToneHint": "How it addresses the person.",
       "sectionRhythm": "Pace and length",
-      "sectionRhythmHint": "How much it writes, how much it asks, and how far it follows up."
+      "sectionRhythmHint": "How much it writes, how much it asks, and how far it follows up.",
+      "sectionHours": "Working hours",
+      "sectionHoursHint": "When this assistant is allowed to text. Outside it, every automated send is deferred to the next opening — never a text at 3am. Québec local time.",
+      "hoursWeekday": "Weekdays (Mon–Fri)",
+      "hoursSaturday": "Saturday",
+      "hoursSunday": "Sunday",
+      "hoursFrom": "From (h)",
+      "hoursTo": "To (h)",
+      "hoursNote": "0–23 for the start, 1–24 for the end. The end must be after the start.",
+      "hoursInvalid": "Each window must end after it starts."
     },
     "guardrailsSection": {
       "gate": "Activation gate"

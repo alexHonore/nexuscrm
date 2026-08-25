@@ -18,7 +18,6 @@ import { preflight, type PreflightFacts, type PreflightReport } from "@/lib/goli
  */
 export async function collectPreflight(now = new Date()): Promise<PreflightReport> {
   const smsSettings = await getSetting("sms").catch(() => null);
-  const quietHours = await getSetting("quietHours").catch(() => DEFAULT_QUIET_HOURS);
 
   const [numbers, assistantRows, campaignRows] = await Promise.all([
     db
@@ -62,7 +61,7 @@ export async function collectPreflight(now = new Date()): Promise<PreflightRepor
     hasMessagingServiceEnv: Boolean(env.TWILIO_MESSAGING_SERVICE_SID),
     activeNumberCount: numbers[0]?.active ?? 0,
     numbersWithoutMessagingService: numbers[0]?.withoutService ?? 0,
-    quietHoursLabel: `${quietHours.weekday[0]}h-${quietHours.weekday[1]}h`,
+    quietHoursLabel: `${DEFAULT_QUIET_HOURS.weekday[0]}h-${DEFAULT_QUIET_HOURS.weekday[1]}h`,
     activeAssistantCount: assistantRows[0]?.active ?? 0,
     activeAssistantsWithRedSuite: assistantRows[0]?.redSuite ?? 0,
     activeCampaignCount: campaignRows[0]?.active ?? 0,

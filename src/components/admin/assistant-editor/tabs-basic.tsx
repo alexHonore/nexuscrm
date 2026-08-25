@@ -987,6 +987,96 @@ export function ApproachTab({ config, update }: TabProps) {
           />
         </Fields>
       </Panel>
+
+      {/* Heures de travail — propre à CET assistant. Le garde-fou contre un
+          texto à 3 h : hors fenêtre, l'envoi est reporté (voir send-sms). */}
+      <Panel
+        look={look}
+        title={t("editor.approach.sectionHours")}
+        description={t("editor.approach.sectionHoursHint")}
+      >
+        <div className="space-y-3">
+          <HoursRow
+            label={t("editor.approach.hoursWeekday")}
+            value={config.approach.quietHours.weekday}
+            onChange={(w) => update((d) => void (d.approach.quietHours.weekday = w))}
+            fromLabel={t("editor.approach.hoursFrom")}
+            toLabel={t("editor.approach.hoursTo")}
+          />
+          <HoursRow
+            label={t("editor.approach.hoursSaturday")}
+            value={config.approach.quietHours.saturday}
+            onChange={(w) => update((d) => void (d.approach.quietHours.saturday = w))}
+            fromLabel={t("editor.approach.hoursFrom")}
+            toLabel={t("editor.approach.hoursTo")}
+          />
+          <HoursRow
+            label={t("editor.approach.hoursSunday")}
+            value={config.approach.quietHours.sunday}
+            onChange={(w) => update((d) => void (d.approach.quietHours.sunday = w))}
+            fromLabel={t("editor.approach.hoursFrom")}
+            toLabel={t("editor.approach.hoursTo")}
+          />
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">{t("editor.approach.hoursNote")}</p>
+        {(["weekday", "saturday", "sunday"] as const).some(
+          (day) => config.approach.quietHours[day][0] >= config.approach.quietHours[day][1],
+        ) ? (
+          <p className="mt-1 text-xs text-destructive">{t("editor.approach.hoursInvalid")}</p>
+        ) : null}
+      </Panel>
+    </div>
+  );
+}
+
+/** Une ligne « de X h à Y h » pour un type de jour de la fenêtre d'envoi. */
+function HoursRow({
+  label,
+  value,
+  onChange,
+  fromLabel,
+  toLabel,
+}: {
+  label: string;
+  value: [number, number];
+  onChange: (window: [number, number]) => void;
+  fromLabel: string;
+  toLabel: string;
+}) {
+  const invalid = value[0] >= value[1];
+  const setHour = (idx: 0 | 1, raw: string) => {
+    const n = Number.parseInt(raw, 10);
+    if (Number.isNaN(n)) return;
+    const next: [number, number] = idx === 0 ? [n, value[1]] : [value[0], n];
+    onChange(next);
+  };
+  return (
+    <div className="grid grid-cols-[1fr_auto_auto] items-end gap-3">
+      <span className="text-sm font-medium">{label}</span>
+      <div className="space-y-1">
+        <Label className="text-xs text-muted-foreground">{fromLabel}</Label>
+        <Input
+          type="number"
+          min={0}
+          max={23}
+          className="h-9 w-20"
+          value={value[0]}
+          aria-invalid={invalid || undefined}
+          onChange={(e) => setHour(0, e.target.value)}
+        />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs text-muted-foreground">{toLabel}</Label>
+        <Input
+          type="number"
+          min={1}
+          max={24}
+          className="h-9 w-20"
+          value={value[1]}
+          aria-invalid={invalid || undefined}
+          onChange={(e) => setHour(1, e.target.value)}
+        />
+      </div>
     </div>
   );
 }

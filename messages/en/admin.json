@@ -497,21 +497,6 @@
       "exists": "This number already exists.",
       "delete": "Delete",
       "save": "Save"
-    },
-    "quietHours": {
-      "title": "Send window (quiet hours)",
-      "desc": "When the assistant is allowed to text. Outside it, every automated SMS is DEFERRED to the next opening — never sent at 3am.",
-      "weekday": "Weekdays (Mon–Fri)",
-      "saturday": "Saturday",
-      "sunday": "Sunday",
-      "fromHour": "From (h)",
-      "toHour": "To (h)",
-      "windowHint": "0–23 for the start, 1–24 for the end. The end must be after the start.",
-      "tzNote": "Local hours — {tz}.",
-      "save": "Save",
-      "saved": "Send window saved.",
-      "invalid": "Each window must end after it starts.",
-      "scope": "Applies to all automated sends: assistant replies AND campaign touches."
     }
   },
   "audit": {

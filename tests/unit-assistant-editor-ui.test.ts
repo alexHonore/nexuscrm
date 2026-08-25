@@ -363,6 +363,17 @@ describe("onglets rendus isolément", () => {
     expect(html).toContain("Aide — Longueur maximale");
   });
 
+  it("Approche : les heures de travail (fenêtre d'envoi) sont réglables par jour", () => {
+    const html = renderTab(createElement(ApproachTab, tabProps));
+    expect(html).toContain("Heures de travail");
+    for (const day of ["Semaine (lun.–ven.)", "Samedi", "Dimanche"]) {
+      expect(html, day).toContain(day);
+    }
+    // Aucune clé i18n nue de la section.
+    expect(html).not.toContain("MISSING_MESSAGE");
+    expect(html).not.toMatch(/editor\.approach\.hours/);
+  });
+
   it("Connaissances : les faits autorisés et l'avertissement OACIQ sont visibles", () => {
     const html = renderTab(createElement(KnowledgeTab, tabProps));
     expect(html).toContain("Nous couvrons Québec et Lévis.");

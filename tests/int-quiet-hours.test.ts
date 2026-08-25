@@ -1,57 +1,46 @@
 /**
- * Intégration — fenêtre d'envoi RÉGLABLE (heures de politesse).
+ * Intégration — heures de travail PAR ASSISTANT (fenêtre d'envoi).
  *
- *  · Le réglage `quietHours` est lu par le dernier verrou d'envoi
- *    (`handleSendSms`) : un message automatisé hors de la fenêtre CONFIGURÉE
- *    est reporté, jamais envoyé — même à une heure que la fenêtre par défaut
- *    aurait permise. C'est la garantie « pas de texto à 3 h ».
- *  · La route POST /api/admin/settings/quiet-hours : réservée à l'admin, refuse
- *    une fenêtre invalide (fin ≤ début).
+ *  · `resolveQuietHours(assistantId)` rend la fenêtre de l'assistant (rangée
+ *    dans son `approach`), ou le défaut de politesse pour null/inconnu.
+ *  · Le dernier verrou d'envoi (`handleSendSms`) lit la fenêtre de l'assistant
+ *    QUI ÉCRIT : un envoi hors de SA fenêtre est reporté — même à une heure
+ *    qu'un autre assistant, ou le défaut, aurait permise. « Pas de texto à 3 h »
+ *    dépend donc de l'assistant.
  */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { fromZonedTime } from "date-fns-tz";
-import { SignJWT } from "jose";
-import { closeDb, makeClient, makeConversation, makeSmsNumber, makeUser, resetDb, testDb } from "./helpers/db";
-import { scheduledJobs } from "@/db/schema-sms";
+import { closeDb, makeClient, makeConversation, makeSmsNumber, resetDb, testDb } from "./helpers/db";
+import { assistants, scheduledJobs } from "@/db/schema-sms";
 
-const CTX = vi.hoisted(() => ({ jar: new Map<string, string>() }));
 vi.mock("server-only", () => ({}));
-vi.mock("next/headers", () => ({
-  cookies: async () => ({
-    get: (n: string) => (CTX.jar.has(n) ? { name: n, value: CTX.jar.get(n)! } : undefined),
-    set: (n: string, v: string) => void CTX.jar.set(n, v),
-    delete: (n: string) => void CTX.jar.delete(n),
-  }),
-  headers: async () => new Headers(),
-}));
 
 const { handleSendSms } = await import("@/lib/jobs/handlers/send-sms");
-const { getSetting, setSetting } = await import("@/lib/settings");
-const { POST } = await import("@/app/api/admin/settings/quiet-hours/route");
-const { NextRequest } = await import("next/server");
+const { resolveQuietHours } = await import("@/lib/assistants/quiet-hours");
+const { approachSchema } = await import("@/lib/assistants/schema");
+const { DEFAULT_QUIET_HOURS } = await import("@/lib/sms/quiet-hours");
 
 const TZ = "America/Toronto";
 const toronto = (local: string) => fromZonedTime(local, TZ);
+const MORNING_ONLY = { tz: TZ, weekday: [6, 8], saturday: [6, 8], sunday: [6, 8] } as const;
 
-async function login(role: "admin" | "caller") {
-  const user = await makeUser({ role });
-  const token = await new SignJWT({ uid: user.id, role, tv: user.tokenVersion, remember: true })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime(Math.floor(Date.now() / 1000) + 3600)
-    .sign(new TextEncoder().encode(process.env.AUTH_SECRET!));
-  CTX.jar.set("nexus_session", token);
+/** Un assistant (brouillon) dont on fixe la fenêtre d'envoi. */
+async function makeAssistantWithWindow(window: unknown) {
+  const approach = approachSchema.parse({ quietHours: window });
+  const [row] = await testDb
+    .insert(assistants)
+    .values({
+      name: "Relance (test)",
+      identity: {},
+      goal: {},
+      approach,
+      model: {},
+    })
+    .returning();
+  return row;
 }
 
-const postReq = (body: unknown) =>
-  new NextRequest("http://x/api/admin/settings/quiet-hours", {
-    method: "POST",
-    body: JSON.stringify(body),
-    headers: { "content-type": "application/json" },
-  });
-
-/** Un job d'envoi automatisé prêt à passer le verrou de fenêtre. */
-async function automatedSendJob() {
+async function automatedSendJob(assistantId: string | null) {
   const client = await makeClient();
   const number = await makeSmsNumber({ active: true });
   const conv = await makeConversation({
@@ -74,6 +63,7 @@ async function automatedSendJob() {
         automated: true,
         aiGenerated: true,
         sentById: null,
+        assistantId,
       },
     })
     .returning();
@@ -82,74 +72,52 @@ async function automatedSendJob() {
 
 afterAll(closeDb);
 
-describe("handleSendSms respecte la fenêtre CONFIGURÉE", () => {
+describe("resolveQuietHours", () => {
   beforeEach(async () => {
     await resetDb();
-    CTX.jar.clear();
-    delete process.env.SMS_MODE; // dry_run — aucun vrai SMS
   });
 
-  it("mercredi 14 h : permis par DÉFAUT, mais REPORTÉ si la fenêtre configurée est 6 h–8 h", async () => {
-    // Fenêtre serrée au petit matin — 14 h tombe donc dehors.
-    await setSetting("quietHours", {
-      tz: TZ,
-      weekday: [6, 8],
-      saturday: [6, 8],
-      sunday: [6, 8],
-    });
-    const job = await automatedSendJob();
-    const result = await handleSendSms(job, () => toronto("2026-08-19T14:00:00")); // mercredi 14 h
-    expect(result.outcome).toBe("reschedule");
+  it("rend la fenêtre de l'assistant", async () => {
+    const a = await makeAssistantWithWindow(MORNING_ONLY);
+    expect((await resolveQuietHours(a.id)).weekday).toEqual([6, 8]);
   });
 
-  it("dans la fenêtre configurée (7 h) : l'envoi n'est PAS reporté par la fenêtre", async () => {
-    await setSetting("quietHours", {
-      tz: TZ,
-      weekday: [6, 8],
-      saturday: [6, 8],
-      sunday: [6, 8],
-    });
-    const job = await automatedSendJob();
-    const result = await handleSendSms(job, () => toronto("2026-08-19T07:00:00")); // mercredi 7 h
-    expect(result.outcome).not.toBe("reschedule");
-  });
-
-  it("sans réglage enregistré : comportement d'origine (14 h permis, 3 h reporté)", async () => {
-    const jobDay = await automatedSendJob();
-    expect((await handleSendSms(jobDay, () => toronto("2026-08-19T14:00:00"))).outcome).not.toBe(
-      "reschedule",
-    );
-    const jobNight = await automatedSendJob();
-    expect((await handleSendSms(jobNight, () => toronto("2026-08-19T03:00:00"))).outcome).toBe(
-      "reschedule",
+  it("null ou assistant inconnu → défaut de politesse", async () => {
+    expect(await resolveQuietHours(null)).toEqual(DEFAULT_QUIET_HOURS);
+    expect(await resolveQuietHours("11111111-1111-4111-8111-111111111111")).toEqual(
+      DEFAULT_QUIET_HOURS,
     );
   });
 });
 
-describe("POST /api/admin/settings/quiet-hours", () => {
+describe("handleSendSms respecte la fenêtre de l'ASSISTANT qui écrit", () => {
   beforeEach(async () => {
     await resetDb();
-    CTX.jar.clear();
+    delete process.env.SMS_MODE; // dry_run — aucun vrai SMS
   });
 
-  it("admin : enregistre une fenêtre valide", async () => {
-    await login("admin");
-    const res = await POST(postReq({ weekday: [8, 21] }));
-    expect(res.status).toBe(200);
-    expect((await getSetting("quietHours")).weekday).toEqual([8, 21]);
+  it("14 h avec un assistant en fenêtre 6 h–8 h : REPORTÉ (le défaut aurait permis)", async () => {
+    const assistant = await makeAssistantWithWindow(MORNING_ONLY);
+    const job = await automatedSendJob(assistant.id);
+    const result = await handleSendSms(job, () => toronto("2026-08-19T14:00:00"));
+    expect(result.outcome).toBe("reschedule");
   });
 
-  it("fenêtre invalide (fin ≤ début) → 422", async () => {
-    await login("admin");
-    const res = await POST(postReq({ weekday: [21, 8] }));
-    expect(res.status).toBe(422);
+  it("7 h avec le même assistant : PAS reporté par la fenêtre", async () => {
+    const assistant = await makeAssistantWithWindow(MORNING_ONLY);
+    const job = await automatedSendJob(assistant.id);
+    const result = await handleSendSms(job, () => toronto("2026-08-19T07:00:00"));
+    expect(result.outcome).not.toBe("reschedule");
   });
 
-  it("RBAC : téléphoniste 403, anonyme 401", async () => {
-    const anon = await POST(postReq({ weekday: [8, 21] }));
-    expect(anon.status).toBe(401);
-    await login("caller");
-    const denied = await POST(postReq({ weekday: [8, 21] }));
-    expect(denied.status).toBe(403);
+  it("sans assistant : le défaut s'applique (14 h permis, 3 h reporté)", async () => {
+    const day = await automatedSendJob(null);
+    expect((await handleSendSms(day, () => toronto("2026-08-19T14:00:00"))).outcome).not.toBe(
+      "reschedule",
+    );
+    const night = await automatedSendJob(null);
+    expect((await handleSendSms(night, () => toronto("2026-08-19T03:00:00"))).outcome).toBe(
+      "reschedule",
+    );
   });
 });

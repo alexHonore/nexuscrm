@@ -436,7 +436,16 @@
       "sectionTone": "Le ton",
       "sectionToneHint": "Comment il s'adresse à la personne.",
       "sectionRhythm": "Le rythme et la longueur",
-      "sectionRhythmHint": "Combien il écrit, combien il demande, et jusqu'où il relance."
+      "sectionRhythmHint": "Combien il écrit, combien il demande, et jusqu'où il relance.",
+      "sectionHours": "Heures de travail",
+      "sectionHoursHint": "Quand cet assistant a le droit d’écrire. En dehors, tout envoi automatisé est reporté à la prochaine ouverture — jamais de texto à 3 h. Heure locale du Québec.",
+      "hoursWeekday": "Semaine (lun.–ven.)",
+      "hoursSaturday": "Samedi",
+      "hoursSunday": "Dimanche",
+      "hoursFrom": "De (h)",
+      "hoursTo": "À (h)",
+      "hoursNote": "0 à 23 pour le début, 1 à 24 pour la fin. La fin doit suivre le début.",
+      "hoursInvalid": "Chaque fenêtre doit finir après son début."
     },
     "guardrailsSection": {
       "gate": "Porte d'activation"

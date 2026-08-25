@@ -5,7 +5,6 @@ import { enCA, fr } from "date-fns/locale";
 import {
   CalendarDays,
   CheckCircle2,
-  Clock,
   Loader2,
   PhoneCall,
   Power,
@@ -412,129 +411,6 @@ function EnvHint({ ok, label }: { ok: boolean; label: string }) {
       )}
       {label}
     </span>
-  );
-}
-
-// ── Fenêtre d'envoi (heures de politesse) ────────────────────────────────────
-
-type Window2 = [number, number];
-type QuietHoursForm = { tz: string; weekday: Window2; saturday: Window2; sunday: Window2 };
-
-/**
- * Fenêtre d'envoi SMS : quand l'assistant a le droit d'écrire. C'est le
- * garde-fou contre un texto à 3 h — hors fenêtre, tout envoi automatisé est
- * reporté à la prochaine ouverture. Le fuseau (Toronto) n'est pas modifiable
- * ici : les heures s'entendent en heure locale du Québec.
- */
-export function QuietHoursCard({ initial }: { initial: QuietHoursForm }) {
-  const t = useTranslations("admin");
-  const [form, setForm] = useState<QuietHoursForm>(initial);
-  const [pending, setPending] = useState(false);
-
-  const valid = (["weekday", "saturday", "sunday"] as const).every(
-    (d) => form[d][0] < form[d][1],
-  );
-
-  const setWindow = (day: "weekday" | "saturday" | "sunday", idx: 0 | 1, raw: string) => {
-    const n = Number.parseInt(raw, 10);
-    if (Number.isNaN(n)) return;
-    setForm((f) => {
-      const w: Window2 = [...f[day]] as Window2;
-      w[idx] = n;
-      return { ...f, [day]: w };
-    });
-  };
-
-  const submit = async () => {
-    if (!valid) {
-      toast.error(t("settings.quietHours.invalid"));
-      return;
-    }
-    setPending(true);
-    try {
-      await api("/api/admin/settings/quiet-hours", {
-        method: "POST",
-        body: JSON.stringify(form),
-      });
-      toast.success(t("settings.quietHours.saved"));
-    } catch {
-      toast.error(t("genericError"));
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const windowRow = (day: "weekday" | "saturday" | "sunday", label: string) => (
-    <div key={day} className="grid grid-cols-[1fr_auto_auto] items-end gap-3">
-      <span className="text-sm font-medium">{label}</span>
-      <div className="space-y-1">
-        <Label htmlFor={`qh-${day}-from`} className="text-xs text-muted-foreground">
-          {t("settings.quietHours.fromHour")}
-        </Label>
-        <Input
-          id={`qh-${day}-from`}
-          type="number"
-          min={0}
-          max={23}
-          className="h-9 w-20"
-          value={form[day][0]}
-          aria-invalid={form[day][0] >= form[day][1] || undefined}
-          onChange={(e) => setWindow(day, 0, e.target.value)}
-        />
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor={`qh-${day}-to`} className="text-xs text-muted-foreground">
-          {t("settings.quietHours.toHour")}
-        </Label>
-        <Input
-          id={`qh-${day}-to`}
-          type="number"
-          min={1}
-          max={24}
-          className="h-9 w-20"
-          value={form[day][1]}
-          aria-invalid={form[day][0] >= form[day][1] || undefined}
-          onChange={(e) => setWindow(day, 1, e.target.value)}
-        />
-      </div>
-    </div>
-  );
-
-  return (
-    <Card className="shadow-xs">
-      <CardHeader className="border-b">
-        <div className="flex items-start gap-3">
-          <CardIcon>
-            <Clock className="size-5" />
-          </CardIcon>
-          <div>
-            <CardTitle>{t("settings.quietHours.title")}</CardTitle>
-            <CardDescription>{t("settings.quietHours.desc")}</CardDescription>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="max-w-md space-y-3">
-          {windowRow("weekday", t("settings.quietHours.weekday"))}
-          {windowRow("saturday", t("settings.quietHours.saturday"))}
-          {windowRow("sunday", t("settings.quietHours.sunday"))}
-        </div>
-        <p className="text-xs text-muted-foreground">{t("settings.quietHours.windowHint")}</p>
-        <p className="text-xs text-muted-foreground">
-          {t("settings.quietHours.tzNote", { tz: form.tz })} · {t("settings.quietHours.scope")}
-        </p>
-      </CardContent>
-      <CardFooter>
-        <Button
-          onClick={() => void submit()}
-          disabled={pending || !valid}
-          className="min-h-11 md:min-h-8"
-        >
-          {pending ? <Loader2 className="size-4 animate-spin" /> : null}
-          {t("settings.quietHours.save")}
-        </Button>
-      </CardFooter>
-    </Card>
   );
 }
 
