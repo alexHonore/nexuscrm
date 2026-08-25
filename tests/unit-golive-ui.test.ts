@@ -24,7 +24,8 @@ const ready = (o: Partial<PreflightFacts> = {}): PreflightFacts => ({
   numbersWithoutMessagingService: 0,
   quietHoursLabel: "9h-20h", appUrl: "https://crm.example.com", hasMessagingServiceEnv: true, activeAssistantCount: 1, activeAssistantsWithRedSuite: 0,
   activeCampaignCount: 1, lastDispatchAt: new Date(NOW.getTime() - 30_000), now: NOW,
-  llmProvidersConfigured: ["openrouter"], ...o,
+  llmProvidersConfigured: ["openrouter"],
+  assistantsMissingModelKey: [], assistantsMissingFallbackKey: [], ...o,
 });
 
 function render(facts: PreflightFacts): string {

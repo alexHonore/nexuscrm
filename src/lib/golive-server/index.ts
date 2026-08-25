@@ -1,5 +1,5 @@
 import "server-only";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { assistants, campaigns, smsNumbers } from "@/db/schema-sms";
 import { getSetting } from "@/lib/settings";
@@ -19,7 +19,7 @@ import { preflight, type PreflightFacts, type PreflightReport } from "@/lib/goli
 export async function collectPreflight(now = new Date()): Promise<PreflightReport> {
   const smsSettings = await getSetting("sms").catch(() => null);
 
-  const [numbers, assistantRows, campaignRows] = await Promise.all([
+  const [numbers, assistantRows, campaignRows, activeAssistantModels] = await Promise.all([
     db
       .select({
         active: sql<number>`(count(*) filter (where ${smsNumbers.active}))::int`,
@@ -35,6 +35,10 @@ export async function collectPreflight(now = new Date()): Promise<PreflightRepor
     db
       .select({ active: sql<number>`(count(*) filter (where ${campaigns.status} = 'active'))::int` })
       .from(campaigns),
+    db
+      .select({ name: assistants.name, model: assistants.model })
+      .from(assistants)
+      .where(eq(assistants.status, "active")),
   ]);
 
   // La MÊME exigence que `getSmsProvider` : compte + paire de clé + service de
@@ -47,6 +51,33 @@ export async function collectPreflight(now = new Date()): Promise<PreflightRepor
     smsKeyPair || voiceKeyPair ? null : "TWILIO_API_KEY_SID/SECRET",
     env.TWILIO_MESSAGING_SERVICE_SID ? null : "TWILIO_MESSAGING_SERVICE_SID",
   ].filter((v): v is string => v !== null);
+
+  // Chaque assistant actif doit pouvoir joindre SES fournisseurs — la clé
+  // « au moins une » du contrôle llm_provider ne dit pas laquelle. Le repli
+  // est à part : sans clé, ça envoie quand même, mais la première panne du
+  // principal lèvera au lieu d'être rattrapée.
+  const providersConfigured: string[] = configuredProviders();
+  const assistantsMissingModelKey: string[] = [];
+  const assistantsMissingFallbackKey: string[] = [];
+  for (const row of activeAssistantModels) {
+    const model = (row.model ?? {}) as {
+      provider?: string;
+      classifier?: { provider?: string } | null;
+      fallback?: { provider?: string } | null;
+    };
+    const missing = [
+      ...new Set(
+        [model.provider, model.classifier?.provider].filter(
+          (p): p is string => typeof p === "string" && !providersConfigured.includes(p),
+        ),
+      ),
+    ];
+    if (missing.length > 0) assistantsMissingModelKey.push(`${row.name} : ${missing.join(", ")}`);
+    const fallbackProvider = model.fallback?.provider;
+    if (typeof fallbackProvider === "string" && !providersConfigured.includes(fallbackProvider)) {
+      assistantsMissingFallbackKey.push(`${row.name} : ${fallbackProvider}`);
+    }
+  }
 
   const facts: PreflightFacts = {
     mode: resolveSmsMode(process.env),
@@ -67,7 +98,9 @@ export async function collectPreflight(now = new Date()): Promise<PreflightRepor
     activeCampaignCount: campaignRows[0]?.active ?? 0,
     lastDispatchAt: smsSettings?.lastDispatchAt ? new Date(smsSettings.lastDispatchAt) : null,
     now,
-    llmProvidersConfigured: configuredProviders(),
+    llmProvidersConfigured: providersConfigured,
+    assistantsMissingModelKey,
+    assistantsMissingFallbackKey,
   };
 
   return preflight(facts);

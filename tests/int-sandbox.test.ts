@@ -184,14 +184,19 @@ describe("simulateTurn", () => {
     expect(generatorCalls()).toHaveLength(0);
   });
 
-  it("refus ferme : arrêt, la chaîne n'est pas touchée, rien n'est généré", async () => {
+  it("refus ferme : UN adieu est généré (clôture polie), la chaîne n'est pas touchée", async () => {
     const assistant = await scene();
     llm.classifierJson = '{"refusal":"hard"}';
+    llm.generatorText = "Merci pour votre réponse, bonne continuation!";
     const result = await simulateTurn({ assistantId: assistant.id, history: [], inbound: "non merci" });
-    expect(result.outcome).toBe("stopped");
+    // Comme en production : l'adieu part (« sent »), le motif dit que l'IA se
+    // taira ensuite, et la chaîne d'objectifs n'a pas bougé.
+    expect(result.outcome).toBe("sent");
     expect(result.reason).toBe("hard_refusal");
+    expect(result.draft).toContain("bonne continuation");
     expect(result.rung).toBe("primary");
-    expect(generatorCalls()).toHaveLength(0);
+    // Le modèle a reçu la consigne de clôture.
+    expect(generatorCalls()[0]?.system).toContain("CLÔTURE");
   });
 
   it("demande d'humain : escalade immédiate", async () => {

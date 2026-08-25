@@ -33,10 +33,22 @@ describe("fidélité du bac à sable", () => {
   it("offre les outils de l'assistant au modèle", () => {
     // Sans `tools`, le modèle ne peut jamais en appeler un : l'aperçu
     // montrerait un assistant incapable de réserver alors qu'il en est capable.
-    expect(source).toContain("const tools = toolDefsFor(config.tools)");
+    // Et sur un tour de clôture (refus ferme), le MÊME sous-ensemble que la
+    // production : classer, consigner, clore — jamais réserver.
+    expect(source).toContain("toolDefsFor(config.tools).filter((t) => CLOSING_TOOL_NAMES.includes(t.name))");
+    expect(source).toContain(": toolDefsFor(config.tools)");
     const start = source.indexOf("generator.generate({");
     const call = source.slice(start, source.indexOf("});", start));
     expect(call).toMatch(/^\s*tools,\s*$/m);
+  });
+
+  it("joue la MÊME clôture polie qu'en production sur un refus ferme", () => {
+    // La consigne et la liste d'outils viennent du même module que la
+    // production (`templates.ts`) : une divergence serait un aperçu menteur.
+    expect(source).toContain("CLOSING_INSTRUCTIONS");
+    expect(source).toContain("closingHard");
+    expect(runtime).toContain("CLOSING_INSTRUCTIONS");
+    expect(runtime).toContain("CLOSING_TOOL_NAMES");
   });
 
   it("utilise le prompt COMPILÉ, pas une reconstruction", () => {
@@ -178,7 +190,7 @@ describe("fidélité du bac à sable", () => {
       'outcome: "blocked"',
       'reason: "booking_failed"',
       'reason: "no_text"',
-      'outcome: "sent", reason: null',
+      'outcome: "sent", reason: closingHard ? "hard_refusal" : null',
     ].map((needle) => source.lastIndexOf(needle));
     expect(order.every((i) => i >= 0)).toBe(true);
     for (let i = 1; i < order.length; i += 1) expect(order[i]).toBeGreaterThan(order[i - 1]);

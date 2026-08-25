@@ -60,7 +60,10 @@ export async function handleSendSms(
   });
   if (!conversation) return { outcome: "failed_permanent", error: "conversation_not_found" };
 
-  if (payload.automated && !conversation.aiEnabled) {
+  // Le « dernier mot » (adieu de clôture) est commis DANS la transaction qui
+  // met l'IA en pause : cette garde le supprimait systématiquement. Il passe —
+  // le désabonnement (suppressions) et l'interrupteur restent jugés plus bas.
+  if (payload.automated && !conversation.aiEnabled && !payload.finalWord) {
     return { outcome: "skipped", reason: "ai_paused" };
   }
   // Heures de travail de l'assistant qui écrit (défaut si aucun assistant).

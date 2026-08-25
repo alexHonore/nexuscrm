@@ -690,6 +690,14 @@
         "label": "Fournisseur de modèle",
         "fix": "Aucune clé de modèle configurée : l'assistant ne peut rien rédiger."
       },
+      "assistant_model_keys": {
+        "label": "Clés des modèles d'assistants",
+        "fix": "Un assistant actif utilise un fournisseur sans clé (générateur ou classifieur) : aucun de ses messages ne partira."
+      },
+      "assistant_fallback_keys": {
+        "label": "Clé du modèle de repli",
+        "fix": "Le repli d'un assistant actif n'a pas de clé : les messages partent, mais la première panne du principal remontera en erreur au lieu d'être rattrapée."
+      },
       "app_url": {
         "label": "URL publique de l'application",
         "fix": "NEXT_PUBLIC_APP_URL doit être l'adresse https exacte que Twilio appelle : la signature des webhooks et le rappel de statut en dépendent."

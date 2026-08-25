@@ -11,7 +11,7 @@
  *  · une trace est écrite même quand le tour finit bloqué ou en erreur.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   closeDb,
   makeClient,
@@ -62,10 +62,14 @@ const llm = vi.hoisted(() => ({
   onGenerate: null as null | (() => Promise<void>),
   /** Le fournisseur a coupé la réponse (max_tokens) — testé sur le tour. */
   truncated: false,
+  /** Fournisseurs SANS clé : getLlmProvider lève, comme en production. */
+  unconfigured: [] as string[],
 }));
 
 vi.mock("@/lib/llm-server", () => ({
-  getLlmProvider: (id: string) => ({
+  getLlmProvider: (id: string) => {
+    if (llm.unconfigured.includes(id)) throw new Error(`llm_provider_unconfigured: ${id}`);
+    return {
     id,
     listModels: async () => [],
     generate: async (input: { system: string; model: string; messages?: unknown[] }): Promise<LLMResult> => {
@@ -99,7 +103,8 @@ vi.mock("@/lib/llm-server", () => ({
         raw: { simulated: true },
       };
     },
-  }),
+  };
+  },
   LlmUnconfiguredError: class extends Error {},
   configuredProviders: () => ["openrouter"],
   getModelCatalog: async () => [],
@@ -218,6 +223,7 @@ describe("runTurn", () => {
     llm.onGenerate = null;
     llm.generatorError = null;
     llm.truncated = false;
+    llm.unconfigured = [];
     llm.classifierJson = '{"refusal":"none","qualification":{}}';
     llm.judgeJson = '{"passed":true,"reason":"conforme"}';
     llm.calls = [];
@@ -334,21 +340,109 @@ describe("runTurn", () => {
     expect(await eventsOf(conversation.id)).toContain("goal_downgrade");
   });
 
-  it("§21 — un refus FERME clôt sans toucher la chaîne ni envoyer", async () => {
-    const { conversation } = await scene();
+  it("§21 — un refus FERME : UN adieu part, puis l'IA se tait et l'inscription s'arrête", async () => {
+    const { conversation, enrollment } = await outreachScene();
     llm.classifierJson = '{"refusal":"hard"}';
+    llm.generatorText = "Merci pour votre réponse, bonne continuation!";
     await inbound(conversation.id, "non merci, pas intéressé");
 
     const result = await runTurn(conversation.id);
-    expect(result.outcome).toBe("stopped");
+    expect(result.outcome).toBe("sent");
     expect(result.reason).toBe("hard_refusal");
+
+    // L'adieu est en file — la « clôture polie » que promet la doctrine.
+    const sends = (await jobsFor(conversation.id)).filter((j) => j.type === "send_sms");
+    expect(sends).toHaveLength(1);
+    expect((sends[0].payload as { body: string }).body).toContain("bonne continuation");
+
+    // Et il PART : l'IA vient d'être mise en pause dans la même transaction —
+    // sans le drapeau « dernier mot », la garde ai_paused du job d'envoi le
+    // supprimait en silence et le fil ne recevait jamais l'adieu.
+    expect((sends[0].payload as { finalWord?: boolean }).finalWord).toBe(true);
+    const { handleSendSms } = await import("@/lib/jobs/handlers/send-sms");
+    const midday = () => new Date("2026-08-24T15:00:00.000Z");
+    expect(await handleSendSms(sends[0], midday)).toMatchObject({ outcome: "done" });
+    const delivered = await testDb
+      .select()
+      .from(messages)
+      .where(and(eq(messages.conversationId, conversation.id), eq(messages.direction, "out")));
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0].body).toContain("bonne continuation");
+
+    // Le modèle a reçu la consigne de clôture, par-dessus le prompt compilé.
+    const call = llm.calls.find((c) => c.model === "generator-model");
+    expect(call?.system).toContain("CLÔTURE");
 
     const [conv] = await testDb.select().from(conversations).where(eq(conversations.id, conversation.id));
     // La chaîne n'a PAS bougé — on ne propose pas de repli après un vrai non.
     expect(conv.goalRung).toBe("primary");
     expect(conv.aiEnabled).toBe(false);
-    expect(await jobsFor(conversation.id)).toHaveLength(0);
+    expect(conv.attentionReason).toBe("hard_refusal");
     expect(await eventsOf(conversation.id)).toContain("hard_refusal");
+
+    // Plus AUCUNE relance : l'inscription de campagne est stoppée dès ce tour.
+    const enr = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrollment.id),
+    });
+    expect(enr!.status).toBe("stopped");
+    expect(enr!.endReason).toBe("hard_refusal");
+
+    const notes = await testDb.select().from(notifications);
+    expect(notes.some((n) => n.type === "sms_stopped")).toBe(true);
+  });
+
+  it("§21 — refus ferme + modèle en panne : arrêt SILENCIEUX immédiat, sans reprise", async () => {
+    const { conversation, enrollment } = await outreachScene();
+    llm.classifierJson = '{"refusal":"hard"}';
+    llm.generatorError = "upstream 502";
+    await inbound(conversation.id, "non merci");
+
+    // DÈS la première tentative (pas de finalAttempt) : rejouer le tour
+    // soumettrait le refus à une deuxième classification — un raté du
+    // classifieur à la reprise le dégraderait en « none » et l'assistant
+    // repartirait en argumentaire chez quelqu'un qui a dit non.
+    const result = await runTurn(conversation.id);
+    expect(result.outcome).toBe("stopped");
+    expect(result.reason).toBe("hard_refusal");
+
+    expect((await jobsFor(conversation.id)).filter((j) => j.type === "send_sms")).toHaveLength(0);
+    // L'entrant est consommé : le refus est réglé, la file n'a rien à rejouer.
+    const [row] = await testDb.select().from(messages).where(eq(messages.direction, "in"));
+    expect(row.processedAt).not.toBeNull();
+    const [conv] = await testDb.select().from(conversations).where(eq(conversations.id, conversation.id));
+    expect(conv.aiEnabled).toBe(false);
+    expect(conv.attentionReason).toBe("hard_refusal");
+    // Même en panne, personne ne relancera : l'inscription est stoppée.
+    const enr = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrollment.id),
+    });
+    expect(enr!.status).toBe("stopped");
+    const notes = await testDb.select().from(notifications);
+    expect(notes.some((n) => n.type === "sms_stopped")).toBe(true);
+  });
+
+  it("un appel d'outil NON OFFERT sur le tour de clôture est écarté, jamais exécuté", async () => {
+    // Le modèle hallucine book_meeting pendant l'adieu : sans la borne
+    // « l'offre n'est pas la permission », la réservation était tentée.
+    const { conversation } = await scene();
+    llm.classifierJson = '{"refusal":"hard"}';
+    llm.generatorToolCalls = [
+      { id: "b1", name: "book_meeting", arguments: { slotIso: "2026-08-27T18:00:00.000Z" } },
+    ];
+    llm.generatorText = "Merci, bonne continuation!";
+    let calls = 0;
+    llm.onGenerate = async () => {
+      calls += 1;
+      if (calls >= 2) llm.generatorToolCalls = [];
+    };
+    await inbound(conversation.id, "non merci");
+
+    const result = await runTurn(conversation.id);
+    // L'appel non offert est ignoré : l'adieu part, aucune réservation tentée.
+    expect(result.outcome).toBe("sent");
+    expect(result.reason).toBe("hard_refusal");
+    const events = await testDb.select().from(agentEvents);
+    expect(events.filter((e) => e.type === "tool_call")).toHaveLength(0);
   });
 
   // ── Filtre de sortie ──────────────────────────────────────────────────────
@@ -646,6 +740,7 @@ describe("tour proactif (barreau sans texte)", () => {
     llm.onGenerate = null;
     llm.generatorError = null;
     llm.truncated = false;
+    llm.unconfigured = [];
     llm.classifierJson = '{"refusal":"none","qualification":{}}';
     llm.judgeJson = '{"passed":true,"reason":"conforme"}';
     llm.calls = [];
@@ -761,6 +856,7 @@ describe("statut, outils et pannes (revue)", () => {
     llm.onGenerate = null;
     llm.generatorError = null;
     llm.truncated = false;
+    llm.unconfigured = [];
     llm.classifierJson = '{"refusal":"none","qualification":{}}';
     llm.judgeJson = '{"passed":true,"reason":"conforme"}';
     llm.calls = [];
@@ -850,6 +946,14 @@ describe("statut, outils et pannes (revue)", () => {
     const conv = await testDb.query.conversations.findFirst({ where: eq(conversations.id, conversation.id) });
     expect(conv!.aiEnabled).toBe(false);
     expect(conv!.attentionReason).toBe("closed_not_interested");
+    // Le message de clôture PART malgré l'IA en pause : c'est le « dernier
+    // mot » — la garde ai_paused du job d'envoi le supprimait en silence.
+    const [sendJob] = (await jobsFor(conversation.id)).filter((j) => j.type === "send_sms");
+    expect((sendJob.payload as { finalWord?: boolean }).finalWord).toBe(true);
+    const { handleSendSms } = await import("@/lib/jobs/handlers/send-sms");
+    expect(
+      await handleSendSms(sendJob, () => new Date("2026-08-24T15:00:00.000Z")),
+    ).toMatchObject({ outcome: "done" });
     const enr = await testDb.query.campaignEnrollments.findFirst({ where: eq(campaignEnrollments.id, enrollment.id) });
     expect(enr!.status).toBe("stopped");
     expect(enr!.endReason).toBe("not_interested");
@@ -904,6 +1008,25 @@ describe("statut, outils et pannes (revue)", () => {
     expect(result.outcome).toBe("sent");
     expect(llm.calls.some((c) => c.model === "fallback-model")).toBe(true);
     expect(await eventsOf(conversation.id)).toContain("fallback_used");
+  });
+
+  it("un repli SANS CLÉ n'efface pas la panne d'origine : l'alerte dit les deux", async () => {
+    // L'incident réel : crédits OpenRouter épuisés (llm_http_402), repli
+    // anthropic sans clé — et chaque notification disait seulement
+    // « llm_provider_unconfigured: anthropic », la vraie cause invisible.
+    const { conversation } = await scene();
+    await inbound(conversation.id, "Allo?");
+    llm.generatorError = "llm_http_402: This request requires more credits";
+    llm.unconfigured = ["anthropic"];
+
+    const result = await runTurn(conversation.id, { finalAttempt: true });
+    expect(result.outcome).toBe("error");
+    expect(result.reason).toContain("llm_http_402");
+    expect(result.reason).toContain("repli anthropic sans clé configurée");
+
+    const notes = await testDb.select().from(notifications);
+    const note = notes.find((n) => n.type === "sms_error");
+    expect(note?.body ?? "").toContain("llm_http_402");
   });
 
   it("une réponse envoyée EFFACE la pastille « nouveau message »", async () => {
@@ -976,6 +1099,7 @@ describe("câblage inter-domaines (revue)", () => {
     llm.onGenerate = null;
     llm.generatorError = null;
     llm.truncated = false;
+    llm.unconfigured = [];
     llm.classifierJson = '{"refusal":"none","qualification":{}}';
     llm.judgeJson = '{"passed":true,"reason":"conforme"}';
     llm.calls = [];
@@ -1057,6 +1181,7 @@ describe("set_category — l'assistant range la fiche", () => {
     llm.onGenerate = null;
     llm.generatorError = null;
     llm.truncated = false;
+    llm.unconfigured = [];
     llm.classifierJson = '{"refusal":"none","qualification":{}}';
     llm.judgeJson = '{"passed":true,"reason":"conforme"}';
     llm.calls = [];
@@ -1125,6 +1250,41 @@ describe("set_category — l'assistant range la fiche", () => {
 
     const [row] = await testDb.select().from(clients).where(eq(clients.id, client.id));
     expect(row.categoryId).toBe(notQualified.id);
+  });
+
+  it("un refus FERME laisse le temps de CLASSER la fiche avant de se taire", async () => {
+    // « Non, on n'est plus intéressés » : l'adieu part, la fiche est rangée
+    // (set_category), puis l'IA se tait — plus jamais « IA en pause » sans
+    // réponse ni classement.
+    const { longTerm } = await withRules();
+    const { conversation, client } = await scene();
+    llm.classifierJson = '{"refusal":"hard"}';
+    llm.generatorToolCalls = [
+      {
+        id: "t1",
+        name: "set_category",
+        arguments: { categoryKey: "long_term", reason: "projet reporté, plus intéressé pour l'instant" },
+      },
+    ];
+    llm.generatorSequence = ["", "Merci de votre réponse, bonne continuation!"];
+    let calls = 0;
+    llm.onGenerate = async () => {
+      calls += 1;
+      if (calls >= 2) llm.generatorToolCalls = [];
+    };
+    await inbound(conversation.id, "non, on n'est plus intéressés");
+
+    const result = await runTurn(conversation.id);
+    expect(result.outcome).toBe("sent");
+    expect(result.reason).toBe("hard_refusal");
+
+    const [row] = await testDb.select().from(clients).where(eq(clients.id, client.id));
+    expect(row.categoryId).toBe(longTerm.id);
+
+    const conv = await testDb.query.conversations.findFirst({
+      where: eq(conversations.id, conversation.id),
+    });
+    expect(conv!.aiEnabled).toBe(false);
   });
 
   it("une clé HORS des règles est refusée, et le refus dit lesquelles sont permises", async () => {
@@ -1201,6 +1361,7 @@ describe("réponses en file et sortants jamais reçus (revue)", () => {
     llm.onGenerate = null;
     llm.generatorError = null;
     llm.truncated = false;
+    llm.unconfigured = [];
     llm.classifierJson = '{"refusal":"none","qualification":{}}';
     llm.judgeJson = '{"passed":true,"reason":"conforme"}';
     llm.calls = [];
@@ -1333,6 +1494,7 @@ describe("outils de lecture (read_client / read_client_comments)", () => {
     llm.onGenerate = null;
     llm.generatorError = null;
     llm.truncated = false;
+    llm.unconfigured = [];
   });
 
   it("read_client renvoie au modèle ce que la fiche sait déjà (labels de catégorie/source résolus)", async () => {

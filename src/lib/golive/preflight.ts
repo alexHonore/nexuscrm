@@ -37,6 +37,8 @@ export const CHECK_IDS = [
   "campaign_active",
   "dispatcher",
   "llm_provider",
+  "assistant_model_keys",
+  "assistant_fallback_keys",
 ] as const;
 export type CheckId = (typeof CHECK_IDS)[number];
 
@@ -74,6 +76,20 @@ export interface PreflightFacts {
   lastDispatchAt: Date | null;
   now: Date;
   llmProvidersConfigured: string[];
+  /**
+   * Assistants ACTIFS dont le générateur ou le classifieur pointe un
+   * fournisseur SANS clé (« Nom : fournisseur »). Une clé peut exister au
+   * global (`llm_provider` vert) pendant qu'un assistant en vise une autre —
+   * c'est le trou que ce contrôle bouche.
+   */
+  assistantsMissingModelKey: string[];
+  /**
+   * Assistants actifs dont le REPLI n'a pas de clé. Les messages partent quand
+   * même (le principal répond), mais à la première panne le repli « réglé
+   * exactement pour ça » lèvera au lieu de rattraper — l'incident du
+   * 2026-08-25 (repli anthropic sans ANTHROPIC_API_KEY).
+   */
+  assistantsMissingFallbackKey: string[];
 }
 
 export interface PreflightCheck {
@@ -152,6 +168,21 @@ export function preflight(facts: PreflightFacts): PreflightReport {
 
   // ── Ce qui décide qu'il dit quelque chose ────────────────────────────────
   add("llm_provider", "blocker", facts.llmProvidersConfigured.length > 0, facts.llmProvidersConfigured.join(", "));
+  // Une clé au global ne suffit pas : chaque assistant actif doit pouvoir
+  // joindre SES fournisseurs — générateur et classifieur (bloquant), et le
+  // repli (avertissement : ça envoie, mais la première panne surprendra).
+  add(
+    "assistant_model_keys",
+    "blocker",
+    facts.assistantsMissingModelKey.length === 0,
+    facts.assistantsMissingModelKey.join(" · ") || undefined,
+  );
+  add(
+    "assistant_fallback_keys",
+    "warning",
+    facts.assistantsMissingFallbackKey.length === 0,
+    facts.assistantsMissingFallbackKey.join(" · ") || undefined,
+  );
   add("assistant_active", "blocker", facts.activeAssistantCount > 0, `${facts.activeAssistantCount}`);
 
   // Un assistant actif avec une suite rouge a forcément été activé en

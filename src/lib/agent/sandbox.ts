@@ -18,7 +18,7 @@ import { contactValue, qualificationText } from "./contact-data";
 import { applyRefusal, requiredFieldsFor, rungNeedsSlots } from "./goal";
 import { outreachInstructionText } from "./opening";
 import { renderTemplate } from "./render";
-import { DEFAULT_TURN_INSTRUCTIONS } from "./templates";
+import { CLOSING_INSTRUCTIONS, CLOSING_TOOL_NAMES, DEFAULT_TURN_INSTRUCTIONS } from "./templates";
 import { getSetting } from "@/lib/settings";
 import { simulateToolCall, simulatedSlotsText } from "./tool-simulation";
 import { toolDefsFor } from "./tools";
@@ -328,12 +328,12 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
   if (classification.optOut) {
     return { ...gated, outcome: "stopped", reason: "optout", error: null };
   }
-  // Refus ferme : la chaîne n'est PAS touchée — on ne propose pas de repli à
-  // quelqu'un qui vient de dire non.
-  if (classification.refusal === "hard") {
-    return { ...gated, outcome: "stopped", reason: "hard_refusal", error: null };
-  }
-  if (turnsUsed >= config.approach.maxTurns || downgrade.exhausted || classification.wantsHuman) {
+  // Refus ferme : comme en production, le tour CONTINUE pour un dernier
+  // message de clôture courtoise ("hard_refusal"), la chaîne n'étant PAS
+  // touchée — on ne propose pas de repli à quelqu'un qui vient de dire non,
+  // et l'IA se tait après cet adieu.
+  const closingHard = classification.refusal === "hard";
+  if (!closingHard && (turnsUsed >= config.approach.maxTurns || downgrade.exhausted || classification.wantsHuman)) {
     const reason: SandboxReason = classification.wantsHuman
       ? "client_wants_human"
       : downgrade.exhausted
@@ -352,8 +352,9 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
   // inventé qui n'ouvre jamais le samedi.
   const bookingSettings = await getSetting("booking").catch(() => null);
   const bookableDays = bookingSettings?.days;
+  // Comme en production : un tour de clôture n'offre rien, donc pas d'heures.
   const slotsText =
-    rungNeedsSlots(rung) && rung.goal.appointmentType
+    !closingHard && rungNeedsSlots(rung) && rung.goal.appointmentType
       ? simulatedSlotsText(rung.goal.slotOfferCount, undefined, { days: bookableDays })
       : "aucune";
 
@@ -381,8 +382,9 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
       }).text
     : "";
 
-  const system =
+  const layered =
     runtimeBlock === "" ? row.compiledPrompt : `${row.compiledPrompt}\n\n${runtimeBlock}`;
+  const system = closingHard ? `${layered}\n\n${CLOSING_INSTRUCTIONS}` : layered;
 
   // À l'ouverture (ou en relance), il n'y a pas de message entrant : la MÊME
   // consigne qu'en production tient lieu de tour — voir `opening.ts`.
@@ -398,7 +400,11 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
   const userTurn = instruction ?? inbound;
 
   const messageArray: LLMMessage[] = [...history, { role: "user", content: userTurn }];
-  const tools = toolDefsFor(config.tools);
+  // Mêmes outils qu'en production sur un tour de clôture : classer, consigner,
+  // clore — jamais réserver, jamais `stop` (un refus n'est pas un désabonnement).
+  const tools = closingHard
+    ? toolDefsFor(config.tools).filter((t) => CLOSING_TOOL_NAMES.includes(t.name))
+    : toolDefsFor(config.tools);
   const toolCalls: SandboxToolCall[] = [];
   const sideEffectsDone = new Set<string>();
 
@@ -452,11 +458,17 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
 
       if (result.toolCalls.length === 0) break;
 
+      // L'offre n'est pas la permission — même borne qu'en production : un
+      // appel halluciné vers un outil non offert est écarté du tour entier.
+      const offeredNames = new Set(tools.map((t) => t.name));
+      const grantedCalls = result.toolCalls.filter((c) => offeredNames.has(c.name));
+      if (grantedCalls.length === 0) break;
+
       // Résultats SIMULÉS, avec les règles de la production (zod, champs
       // requis, créneau offert, effets de bord joués une seule fois), dans
       // l'ordre des appels — un outil terminal arrête les suivants.
       const simulated: { id: string; name: string; content: string }[] = [];
-      for (const call of result.toolCalls) {
+      for (const call of grantedCalls) {
         const outcome = simulateToolCall(call.name, sideEffectsDone, {
           args: call.arguments,
           appointmentType: rung.goal.appointmentType,
@@ -480,7 +492,7 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
       // Vrai protocole d'outils : l'assistant DÉCLARE ses appels, puis chaque
       // résultat revient rattaché à son identifiant. Maquillé en message
       // `user`, le modèle ne relie pas le résultat à sa demande et la réémet.
-      turnMessages.push({ role: "assistant", content: result.text, toolCalls: result.toolCalls });
+      turnMessages.push({ role: "assistant", content: result.text, toolCalls: grantedCalls });
       for (const r of simulated) {
         turnMessages.push({ role: "tool", toolCallId: r.id, name: r.name, content: r.content });
       }
@@ -545,6 +557,10 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
     return { ...base, draft: "", outcome: "error", reason: "llm_error", error: llmError ?? "no_result" };
   }
   if (blockingFailures(verdicts).length > 0) {
+    // Sur un tour de clôture, la production n'escalade pas : arrêt silencieux.
+    if (closingHard) {
+      return { ...base, draft: "", blocked: true, outcome: "stopped", reason: "hard_refusal", error: null };
+    }
     // Un juge injoignable bloque tout (fermeture par défaut, voulue) — mais
     // l'admin doit distinguer « l'assistant a mal écrit » d'une panne de notre
     // côté, sinon il cherche au mauvais endroit.
@@ -565,9 +581,12 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
     return { ...base, draft: "", outcome: "handoff", reason: "booking_failed", error: null };
   }
   if (draft === "") {
+    if (closingHard) return { ...base, outcome: "stopped", reason: "hard_refusal", error: null };
     return { ...base, outcome: "handoff", reason: "no_text", error: null };
   }
-  return { ...base, outcome: "sent", reason: null, error: null };
+  // Après un refus ferme, l'adieu part puis l'IA se tait : « sent » avec le
+  // motif « hard_refusal » — exactement le couple que la production écrit.
+  return { ...base, outcome: "sent", reason: closingHard ? "hard_refusal" : null, error: null };
 }
 
 /**

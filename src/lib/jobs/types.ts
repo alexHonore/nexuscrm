@@ -26,6 +26,14 @@ export const sendSmsPayloadSchema = z.object({
    * (conversations.aiEnabled = false); human-initiated sends are not.
    */
   automated: z.boolean().default(true),
+  /**
+   * Le DERNIER MOT de l'assistant : un adieu commis dans la même transaction
+   * que la mise en pause de l'IA (refus ferme, close_conversation). Sans ce
+   * drapeau, la garde « automatisé + IA en pause » sautait ce même message —
+   * le tour disait « envoyé », le fil ne recevait rien. Le désabonnement et
+   * l'interrupteur d'arrêt restent prioritaires : ils se jugent à l'envoi.
+   */
+  finalWord: z.boolean().default(false),
   aiGenerated: z.boolean().default(false),
   sentById: z.uuid().nullable().default(null),
   /**

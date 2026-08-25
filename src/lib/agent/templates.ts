@@ -52,3 +52,28 @@ export const TURN_VARIABLES: readonly string[] = [
   "assistant.name",
   "org",
 ];
+
+/**
+ * Consigne du tour de CLÔTURE — jouée quand le classifieur a tranché « refus
+ * ferme ». La doctrine de `classify.ts` promet une « clôture polie » : ce tour
+ * la tient. UN dernier message, aucun argument, et la fiche classée quand
+ * l'assistant dispose de l'outil — puis l'IA se tait, quoi que le modèle
+ * écrive (le moteur force l'arrêt, la consigne n'est pas la garantie).
+ */
+export const CLOSING_INSTRUCTIONS = `CLÔTURE : le contact vient de refuser clairement de poursuivre. C'est ton DERNIER message.
+Écris une ou deux phrases : remercie-le de sa réponse et souhaite-lui bonne continuation. Aucun argument, aucune relance, aucune question, aucune proposition.
+Si ses messages disent ce qu'il est advenu de son projet (déjà acheté ou vendu, projet abandonné, simplement plus intéressé) et que l'outil set_category t'est offert, classe la fiche dans la catégorie qui correspond.
+Si l'outil close_conversation t'est offert, appelle-le avec le résultat qui correspond (le plus souvent "not_interested" ; "goal_reached" ou "disqualified" seulement si la conversation le justifie).
+N'appelle aucun autre outil.`;
+
+/**
+ * Les seuls outils qui gardent un sens sur un tour de clôture : classer,
+ * consigner, clore. `book_meeting` serait la relance qu'on vient d'interdire,
+ * et `stop` supprimerait le numéro sans adieu (un refus n'est pas un
+ * désabonnement).
+ */
+export const CLOSING_TOOL_NAMES: readonly string[] = [
+  "set_category",
+  "update_qualification",
+  "close_conversation",
+];

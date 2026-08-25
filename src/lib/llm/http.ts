@@ -6,7 +6,9 @@ import { LLMProviderError, type ProviderId } from "./types";
  * Un appel qui pend n'est pas une erreur visible — sans plafond il bloquerait
  * le tour d'agent (et, en phase 4, le job du dispatcher) jusqu'à l'expiration
  * de la fonction. `retryable` distingue ce qui mérite un repli (5xx, 429,
- * délai) de ce qui ne le mérite pas (400, 401 : la requête est fautive).
+ * délai — et 402 : le COMPTE est à sec, pas la requête ; un autre fournisseur
+ * peut répondre) de ce qui ne le mérite pas (400, 401 : la requête est
+ * fautive, la rejouer ailleurs ne ferait que doubler la facture).
  */
 
 export const DEFAULT_LLM_TIMEOUT_MS = 60_000;
@@ -57,7 +59,7 @@ export async function callJson(
       `llm_http_${res.status}: ${describeError(text)}`,
       input.provider,
       res.status,
-      res.status >= 500 || res.status === 429,
+      res.status >= 500 || res.status === 429 || res.status === 402,
     );
   }
 

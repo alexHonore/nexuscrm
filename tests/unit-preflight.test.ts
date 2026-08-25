@@ -32,6 +32,8 @@ function ready(overrides: Partial<PreflightFacts> = {}): PreflightFacts {
     lastDispatchAt: new Date(NOW.getTime() - 30_000),
     now: NOW,
     llmProvidersConfigured: ["openrouter"],
+    assistantsMissingModelKey: [],
+    assistantsMissingFallbackKey: [],
     ...overrides,
   };
 }
@@ -178,5 +180,30 @@ describe("revue : URL publique et service de messagerie", () => {
     const report = preflight(ready({ lastDispatchAt: null }));
     const check = report.checks.find((c) => c.id === "dispatcher")!;
     expect(check.detail).toBeUndefined();
+  });
+});
+
+describe("les clés PAR ASSISTANT — une clé au global ne suffit pas", () => {
+  it("générateur ou classifieur sans clé : BLOQUANT, et le contrôle nomme qui et quoi", () => {
+    // L'angle mort de l'incident du 2026-08-25 : llm_provider vert (openrouter
+    // a une clé) pendant qu'un assistant vise un fournisseur qui n'en a pas.
+    const report = preflight(ready({ assistantsMissingModelKey: ["Réactivation : anthropic"] }));
+    expect(report.canSendLive).toBe(false);
+    expect(report.blockers).toContain("assistant_model_keys");
+    expect(report.checks.find((c) => c.id === "assistant_model_keys")?.detail).toBe(
+      "Réactivation : anthropic",
+    );
+  });
+
+  it("repli sans clé : AVERTISSEMENT — ça envoie, mais la première panne surprendra", () => {
+    const report = preflight(ready({ assistantsMissingFallbackKey: ["Réactivation : anthropic"] }));
+    expect(report.canSendLive).toBe(true);
+    expect(report.warnings).toContain("assistant_fallback_keys");
+  });
+
+  it("tout configuré : les deux contrôles sont verts", () => {
+    const report = preflight(ready());
+    expect(report.blockers).not.toContain("assistant_model_keys");
+    expect(report.warnings).not.toContain("assistant_fallback_keys");
   });
 });

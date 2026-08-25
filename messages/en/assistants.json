@@ -690,6 +690,14 @@
         "label": "Model provider",
         "fix": "No model key configured: the assistant cannot write anything."
       },
+      "assistant_model_keys": {
+        "label": "Assistant model keys",
+        "fix": "An active assistant uses a provider with no API key (generator or classifier): none of its messages will go out."
+      },
+      "assistant_fallback_keys": {
+        "label": "Fallback model key",
+        "fix": "An active assistant's fallback has no API key: messages still go out, but the first primary failure will surface as an error instead of being caught."
+      },
       "app_url": {
         "label": "Public app URL",
         "fix": "NEXT_PUBLIC_APP_URL must be the exact https address Twilio calls: webhook signatures and status callbacks depend on it."

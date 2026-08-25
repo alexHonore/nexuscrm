@@ -38,7 +38,7 @@ import { contactValue, qualificationText } from "./contact-data";
 import { CLIENT_COMMENTS_MAX, formatClientComments, formatClientContext } from "./client-context";
 import { applyRefusal, requiredFieldsFor, rungNeedsSlots, type Rung } from "./goal";
 import { renderTemplate } from "./render";
-import { DEFAULT_TURN_INSTRUCTIONS } from "./templates";
+import { CLOSING_INSTRUCTIONS, CLOSING_TOOL_NAMES, DEFAULT_TURN_INSTRUCTIONS } from "./templates";
 import { outreachInstructionText } from "./opening";
 import { missingFieldsError, parseToolArgs, toolDefsFor } from "./tools";
 
@@ -730,7 +730,7 @@ export async function runTurn(
     trace: Record<string, unknown>;
     conversationPatch?: Partial<typeof conversations.$inferInsert>;
     events?: { type: string; payload?: Record<string, unknown> }[];
-    send?: { body: string; delayMs: number; model?: string | null };
+    send?: { body: string; delayMs: number; model?: string | null; finalWord?: boolean };
     qualification?: Record<string, unknown>;
     reason?: string;
     /**
@@ -838,6 +838,7 @@ export async function runTurn(
               assistantId: assistantRow.id,
               assistantVersion: assistantRow.version,
               model: input.send.model ?? null,
+              ...(input.send.finalWord ? { finalWord: true } : {}),
             },
           },
           tx,
@@ -968,22 +969,13 @@ export async function runTurn(
   const downgrade = applyRefusal(config.goal, softBefore, classification.refusal);
 
   // Refus ferme : la chaîne n'est PAS touchée — on ne propose pas de repli à
-  // quelqu'un qui vient de dire non.
-  if (classification.refusal === "hard") {
-    return commit({
-      outcome: "stopped",
-      reason: "hard_refusal",
-      trace: { runtimeBlock: "", rawResponse: {} },
-      conversationPatch: {
-        aiEnabled: false,
-        needsAttention: true,
-        attentionReason: "hard_refusal",
-      },
-      events: [{ type: "hard_refusal" }],
-      enrollmentOutcome: { status: "stopped", endReason: "hard_refusal" },
-      alert: { kind: "stopped", reason: "refus clair du contact" },
-    });
-  }
+  // quelqu'un qui vient de dire non. Mais un vrai non mérite mieux qu'un
+  // silence : le tour continue pour UN dernier message de clôture courtoise
+  // (la « clôture polie » que promet la doctrine de `classify.ts`), avec pour
+  // seuls outils classer la fiche et clore. Quoi que le modèle fasse — et même
+  // s'il tombe en panne — l'IA se tait ensuite et l'inscription de campagne
+  // s'arrête dès ce tour : personne ne relance quelqu'un qui a dit non.
+  const closingHard = classification.refusal === "hard";
 
   // Réponses encore EN FILE : une réponse d'agent n'existe dans `messages`
   // qu'au moment où son job `send_sms` s'exécute — 30 à 90 s après le tour
@@ -1039,7 +1031,9 @@ export async function runTurn(
   const turnsUsed =
     (turnCount?.n ?? 0) + queuedReplies.filter((job) => job.source === "agent").length;
 
-  if (turnsUsed >= config.approach.maxTurns || downgrade.exhausted || classification.wantsHuman) {
+  // Un tour de clôture passe outre ces portes : l'adieu est toujours permis,
+  // même budget épuisé — et un refus ferme l'emporte sur une demande d'humain.
+  if (!closingHard && (turnsUsed >= config.approach.maxTurns || downgrade.exhausted || classification.wantsHuman)) {
     const reason = classification.wantsHuman
       ? "client_wants_human"
       : downgrade.exhausted
@@ -1062,7 +1056,9 @@ export async function runTurn(
   };
 
   let slotsText = "aucune";
-  if (rungNeedsSlots(rung) && rung.goal.appointmentType) {
+  // Un tour de clôture n'offre RIEN : consulter l'agenda serait payer un appel
+  // pour des heures que la consigne de clôture interdit de proposer.
+  if (!closingHard && rungNeedsSlots(rung) && rung.goal.appointmentType) {
     try {
       const { slots, googleConnected } = await getInternalBookingProvider().getSlots({
         type: rung.goal.appointmentType,
@@ -1103,10 +1099,11 @@ export async function runTurn(
       }).text
     : "";
 
-  const system =
+  const layered =
     runtimeBlock === ""
       ? assistantRow.compiledPrompt
       : `${assistantRow.compiledPrompt}\n\n${runtimeBlock}`;
+  const system = closingHard ? `${layered}\n\n${CLOSING_INSTRUCTIONS}` : layered;
 
   const history = await db
     .select()
@@ -1136,7 +1133,12 @@ export async function runTurn(
     { role: "user" as const, content: userTurn },
   ];
 
-  const tools = toolDefsFor(config.tools);
+  // Sur un tour de clôture, seuls les outils de rangement gardent un sens —
+  // offrir book_meeting à quelqu'un qui vient de refuser serait la relance
+  // qu'on interdit, et `stop` supprimerait le numéro sans adieu.
+  const tools = closingHard
+    ? toolDefsFor(config.tools).filter((t) => CLOSING_TOOL_NAMES.includes(t.name))
+    : toolDefsFor(config.tools);
   const effects: ToolEffect[] = [];
   const sideEffectsDone = new Set<string>();
 
@@ -1161,6 +1163,12 @@ export async function runTurn(
    * Un appel au générateur, avec repli configuré. Le repli n'était jamais
    * utilisé : le modèle principal en panne, le tour finissait en erreur alors
    * qu'un second fournisseur était réglé exactement pour ça.
+   *
+   * La panne PRIMAIRE reste le diagnostic. Un repli sans clé (ou en panne à
+   * son tour) s'y ANNOTE au lieu de la remplacer : le repli par défaut est
+   * `anthropic` et sa clé absente faisait dire « llm_provider_unconfigured »
+   * à chaque alerte pendant que la vraie cause (crédits OpenRouter épuisés,
+   * llm_http_402) restait invisible.
    */
   const generateWithFallback = async (
     input: Omit<Parameters<typeof generatorProvider.generate>[0], "model">,
@@ -1170,9 +1178,21 @@ export async function runTurn(
     } catch (primaryErr) {
       const fallback = config.model.fallback;
       if (!fallback) throw primaryErr;
-      const out = await getLlmProvider(fallback.provider).generate({ ...input, model: fallback.model });
-      fallbackUsed = true;
-      return out;
+      const primaryMsg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+      let fallbackProvider: ReturnType<typeof getLlmProvider>;
+      try {
+        fallbackProvider = getLlmProvider(fallback.provider);
+      } catch {
+        throw new Error(`${primaryMsg} (repli ${fallback.provider} sans clé configurée)`);
+      }
+      try {
+        const out = await fallbackProvider.generate({ ...input, model: fallback.model });
+        fallbackUsed = true;
+        return out;
+      } catch (fallbackErr) {
+        const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+        throw new Error(`${primaryMsg} (repli ${fallback.provider}/${fallback.model} : ${fallbackMsg})`);
+      }
     }
   };
   /** Refus successifs — journalises meme quand la regeneration finit par passer. */
@@ -1216,8 +1236,17 @@ export async function runTurn(
 
       if (result.toolCalls.length === 0 || !offerTools) break;
 
+      // L'OFFRE n'est pas la PERMISSION : un modèle peut halluciner un appel
+      // vers un outil qu'on ne lui a pas offert (book_meeting sur un tour de
+      // clôture) — sans cette borne, il serait exécuté quand même. L'appel
+      // non offert est écarté du tour entier, résultat compris : un appel
+      // déclaré sans résultat ferait rejeter la requête suivante.
+      const offeredNames = new Set(tools.map((t) => t.name));
+      const grantedCalls = result.toolCalls.filter((c) => offeredNames.has(c.name));
+      if (grantedCalls.length === 0) break;
+
       const ran = await executeTools({
-        calls: result.toolCalls,
+        calls: grantedCalls,
         rung,
         clientId: conversation.clientId,
         clientAssignedToId: client?.assignedToId ?? null,
@@ -1250,7 +1279,7 @@ export async function runTurn(
       turnMessages.push({
         role: "assistant",
         content: result.text,
-        toolCalls: result.toolCalls,
+        toolCalls: grantedCalls,
       });
       for (const r of ran.results) {
         turnMessages.push({ role: "tool", toolCallId: r.id, name: r.name, content: r.content });
@@ -1321,6 +1350,9 @@ export async function runTurn(
   if (classifyError) {
     events.push({ type: "llm_error", payload: { stage: "classifier", error: classifyError } });
   }
+  // Le marqueur d'audit du refus ferme survit au changement de comportement :
+  // il dit « ce tour était une clôture », quel que soit son dénouement.
+  if (closingHard) events.push({ type: "hard_refusal" });
 
   const baseState = { goalRung: downgrade.rung.key, softRefusals: downgrade.softRefusals };
   const modelFacts = result
@@ -1379,6 +1411,30 @@ export async function runTurn(
   if (llmError !== null || result === null) {
     events.push({ type: "llm_error", payload: { error: llmError } });
     const final = options.finalAttempt === true;
+    if (closingHard) {
+      // Modèle en panne sur l'adieu : arrêt silencieux IMMÉDIAT — l'ancien
+      // comportement, sans reprise. Rejouer le tour soumettrait le refus à une
+      // DEUXIÈME classification : un raté du classifieur à la reprise le
+      // dégrade en « none » et l'assistant repartirait en argumentaire chez
+      // quelqu'un qui vient de dire non — bien pire qu'un adieu sauté. Le
+      // refus est réglé ici : entrants consommés, IA en pause, inscription
+      // stoppée, humains prévenus.
+      return commit({
+        outcome: "stopped",
+        reason: "hard_refusal",
+        trace: { ...traceCommon, rawResponse: { error: llmError } },
+        conversationPatch: {
+          ...baseState,
+          aiEnabled: false,
+          needsAttention: true,
+          attentionReason: "hard_refusal",
+        },
+        events,
+        qualification,
+        enrollmentOutcome: { status: "stopped", endReason: "hard_refusal" },
+        alert: { kind: "stopped", reason: "refus clair du contact" },
+      });
+    }
     return commit({
       outcome: "error",
       reason: llmError ?? "no_result",
@@ -1401,8 +1457,30 @@ export async function runTurn(
     reason: v.reason ?? null,
   }));
 
+  // Tour de clôture qui n'aboutit pas à un envoi (brouillon bloqué, vide ou
+  // coupé) : l'ancien comportement — arrêt silencieux — reste le bon repli.
+  // Jamais d'escalade : il n'y a rien à reprendre pour un humain après un non.
+  const silentClose = () => {
+    return commit({
+      outcome: "stopped",
+      reason: "hard_refusal",
+      trace: { ...traceCommon, guardrailResults: guardrailJson, ...modelFacts },
+      conversationPatch: {
+        ...baseState,
+        aiEnabled: false,
+        needsAttention: true,
+        attentionReason: "hard_refusal",
+      },
+      events,
+      qualification,
+      enrollmentOutcome: { status: "stopped", endReason: "hard_refusal" },
+      alert: { kind: "stopped", reason: "refus clair du contact" },
+    });
+  };
+
   // Toujours bloqué après la régénération : on n'envoie RIEN.
   if (blockingFailures(verdicts).length > 0) {
+    if (closingHard) return silentClose();
     // Un juge injoignable bloque tout (fermeture par défaut, voulue) — mais
     // l'opérateur doit distinguer « l'assistant a mal écrit » d'une panne de
     // notre côté, sinon il cherche au mauvais endroit.
@@ -1450,6 +1528,7 @@ export async function runTurn(
   }
 
   if (draft === "") {
+    if (closingHard) return silentClose();
     events.push({ type: "escalation", payload: { reason: "no_text" } });
     return commit({
       outcome: "handoff",
@@ -1467,6 +1546,7 @@ export async function runTurn(
   if (result.truncated) events.push({ type: "truncated", payload: { finishReason: result.finishReason ?? null } });
   if (result.truncated || result.finishReason === "content_filter") {
     const reason = result.finishReason === "content_filter" ? "content_filter" : "truncated";
+    if (closingHard) return silentClose();
     events.push({ type: "escalation", payload: { reason } });
     return commit({
       outcome: "handoff",
@@ -1501,27 +1581,45 @@ export async function runTurn(
 
   return commit({
     outcome: "sent",
+    ...(closingHard ? { reason: "hard_refusal" } : {}),
     trace: { ...traceCommon, guardrailResults: guardrailJson, ...modelFacts },
     conversationPatch: {
       ...baseState,
       ...(clearInbound ? { needsAttention: false, attentionReason: null } : {}),
       ...(transferTo ? { activeAssistantId: transferTo } : {}),
       // Fil clos par l'assistant : l'IA se tait après ce message et un humain
-      // voit le résultat dans l'inbox.
+      // voit le résultat dans l'inbox. Après un refus ferme, la clôture est
+      // FORCÉE même si le modèle n'a pas appelé close_conversation : l'adieu
+      // part, puis l'IA se tait.
       ...(closedOutcome
         ? { aiEnabled: false, needsAttention: true, attentionReason: `closed_${closedOutcome}` }
-        : {}),
+        : closingHard
+          ? { aiEnabled: false, needsAttention: true, attentionReason: "hard_refusal" }
+          : {}),
     },
     events,
     qualification,
-    send: { body: draft, delayMs: replyDelayMs(config.approach.replySpeed), model: result.modelServed ?? null },
+    send: {
+      body: draft,
+      delayMs: replyDelayMs(config.approach.replySpeed),
+      model: result.modelServed ?? null,
+      // Ce tour met l'IA en pause dans la MÊME transaction : sans ce drapeau,
+      // la garde « ai_paused » du job d'envoi supprimait l'adieu.
+      ...(closingHard || closedOutcome ? { finalWord: true } : {}),
+    },
     ...(bookedNow
       ? { enrollmentOutcome: { status: "booked" as const, endReason: "booked" } }
       : closedOutcome === "goal_reached"
         ? { enrollmentOutcome: { status: "completed" as const, endReason: "goal_reached" } }
         : closedOutcome
           ? { enrollmentOutcome: { status: "stopped" as const, endReason: closedOutcome } }
-          : {}),
-    ...(closedReason ? { alert: { kind: "closed" as const, reason: closedReason } } : {}),
+          : closingHard
+            ? { enrollmentOutcome: { status: "stopped" as const, endReason: "hard_refusal" } }
+            : {}),
+    ...(closedReason
+      ? { alert: { kind: "closed" as const, reason: closedReason } }
+      : closingHard
+        ? { alert: { kind: "stopped" as const, reason: "refus clair du contact" } }
+        : {}),
   });
 }

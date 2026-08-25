@@ -101,6 +101,7 @@ function sendPayload(
     body: "Bonjour, ici Groupe Nexus. Avez-vous deux minutes ?",
     source: "opener",
     automated: true,
+    finalWord: false,
     aiGenerated: false,
     sentById: null,
     assistantId: null,
@@ -296,6 +297,20 @@ describe("dispatcher de la file (runDispatchCycle + /api/cron/dispatch)", () => 
     expect(job.status).toBe("skipped");
     expect(job.lastError).toBe("ai_paused");
     expect(await testDb.select().from(messages)).toHaveLength(0);
+  });
+
+  it("le « dernier mot » passe malgré l'IA en pause : l'adieu commis avec la pause part", async () => {
+    // Un adieu de clôture est mis en file DANS la transaction qui met l'IA en
+    // pause : sans cette exemption, la garde ai_paused le supprimait toujours.
+    freezeAt(IN_WINDOW);
+    const { conversation } = await seedThread({ aiEnabled: false });
+    const { id } = await enqueueDue(sendPayload(conversation, { automated: true, finalWord: true }));
+
+    const counts = await runDispatchCycle();
+    expect(counts).toMatchObject({ claimed: 1, done: 1, skipped: 0 });
+
+    expect((await getJob(id)).status).toBe("done");
+    expect(await testDb.select().from(messages)).toHaveLength(1);
   });
 
   it("un envoi humain (automated:false) part malgré aiEnabled=false", async () => {

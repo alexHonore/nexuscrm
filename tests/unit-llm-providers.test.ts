@@ -743,6 +743,19 @@ describe("erreurs normalisées", () => {
     await expect(client.generate(INPUT)).rejects.toMatchObject({ status: 400, retryable: false });
   });
 
+  it("402 (crédits épuisés) → rejouable : le COMPTE est à sec, pas la requête", async () => {
+    // L'incident du 2026-08-25 : OpenRouter à court de crédits — un repli
+    // configuré chez un autre fournisseur doit avoir sa chance.
+    const broke = createOpenRouterProvider({
+      apiKey: "k",
+      fetchFn: makeFetch(402, { error: { message: "This request requires more credits" } }).fetchFn,
+    });
+    await expect(broke.generate(INPUT)).rejects.toMatchObject({
+      status: 402,
+      retryable: true,
+    });
+  });
+
   it("un appel qui pend est abandonné et devient rejouable", async () => {
     const fetchFn: typeof fetch = (_url, init) =>
       new Promise((_resolve, reject) => {
