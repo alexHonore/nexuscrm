@@ -204,6 +204,44 @@ describe("POST /api/admin/sms/replay-llm-errors", () => {
     });
   });
 
+  it("« n'a rien écrit » (no_text) se rejoue aussi — l'erreur d'amont maquillée en 200", async () => {
+    const { assistant, client, conversation } = await stuckThread();
+    await testDb
+      .update(conversations)
+      .set({ attentionReason: "no_text" })
+      .where(eq(conversations.id, conversation.id));
+    const [campaign] = await testDb
+      .insert(campaigns)
+      .values({
+        name: "Réactivation 90 j",
+        status: "active",
+        trigger: { kind: "manual" },
+        ladder: [{ delayHours: 0, body: null, label: "ouverture" }],
+        assistantId: assistant.id,
+      })
+      .returning();
+    const [enrollment] = await testDb
+      .insert(campaignEnrollments)
+      .values({
+        campaignId: campaign.id,
+        clientId: client.id,
+        conversationId: conversation.id,
+        status: "active",
+        step: 1,
+      })
+      .returning();
+    await testDb.insert(scheduledJobs).values({
+      type: "agent_turn",
+      status: "failed",
+      runAt: new Date(),
+      payload: { conversationId: conversation.id, outreach: { enrollmentId: enrollment.id, step: 0 } },
+      lastError: "llm_http_402",
+    });
+
+    const res = await route.POST();
+    expect(await res.json()).toMatchObject({ stuck: 1, replayedOutreach: 1 });
+  });
+
   it("une inscription STOPPÉE entre-temps n'est jamais rejouée", async () => {
     const { assistant, client, conversation } = await stuckThread();
     const [campaign] = await testDb

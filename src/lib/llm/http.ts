@@ -63,11 +63,57 @@ export async function callJson(
     );
   }
 
+  let json: unknown;
   try {
-    return { json: JSON.parse(text), latencyMs: Date.now() - startedAt };
+    json = JSON.parse(text);
   } catch {
     throw new LLMProviderError("llm_malformed_response", input.provider, res.status, false);
   }
+
+  // OpenRouter renvoie parfois l'erreur DANS un 200 : {"error":{"message":
+  // "…rate-limited upstream…","code":429}}. Traitée comme un succès, la
+  // réponse « sans choices » donnait un texte vide — le tour partait en
+  // « l'assistant n'a rien écrit » (escalade) au lieu d'être rejoué, et 80
+  // fils ont fini chez un humain pendant l'incident du 2026-08-25.
+  const embedded = embeddedError(json);
+  if (embedded !== null) {
+    throw new LLMProviderError(
+      `llm_upstream_${embedded.code ?? "error"}: ${embedded.message.slice(0, 200)}`,
+      input.provider,
+      embedded.code,
+      // Code inconnu : une erreur maquillée en 200 est une bizarrerie d'amont,
+      // la rejouer est le pari raisonnable. Codes connus : même règle que plus
+      // haut (5xx, 429, 408, 402 = repli ; 4xx restants = requête fautive).
+      embedded.code === undefined ||
+        embedded.code >= 500 ||
+        embedded.code === 429 ||
+        embedded.code === 408 ||
+        embedded.code === 402,
+    );
+  }
+
+  return { json, latencyMs: Date.now() - startedAt };
+}
+
+/** L'erreur qu'un relais glisse dans un corps 2xx, ou null si le corps est sain. */
+function embeddedError(json: unknown): { message: string; code?: number } | null {
+  if (json === null || typeof json !== "object") return null;
+  const error = (json as Record<string, unknown>).error;
+  if (error === null || error === undefined) return null;
+  if (typeof error === "string") return { message: error };
+  if (typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    const message = typeof record.message === "string" ? record.message : JSON.stringify(record).slice(0, 200);
+    const rawCode = record.code ?? record.status;
+    const code =
+      typeof rawCode === "number"
+        ? rawCode
+        : typeof rawCode === "string" && /^\d{3}$/.test(rawCode)
+          ? Number(rawCode)
+          : undefined;
+    return code === undefined ? { message } : { message, code };
+  }
+  return null;
 }
 
 /** Message d'erreur du fournisseur, sans jamais relayer un corps entier. */

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { campaignEnrollments, conversations, messages, scheduledJobs } from "@/db/schema-sms";
 import { UNDELIVERED_STATUSES } from "@/lib/agent/runtime";
@@ -26,8 +26,17 @@ import { enqueueJob } from "@/lib/jobs/queue";
  *  · fil déjà repris par un humain (rien à rouvrir, pas d'ouverture en échec) —
  *    la pastille est simplement levée.
  *
- * Ne touche QUE les fils `attention = llm_error` avec l'IA encore active : un
- * refus ferme, un désabonnement ou une pause humaine ne sont jamais rejoués.
+ * Ne touche QUE les fils `attention = llm_error` ou `no_text` avec l'IA
+ * encore active : un refus ferme, un désabonnement ou une pause humaine ne
+ * sont jamais rejoués. `no_text` est là parce qu'une erreur d'amont maquillée
+ * en 200 (« rate-limited upstream ») donnait un texte vide : le tour finissait
+ * en « l'assistant n'a rien écrit » — une panne, pas un silence du modèle.
+ * Rejouer un vrai silence est sans danger : rien n'était parti, le modèle a
+ * simplement une seconde chance d'écrire.
+ *
+ * Les tours repartent ÉTALÉS (15 s d'écart) : les rejouer tous à la même
+ * seconde est exactement ce qui a fait dériver la reprise du 2026-08-25 vers
+ * la limite de débit de l'amont.
  */
 export async function POST() {
   const admin = await apiAdmin();
@@ -40,7 +49,7 @@ export async function POST() {
       and(
         eq(conversations.aiEnabled, true),
         eq(conversations.needsAttention, true),
-        eq(conversations.attentionReason, "llm_error"),
+        inArray(conversations.attentionReason, ["llm_error", "no_text"]),
         isNotNull(conversations.activeAssistantId),
       ),
     );
@@ -48,6 +57,9 @@ export async function POST() {
   let replayedInbound = 0;
   let replayedOutreach = 0;
   let cleared = 0;
+  /** Départ étalé : un tour toutes les 15 s, jamais un troupeau. */
+  const staggeredRunAt = () =>
+    new Date(Date.now() + 2_000 + (replayedInbound + replayedOutreach) * 15_000);
 
   for (const conv of stuck) {
     // Rouvrir les entrants restés sans réponse : tout entrant consommé APRÈS
@@ -73,7 +85,7 @@ export async function POST() {
     if (reopened.length > 0) {
       await enqueueJob({
         type: "agent_turn",
-        runAt: new Date(Date.now() + 2_000),
+        runAt: staggeredRunAt(),
         payload: { conversationId: conv.id },
         // La MÊME clé que le webhook : un tour déjà en file absorbe le nôtre.
         dedupeKey: `turn:${conv.id}`,
@@ -106,7 +118,7 @@ export async function POST() {
       if (outreach && enrollment && enrollment.status !== "stopped" && enrollment.status !== "excluded") {
         await enqueueJob({
           type: "agent_turn",
-          runAt: new Date(Date.now() + 2_000),
+          runAt: staggeredRunAt(),
           payload: { conversationId: conv.id, outreach },
           // La clé du barreau d'origine — le dédoublonnage n'absorbe que les
           // jobs vivants, jamais celui en échec qu'on remplace.

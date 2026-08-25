@@ -743,6 +743,32 @@ describe("erreurs normalisées", () => {
     await expect(client.generate(INPUT)).rejects.toMatchObject({ status: 400, retryable: false });
   });
 
+  it("une erreur GLISSÉE dans un 200 est une ERREUR, jamais un texte vide", async () => {
+    // OpenRouter répond parfois {"error":{code:429,…}} avec un statut HTTP
+    // 200. Traitée comme un succès, la réponse « sans choices » donnait un
+    // brouillon vide : le tour partait en « l'assistant n'a rien écrit »
+    // (escalade) au lieu d'être rejoué — 80 fils pendant l'incident du
+    // 2026-08-25.
+    const throttled = createOpenRouterProvider({
+      apiKey: "k",
+      fetchFn: makeFetch(200, {
+        error: { message: "openai/gpt-5.6-luna is temporarily rate-limited upstream", code: 429 },
+      }).fetchFn,
+    });
+    await expect(throttled.generate(INPUT)).rejects.toMatchObject({
+      name: "LLMProviderError",
+      status: 429,
+      retryable: true,
+    });
+
+    // Un code non rejouable embarqué garde sa classification.
+    const refused = createOpenRouterProvider({
+      apiKey: "k",
+      fetchFn: makeFetch(200, { error: { message: "moderation refusal", code: 403 } }).fetchFn,
+    });
+    await expect(refused.generate(INPUT)).rejects.toMatchObject({ status: 403, retryable: false });
+  });
+
   it("402 (crédits épuisés) → rejouable : le COMPTE est à sec, pas la requête", async () => {
     // L'incident du 2026-08-25 : OpenRouter à court de crédits — un repli
     // configuré chez un autre fournisseur doit avoir sa chance.
