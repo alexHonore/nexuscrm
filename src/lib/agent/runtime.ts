@@ -83,7 +83,10 @@ const SIDE_EFFECT_TOOLS = new Set(["book_meeting", "stop", "handoff", "schedule_
  * un message qui n'est jamais parti, ni le compter dans son budget de tours.
  * « unknown » (délai réseau) n'en fait pas partie : Twilio l'a peut-être livré.
  */
-const UNDELIVERED_STATUSES = ["skipped", "failed", "undelivered", "canceled"] as const;
+// Exporté : le rejeu après panne (« replay-llm-errors ») borne les entrants à
+// rouvrir sur le dernier sortant REÇU — la même définition que le budget de
+// tours, sinon un envoi sauté compterait comme une réponse déjà donnée.
+export const UNDELIVERED_STATUSES = ["skipped", "failed", "undelivered", "canceled"] as const;
 const undelivered = (m: { direction: string; status: string | null }): boolean =>
   m.direction === "out" && (UNDELIVERED_STATUSES as readonly string[]).includes(m.status ?? "");
 
