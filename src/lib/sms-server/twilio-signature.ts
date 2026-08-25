@@ -41,3 +41,50 @@ export function publicWebhookUrl(path: string, search = ""): string {
   const base = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
   return `${base ?? ""}${path}${search}`;
 }
+
+/**
+ * Validation multi-URL : vraie si la signature valide pour AU MOINS UNE des
+ * URL candidates. Twilio signe l'URL exactement telle qu'elle est configurée
+ * chez lui — que NOUS ne connaissons pas avec certitude. On essaie donc
+ * l'URL reconstruite de NEXT_PUBLIC_APP_URL ET celle que porte la requête
+ * (x-forwarded-host) : une divergence de domaine ou de protocole entre les
+ * deux réglages ne doit plus jeter chaque réponse de client en silence.
+ * Sans candidate, le comportement suit la règle du jeton absent : fermé en
+ * production.
+ */
+export function isValidTwilioSignatureAnyUrl(input: {
+  urls: string[];
+  params: URLSearchParams;
+  signature: string | null;
+  authToken: string | undefined;
+  isProduction: boolean;
+}): boolean {
+  const { urls, params, signature, authToken, isProduction } = input;
+  if (!authToken) return !isProduction;
+  if (urls.length === 0) return false;
+  return urls.some((url) => isValidTwilioSignature({ url, params, signature, authToken, isProduction }));
+}
+
+/**
+ * URL candidates d'un webhook, dans l'ordre de confiance : la reconstruction
+ * depuis NEXT_PUBLIC_APP_URL (la config déclarée), puis l'adresse réellement
+ * appelée d'après les en-têtes du mandataire (x-forwarded-*). Dédoublonnées —
+ * quand tout est bien configuré, les deux coïncident.
+ */
+export function webhookUrlCandidates(input: {
+  path: string;
+  search?: string;
+  headers: { get(name: string): string | null };
+}): string[] {
+  const { path, headers } = input;
+  const search = input.search ?? "";
+  const urls = new Set<string>();
+  const envBase = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+  if (envBase) urls.add(`${envBase}${path}${search}`);
+  const host = headers.get("x-forwarded-host") ?? headers.get("host");
+  if (host) {
+    const proto = headers.get("x-forwarded-proto") ?? "https";
+    urls.add(`${proto}://${host}${path}${search}`);
+  }
+  return [...urls];
+}

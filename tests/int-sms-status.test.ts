@@ -111,6 +111,45 @@ describe("POST /api/webhooks/twilio/status", () => {
     expect(row.status).toBe("queued");
   });
 
+  it("journalise le rejet : une rangée d'audit avec le chemin et les URL candidates", async () => {
+    // La panne d'origine : des rappels rejetés en silence, 44 messages
+    // « En file » sans aucune trace. Le rejet doit maintenant laisser une
+    // rangée d'audit PROPRE À CETTE ROUTE (fenêtre par chemin — un déluge de
+    // rejets entrants ne doit pas la masquer), avec les URL essayées.
+    await seedMessage();
+    const res = await POST(
+      statusRequest(
+        { MessageSid: SID, MessageStatus: "delivered" },
+        { signature: "pas-la-bonne-signature" },
+      ),
+    );
+    expect(res.status).toBe(403);
+
+    const rows = await testDb
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "sms.webhook_invalid_signature"));
+    expect(rows).toHaveLength(1);
+    const detail = rows[0].detail as { path: string; hasToken: boolean; candidates: string[] };
+    expect(detail.path).toBe("/api/webhooks/twilio/status");
+    expect(detail.hasToken).toBe(true);
+    expect(detail.candidates).toContain(URL_STATUS);
+
+    // Rafale : une seule rangée par fenêtre de 10 minutes.
+    await POST(
+      statusRequest(
+        { MessageSid: SID, MessageStatus: "delivered" },
+        { signature: "toujours-pas" },
+      ),
+    );
+    expect(
+      await testDb
+        .select()
+        .from(auditLogs)
+        .where(eq(auditLogs.action, "sms.webhook_invalid_signature")),
+    ).toHaveLength(1);
+  });
+
   it("refuse (400) un corps sans MessageSid", async () => {
     const res = await POST(statusRequest({ MessageStatus: "delivered" }));
     expect(res.status).toBe(400);
