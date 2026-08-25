@@ -6,8 +6,16 @@ import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 import { db } from "@/db";
 import { auditLogs, categories, sources, users } from "@/db/schema";
-import { assistants, messages, scheduledJobs, smsNumbers } from "@/db/schema-sms";
+import {
+  assistants,
+  campaignEnrollments,
+  campaigns,
+  messages,
+  scheduledJobs,
+  smsNumbers,
+} from "@/db/schema-sms";
 import { requireUser } from "@/lib/auth/guards";
+import { enrollmentInFlight, enrollmentPaused } from "@/lib/campaigns/enrollment-status";
 import { dispositionDisplayMap } from "@/lib/dispositions";
 import { APP_TZ } from "@/components/clients/timezone";
 import { ClientHeader } from "@/components/clients/client-header";
@@ -17,6 +25,10 @@ import { ClientSwitcher } from "@/components/clients/client-switcher";
 import { CommentsTimeline } from "@/components/clients/comments-timeline";
 import { DeleteClientButton } from "@/components/clients/delete-client-button";
 import { FollowupsCard } from "@/components/clients/followups-card";
+import {
+  CampaignEnrollmentsCard,
+  type ClientEnrollmentData,
+} from "@/components/clients/campaign-enrollments-card";
 import { SmsThreadCard, type SmsThreadData } from "@/components/clients/sms-thread-card";
 import type { FilterOption } from "@/components/clients/clients-filters";
 
@@ -112,6 +124,46 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
         })
       : Promise.resolve(undefined),
   ]);
+
+  // Campagnes du client — chaque inscription avec sa campagne et l'assistant
+  // qui tiendra la conversation. La fiche doit dire à quoi cette personne est
+  // rattachée, et permettre d'en sortir sans partir dans l'éditeur.
+  const enrollmentRows = await db
+    .select({
+      id: campaignEnrollments.id,
+      campaignId: campaignEnrollments.campaignId,
+      status: campaignEnrollments.status,
+      step: campaignEnrollments.step,
+      nextTouchAt: campaignEnrollments.nextTouchAt,
+      endReason: campaignEnrollments.endReason,
+      enrolledAt: campaignEnrollments.enrolledAt,
+      campaignName: campaigns.name,
+      ladder: campaigns.ladder,
+      assistantName: assistants.name,
+    })
+    .from(campaignEnrollments)
+    .innerJoin(campaigns, eq(campaigns.id, campaignEnrollments.campaignId))
+    .leftJoin(assistants, eq(assistants.id, campaigns.assistantId))
+    .where(eq(campaignEnrollments.clientId, client.id))
+    .orderBy(desc(campaignEnrollments.enrolledAt));
+
+  const clientEnrollments: ClientEnrollmentData[] = enrollmentRows.map((row) => {
+    const paused = enrollmentPaused(row);
+    return {
+      id: row.id,
+      campaignId: row.campaignId,
+      campaignName: row.campaignName,
+      displayStatus: paused ? "paused" : row.status,
+      inFlight: enrollmentInFlight(row.status),
+      paused,
+      sent: row.step,
+      total: Array.isArray(row.ladder) ? row.ladder.length : 0,
+      nextTouchAt: row.nextTouchAt?.toISOString() ?? null,
+      enrolledAt: row.enrolledAt.toISOString(),
+      endReason: row.endReason,
+      assistantName: row.assistantName,
+    };
+  });
 
   const smsThread: SmsThreadData = {
     conversationId: thread?.id ?? null,
@@ -266,6 +318,15 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
                 author: { id: c.userId, name: c.user?.name ?? "—" },
               }))}
             />
+            {/* À quoi cette personne est rattachée — visible AVANT le fil :
+                comprendre pourquoi des SMS partent précède leur lecture. */}
+            {clientEnrollments.length > 0 ? (
+              <CampaignEnrollmentsCard
+                clientName={client.fullName}
+                isAdmin={user.role === "admin"}
+                enrollments={clientEnrollments}
+              />
+            ) : null}
             {/* Sous les commentaires : le fil SMS fait partie de l'espace de
                 travail du téléphoniste, au même titre que ses relances. */}
             <SmsThreadCard clientId={client.id} thread={smsThread} />

@@ -271,5 +271,12 @@
     "createdBy": "Created {date} by {name}",
     "updated": "Edited {date}",
     "updatedBy": "Edited {date} by {name}"
+  },
+  "campaigns": {
+    "title": "Campaigns",
+    "progress": "{sent}/{total} messages sent",
+    "assistant": "Assistant: {name}",
+    "nextTouch": "Next message: {when}",
+    "open": "Open campaign"
   }
 }

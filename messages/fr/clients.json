@@ -271,5 +271,12 @@
     "createdBy": "Créée le {date} par {name}",
     "updated": "Modifiée le {date}",
     "updatedBy": "Modifiée le {date} par {name}"
+  },
+  "campaigns": {
+    "title": "Campagnes",
+    "progress": "{sent}/{total} messages envoyés",
+    "assistant": "Assistant : {name}",
+    "nextTouch": "Prochain message : {when}",
+    "open": "Ouvrir la campagne"
   }
 }
