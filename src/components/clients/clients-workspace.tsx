@@ -107,6 +107,35 @@ function subscribeStoredView(onChange: () => void): () => void {
   return () => viewListeners.delete(onChange);
 }
 
+// ── Filtres et tri persistants ───────────────────────────────────────────────
+// Le panneau retrouve ses filtres au retour (rechargement, autre onglet) : on
+// range l'instantané SavedViewState sous sa propre clé et on le restaure au
+// montage — après l'hydratation, pour ne jamais diverger du rendu serveur.
+// Un lien profond (?q=, ?categoryId=) garde la priorité sur l'état mémorisé.
+
+const PANEL_STATE_KEY = "nexus.clientsPanelState";
+
+function readStoredPanelState(): SavedViewState | null {
+  try {
+    const raw = window.localStorage.getItem(PANEL_STATE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    // Données d'un autre âge ou trafiquées : normalisées, jamais crues.
+    return normalizeSavedView(parsed as SavedView);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredPanelState(state: SavedViewState): void {
+  try {
+    window.localStorage.setItem(PANEL_STATE_KEY, JSON.stringify(state));
+  } catch {
+    // Stockage indisponible (navigation privée) : tant pis, rien ne casse.
+  }
+}
+
 /** Signature d'affichage d'une ligne — évite les rendus inutiles au sondage. */
 function rowsSignature(rows: ClientListItem[]): string {
   return rows
@@ -258,6 +287,35 @@ export function ClientsWorkspace({
     [],
   );
 
+  /** Applique un état de filtres/tri complet (vues enregistrées, restauration). */
+  const applyFilterState = (v: SavedViewState) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setQ(v.q);
+    setAppliedQ(v.q.trim());
+    setCategoryIds(v.categoryIds);
+    setSourceIds(v.sourceIds);
+    setAssignedToIds(v.assignedToIds);
+    setStatuses(v.statuses);
+    setLanguages(v.languages);
+    setCreatedFilter({ mode: v.createdMode, from: v.createdFrom, to: v.createdTo });
+    setUpdatedFilter({ mode: v.updatedMode, from: v.updatedFrom, to: v.updatedTo });
+    setSortKey(SORT_KEYS.includes(v.sortKey) ? v.sortKey : "activity");
+    setSortDir(v.sortDir);
+  };
+
+  // Restauration au montage — une seule fois, après l'hydratation. Un lien
+  // profond (?q= du tableau de bord, ?categoryId= du pipeline) gagne : ces
+  // adresses promettent un résultat précis, pas les filtres d'hier.
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+    if (searchParams.get("q") || searchParams.get("categoryId")) return;
+    const stored = readStoredPanelState();
+    if (stored) applyFilterState(stored);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- montage seulement
+  }, []);
+
   // ── List state ─────────────────────────────────────────────────────────────
   const [items, setItems] = useState<ClientListItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -317,6 +375,40 @@ export function ClientsWorkspace({
     sortKey,
     sortDir,
   ]);
+
+  // Mémorisation continue : chaque changement de filtres ou de tri est rangé —
+  // jamais avant la restauration, sinon le montage écraserait l'état d'hier
+  // avec les valeurs par défaut.
+  // Le premier passage de cet effet est TOUJOURS avalé : au montage il voit
+  // encore l'état du premier rendu (défauts, ou graines d'un lien profond) —
+  // l'écrire aurait écrasé les filtres mémorisés avec des valeurs que
+  // l'utilisateur n'a pas choisies. Seul un vrai changement persiste.
+  const persistArmedRef = useRef(false);
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    if (!persistArmedRef.current) {
+      persistArmedRef.current = true;
+      return;
+    }
+    writeStoredPanelState({
+      q: appliedQ,
+      categoryIds,
+      sourceIds,
+      assignedToIds,
+      statuses,
+      languages,
+      createdMode: createdFilter.mode,
+      createdFrom: createdFilter.from,
+      createdTo: createdFilter.to,
+      updatedMode: updatedFilter.mode,
+      updatedFrom: updatedFilter.from,
+      updatedTo: updatedFilter.to,
+      sortKey,
+      sortDir,
+      view,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- filterQuery couvre tous les filtres
+  }, [filterQuery, sortKey, sortDir, view]);
 
   // Latest-value refs so loadMore stays stable for the context consumers.
   const itemsRef = useRef<ClientListItem[]>([]);
@@ -579,18 +671,7 @@ export function ClientsWorkspace({
   const applySavedView = (saved: SavedView) => {
     // Données venues du localStorage (ancien ou nouveau format) : normalisées.
     const v = normalizeSavedView(saved);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    setQ(v.q);
-    setAppliedQ(v.q.trim());
-    setCategoryIds(v.categoryIds);
-    setSourceIds(v.sourceIds);
-    setAssignedToIds(v.assignedToIds);
-    setStatuses(v.statuses);
-    setLanguages(v.languages);
-    setCreatedFilter({ mode: v.createdMode, from: v.createdFrom, to: v.createdTo });
-    setUpdatedFilter({ mode: v.updatedMode, from: v.updatedFrom, to: v.updatedTo });
-    setSortKey(SORT_KEYS.includes(v.sortKey) ? v.sortKey : "activity");
-    setSortDir(v.sortDir);
+    applyFilterState(v);
     changeView(v.view);
   };
 
