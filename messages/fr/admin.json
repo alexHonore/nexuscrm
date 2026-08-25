@@ -710,7 +710,7 @@
     "confirmMismatch": "Les chiffres saisis ne correspondent pas au numéro.",
     "recurringNote": "La location mensuelle des numéros n'apparaît pas ici : seuls les appels de la période sont chiffrés.",
     "grandTotal": "Total de la période ($ US)",
-    "grandTotalNote": "Téléphonie voip.ms (réel) + SMS Twilio (estimé) + assistants IA (réel).",
+    "grandTotalNote": "Téléphonie voip.ms (réel) + SMS Twilio (réel si disponible, sinon estimé) + assistants IA (réel).",
     "sectionTelephony": "Téléphonie (voip.ms)",
     "sectionSms": "SMS (Twilio)",
     "sectionAi": "Assistants (IA)",
@@ -723,7 +723,7 @@
     "smsRateLabel": "Coût par segment ($ US)",
     "smsRateSave": "Enregistrer",
     "smsRateSaved": "Taux SMS enregistré.",
-    "smsRateNote": "Twilio ne renvoie pas le prix par message — la dépense SMS est estimée : segments × ce taux. Mettez votre tarif réel.",
+    "smsRateNote": "Taux de REPLI : utilisé seulement quand le coût réel de Twilio est indisponible. Défaut : le tarif SMS sortant publié par Twilio (É.-U./Canada).",
     "msgCount": "{count} message(s)",
     "aiTurns": "Tours",
     "aiTokensIn": "Jetons entrée",
@@ -733,7 +733,10 @@
     "aiEmpty": "Aucun tour d’assistant sur cette période.",
     "smsEmpty": "Aucun SMS sur cette période.",
     "totalPartial": "Total partiel : une source est encore en cours de chargement ou indisponible.",
-    "unavailable": "Données de consommation indisponibles — réessayez."
+    "unavailable": "Données de consommation indisponibles — réessayez.",
+    "smsCostReal": "Coût facturé ($ US)",
+    "smsSourceReal": "Coût réel facturé par Twilio.",
+    "smsSourceEstimate": "Twilio injoignable — estimation : segments × taux."
   },
   "classification": {
     "title": "Classement automatique",

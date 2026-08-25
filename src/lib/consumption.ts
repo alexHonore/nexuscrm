@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { agentTurnTraces, messages } from "@/db/schema-sms";
 import { dayStartUtc, shiftDateStr } from "@/components/analytics/period";
 import { getSetting } from "@/lib/settings";
+import { getTwilioSmsCost } from "@/lib/sms-server/twilio-usage";
 
 /**
  * Consommation IA et SMS sur une période — depuis la BASE (rapide), à côté de
@@ -44,10 +45,16 @@ export type ConsumptionReport = {
     outboundSegments: number;
     inboundMessages: number;
     inboundSegments: number;
-    /** Taux appliqué (dollars US par segment). */
+    /** Taux d'ESTIMATION appliqué (dollars US par segment) — le repli. */
     segmentCostUsd: number;
     /** ESTIMATION : (segments sortants + entrants) × taux. */
     estimatedCostUsd: number;
+    /** Coût RÉEL facturé par Twilio (Usage Records), ou null si indisponible. */
+    realCostUsd: number | null;
+    /** D'où vient `costUsd` : « twilio » (réel) ou « estimate » (segments × taux). */
+    costSource: "twilio" | "estimate";
+    /** Le coût à AFFICHER : le réel de Twilio quand on l'a, sinon l'estimation. */
+    costUsd: number;
   };
 };
 
@@ -112,13 +119,21 @@ export async function getConsumption(from: string, to: string): Promise<Consumpt
 
   const outboundSegments = num(smsRow?.outSeg);
   const inboundSegments = num(smsRow?.inSeg);
+  const estimatedCostUsd = (outboundSegments + inboundSegments) * smsSegmentCostUsd;
+
+  // On préfère TOUJOURS le coût réel de Twilio ; l'estimation n'est qu'un repli
+  // quand Twilio n'est pas configuré ou injoignable.
+  const real = await getTwilioSmsCost(from, to);
   const sms = {
     outboundMessages: num(smsRow?.outMsgs),
     outboundSegments,
     inboundMessages: num(smsRow?.inMsgs),
     inboundSegments,
     segmentCostUsd: smsSegmentCostUsd,
-    estimatedCostUsd: (outboundSegments + inboundSegments) * smsSegmentCostUsd,
+    estimatedCostUsd,
+    realCostUsd: real ? real.costUsd : null,
+    costSource: real ? ("twilio" as const) : ("estimate" as const),
+    costUsd: real ? real.costUsd : estimatedCostUsd,
   };
 
   return { from, to, ai, sms };

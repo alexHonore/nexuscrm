@@ -45,6 +45,9 @@ export type ConsumptionReport = {
     inboundSegments: number;
     segmentCostUsd: number;
     estimatedCostUsd: number;
+    realCostUsd: number | null;
+    costSource: "twilio" | "estimate";
+    costUsd: number;
   };
 };
 
@@ -129,7 +132,11 @@ export function ConsumptionSections({
         <div className="flex items-center gap-2">
           <MessageSquare className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold">{t("billing.sectionSms")}</h2>
-          <Badge variant="secondary">{t("billing.estimatedBadge")}</Badge>
+          {/* Réel (facturé par Twilio) ou estimé (repli par segments) — le badge
+              le dit, on ne fait jamais passer une estimation pour une facture. */}
+          <Badge variant={sms?.costSource === "twilio" ? "default" : "secondary"}>
+            {t(sms?.costSource === "twilio" ? "billing.realBadge" : "billing.estimatedBadge")}
+          </Badge>
           {loading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
         </div>
 
@@ -152,10 +159,15 @@ export function ConsumptionSections({
                 value={`${nf.format(sms.inboundSegments)}`}
               />
               <Stat
-                label={t("billing.smsEstimate")}
-                value={money(sms.estimatedCostUsd)}
+                label={sms.costSource === "twilio" ? t("billing.smsCostReal") : t("billing.smsEstimate")}
+                value={money(sms.costUsd)}
               />
             </div>
+            <p className="text-xs text-muted-foreground">
+              {sms.costSource === "twilio"
+                ? t("billing.smsSourceReal")
+                : t("billing.smsSourceEstimate")}
+            </p>
 
             {/* Taux d'estimation — réglable, car Twilio ne nous donne pas le prix. */}
             <div className="flex flex-wrap items-end gap-2 rounded-md border bg-muted/30 p-3">

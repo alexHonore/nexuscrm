@@ -710,7 +710,7 @@
     "confirmMismatch": "The digits you typed do not match the number.",
     "recurringNote": "Monthly number rental is not shown here: only the period's calls are priced.",
     "grandTotal": "Period total (US $)",
-    "grandTotalNote": "voip.ms telephony (real) + Twilio SMS (estimated) + AI assistants (real).",
+    "grandTotalNote": "voip.ms telephony (real) + Twilio SMS (real if available, otherwise estimated) + AI assistants (real).",
     "sectionTelephony": "Telephony (voip.ms)",
     "sectionSms": "SMS (Twilio)",
     "sectionAi": "Assistants (AI)",
@@ -723,7 +723,7 @@
     "smsRateLabel": "Cost per segment (US $)",
     "smsRateSave": "Save",
     "smsRateSaved": "SMS rate saved.",
-    "smsRateNote": "Twilio does not return the per-message price — SMS spend is estimated: segments × this rate. Set your real rate.",
+    "smsRateNote": "FALLBACK rate: used only when Twilio’s real cost is unavailable. Default: Twilio’s published outbound SMS rate (US/Canada).",
     "msgCount": "{count} message(s)",
     "aiTurns": "Turns",
     "aiTokensIn": "Input tokens",
@@ -733,7 +733,10 @@
     "aiEmpty": "No assistant turns in this period.",
     "smsEmpty": "No SMS in this period.",
     "totalPartial": "Partial total: one source is still loading or unavailable.",
-    "unavailable": "Consumption data unavailable — try again."
+    "unavailable": "Consumption data unavailable — try again.",
+    "smsCostReal": "Billed cost (US $)",
+    "smsSourceReal": "Real cost billed by Twilio.",
+    "smsSourceEstimate": "Twilio unreachable — estimated: segments × rate."
   },
   "classification": {
     "title": "Automatic classification",

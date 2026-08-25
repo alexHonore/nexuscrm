@@ -12,8 +12,13 @@ import { SignJWT } from "jose";
 import { closeDb, makeClient, makeConversation, makeSmsNumber, makeUser, resetDb, testDb } from "./helpers/db";
 import { agentTurnTraces, messages } from "@/db/schema-sms";
 
-const CTX = vi.hoisted(() => ({ jar: new Map<string, string>(), hdrs: new Headers() }));
+const CTX = vi.hoisted(() => ({ jar: new Map<string, string>(), hdrs: new Headers(), twilioCost: null as null | { costUsd: number; priceUnit: string } }));
 vi.mock("server-only", () => ({}));
+// Twilio Usage Records : mocké — on ne tape pas le réseau. `twilioCost` null =
+// Twilio indisponible → l'estimation par segments s'applique.
+vi.mock("@/lib/sms-server/twilio-usage", () => ({
+  getTwilioSmsCost: async () => CTX.twilioCost,
+}));
 vi.mock("next/headers", () => ({
   cookies: async () => ({
     get: (n: string) => (CTX.jar.has(n) ? { name: n, value: CTX.jar.get(n)! } : undefined),
@@ -88,6 +93,7 @@ describe("getConsumption", () => {
   beforeEach(async () => {
     await resetDb();
     CTX.jar.clear();
+    CTX.twilioCost = null;
   });
 
   it("IA : somme le coût et les jetons RÉELS par modèle, dans la période", async () => {
@@ -103,7 +109,8 @@ describe("getConsumption", () => {
     expect(r.ai.byModel[0].costUsd).toBeCloseTo(0.03, 5);
   });
 
-  it("SMS : ne compte que les sortants partis (twilio_sid), plus les entrants", async () => {
+  it("SMS : compte les segments facturés ; sans Twilio, le coût est une ESTIMATION", async () => {
+    CTX.twilioCost = null; // Twilio indisponible
     await scene();
     const r = await getConsumption(FROM, TO);
     expect(r.sms.outboundMessages).toBe(2); // le « sauté » sans sid est exclu
@@ -111,8 +118,22 @@ describe("getConsumption", () => {
     expect(r.sms.inboundMessages).toBe(1);
     expect(r.sms.inboundSegments).toBe(1);
     expect(r.sms.segmentCostUsd).toBeCloseTo(0.0079, 6);
-    // Estimation = (3 + 1) segments × 0,0079.
     expect(r.sms.estimatedCostUsd).toBeCloseTo(4 * 0.0079, 6);
+    // Repli : source « estimate », coût = estimation, pas de réel.
+    expect(r.sms.costSource).toBe("estimate");
+    expect(r.sms.realCostUsd).toBeNull();
+    expect(r.sms.costUsd).toBeCloseTo(4 * 0.0079, 6);
+  });
+
+  it("SMS : quand Twilio répond, c'est le coût RÉEL facturé qui prime", async () => {
+    CTX.twilioCost = { costUsd: 1.23, priceUnit: "usd" };
+    await scene();
+    const r = await getConsumption(FROM, TO);
+    expect(r.sms.costSource).toBe("twilio");
+    expect(r.sms.realCostUsd).toBeCloseTo(1.23, 6);
+    expect(r.sms.costUsd).toBeCloseTo(1.23, 6); // pas l'estimation
+    // Les segments comptés restent visibles à titre d'information.
+    expect(r.sms.outboundSegments).toBe(3);
   });
 
   it("période vide : tout à zéro, pas de plantage", async () => {
@@ -128,6 +149,7 @@ describe("route /api/admin/consumption", () => {
   beforeEach(async () => {
     await resetDb();
     CTX.jar.clear();
+    CTX.twilioCost = null;
   });
   afterAll(closeDb);
 

@@ -60,6 +60,9 @@ const DATA: ConsumptionReport = {
     inboundSegments: 1,
     segmentCostUsd: 0.0079,
     estimatedCostUsd: 0.0316,
+    realCostUsd: null,
+    costSource: "estimate",
+    costUsd: 0.0316,
   },
 };
 
@@ -82,12 +85,23 @@ describe("ConsumptionSections", () => {
     const empty: ConsumptionReport = {
       ...DATA,
       ai: { turns: 0, tokensIn: 0, tokensOut: 0, costUsd: 0, byModel: [] },
-      sms: { outboundMessages: 0, outboundSegments: 0, inboundMessages: 0, inboundSegments: 0, segmentCostUsd: 0.0079, estimatedCostUsd: 0 },
+      sms: { outboundMessages: 0, outboundSegments: 0, inboundMessages: 0, inboundSegments: 0, segmentCostUsd: 0.0079, estimatedCostUsd: 0, realCostUsd: null, costSource: "estimate", costUsd: 0 },
     };
     const html = wrap(empty);
     expect(html).toContain("Aucun tour");
     expect(html).toContain("Aucun SMS");
     expect(html).not.toContain("MISSING_MESSAGE");
+  });
+
+  it("coût réel de Twilio : badge « réel » et coût facturé, pas l'estimation", () => {
+    const real: ConsumptionReport = {
+      ...DATA,
+      sms: { ...DATA.sms, realCostUsd: 1.23, costSource: "twilio", costUsd: 1.23 },
+    };
+    const html = wrap(real);
+    expect(html).toContain("réel");
+    expect(html).toContain("1.23"); // le coût facturé
+    expect(html).toContain("facturé par Twilio");
   });
 
   it("échec de chargement : « indisponible », JAMAIS « zéro » (honnêteté)", () => {

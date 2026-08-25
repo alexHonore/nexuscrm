@@ -310,7 +310,8 @@ export function BillingClient() {
   const consReady = !!consumption && consumption.from === from && consumption.to === to;
   const voipCost = voipReady ? report.totals.cost : 0;
   const aiCost = consReady ? consumption.ai.costUsd : 0;
-  const smsCost = consReady ? consumption.sms.estimatedCostUsd : 0;
+  // Le coût affiché : le réel de Twilio quand on l'a, sinon l'estimation.
+  const smsCost = consReady ? consumption.sms.costUsd : 0;
   const totalComplete = voipReady && consReady;
   const grandTotal = voipCost + aiCost + smsCost;
 

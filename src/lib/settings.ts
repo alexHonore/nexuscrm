@@ -131,10 +131,11 @@ export type SmsSettings = z.infer<typeof smsSettingsSchema>;
 
 export const consumptionSettingsSchema = z.object({
   /**
-   * Coût ESTIMÉ d'un segment SMS (dollars US) — Twilio ne renvoie pas le prix
-   * par message dans ce qu'on stocke, donc la dépense SMS est une estimation :
-   * segments × ce taux. L'admin y met son tarif Twilio réel. ~0,0079 $/segment
-   * au Canada par défaut. La téléphonie voip.ms, elle, garde des coûts RÉELS.
+   * Taux de REPLI pour estimer la dépense SMS (dollars US par segment) quand le
+   * coût réel de Twilio est indisponible (non configuré, API injoignable).
+   * Défaut 0,0079 $ — le tarif SMS sortant publié par Twilio pour les États-Unis
+   * et le Canada (numéros longs). L'admin peut y mettre son tarif exact. Quand
+   * Twilio répond, c'est son coût FACTURÉ qui prime, jamais cette estimation.
    */
   smsSegmentCostUsd: z.number().min(0).max(10).default(0.0079),
 });
