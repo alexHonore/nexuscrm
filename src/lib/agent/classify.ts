@@ -57,7 +57,7 @@ Tu réponds UNIQUEMENT par un objet JSON, sans texte autour, exactement de cette
 - "none" : tout le reste, y compris une question ou une réponse partielle.
 En cas de doute entre "hard" et "soft", choisis "hard" : mieux vaut arrêter trop tôt que harceler.
 
-« optOut » : true seulement pour une demande explicite de ne plus recevoir de messages.
+« optOut » : true SEULEMENT pour une demande explicite de ne plus recevoir de messages — « arrêtez de m'écrire », « désabonnez-moi », « ne me recontactez plus ». Un refus, même définitif et poli (« j'ai acheté ailleurs », « c'est réglé, merci », « plus intéressé »), n'est PAS un désabonnement : c'est refusal "hard" avec optOut false — la personne décline l'offre, elle n'interdit pas qu'on lui réponde.
 « wantsHuman » : true si la personne demande à parler à quelqu'un, au courtier, ou à être appelée par un humain.
 « unintelligible » : true si le message n'a aucun sens exploitable.
 
