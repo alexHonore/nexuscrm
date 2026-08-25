@@ -5,6 +5,7 @@ import { handleAgentTurn } from "./handlers/agent-turn";
 import { handleSendSms } from "./handlers/send-sms";
 import { handleCampaignTouch } from "./handlers/campaign-touch";
 import { queueDueTouches, sweepDueCampaigns } from "@/lib/campaigns-server/match";
+import { reconcileTwilioMessages } from "./reconcile";
 import {
   claimDueJobs,
   completeJob,
@@ -136,7 +137,7 @@ const CYCLE_BUDGET_MS = Number(process.env.DISPATCH_BUDGET_MS ?? 240_000);
 const CLAIM_BATCH = 10;
 
 export async function runDispatchCycle(
-  opts: { limit?: number; now?: () => Date } = {},
+  opts: { limit?: number; now?: () => Date; reconcile?: boolean } = {},
 ): Promise<DispatchCounts> {
   const now = opts.now ?? (() => new Date());
   const startedAt = Date.now();
@@ -166,6 +167,32 @@ export async function runDispatchCycle(
   // dans le même cycle que les barreaux déjà dus.
   await sweepDueCampaigns(now()).catch(() => []);
   await queueDueTouches(200, now()).catch(() => 0);
+  // Réconciliation REST avec Twilio (statuts bloqués + entrants perdus) —
+  // AVANT la réclamation : un tour d'agent rejoué par le backfill entre ainsi
+  // dans le même cycle. Sans configuration REST, elle se désarme toute seule.
+  // Le chemin rapide (kickDispatch après un webhook) la SAUTE : il existe pour
+  // répondre en secondes, pas pour payer un balayage REST — le cron d'1 minute
+  // réconcilie bien assez souvent. Son budget propre (SWEEP_BUDGET_MS) borne
+  // ce qu'un Twilio dégradé peut voler au cycle.
+  if (opts.reconcile !== false)
+    await reconcileTwilioMessages(now)
+      .then((r) => {
+      if (r.checked > 0 || r.backfilled > 0) {
+        console.log(
+          JSON.stringify({ ts: new Date().toISOString(), level: "info", msg: "twilio.reconcile", ...r }),
+        );
+      }
+    })
+    .catch((err: unknown) => {
+      console.log(
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          level: "error",
+          msg: "twilio.reconcile_failed",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    });
 
   const limit = opts.limit ?? 50;
   const jobs: ScheduledJob[] = [];

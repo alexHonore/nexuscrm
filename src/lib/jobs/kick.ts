@@ -15,7 +15,7 @@ import { runDispatchCycle } from "./dispatch";
 export function kickDispatch(): void {
   try {
     after(() =>
-      runDispatchCycle({ limit: 10 }).catch((err: unknown) => {
+      runDispatchCycle({ limit: 10, reconcile: false }).catch((err: unknown) => {
         console.log(
           JSON.stringify({
             ts: new Date().toISOString(),
