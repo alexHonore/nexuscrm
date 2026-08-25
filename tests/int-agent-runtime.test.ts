@@ -1133,6 +1133,28 @@ describe("statut, outils et pannes (revue)", () => {
     expect(notes.some((n) => n.type === "sms_handoff")).toBe(true);
   });
 
+  it("« appelez-moi » crée une TÂCHE : rappel posé au prochain matin, avec les mots du client", async () => {
+    // Une pastille d'inbox s'oublie ; un rappel daté (fiche, tableau de bord,
+    // pipeline) non. Le rappel est posé en CODE, pas confié au modèle.
+    const { conversation, client } = await scene();
+    await inbound(conversation.id, "Oui toujours intéressé — appelez-moi svp");
+    llm.classifierJson = '{"refusal":"none","qualification":{},"wantsHuman":true}';
+
+    const result = await runTurn(conversation.id);
+    expect(result.outcome).toBe("handoff");
+    expect(result.reason).toBe("client_wants_human");
+
+    const rows = await testDb.select().from(followups).where(eq(followups.clientId, client.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].note).toContain("appelez-moi svp");
+    expect(rows[0].assignedToId).not.toBeNull();
+    expect(rows[0].dueAt.getTime()).toBeGreaterThan(Date.now());
+    expect(rows[0].dueAt.getTime()).toBeLessThan(Date.now() + 36 * 3600 * 1000);
+    const fiche = await testDb.query.clients.findFirst({ where: eq(clients.id, client.id) });
+    expect(fiche!.nextFollowupAt).not.toBeNull();
+    expect(await eventsOf(conversation.id)).toContain("followup_created");
+  });
+
   it("un corps vide (MMS sans texte) ne part pas tel quel au modèle", async () => {
     const { conversation } = await scene();
     await inbound(conversation.id, "   ");

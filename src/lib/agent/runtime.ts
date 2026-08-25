@@ -79,6 +79,45 @@ function nextMorning(now: Date): Date {
 }
 
 /**
+ * Pose un rappel (une tâche) sur la fiche. Un rappel a toujours un
+ * destinataire : l'assigné de la fiche, sinon un administrateur actif — un
+ * rappel que personne ne voit n'en est pas un. Renvoie faux quand aucun
+ * destinataire n'existe. La colonne dénormalisée `nextFollowupAt` suit, comme
+ * pour un rappel posé à la main (filtres, pastille du pipeline, export).
+ */
+async function createFollowupTask(input: {
+  clientId: string;
+  assignedToId: string | null;
+  when: Date;
+  note: string;
+}): Promise<boolean> {
+  let assigneeId = input.assignedToId;
+  if (!assigneeId) {
+    const admin = await db.query.users.findFirst({
+      where: and(eq(users.role, "admin"), eq(users.isActive, true)),
+      columns: { id: true },
+    });
+    assigneeId = admin?.id ?? null;
+  }
+  if (!assigneeId) return false;
+  await db.insert(followups).values({
+    clientId: input.clientId,
+    assignedToId: assigneeId,
+    dueAt: input.when,
+    note: input.note,
+    createdById: null,
+  });
+  await db
+    .update(clients)
+    .set({
+      nextFollowupAt: sql`least(coalesce(${clients.nextFollowupAt}, ${input.when.toISOString()}::timestamptz), ${input.when.toISOString()}::timestamptz)`,
+      updatedAt: new Date(),
+    })
+    .where(eq(clients.id, input.clientId));
+  return true;
+}
+
+/**
  * Classement AUTOMATIQUE d'une fin de conversation.
  *
  * Une discussion TERMINÉE (clôture « pas intéressé » ou « non qualifié »,
@@ -542,41 +581,18 @@ async function executeTools(input: {
           record("schedule_followup : date invalide ou passée — demande une date précise à venir.");
           continue;
         }
-        // Un rappel a toujours un destinataire : l'assigné de la fiche, sinon
-        // un administrateur — un rappel que personne ne voit n'en est pas un.
-        let assigneeId = input.clientAssignedToId;
-        if (!assigneeId) {
-          const admin = await db.query.users.findFirst({
-            where: and(eq(users.role, "admin"), eq(users.isActive, true)),
-            columns: { id: true },
-          });
-          assigneeId = admin?.id ?? null;
-        }
-        if (!assigneeId) {
+        const created = await createFollowupTask({
+          clientId: input.clientId,
+          assignedToId: input.clientAssignedToId,
+          when,
+          note: args.note ?? "Rappel demandé par SMS (assistant)",
+        });
+        if (!created) {
           input.effects.push({ name, ok: false, detail: "no_assignee" });
           record("schedule_followup : aucun destinataire pour le rappel — propose un autre moyen.");
           continue;
         }
         input.sideEffectsDone.add(name);
-        await db.insert(followups).values({
-          clientId: input.clientId,
-          assignedToId: assigneeId,
-          dueAt: when,
-          note: args.note ?? "Rappel demandé par SMS (assistant)",
-          createdById: null,
-        });
-        // La colonne dénormalisée suit, comme pour un rappel posé à la main
-        // (filtres « en retard / aujourd'hui / à venir », pastille du
-        // pipeline, export). Sans elle, le rappel existait mais la fiche
-        // restait « sans rappel » partout sauf au tableau de bord. Calcul en
-        // base — la fiche lue en phase 1 peut être périmée.
-        await db
-          .update(clients)
-          .set({
-            nextFollowupAt: sql`least(coalesce(${clients.nextFollowupAt}, ${when.toISOString()}::timestamptz), ${when.toISOString()}::timestamptz)`,
-            updatedAt: new Date(),
-          })
-          .where(eq(clients.id, input.clientId));
         record(
           args.whenIso
             ? `schedule_followup : rappel posé pour ${args.whenIso}`
@@ -1147,12 +1163,28 @@ export async function runTurn(
       : downgrade.exhausted
         ? "goal_chain_exhausted"
         : "max_turns";
+    // « Appelez-moi » n'est pas qu'une escalade : c'est une TÂCHE. Une pastille
+    // d'inbox s'oublie ; un rappel daté (fiche, tableau de bord, pipeline) non.
+    // Le rappel est posé ICI, en code — pas confié au modèle — au prochain
+    // matin, pour l'assigné de la fiche (sinon un administrateur).
+    const followupCreated =
+      reason === "client_wants_human"
+        ? await createFollowupTask({
+            clientId: conversation.clientId,
+            assignedToId: client?.assignedToId ?? null,
+            when: nextMorning(new Date()),
+            note: `Demande d'appel reçue par SMS : « ${userTurn.slice(0, 160)} »`,
+          })
+        : false;
     return commit({
       outcome: "handoff",
       reason,
       trace: { runtimeBlock: "", rawResponse: {} },
       conversationPatch: { aiEnabled: false, needsAttention: true, attentionReason: reason },
-      events: [{ type: "escalation", payload: { reason } }],
+      events: [
+        { type: "escalation", payload: { reason } },
+        ...(followupCreated ? [{ type: "followup_created", payload: { via: "client_wants_human" } }] : []),
+      ],
       alert: { kind: "handoff", reason },
     });
   }
