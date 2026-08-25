@@ -20,7 +20,8 @@ import {
 } from "@/lib/campaigns/eligibility";
 import { bodyForStep, ladderExhausted, nextTouchAt } from "@/lib/campaigns/ladder";
 import { variantBody } from "@/lib/campaigns/variants";
-import { DEFAULT_QUIET_HOURS, isWithinSendWindow, nextSendTime } from "@/lib/sms/quiet-hours";
+import { isWithinSendWindow, nextSendTime } from "@/lib/sms/quiet-hours";
+import { getSetting } from "@/lib/settings";
 import { settingsSendGate } from "@/lib/sms-server";
 
 /**
@@ -150,6 +151,8 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
     .where(and(eq(campaignTouches.enrollmentId, enrollment.id), eq(campaignTouches.step, step)))
     .limit(1);
 
+  // Fenêtre d'envoi réglée par l'admin (défaut : heures de politesse d'origine).
+  const quietHours = await getSetting("quietHours");
   const decision = canSendTouch({
     campaignStatus: campaignRow.status,
     enrollmentStatus: enrollment.status,
@@ -166,7 +169,7 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
     repliedSince,
     liveConversation,
     hasSender: smsNumber !== undefined,
-    withinSendWindow: isWithinSendWindow(now, DEFAULT_QUIET_HOURS),
+    withinSendWindow: isWithinSendWindow(now, quietHours),
   });
 
   if (!decision.allowed) {
@@ -369,7 +372,7 @@ async function handleRefusal(
     case "quiet_hours":
       // Prochaine ouverture de la fenêtre, avec le jitter de `nextSendTime` :
       // un lot reporté pendant la nuit part étalé le matin, pas en rafale.
-      return defer(enrollment, nextSendTime(now, DEFAULT_QUIET_HOURS), result);
+      return defer(enrollment, nextSendTime(now, await getSetting("quietHours")), result);
     case "kill_switch":
       return defer(enrollment, new Date(now.getTime() + KILL_SWITCH_RETRY_MS), result);
     case "ai_paused":

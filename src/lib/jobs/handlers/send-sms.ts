@@ -5,7 +5,8 @@ import { clients } from "@/db/schema";
 import { conversations, messages, smsNumbers } from "@/db/schema-sms";
 import { sendSmsPayloadSchema, type JobOutcome, type ScheduledJob } from "@/lib/jobs/types";
 import { TwilioSendError } from "@/lib/sms/provider";
-import { DEFAULT_QUIET_HOURS, isWithinSendWindow, nextSendTime } from "@/lib/sms/quiet-hours";
+import { isWithinSendWindow, nextSendTime } from "@/lib/sms/quiet-hours";
+import { getSetting } from "@/lib/settings";
 import { analyzeSms } from "@/lib/sms/segments";
 import type { SendResult } from "@/lib/sms/types";
 import { getSmsProvider } from "@/lib/sms-server";
@@ -62,8 +63,12 @@ export async function handleSendSms(
   if (payload.automated && !conversation.aiEnabled) {
     return { outcome: "skipped", reason: "ai_paused" };
   }
-  if (payload.automated && !isWithinSendWindow(now(), DEFAULT_QUIET_HOURS)) {
-    return { outcome: "reschedule", runAt: nextSendTime(now(), DEFAULT_QUIET_HOURS) };
+  // Fenêtre d'envoi réglée par l'admin (défaut : heures de politesse d'origine).
+  // Le dernier verrou avant l'envoi : un message automatisé hors fenêtre est
+  // reporté à la prochaine ouverture, jamais expédié à 3 h.
+  const quietHours = await getSetting("quietHours");
+  if (payload.automated && !isWithinSendWindow(now(), quietHours)) {
+    return { outcome: "reschedule", runAt: nextSendTime(now(), quietHours) };
   }
 
   // ── Plafond du jour du numéro expéditeur ────────────────────────────────
@@ -90,7 +95,7 @@ export async function handleSendSms(
       );
     if ((row?.n ?? 0) >= number.dailyCap) {
       const tomorrow = new Date(startOfTorontoDay(now()).getTime() + 24 * 60 * 60 * 1000);
-      return { outcome: "reschedule", runAt: nextSendTime(tomorrow, DEFAULT_QUIET_HOURS) };
+      return { outcome: "reschedule", runAt: nextSendTime(tomorrow, quietHours) };
     }
   }
 

@@ -33,7 +33,7 @@ import type { LLMResult, ToolCall } from "@/lib/llm/types";
 import { suppressPhone } from "@/lib/sms-server";
 import { notifyHumans } from "@/lib/sms-server/notify";
 import { detectOptOut } from "@/lib/sms/optout";
-import { DEFAULT_QUIET_HOURS } from "@/lib/sms/quiet-hours";
+import { getSetting } from "@/lib/settings";
 import { classifyInbound, type Classification } from "./classify";
 import { contactValue, qualificationText } from "./contact-data";
 import { CLIENT_COMMENTS_MAX, formatClientComments, formatClientContext } from "./client-context";
@@ -1077,6 +1077,9 @@ export async function runTurn(
     }
   }
 
+  // Fenêtre d'envoi réglée par l'admin — le prompt doit annoncer la vraie
+  // plage, pas une valeur figée.
+  const quietHours = await getSetting("quietHours");
   const runtimeBlock = assistantRow.includeRuntimeLayer
     ? renderTemplate(assistantRow.turnInstructions ?? DEFAULT_TURN_INSTRUCTIONS, {
         // Tout ce qui vient du contact (formulaire de lead, SMS classés) est
@@ -1096,7 +1099,7 @@ export async function runTurn(
         max_turns: config.approach.maxTurns,
         soft_refusals: downgrade.softRefusals,
         now_local: formatInTimeZone(new Date(), APP_TZ, "EEEE HH'h'mm"),
-        send_window: `${DEFAULT_QUIET_HOURS.weekday[0]}h-${DEFAULT_QUIET_HOURS.weekday[1]}h`,
+        send_window: `${quietHours.weekday[0]}h-${quietHours.weekday[1]}h`,
         "assistant.name": config.name,
         org: config.identity.orgName,
       }).text

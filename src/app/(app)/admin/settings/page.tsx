@@ -1,7 +1,13 @@
 import { asc } from "drizzle-orm";
 import { Settings2 } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { BookingCard, GoogleCard, KillSwitchCard, TelephonyCard } from "@/components/admin/settings-client";
+import {
+  BookingCard,
+  GoogleCard,
+  KillSwitchCard,
+  QuietHoursCard,
+  TelephonyCard,
+} from "@/components/admin/settings-client";
 import { ClassificationCard } from "@/components/admin/classification-card";
 import { SmsNumbersCard } from "@/components/admin/sms-numbers-card";
 import { listSmsNumbersForAdmin } from "@/lib/sms-server/numbers";
@@ -18,7 +24,7 @@ export default async function AdminSettingsPage() {
   const t = await getTranslations("admin");
 
   const locale = docLocale(await getLocale());
-  const [google, booking, telephony, sms, numbers, classification, categoryRows] =
+  const [google, booking, telephony, sms, numbers, classification, quietHours, categoryRows] =
     await Promise.all([
       getSetting("google"),
       getSetting("booking"),
@@ -26,6 +32,7 @@ export default async function AdminSettingsPage() {
       getSetting("sms"),
       listSmsNumbersForAdmin(),
       getSetting("classification"),
+      getSetting("quietHours"),
       db.select().from(categories).orderBy(asc(categories.sortOrder)),
     ]);
 
@@ -78,6 +85,15 @@ export default async function AdminSettingsPage() {
       <ClassificationCard
         initial={classification.rules}
         categories={categoryChoices}
+      />
+
+      <QuietHoursCard
+        initial={{
+          tz: quietHours.tz,
+          weekday: quietHours.weekday,
+          saturday: quietHours.saturday,
+          sunday: quietHours.sunday,
+        }}
       />
 
       <KillSwitchCard

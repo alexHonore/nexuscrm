@@ -35,6 +35,19 @@ export const DEFAULT_QUIET_HOURS: QuietHours = {
   sunday: [11, 19],
 };
 
+/**
+ * Variante RÉGLAGE : chaque champ a une valeur par défaut, si bien que
+ * `parse({})` rend `DEFAULT_QUIET_HOURS`. C'est ce que lit `getSetting`
+ * lorsqu'aucune fenêtre n'a été enregistrée — le comportement d'origine est
+ * donc conservé tant que l'admin n'a rien changé.
+ */
+export const quietHoursSettingsSchema = z.object({
+  tz: z.string().min(1).default(DEFAULT_QUIET_HOURS.tz),
+  weekday: hourWindowSchema.default(DEFAULT_QUIET_HOURS.weekday),
+  saturday: hourWindowSchema.default(DEFAULT_QUIET_HOURS.saturday),
+  sunday: hourWindowSchema.default(DEFAULT_QUIET_HOURS.sunday),
+});
+
 /** Fenêtre applicable pour un jour ISO (1 = lundi … 6 = samedi, 7 = dimanche). */
 function windowForIsoDay(isoDay: number, cfg: QuietHours): [number, number] {
   if (isoDay === 6) return cfg.saturday;

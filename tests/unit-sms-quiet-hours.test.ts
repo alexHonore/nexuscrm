@@ -13,6 +13,7 @@ import {
   isWithinSendWindow,
   nextSendTime,
   quietHoursSchema,
+  quietHoursSettingsSchema,
   type QuietHours,
 } from "@/lib/sms/quiet-hours";
 
@@ -162,5 +163,29 @@ describe("nextSendTime — changement d'heure", () => {
     expect(formatInTimeZone(result, TZ, "yyyy-MM-dd HH:mm:ss zzz")).toBe(
       "2026-03-08 09:00:00 EDT",
     );
+  });
+});
+
+describe("quietHoursSettingsSchema (réglage)", () => {
+  it("parse({}) rend exactement DEFAULT_QUIET_HOURS", () => {
+    expect(quietHoursSettingsSchema.parse({})).toEqual(DEFAULT_QUIET_HOURS);
+  });
+
+  it("refuse une fenêtre dont la fin ne suit pas le début", () => {
+    expect(quietHoursSettingsSchema.safeParse({ weekday: [20, 9] }).success).toBe(false);
+    expect(quietHoursSettingsSchema.safeParse({ weekday: [9, 9] }).success).toBe(false);
+  });
+
+  it("accepte une fenêtre valide et complète les jours non fournis", () => {
+    const r = quietHoursSettingsSchema.parse({ weekday: [8, 21] });
+    expect(r.weekday).toEqual([8, 21]);
+    expect(r.saturday).toEqual(DEFAULT_QUIET_HOURS.saturday);
+    expect(r.sunday).toEqual(DEFAULT_QUIET_HOURS.sunday);
+    expect(r.tz).toBe(DEFAULT_QUIET_HOURS.tz);
+  });
+
+  it("borne les heures (0–23 début, 1–24 fin)", () => {
+    expect(quietHoursSettingsSchema.safeParse({ weekday: [-1, 8] }).success).toBe(false);
+    expect(quietHoursSettingsSchema.safeParse({ weekday: [8, 25] }).success).toBe(false);
   });
 });

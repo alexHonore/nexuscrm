@@ -3,6 +3,9 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { settings } from "@/db/schema";
+import { quietHoursSettingsSchema } from "@/lib/sms/quiet-hours";
+
+export { quietHoursSettingsSchema } from "@/lib/sms/quiet-hours";
 
 // ── Schemas des réglages ─────────────────────────────────────────────────────
 
@@ -148,6 +151,9 @@ const SCHEMAS = {
   sms: smsSettingsSchema,
   classification: classificationSettingsSchema,
   consumption: consumptionSettingsSchema,
+  // Fenêtre d'envoi (« heures de politesse ») — quand l'assistant a le droit
+  // d'écrire. Le schéma vit dans le module SMS pur ; ici on l'enregistre.
+  quietHours: quietHoursSettingsSchema,
 } as const;
 
 export type SettingKey = keyof typeof SCHEMAS;

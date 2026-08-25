@@ -497,6 +497,21 @@
       "exists": "Ce numéro existe déjà.",
       "delete": "Supprimer",
       "save": "Enregistrer"
+    },
+    "quietHours": {
+      "title": "Fenêtre d’envoi (heures de politesse)",
+      "desc": "Quand l’assistant a le droit d’écrire. En dehors, tout SMS automatisé est REPORTÉ à la prochaine ouverture — jamais envoyé à 3 h.",
+      "weekday": "Semaine (lun.–ven.)",
+      "saturday": "Samedi",
+      "sunday": "Dimanche",
+      "fromHour": "De (h)",
+      "toHour": "À (h)",
+      "windowHint": "0 à 23 pour le début, 1 à 24 pour la fin. La fin doit suivre le début.",
+      "tzNote": "Heures locales — {tz}.",
+      "save": "Enregistrer",
+      "saved": "Fenêtre d’envoi enregistrée.",
+      "invalid": "Chaque fenêtre doit finir après son début.",
+      "scope": "S’applique à tous les envois automatisés : réponses de l’assistant ET barreaux de campagne."
     }
   },
   "audit": {
