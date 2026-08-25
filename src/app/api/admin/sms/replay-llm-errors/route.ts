@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { campaignEnrollments, conversations, messages, scheduledJobs } from "@/db/schema-sms";
 import { UNDELIVERED_STATUSES } from "@/lib/agent/runtime";
@@ -137,12 +137,49 @@ export async function POST() {
       .where(eq(conversations.id, conv.id));
   }
 
+  // Entrants ORPHELINS : le webhook avait mis le tour en file, la panne l'a
+  // tué en échec définitif SANS consommer l'entrant (les tentatives non
+  // finales laissent exprès les entrants à traiter). La pastille reste
+  // « nouveau message » et plus rien ne viendra jamais. Remettre le tour du
+  // webhook suffit : la clé de dédoublonnage absorbe ceux qui en ont déjà un,
+  // et le tour lui-même re-vérifie toutes ses portes.
+  const alreadyReplayed = new Set(stuck.map((c) => c.id));
+  const orphaned = await db
+    .selectDistinct({ id: conversations.id })
+    .from(conversations)
+    .innerJoin(messages, eq(messages.conversationId, conversations.id))
+    .where(
+      and(
+        eq(conversations.aiEnabled, true),
+        isNotNull(conversations.activeAssistantId),
+        eq(messages.direction, "in"),
+        isNull(messages.processedAt),
+      ),
+    );
+  let replayedOrphans = 0;
+  for (const conv of orphaned) {
+    if (alreadyReplayed.has(conv.id)) continue;
+    const { deduped } = await enqueueJob({
+      type: "agent_turn",
+      runAt: staggeredRunAt(),
+      payload: { conversationId: conv.id },
+      dedupeKey: `turn:${conv.id}`,
+    });
+    if (!deduped) replayedOrphans += 1;
+  }
+
   await logAudit({
     userId: admin.id,
     action: "sms.replay_llm_errors",
     entity: "conversation",
-    detail: { stuck: stuck.length, replayedInbound, replayedOutreach, cleared },
+    detail: { stuck: stuck.length, replayedInbound, replayedOutreach, replayedOrphans, cleared },
   });
 
-  return NextResponse.json({ stuck: stuck.length, replayedInbound, replayedOutreach, cleared });
+  return NextResponse.json({
+    stuck: stuck.length,
+    replayedInbound,
+    replayedOutreach,
+    replayedOrphans,
+    cleared,
+  });
 }

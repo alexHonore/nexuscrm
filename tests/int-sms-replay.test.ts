@@ -278,6 +278,35 @@ describe("POST /api/admin/sms/replay-llm-errors", () => {
     expect((await jobsFor(conversation.id)).filter((j) => j.status === "pending")).toHaveLength(0);
   });
 
+  it("entrant ORPHELIN (jamais consommé, aucun job vivant) : le tour du webhook repart", async () => {
+    // Le job du webhook est mort en échec définitif AVANT la tentative finale :
+    // l'entrant n'a jamais été consommé, la pastille dit « nouveau message »,
+    // et plus rien ne viendrait jamais.
+    const { conversation } = await stuckThread();
+    await testDb
+      .update(conversations)
+      .set({ attentionReason: "inbound" })
+      .where(eq(conversations.id, conversation.id));
+    await testDb.insert(messages).values({
+      conversationId: conversation.id,
+      direction: "in",
+      body: "Pas pour tout de suite malheureusement !",
+      source: "human",
+      status: "received",
+    });
+
+    const res = await route.POST();
+    expect(await res.json()).toMatchObject({ stuck: 0, replayedOrphans: 1 });
+    const jobs = await jobsFor(conversation.id);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].dedupeKey).toBe(`turn:${conversation.id}`);
+
+    // Idempotent : un second passage est absorbé par la clé du job vivant.
+    const again = await (await route.POST()).json();
+    expect(again).toMatchObject({ replayedOrphans: 0 });
+    expect(await jobsFor(conversation.id)).toHaveLength(1);
+  });
+
   it("ne touche pas aux autres pastilles (refus ferme, passage humain)", async () => {
     const { conversation } = await stuckThread();
     await testDb
