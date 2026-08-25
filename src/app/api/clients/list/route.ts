@@ -243,6 +243,19 @@ export async function GET(req: NextRequest) {
   const langs = tokens(languageParam).filter((l) => l === "fr" || l === "en");
   if (langs.length > 0) conditions.push(inArray(clients.language, langs));
 
+  // « Ajouter des clients » d'une campagne : écarte ceux qui y sont DÉJÀ
+  // inscrits — n'importe quel statut, car l'index unique (campagne, client)
+  // rend toute ré-inscription impossible ; les proposer ne ferait que gonfler
+  // « ignorés » au moment d'ajouter. Même règle que l'audience programmée
+  // (campaigns-server/audience.ts).
+  const excludeCampaignId = sp.get("excludeCampaignId");
+  if (excludeCampaignId && UUID_RE.test(excludeCampaignId)) {
+    conditions.push(
+      sql`not exists (select 1 from campaign_enrollments
+        where campaign_id = ${excludeCampaignId} and client_id = ${clients.id})`,
+    );
+  }
+
   // Filtres de dates : mêmes options pour la création et la modification —
   // fenêtre nommée (createdWithin), borne stricte (createdBefore/After) ou
   // plage inclusive libre (createdFrom/To).

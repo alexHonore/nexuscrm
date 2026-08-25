@@ -39,10 +39,15 @@ export function hasAnyFilter(f: ClientSearchFilters): boolean {
   );
 }
 
-/** La requête `/api/clients/list` correspondante — les mêmes filtres que la liste. */
+/**
+ * La requête `/api/clients/list` correspondante — les mêmes filtres que la
+ * liste. `excludeCampaignId` écarte côté serveur les fiches DÉJÀ inscrites à
+ * la campagne : les proposer (et les compter dans « Tout sélectionner ») ne
+ * pouvait produire que des « ignorés » à l'ajout.
+ */
 export function buildClientSearchQuery(
   f: ClientSearchFilters,
-  opts?: { page?: number; pageSize?: number },
+  opts?: { page?: number; pageSize?: number; excludeCampaignId?: string },
 ): string {
   const p = new URLSearchParams();
   if (f.q.trim()) p.set("q", f.q.trim());
@@ -50,6 +55,7 @@ export function buildClientSearchQuery(
   if (f.srcs.length) p.set("sourceId", f.srcs.join(","));
   if (f.assignees.length) p.set("assignedToId", f.assignees.join(","));
   if (f.never) p.set("filter", "never");
+  if (opts?.excludeCampaignId) p.set("excludeCampaignId", opts.excludeCampaignId);
   p.set("pageSize", String(opts?.pageSize ?? 25));
   if (opts?.page && opts.page > 1) p.set("page", String(opts.page));
   return p.toString();
@@ -128,9 +134,10 @@ export function AddClientsDialog({
     const go = () => {
       const controller = new AbortController();
       inFlight.current = controller;
-      api<{ items: Found[]; total: number }>(`/api/clients/list?${buildClientSearchQuery(next)}`, {
-        signal: controller.signal,
-      })
+      api<{ items: Found[]; total: number }>(
+        `/api/clients/list?${buildClientSearchQuery(next, { excludeCampaignId: campaignId })}`,
+        { signal: controller.signal },
+      )
         .then((data) => {
           setResults(data.items);
           setTotal(data.total);
@@ -166,7 +173,11 @@ export function AddClientsDialog({
       const collected: Found[] = [];
       for (let page = 1; collected.length < SELECT_ALL_CAP; page += 1) {
         const data = await api<{ items: Found[]; total: number }>(
-          `/api/clients/list?${buildClientSearchQuery(filters, { page, pageSize: PAGE })}`,
+          `/api/clients/list?${buildClientSearchQuery(filters, {
+            page,
+            pageSize: PAGE,
+            excludeCampaignId: campaignId,
+          })}`,
         );
         collected.push(...data.items);
         if (data.items.length < PAGE || collected.length >= data.total) break;

@@ -316,6 +316,19 @@ describe("AddClientsDialog — recherche par filtres (pas seulement le nom)", ()
     expect(p.get("filter")).toBe("never");
   });
 
+  it("excludeCampaignId écarte les fiches déjà inscrites — présent partout, pagination comprise", () => {
+    const f = { q: "bouchard", cats: [], srcs: [], assignees: [], never: false };
+    const id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const preview = new URLSearchParams(buildClientSearchQuery(f, { excludeCampaignId: id }));
+    expect(preview.get("excludeCampaignId")).toBe(id);
+    const p2 = new URLSearchParams(
+      buildClientSearchQuery(f, { page: 2, pageSize: 50, excludeCampaignId: id }),
+    );
+    expect(p2.get("excludeCampaignId")).toBe(id);
+    // Sans campagne : pas de paramètre.
+    expect(new URLSearchParams(buildClientSearchQuery(f)).get("excludeCampaignId")).toBeNull();
+  });
+
   it("un filtre vide n'ajoute pas son paramètre", () => {
     const p = new URLSearchParams(
       buildClientSearchQuery({ q: "", cats: [], srcs: [], assignees: [], never: false }),
