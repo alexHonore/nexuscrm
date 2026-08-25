@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2, Plus, Search, UserPlus } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -40,16 +40,23 @@ export function hasAnyFilter(f: ClientSearchFilters): boolean {
 }
 
 /** La requête `/api/clients/list` correspondante — les mêmes filtres que la liste. */
-export function buildClientSearchQuery(f: ClientSearchFilters): string {
+export function buildClientSearchQuery(
+  f: ClientSearchFilters,
+  opts?: { page?: number; pageSize?: number },
+): string {
   const p = new URLSearchParams();
   if (f.q.trim()) p.set("q", f.q.trim());
   if (f.cats.length) p.set("categoryId", f.cats.join(","));
   if (f.srcs.length) p.set("sourceId", f.srcs.join(","));
   if (f.assignees.length) p.set("assignedToId", f.assignees.join(","));
   if (f.never) p.set("filter", "never");
-  p.set("pageSize", "25");
+  p.set("pageSize", String(opts?.pageSize ?? 25));
+  if (opts?.page && opts.page > 1) p.set("page", String(opts.page));
   return p.toString();
 }
+
+/** Plafond de sélection en masse — le même que le lot d'ajout côté serveur. */
+export const SELECT_ALL_CAP = 500;
 
 /**
  * Ajouter des fiches à une campagne — une par une ou en lot.
@@ -74,11 +81,15 @@ export function AddClientsDialog({
   onAdded: () => void;
 }) {
   const t = useTranslations("campaigns");
+  const locale = useLocale();
+  const nf = new Intl.NumberFormat(locale === "en" ? "en-CA" : "fr-CA");
   const [open, setOpen] = useState(false);
   const [filters, setClientSearchFilters] = useState<ClientSearchFilters>(EMPTY);
   const [results, setResults] = useState<Found[]>([]);
+  const [total, setTotal] = useState(0);
   const [selected, setSelected] = useState<Record<string, Found>>({});
   const [searching, setSearching] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
   const [adding, setAdding] = useState(false);
 
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -93,8 +104,10 @@ export function AddClientsDialog({
     cancelSearch();
     setClientSearchFilters(EMPTY);
     setResults([]);
+    setTotal(0);
     setSelected({});
     setSearching(false);
+    setSelectingAll(false);
   };
 
   /**
@@ -107,6 +120,7 @@ export function AddClientsDialog({
     cancelSearch();
     if (!hasAnyFilter(next)) {
       setResults([]);
+      setTotal(0);
       setSearching(false);
       return;
     }
@@ -114,10 +128,18 @@ export function AddClientsDialog({
     const go = () => {
       const controller = new AbortController();
       inFlight.current = controller;
-      api<{ items: Found[] }>(`/api/clients/list?${buildClientSearchQuery(next)}`, { signal: controller.signal })
-        .then((data) => setResults(data.items))
+      api<{ items: Found[]; total: number }>(`/api/clients/list?${buildClientSearchQuery(next)}`, {
+        signal: controller.signal,
+      })
+        .then((data) => {
+          setResults(data.items);
+          setTotal(data.total);
+        })
         .catch(() => {
-          if (!controller.signal.aborted) setResults([]);
+          if (!controller.signal.aborted) {
+            setResults([]);
+            setTotal(0);
+          }
         })
         .finally(() => {
           if (inFlight.current === controller) {
@@ -128,6 +150,38 @@ export function AddClientsDialog({
     };
     if (debounced) debounce.current = setTimeout(go, 250);
     else go();
+  };
+
+  /**
+   * Coche TOUTES les fiches qui répondent aux filtres — pas seulement la page
+   * affichée. Parcourt la liste par pages jusqu'au plafond (SELECT_ALL_CAP =
+   * le lot d'ajout). Au-delà, un message invite à affiner : on n'inscrit pas
+   * silencieusement moins que ce que « tout » laisse croire.
+   */
+  const selectAllMatching = async () => {
+    if (!hasAnyFilter(filters)) return;
+    setSelectingAll(true);
+    try {
+      const PAGE = 50;
+      const collected: Found[] = [];
+      for (let page = 1; collected.length < SELECT_ALL_CAP; page += 1) {
+        const data = await api<{ items: Found[]; total: number }>(
+          `/api/clients/list?${buildClientSearchQuery(filters, { page, pageSize: PAGE })}`,
+        );
+        collected.push(...data.items);
+        if (data.items.length < PAGE || collected.length >= data.total) break;
+      }
+      const capped = collected.slice(0, SELECT_ALL_CAP);
+      setSelected((s) => {
+        const next = { ...s };
+        for (const c of capped) next[c.id] = { id: c.id, fullName: c.fullName, phone: c.phone };
+        return next;
+      });
+    } catch {
+      toast.error(t("editor.enrollments.toast.failed"));
+    } finally {
+      setSelectingAll(false);
+    }
   };
 
   const toggle = (client: Found, on: boolean) =>
@@ -247,6 +301,51 @@ export function AddClientsDialog({
               {t("editor.enrollments.filterNever")}
             </Button>
           </div>
+
+          {/* Barre de résultats : compte, « tout sélectionner » (pas seulement
+              la page affichée), et « désélectionner ». */}
+          {hasAnyFilter(filters) && total > 0 ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">
+              <span className="text-muted-foreground">
+                {t("editor.enrollments.addResults", { count: nf.format(total) })}
+                {chosen.length > 0
+                  ? ` · ${t("editor.enrollments.selected", { count: chosen.length })}`
+                  : ""}
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8"
+                  disabled={selectingAll || searching}
+                  onClick={() => void selectAllMatching()}
+                >
+                  {selectingAll ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                  {t("editor.enrollments.addSelectAll", {
+                    count: nf.format(Math.min(total, SELECT_ALL_CAP)),
+                  })}
+                </Button>
+                {chosen.length > 0 ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8"
+                    disabled={selectingAll}
+                    onClick={() => setSelected({})}
+                  >
+                    {t("editor.enrollments.clearSelection")}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          {total > SELECT_ALL_CAP ? (
+            <p className="px-1 text-xs text-muted-foreground">
+              {t("editor.enrollments.addCapNote", { cap: nf.format(SELECT_ALL_CAP) })}
+            </p>
+          ) : null}
 
           <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-1">
             {searching ? (

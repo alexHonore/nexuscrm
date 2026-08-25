@@ -281,7 +281,10 @@
       "filterCategory": "Catégorie",
       "filterSource": "Source",
       "filterAssignee": "Assigné à",
-      "filterNever": "Jamais contacté"
+      "filterNever": "Jamais contacté",
+      "addResults": "{count} résultat(s)",
+      "addSelectAll": "Tout sélectionner ({count})",
+      "addCapNote": "Limité à {cap} fiches à la fois — affinez les filtres pour le reste."
     },
     "errors": {
       "save": "Impossible d'enregistrer",

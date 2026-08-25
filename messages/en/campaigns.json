@@ -281,7 +281,10 @@
       "filterCategory": "Category",
       "filterSource": "Source",
       "filterAssignee": "Assigned to",
-      "filterNever": "Never contacted"
+      "filterNever": "Never contacted",
+      "addResults": "{count} result(s)",
+      "addSelectAll": "Select all ({count})",
+      "addCapNote": "Limited to {cap} records at a time — narrow the filters for the rest."
     },
     "errors": {
       "save": "Could not save",

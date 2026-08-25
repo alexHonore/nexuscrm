@@ -324,4 +324,17 @@ describe("AddClientsDialog — recherche par filtres (pas seulement le nom)", ()
     expect(p.get("sourceId")).toBeNull();
     expect(p.get("filter")).toBeNull();
   });
+
+  it("pagination : « tout sélectionner » demande de plus grandes pages", () => {
+    const f = { q: "bouchard", cats: [], srcs: [], assignees: [], never: false };
+    // Défaut : page 1 implicite, pageSize 25 (l'aperçu).
+    const preview = new URLSearchParams(buildClientSearchQuery(f));
+    expect(preview.get("pageSize")).toBe("25");
+    expect(preview.get("page")).toBeNull();
+    // Sélection en masse : pages de 50, page > 1 explicite.
+    const p3 = new URLSearchParams(buildClientSearchQuery(f, { page: 3, pageSize: 50 }));
+    expect(p3.get("pageSize")).toBe("50");
+    expect(p3.get("page")).toBe("3");
+    expect(p3.get("q")).toBe("bouchard"); // les filtres sont conservés
+  });
 });
