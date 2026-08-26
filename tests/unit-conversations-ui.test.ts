@@ -27,6 +27,7 @@ vi.mock("@/app/(app)/conversations/actions", () => ({
   markConversationHandledAction: vi.fn(),
   assignConversationAction: vi.fn(),
   handBackToAiAction: vi.fn(),
+  retryAiTurnAction: vi.fn(),
 }));
 
 const { SmsThreadCard } = await import("@/components/clients/sms-thread-card");
@@ -443,9 +444,10 @@ describe("boîte de réception", () => {
   it("un fil à traiter offre les DÉCISIONS sur place : rendre à l'IA, je réponds, traité", () => {
     // Décider ne doit pas demander d'ouvrir trois écrans. « Rendre à l'IA »
     // n'apparaît que si un assistant tient réellement le fil.
+    const withAssistant: InboxRow = { ...ROWS[0], assistantName: "Acheteur FB" };
     const html = wrap(
       createElement(ConversationsInbox, {
-        rows: [...ROWS, ENGINE_ROW],
+        rows: [withAssistant],
         currentUserId: "me",
         health: HEALTH,
       }),
@@ -453,6 +455,20 @@ describe("boîte de réception", () => {
     expect(html).toContain("Rendre à l&#x27;IA");
     expect(html).toContain("Je réponds");
     expect(html).toContain("Marquer trait");
+  });
+
+  it("une PANNE offre « Réessayer », pas « Rendre à l'IA »", () => {
+    // Réessayer rouvre les entrants consommés et rejoue le tour — rendre la
+    // main ne le fait pas : sur une panne, c'est le rejeu qu'il faut offrir.
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: [ENGINE_ROW],
+        currentUserId: "me",
+        health: HEALTH,
+      }),
+    );
+    expect(html).toContain("Réessayer");
+    expect(html).not.toContain("Rendre à l&#x27;IA");
   });
 
   it("sans assistant sur le fil, « rendre à l'IA » n'est pas offert", () => {

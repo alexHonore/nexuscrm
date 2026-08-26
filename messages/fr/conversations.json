@@ -109,9 +109,12 @@
     "you": "Vous",
     "actions": {
       "handBack": "Rendre à l'IA",
+      "retry": "Réessayer",
       "respond": "Je réponds"
     },
     "handedBack": "L'assistant reprend le fil",
+    "retried": "Le tour repart — l'assistant réessaie tout de suite",
+    "retriedNothing": "Rien à relancer — la pastille est retirée",
     "empty": {
       "attention": {
         "title": "Rien à traiter",

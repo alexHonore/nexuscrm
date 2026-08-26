@@ -20,7 +20,7 @@ import {
   resetDb,
   testDb,
 } from "./helpers/db";
-import { assistants, consents, conversations, messages, scheduledJobs, smsNumbers, suppressions } from "@/db/schema-sms";
+import { assistants, consents, conversations, messages, promptCores, scheduledJobs, smsNumbers, suppressions } from "@/db/schema-sms";
 
 const ctx = vi.hoisted(() => ({ cookies: new Map<string, string>() }));
 
@@ -46,6 +46,7 @@ const {
   setConversationAiAction,
   markConversationHandledAction,
   assignConversationAction,
+  retryAiTurnAction,
 } = await import("@/app/(app)/conversations/actions");
 const { seedGuardrailDefaults } = await import("@/lib/guardrails/store");
 
@@ -408,6 +409,129 @@ describe("annulation d'un envoi", () => {
     const { message } = await queuedMessage();
     await loginAs(null);
     expect(await cancelOutboundSmsAction(message.id)).toEqual({ ok: false, error: "forbidden" });
+  });
+});
+
+describe("réessayer un fil en panne", () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  /** Un assistant ACTIF et compilé — la condition pour que « réessayer » relance quoi que ce soit. */
+  async function makeActiveAssistant() {
+    // Le déclencheur d'activation exige un noyau de prompt compilé existant.
+    await testDb.insert(promptCores).values({ version: 1, body: "# RÔLE\nnoyau" }).onConflictDoNothing();
+    const [active] = await testDb
+      .insert(assistants)
+      .values({
+        name: "Actif", status: "active", identity: {}, goal: {}, approach: {}, model: {},
+        compiledPrompt: "prompt", compiledCoreVersion: 1, needsRecompile: false, requireSuitePass: false,
+      })
+      .returning();
+    return active;
+  }
+
+  it("un TÉLÉPHONISTE rouvre l'entrant consommé, le tour repart, la pastille tombe", async () => {
+    // C'est le geste d'une carte « Panne du modèle » : pas besoin d'être
+    // admin ni de ratisser toute la flotte comme le rejeu global.
+    const caller = await makeUser({ role: "caller", email: "retry1@x.test" });
+    await loginAs(caller);
+    const number = await makeSmsNumber();
+    const client = await makeClient({ phone: "+15145550190" });
+    const assistant = await makeActiveAssistant();
+    const thread = await makeConversation({
+      clientId: client.id, clientPhone: client.phone, smsNumberId: number.id,
+      activeAssistantId: assistant.id, aiEnabled: true,
+      needsAttention: true, attentionReason: "llm_error",
+    });
+    // Un sortant reçu, puis un entrant CONSOMMÉ par le tour mort : le fil est
+    // réglé du point de vue de la file, personne ne répondra jamais.
+    await testDb.insert(messages).values([
+      {
+        conversationId: thread.id, direction: "out", body: "Bonjour!", source: "agent",
+        status: "delivered", createdAt: new Date("2026-08-25T14:00:00Z"),
+      },
+      {
+        conversationId: thread.id, direction: "in", body: "Vos frais?", source: "human",
+        status: "received", processedAt: new Date("2026-08-25T15:01:00Z"),
+        createdAt: new Date("2026-08-25T15:00:00Z"),
+      },
+    ]);
+
+    const result = await retryAiTurnAction(thread.id);
+    expect(result).toEqual({ ok: true, id: thread.id, relaunched: true });
+
+    // L'entrant est rouvert…
+    const inbound = (await testDb.select().from(messages)).find((m) => m.direction === "in");
+    expect(inbound!.processedAt).toBeNull();
+    // …le tour est en file sous la clé du webhook…
+    const turns = (await testDb.select().from(scheduledJobs)).filter((j) => j.type === "agent_turn");
+    expect(turns).toHaveLength(1);
+    expect(turns[0].status).toBe("pending");
+    // …et la pastille est tombée, l'IA en selle.
+    const conv = await testDb.query.conversations.findFirst({ where: eq(conversations.id, thread.id) });
+    expect(conv!.needsAttention).toBe(false);
+    expect(conv!.attentionReason).toBeNull();
+    expect(conv!.aiEnabled).toBe(true);
+  });
+
+  it("réessayer DEUX fois n'empile pas deux tours (clé de dédoublonnage)", async () => {
+    const caller = await makeUser({ role: "caller", email: "retry2@x.test" });
+    await loginAs(caller);
+    const number = await makeSmsNumber();
+    const client = await makeClient({ phone: "+15145550191" });
+    const assistant = await makeActiveAssistant();
+    const thread = await makeConversation({
+      clientId: client.id, clientPhone: client.phone, smsNumberId: number.id,
+      activeAssistantId: assistant.id, aiEnabled: true,
+      needsAttention: true, attentionReason: "no_text",
+    });
+    await testDb.insert(messages).values({
+      conversationId: thread.id, direction: "in", body: "Allo?", source: "human",
+      status: "received", processedAt: new Date(), createdAt: new Date(),
+    });
+
+    expect((await retryAiTurnAction(thread.id)).ok).toBe(true);
+    expect((await retryAiTurnAction(thread.id)).ok).toBe(true);
+    const turns = (await testDb.select().from(scheduledJobs)).filter((j) => j.type === "agent_turn");
+    expect(turns).toHaveLength(1);
+  });
+
+  it("sans assistant actif sur le fil, réessayer est REFUSÉ — pas une pastille tombée en silence", async () => {
+    const caller = await makeUser({ role: "caller", email: "retry3@x.test" });
+    await loginAs(caller);
+    const number = await makeSmsNumber();
+    const client = await makeClient({ phone: "+15145550192" });
+    const thread = await makeConversation({
+      clientId: client.id, clientPhone: client.phone, smsNumberId: number.id,
+      needsAttention: true, attentionReason: "send_failed",
+    });
+    expect(await retryAiTurnAction(thread.id)).toEqual({ ok: false, error: "assistantUnavailable" });
+    const conv = await testDb.query.conversations.findFirst({ where: eq(conversations.id, thread.id) });
+    expect(conv!.needsAttention).toBe(true);
+  });
+
+  it("rien à relancer : la pastille tombe et l'action le DIT (relaunched: false)", async () => {
+    // Fil en panne sans entrant à reprendre ni ouverture en échec — un
+    // humain a peut-être déjà répondu à la main. « Réessayé » et « rien à
+    // réessayer » ne doivent pas afficher le même toast.
+    const caller = await makeUser({ role: "caller", email: "retry4@x.test" });
+    await loginAs(caller);
+    const number = await makeSmsNumber();
+    const client = await makeClient({ phone: "+15145550193" });
+    const assistant = await makeActiveAssistant();
+    const thread = await makeConversation({
+      clientId: client.id, clientPhone: client.phone, smsNumberId: number.id,
+      activeAssistantId: assistant.id, aiEnabled: true,
+      needsAttention: true, attentionReason: "send_failed",
+    });
+
+    const result = await retryAiTurnAction(thread.id);
+    expect(result).toEqual({ ok: true, id: thread.id, relaunched: false });
+    const turns = (await testDb.select().from(scheduledJobs)).filter((j) => j.type === "agent_turn");
+    expect(turns).toHaveLength(0);
+    const conv = await testDb.query.conversations.findFirst({ where: eq(conversations.id, thread.id) });
+    expect(conv!.needsAttention).toBe(false);
   });
 });
 

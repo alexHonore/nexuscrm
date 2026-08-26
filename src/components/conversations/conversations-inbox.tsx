@@ -22,6 +22,7 @@ import {
   assignConversationAction,
   handBackToAiAction,
   markConversationHandledAction,
+  retryAiTurnAction,
   setConversationAiAction,
 } from "@/app/(app)/conversations/actions";
 import {
@@ -217,6 +218,23 @@ export function ConversationsInbox({
       return true;
     });
 
+  // « Réessayer » : rejouer le tour d'UN fil en panne — entrants rouverts,
+  // ouverture de campagne remise en file, IA remise en selle. Le toast dit
+  // honnêtement si quelque chose est reparti.
+  const retry = (row: InboxRow) =>
+    act(async () => {
+      const result = await retryAiTurnAction(row.id);
+      if (!result.ok) {
+        toast.error(
+          result.error === "assistantUnavailable" ? t("thread.assistantUnavailable") : t("error"),
+        );
+        return false;
+      }
+      if (result.relaunched) toast.success(t("inbox.retried"));
+      else toast.info(t("inbox.retriedNothing"));
+      return true;
+    });
+
   // « Je réponds » : prendre le fil (IA coupée, fil attribué) et atterrir
   // directement dans la zone de rédaction de la fiche. La pastille « à
   // traiter » ne tombe QUE lorsque la réponse part vraiment (l'envoi manuel
@@ -276,6 +294,7 @@ export function ConversationsInbox({
     pending,
     onHandle: handle,
     onHandBack: handBack,
+    onRetry: retry,
     onRespond: respond,
     dfnsLocale,
   };
@@ -478,6 +497,7 @@ function InboxRowCard({
   pending,
   onHandle,
   onHandBack,
+  onRetry,
   onRespond,
   dfnsLocale,
 }: {
@@ -487,10 +507,15 @@ function InboxRowCard({
   pending: boolean;
   onHandle: (row: InboxRow) => void;
   onHandBack: (row: InboxRow) => void;
+  onRetry: (row: InboxRow) => void;
   onRespond: (row: InboxRow) => void;
   dfnsLocale: typeof fr;
 }) {
   const t = useTranslations("conversations");
+  // Une PANNE se réessaie (entrants rouverts, tour rejoué) ; une demande du
+  // client se REND à l'IA ou se répond — pas le même geste.
+  const isEngine =
+    state === "attention" && attentionKindOf(row.attentionReason ?? "") === "engine";
   const stateLook = CONVERSATION_STATE_LOOK[state];
   // La pastille de gauche porte le MOTIF quand il y en a un (à traiter,
   // refus, conclu), l'état sinon (assistant, main humaine).
@@ -600,17 +625,19 @@ function InboxRowCard({
               </span>
             ) : null}
             <span className="flex-1" />
-            {/* Les 2-3 décisions possibles, sur place. « Rendre à l'IA »
-                n'apparaît que si un assistant tient réellement le fil. */}
+            {/* Les 2-3 décisions possibles, sur place. « Réessayer » sur une
+                panne, « Rendre à l'IA » sur une demande — et seulement si un
+                assistant tient réellement le fil. */}
             {(state === "attention" || state === "human") && row.assistantName ? (
               <Button
                 variant="outline"
                 size="sm"
                 className="relative z-10 min-h-11 md:min-h-8"
                 disabled={pending}
-                onClick={() => onHandBack(row)}
+                onClick={() => (isEngine ? onRetry(row) : onHandBack(row))}
               >
-                <BotIcon aria-hidden /> {t("inbox.actions.handBack")}
+                {isEngine ? <RotateCcwIcon aria-hidden /> : <BotIcon aria-hidden />}
+                {isEngine ? t("inbox.actions.retry") : t("inbox.actions.handBack")}
               </Button>
             ) : null}
             {state === "attention" ? (

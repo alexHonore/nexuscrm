@@ -1,11 +1,19 @@
 "use server";
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
-import { assistants, conversations, messages, scheduledJobs, smsNumbers } from "@/db/schema-sms";
+import {
+  assistants,
+  campaignEnrollments,
+  conversations,
+  messages,
+  scheduledJobs,
+  smsNumbers,
+} from "@/db/schema-sms";
+import { UNDELIVERED_STATUSES } from "@/lib/agent/runtime";
 import { logAudit } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth/guards";
 import { cancelPendingJobs, enqueueJob } from "@/lib/jobs/queue";
@@ -26,7 +34,7 @@ import { analyzeSms } from "@/lib/sms/segments";
  */
 
 export type SmsActionResult =
-  | { ok: true; id?: string }
+  | { ok: true; id?: string; relaunched?: boolean }
   | {
       ok: false;
       error:
@@ -391,6 +399,167 @@ export async function handBackToAiAction(conversationId: string): Promise<SmsAct
   if (thread.clientId) revalidateFor(thread.clientId);
   else revalidatePath("/conversations");
   return { ok: true, id: thread.id };
+}
+
+/**
+ * « Réessayer » — relancer l'assistant sur UN fil tombé en panne.
+ *
+ * Le rejeu global (/api/admin/sms/replay-llm-errors) répare une panne de
+ * flotte, mais il est réservé à l'administrateur et ratisse tout. Ici, le
+ * geste d'un téléphoniste devant UNE carte « Panne du modèle » : la même
+ * mécanique, bornée à ce fil.
+ *
+ * Ce que « réessayer » veut dire, dans l'ordre :
+ *  · rouvrir les entrants consommés restés SANS réponse (tout entrant
+ *    postérieur au dernier sortant réellement reçu — la définition
+ *    d'« indélivré » du budget de tours) et remettre un tour en file ;
+ *  · sinon, remettre en file l'OUVERTURE de campagne dont le job a échoué —
+ *    sauf inscription stoppée ou exclue entre-temps ;
+ *  · sinon, un entrant jamais consommé (tour mort avant sa tentative finale)
+ *    reçoit simplement son tour.
+ *
+ * Dans tous les cas l'IA est remise en selle et la pastille tombe — le tour
+ * rejoué la remettra s'il échoue encore. `relaunched` dit honnêtement si
+ * quelque chose est reparti : « réessayé » et « rien à réessayer » ne doivent
+ * pas afficher le même toast.
+ */
+export async function retryAiTurnAction(conversationId: string): Promise<SmsActionResult> {
+  const user = await getCurrentUser();
+  if (!user) return FORBIDDEN;
+  if (!z.uuid().safeParse(conversationId).success) return INVALID;
+
+  const thread = await db.query.conversations.findFirst({
+    where: eq(conversations.id, conversationId),
+  });
+  if (!thread) return NOT_FOUND;
+
+  // Réessayer sans assistant actif et compilé ne relancerait rien : refuser
+  // vaut mieux qu'une pastille qui tombe en silence.
+  if (!thread.activeAssistantId) return { ok: false, error: "assistantUnavailable" };
+  const assistant = await db.query.assistants.findFirst({
+    where: eq(assistants.id, thread.activeAssistantId),
+    columns: { id: true, status: true, compiledPrompt: true },
+  });
+  if (!assistant || assistant.status !== "active" || !assistant.compiledPrompt) {
+    return { ok: false, error: "assistantUnavailable" };
+  }
+
+  const reopened = await db
+    .update(messages)
+    .set({ processedAt: null })
+    .where(
+      and(
+        eq(messages.conversationId, thread.id),
+        eq(messages.direction, "in"),
+        isNotNull(messages.processedAt),
+        sql`${messages.createdAt} > coalesce((
+          select max(m2.created_at) from messages m2
+          where m2.conversation_id = ${thread.id}
+            and m2.direction = 'out'
+            and coalesce(m2.status, '') not in ${UNDELIVERED_STATUSES}
+        ), to_timestamp(0))`,
+      ),
+    )
+    .returning({ id: messages.id });
+
+  let relaunched = false;
+  if (reopened.length > 0) {
+    await enqueueJob({
+      type: "agent_turn",
+      runAt: new Date(),
+      payload: { conversationId: thread.id },
+      // La MÊME clé que le webhook : un tour déjà en file absorbe le nôtre.
+      dedupeKey: `turn:${thread.id}`,
+    });
+    relaunched = true;
+  } else {
+    // Aucun entrant à reprendre : peut-être une OUVERTURE de campagne qui a
+    // échoué — le job en échec définitif porte encore son contexte.
+    const [failedJob] = await db
+      .select({ payload: scheduledJobs.payload })
+      .from(scheduledJobs)
+      .where(
+        and(
+          eq(scheduledJobs.type, "agent_turn"),
+          eq(scheduledJobs.status, "failed"),
+          sql`${scheduledJobs.payload}->>'conversationId' = ${thread.id}`,
+        ),
+      )
+      .orderBy(desc(scheduledJobs.createdAt))
+      .limit(1);
+    const outreach = (
+      failedJob?.payload as { outreach?: { enrollmentId: string; step: number } } | undefined
+    )?.outreach;
+    const enrollment = outreach
+      ? await db.query.campaignEnrollments.findFirst({
+          where: eq(campaignEnrollments.id, outreach.enrollmentId),
+          columns: { status: true },
+        })
+      : undefined;
+
+    if (
+      outreach &&
+      enrollment &&
+      enrollment.status !== "stopped" &&
+      enrollment.status !== "excluded"
+    ) {
+      await enqueueJob({
+        type: "agent_turn",
+        runAt: new Date(),
+        payload: { conversationId: thread.id, outreach },
+        // La clé du barreau d'origine — le dédoublonnage n'absorbe que les
+        // jobs vivants, jamais celui en échec qu'on remplace.
+        dedupeKey: `outreach:${outreach.enrollmentId}:${outreach.step}`,
+      });
+      relaunched = true;
+    } else {
+      // Entrant ORPHELIN : jamais consommé, son tour est mort avant la
+      // tentative finale. Remettre le tour du webhook suffit.
+      const pending = await db.query.messages.findFirst({
+        where: and(
+          eq(messages.conversationId, thread.id),
+          eq(messages.direction, "in"),
+          isNull(messages.processedAt),
+        ),
+        columns: { id: true },
+      });
+      if (pending) {
+        await enqueueJob({
+          type: "agent_turn",
+          runAt: new Date(),
+          payload: { conversationId: thread.id },
+          dedupeKey: `turn:${thread.id}`,
+        });
+        relaunched = true;
+      }
+    }
+  }
+
+  await db
+    .update(conversations)
+    .set({
+      aiEnabled: true,
+      pausedById: null,
+      pausedAt: null,
+      pauseReason: null,
+      needsAttention: false,
+      attentionReason: null,
+    })
+    .where(eq(conversations.id, thread.id));
+
+  if (relaunched) kickDispatch();
+
+  await logAudit({
+    userId: user.id,
+    action: "sms.retry_turn",
+    entity: "conversation",
+    entityId: thread.id,
+    detail: { reopened: reopened.length, relaunched },
+  });
+
+  if (thread.clientId) revalidateFor(thread.clientId);
+  else revalidatePath("/conversations");
+  return { ok: true, id: thread.id, relaunched };
 }
 
 /** Marque un fil comme traité — retire la pastille « à traiter ». */

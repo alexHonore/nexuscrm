@@ -158,9 +158,12 @@
     "aiComposing": "Assistant reply on its way.",
     "actions": {
       "handBack": "Hand back to AI",
-      "respond": "I'll reply"
+      "respond": "I'll reply",
+      "retry": "Try again"
     },
-    "handedBack": "The assistant takes the thread back"
+    "handedBack": "The assistant takes the thread back",
+    "retried": "The turn is back in flight — the assistant retries right away",
+    "retriedNothing": "Nothing to relaunch — the flag was cleared"
   },
   "health": {
     "title": "Engine health",
