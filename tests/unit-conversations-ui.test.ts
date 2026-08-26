@@ -133,6 +133,7 @@ const ROWS: InboxRow[] = [
     assignedToId: null,
     assignedToName: null,
     assistantName: null,
+    did: [],
     lastBody: "Je préfère parler à quelqu'un",
     lastDirection: "in",
     lastSource: "human",
@@ -149,6 +150,7 @@ const ROWS: InboxRow[] = [
     assignedToId: "me",
     assignedToName: "Moi",
     assistantName: "Acheteur FB",
+    did: [],
     lastBody: "Merci!",
     lastDirection: "out",
     lastSource: "agent",
@@ -168,6 +170,7 @@ const ENGINE_ROW: InboxRow = {
   assignedToId: null,
   assignedToName: null,
   assistantName: "Acheteur FB",
+  did: [],
   lastBody: "C'est quoi vos frais?",
   lastDirection: "in",
   lastSource: "human",
@@ -186,6 +189,7 @@ const FINISHED_ROW: InboxRow = {
   assignedToId: null,
   assignedToName: null,
   assistantName: "Acheteur FB",
+  did: [],
   lastBody: "Parfait pour mardi 10h!",
   lastDirection: "in",
   lastSource: "human",
@@ -214,6 +218,7 @@ const HELD_ROW: InboxRow = {
   assignedToId: "me",
   assignedToName: "Moi",
   assistantName: "Acheteur FB",
+  did: [],
   lastBody: "Je vous appelle demain.",
   lastDirection: "out",
   lastSource: "human",
@@ -455,6 +460,39 @@ describe("boîte de réception", () => {
     expect(html).toContain("Rendre à l&#x27;IA");
     expect(html).toContain("Je réponds");
     expect(html).toContain("Marquer trait");
+  });
+
+  it("la CONCLUSION de l'assistant se lit sur la carte : ce qu'il a fait", () => {
+    // Un rendez-vous réservé ou une fiche classée ne doivent pas demander
+    // d'ouvrir la fiche pour être découverts.
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: [{ ...ROWS[0], did: ["booked", "categorized", "followup"] }],
+        currentUserId: "me",
+        health: HEALTH,
+      }),
+    );
+    expect(html).toContain("Rendez-vous réservé");
+    expect(html).toContain("Fiche classée");
+    expect(html).toContain("Rappel posé");
+  });
+
+  it("chaque acte du modèle a son libellé français ET anglais", async () => {
+    const { CONVERSATION_DEEDS, deedOf } = await import("@/components/conversations/state");
+    const en = (await import("../messages/en/conversations.json")).default as {
+      inbox: { did: Record<string, string> };
+    };
+    const fr = (conversationsFr as { inbox: { did: Record<string, string> } }).inbox.did;
+    for (const deed of CONVERSATION_DEEDS) {
+      expect(fr[deed], `fr: ${deed}`).toBeTruthy();
+      expect(en.inbox.did[deed], `en: ${deed}`).toBeTruthy();
+    }
+    // Les outils qui laissent une trace se réduisent à leur acte ; une
+    // lecture n'en est pas un.
+    expect(deedOf("book_meeting")).toBe("booked");
+    expect(deedOf("auto_categorized")).toBe("categorized");
+    expect(deedOf("followup_created")).toBe("followup");
+    expect(deedOf("read_client")).toBeNull();
   });
 
   it("une PANNE offre « Réessayer », pas « Rendre à l'IA »", () => {

@@ -106,6 +106,14 @@
     },
     "aiWaitingClient": "L'assistant a répondu — en attente du client.",
     "aiComposing": "Réponse de l'assistant en route.",
+    "did": {
+      "booked": "Rendez-vous réservé",
+      "categorized": "Fiche classée",
+      "qualified": "Qualification notée",
+      "followup": "Rappel posé",
+      "note": "Note ajoutée à la fiche",
+      "transferred": "Transféré d'assistant"
+    },
     "you": "Vous",
     "actions": {
       "handBack": "Rendre à l'IA",

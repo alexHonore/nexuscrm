@@ -99,6 +99,48 @@ export type ConversationState = "attention" | "human" | "ai" | "refused" | "conc
 
 const REFUSED = new Set<string>(REFUSED_REASONS);
 
+/**
+ * Ce que l'assistant a FAIT sur un fil — la conclusion visible de son travail.
+ *
+ * Le moteur journalise chaque outil exécuté (`agent_events`), mais un journal
+ * n'est pas une réponse à « qu'a-t-il fait ? ». Ici, les événements sont
+ * réduits aux six actes qui comptent pour un humain qui parcourt la boîte :
+ * réservé, classé, qualifié, rappel posé, note laissée, transféré. Les
+ * lectures (fiche, notes, disponibilités) ne sont pas des actes — les montrer
+ * noierait les vrais.
+ */
+export const CONVERSATION_DEEDS = [
+  "booked",
+  "categorized",
+  "qualified",
+  "followup",
+  "note",
+  "transferred",
+] as const;
+
+export type ConversationDeed = (typeof CONVERSATION_DEEDS)[number];
+
+/** L'ordre d'affichage = l'ordre de la liste : le rendez-vous d'abord. */
+const DEED_OF_ITEM: Record<string, ConversationDeed> = {
+  book_meeting: "booked",
+  set_category: "categorized",
+  auto_categorized: "categorized",
+  update_qualification: "qualified",
+  schedule_followup: "followup",
+  followup_created: "followup",
+  add_client_comment: "note",
+  transfer_assistant: "transferred",
+  transfer: "transferred",
+};
+
+/**
+ * Réduit un événement du moteur (nom d'outil réussi, ou type d'événement) à
+ * son acte — null pour tout ce qui n'en est pas un.
+ */
+export function deedOf(item: string): ConversationDeed | null {
+  return DEED_OF_ITEM[item] ?? null;
+}
+
 export function conversationStateOf(row: {
   needsAttention: boolean;
   attentionReason: string | null;

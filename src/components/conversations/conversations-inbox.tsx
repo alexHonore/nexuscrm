@@ -29,6 +29,7 @@ import {
   ATTENTION_KIND_LOOK,
   ATTENTION_LOOK,
   CONVERSATION_STATE_LOOK,
+  TOOL_LOOK,
   LookGlyph,
   LookIcon,
   lookTint,
@@ -37,6 +38,7 @@ import {
 import {
   attentionKindOf,
   conversationStateOf,
+  type ConversationDeed,
   type ConversationState,
 } from "@/components/conversations/state";
 import { RelativeTime } from "@/components/relative-time";
@@ -58,6 +60,8 @@ export type InboxRow = {
   assignedToName: string | null;
   /** Nom de l'assistant qui tient le fil — null si un humain répond. */
   assistantName: string | null;
+  /** Ce que l'assistant a FAIT (rendez-vous, classement, rappel…) — sa conclusion visible. */
+  did: ConversationDeed[];
   lastBody: string | null;
   /** QUI a parlé en dernier : sans ça, impossible de savoir si on attend le client ou s'il nous attend. */
   lastDirection: "in" | "out" | null;
@@ -99,6 +103,20 @@ const TAB_STATES: Record<Exclude<Tab, "all">, ConversationState[]> = {
 const ALL_SECTIONS: ConversationState[] = ["attention", "human", "ai", "refused", "concluded"];
 
 const POLL_MS = 25_000;
+
+/**
+ * Chaque acte de l'assistant reprend le pictogramme de l'OUTIL qui l'a posé
+ * (`TOOL_LOOK`) : la même image dans l'éditeur d'assistant, dans les traces
+ * et ici — un vocabulaire, pas trois.
+ */
+const DEED_LOOK: Record<ConversationDeed, Look> = {
+  booked: TOOL_LOOK.book_meeting,
+  categorized: TOOL_LOOK.set_category,
+  qualified: TOOL_LOOK.update_qualification,
+  followup: TOOL_LOOK.schedule_followup,
+  note: TOOL_LOOK.add_client_comment,
+  transferred: TOOL_LOOK.transfer_assistant,
+};
 
 /**
  * Boîte de réception.
@@ -605,6 +623,20 @@ function InboxRowCard({
             <span className={clientWaiting ? "text-foreground" : "text-muted-foreground"}>
               {row.lastBody}
             </span>
+          </p>
+        ) : null}
+
+        {/* La conclusion de l'assistant — ce qu'il a FAIT sur ce fil. Un
+            rendez-vous réservé ou une fiche classée se voient ici, sans
+            ouvrir la fiche pour le découvrir. */}
+        {row.did.length > 0 ? (
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            {row.did.map((deed) => (
+              <span key={deed} className="inline-flex items-center gap-1">
+                <LookGlyph look={DEED_LOOK[deed]} className="size-3" />
+                {t(`inbox.did.${deed}`)}
+              </span>
+            ))}
           </p>
         ) : null}
 

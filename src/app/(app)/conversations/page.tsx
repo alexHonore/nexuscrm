@@ -1,11 +1,19 @@
-import { desc, eq, isNotNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { MessageCircle } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { ConversationsInbox, type InboxRow } from "@/components/conversations/conversations-inbox";
+import { deedOf, CONVERSATION_DEEDS, type ConversationDeed } from "@/components/conversations/state";
 import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/db";
 import { clients, users } from "@/db/schema";
-import { assistants, conversations, messages, scheduledJobs, suppressions } from "@/db/schema-sms";
+import {
+  agentEvents,
+  assistants,
+  conversations,
+  messages,
+  scheduledJobs,
+  suppressions,
+} from "@/db/schema-sms";
 import { requireUser } from "@/lib/auth/guards";
 import { settingsSendGate } from "@/lib/sms-server";
 import { resolveSmsMode } from "@/lib/sms/provider";
@@ -73,6 +81,47 @@ export default async function ConversationsPage() {
     .orderBy(desc(conversations.needsAttention), desc(lastMessage.at))
     .limit(200);
 
+  // ── Ce que l'assistant a FAIT sur chaque fil ─────────────────────────────
+  // La conclusion de son travail, pas son journal : seuls les outils REUSSIS
+  // qui laissent une trace pour le client (rendez-vous, classement,
+  // qualification, rappel, note, transfert) — jamais les lectures.
+  const deedsByConversation = new Map<string, ConversationDeed[]>();
+  if (rows.length > 0) {
+    const eventRows = await db
+      .selectDistinct({
+        conversationId: agentEvents.conversationId,
+        item: sql<string>`coalesce(${agentEvents.payload}->>'name', ${agentEvents.type})`,
+      })
+      .from(agentEvents)
+      .where(
+        and(
+          inArray(
+            agentEvents.conversationId,
+            rows.map((r) => r.id),
+          ),
+          or(
+            and(eq(agentEvents.type, "tool_call"), sql`${agentEvents.payload}->>'ok' = 'true'`),
+            inArray(agentEvents.type, ["auto_categorized", "followup_created", "transfer"]),
+          ),
+        ),
+      );
+    for (const event of eventRows) {
+      const deed = deedOf(event.item);
+      if (!deed) continue;
+      const list = deedsByConversation.get(event.conversationId) ?? [];
+      if (!list.includes(deed)) deedsByConversation.set(event.conversationId, [...list, deed]);
+    }
+  }
+  // L'ordre d'affichage est celui du modèle (le rendez-vous d'abord), pas
+  // l'ordre d'arrivée des événements.
+  const deedRank = new Map(CONVERSATION_DEEDS.map((d, i) => [d, i]));
+  for (const [id, list] of deedsByConversation) {
+    deedsByConversation.set(
+      id,
+      [...list].sort((a, b) => (deedRank.get(a) ?? 0) - (deedRank.get(b) ?? 0)),
+    );
+  }
+
   // ── Bande d'état ─────────────────────────────────────────────────────────
   const [sendingAllowed, queueCounts, suppressedCount] = await Promise.all([
     // On réutilise la PORTE d'envoi plutôt que de relire la rangée ici : elle
@@ -100,6 +149,7 @@ export default async function ConversationsPage() {
     assignedToId: r.assignedToId,
     assignedToName: r.assignedToName,
     assistantName: r.assistantName,
+    did: deedsByConversation.get(r.id) ?? [],
     lastBody: r.lastBody ?? null,
     lastDirection: r.lastDirection === "in" || r.lastDirection === "out" ? r.lastDirection : null,
     lastSource: r.lastSource ?? null,

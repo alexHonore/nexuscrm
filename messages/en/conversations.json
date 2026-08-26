@@ -163,7 +163,15 @@
     },
     "handedBack": "The assistant takes the thread back",
     "retried": "The turn is back in flight — the assistant retries right away",
-    "retriedNothing": "Nothing to relaunch — the flag was cleared"
+    "retriedNothing": "Nothing to relaunch — the flag was cleared",
+    "did": {
+      "booked": "Meeting booked",
+      "categorized": "Client categorized",
+      "qualified": "Qualification captured",
+      "followup": "Follow-up scheduled",
+      "note": "Note added to the client",
+      "transferred": "Assistant transferred"
+    }
   },
   "health": {
     "title": "Engine health",
