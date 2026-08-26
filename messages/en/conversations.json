@@ -95,7 +95,11 @@
         "title": "No conversations",
         "desc": "SMS threads will appear here from the first message."
       },
-      "mine": "No thread is assigned to you in this view."
+      "mine": "No thread is assigned to you in this view.",
+      "queue": {
+        "title": "Queue is empty",
+        "desc": "No scheduled send, no reply in preparation, no planned follow-up."
+      }
     },
     "reason": {
       "inbound": "New message",
@@ -131,7 +135,8 @@
       "attention": "To handle",
       "waiting": "Awaiting client",
       "refused": "Refusals",
-      "all": "All"
+      "all": "All",
+      "queue": "Send queue"
     },
     "mine": "Mine",
     "sections": {
@@ -171,6 +176,15 @@
       "followup": "Follow-up scheduled",
       "note": "Note added to the client",
       "transferred": "Assistant transferred"
+    },
+    "queue": {
+      "kind": {
+        "send": "Scheduled send",
+        "turn": "Reply in preparation",
+        "touch": "Campaign follow-up"
+      },
+      "turnHint": "The assistant is composing its reply — the text does not exist yet.",
+      "touchHint": "{campaign} · rung {step} — the text will be written at send time."
     }
   },
   "health": {

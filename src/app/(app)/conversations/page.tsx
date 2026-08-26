@@ -1,7 +1,11 @@
-import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { MessageCircle } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { ConversationsInbox, type InboxRow } from "@/components/conversations/conversations-inbox";
+import {
+  ConversationsInbox,
+  type InboxRow,
+  type QueueItem,
+} from "@/components/conversations/conversations-inbox";
 import { deedOf, CONVERSATION_DEEDS, type ConversationDeed } from "@/components/conversations/state";
 import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/db";
@@ -9,6 +13,8 @@ import { clients, users } from "@/db/schema";
 import {
   agentEvents,
   assistants,
+  campaignEnrollments,
+  campaigns,
   conversations,
   messages,
   scheduledJobs,
@@ -122,6 +128,119 @@ export default async function ConversationsPage() {
     );
   }
 
+  // ── File d'envoi : qui va recevoir un texto, et quand ────────────────────
+  // Trois sources, une seule ligne du temps : les envois déjà écrits qui
+  // attendent leur heure (annulables), les réponses que l'assistant est en
+  // train de composer, et les barreaux de campagne planifiés — parfois à des
+  // jours d'ici (campaign_enrollments.next_touch_at, la vraie source des
+  // relances futures : le job n'existe qu'au moment dû).
+  const [sendJobs, turnJobs, upcomingTouches] = await Promise.all([
+    db
+      .select({ id: scheduledJobs.id, runAt: scheduledJobs.runAt, payload: scheduledJobs.payload })
+      .from(scheduledJobs)
+      .where(and(eq(scheduledJobs.type, "send_sms"), eq(scheduledJobs.status, "pending")))
+      .orderBy(asc(scheduledJobs.runAt))
+      .limit(100),
+    db
+      .select({ id: scheduledJobs.id, runAt: scheduledJobs.runAt, payload: scheduledJobs.payload })
+      .from(scheduledJobs)
+      .where(and(eq(scheduledJobs.type, "agent_turn"), eq(scheduledJobs.status, "pending")))
+      .orderBy(asc(scheduledJobs.runAt))
+      .limit(100),
+    db
+      .select({
+        id: campaignEnrollments.id,
+        nextTouchAt: campaignEnrollments.nextTouchAt,
+        step: campaignEnrollments.step,
+        campaignName: campaigns.name,
+        clientId: clients.id,
+        clientName: clients.fullName,
+      })
+      .from(campaignEnrollments)
+      .innerJoin(campaigns, eq(campaigns.id, campaignEnrollments.campaignId))
+      .innerJoin(clients, eq(clients.id, campaignEnrollments.clientId))
+      .where(
+        and(
+          inArray(campaignEnrollments.status, ["pending", "active"]),
+          isNotNull(campaignEnrollments.nextTouchAt),
+        ),
+      )
+      .orderBy(asc(campaignEnrollments.nextTouchAt))
+      .limit(100),
+  ]);
+
+  // Les jobs ne portent qu'un conversationId : résoudre le client une fois.
+  const jobConversationIds = [
+    ...new Set(
+      [...sendJobs, ...turnJobs]
+        .map((j) => (j.payload as { conversationId?: string }).conversationId)
+        .filter((id): id is string => typeof id === "string"),
+    ),
+  ];
+  const jobThreads = jobConversationIds.length
+    ? await db
+        .select({
+          id: conversations.id,
+          clientId: conversations.clientId,
+          clientName: clients.fullName,
+          clientPhone: conversations.clientPhone,
+        })
+        .from(conversations)
+        .leftJoin(clients, eq(clients.id, conversations.clientId))
+        .where(inArray(conversations.id, jobConversationIds))
+    : [];
+  const threadById = new Map(jobThreads.map((c) => [c.id, c]));
+
+  const queue: QueueItem[] = [
+    ...sendJobs.map((job): QueueItem => {
+      const payload = job.payload as { conversationId?: string; body?: string; source?: string };
+      const thread = payload.conversationId ? threadById.get(payload.conversationId) : undefined;
+      return {
+        id: job.id,
+        kind: "send",
+        clientId: thread?.clientId ?? null,
+        clientName: thread?.clientName ?? thread?.clientPhone ?? "—",
+        when: job.runAt.toISOString(),
+        body: payload.body ?? null,
+        source: payload.source ?? null,
+        campaignName: null,
+        step: null,
+        jobId: job.id,
+      };
+    }),
+    ...turnJobs.map((job): QueueItem => {
+      const payload = job.payload as { conversationId?: string };
+      const thread = payload.conversationId ? threadById.get(payload.conversationId) : undefined;
+      return {
+        id: job.id,
+        kind: "turn",
+        clientId: thread?.clientId ?? null,
+        clientName: thread?.clientName ?? thread?.clientPhone ?? "—",
+        when: job.runAt.toISOString(),
+        body: null,
+        source: null,
+        campaignName: null,
+        step: null,
+        jobId: null,
+      };
+    }),
+    ...upcomingTouches.map(
+      (touch): QueueItem => ({
+        id: touch.id,
+        kind: "touch",
+        clientId: touch.clientId,
+        clientName: touch.clientName,
+        when: (touch.nextTouchAt as Date).toISOString(),
+        body: null,
+        source: null,
+        campaignName: touch.campaignName,
+        // `step` est l'index du PROCHAIN barreau — l'humain compte à partir de 1.
+        step: touch.step + 1,
+        jobId: null,
+      }),
+    ),
+  ].sort((a, b) => Date.parse(a.when) - Date.parse(b.when));
+
   // ── Bande d'état ─────────────────────────────────────────────────────────
   const [sendingAllowed, queueCounts, suppressedCount] = await Promise.all([
     // On réutilise la PORTE d'envoi plutôt que de relire la rangée ici : elle
@@ -165,6 +284,7 @@ export default async function ConversationsPage() {
       />
       <ConversationsInbox
         rows={items}
+        queue={queue}
         currentUserId={user.id}
         isAdmin={user.role === "admin"}
         health={{

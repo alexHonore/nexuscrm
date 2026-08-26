@@ -31,6 +31,7 @@ import {
   ListChecksIcon,
   ListOrderedIcon,
   MailIcon,
+  MegaphoneIcon,
   MessageCircleQuestionMarkIcon,
   MessageSquareDotIcon,
   MessageSquareOffIcon,
@@ -56,6 +57,7 @@ import {
   ScissorsIcon,
   ScrollTextIcon,
   SearchCheckIcon,
+  SendIcon,
   ShieldIcon,
   ShieldQuestionMarkIcon,
   ShieldXIcon,
@@ -525,6 +527,22 @@ export const ATTENTION_LOOK: Record<string, Look> = {
   closed_not_interested: { color: TONE.raw, Icon: CircleXIcon },
   hard_refusal: { color: TONE.raw, Icon: MessageSquareXIcon },
   optout: { color: "#EF4444", Icon: XOctagonIcon },
+};
+
+/**
+ * Les trois choses qui peuvent ATTENDRE dans la file d'envoi.
+ *
+ * « Qui va recevoir un texto, et quand ? » — un message déjà écrit qui attend
+ * son heure, une réponse que l'assistant est en train de composer, et un
+ * barreau de campagne planifié à des jours d'ici ne sont pas la même
+ * promesse : le premier a un texte qu'on peut lire (et annuler), le deuxième
+ * n'existe pas encore, le troisième dépend d'une campagne qu'on règle
+ * ailleurs.
+ */
+export const QUEUE_KIND_LOOK: Record<"send" | "turn" | "touch", Look> = {
+  send: { color: "#0EA5E9", Icon: SendIcon },
+  turn: { color: TONE.machinery, Icon: SparklesIcon },
+  touch: { color: "#3B82F6", Icon: MegaphoneIcon },
 };
 
 /**

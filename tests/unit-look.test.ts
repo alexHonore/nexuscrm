@@ -28,6 +28,7 @@ import {
   LookGlyph,
   LookIcon,
   ORIGIN_LOOK,
+  QUEUE_KIND_LOOK,
   RESULT_LOOK,
   SEVERITY_LOOK,
   TONE,
@@ -264,6 +265,7 @@ describe("un pictogramme ne remplace pas un libellé", () => {
       ...ATTENTION_LOOK,
       ...CONVERSATION_STATE_LOOK,
       ...ATTENTION_KIND_LOOK,
+      ...QUEUE_KIND_LOOK,
       sms: CHANNEL_LOOK.sms,
     })) {
       expect(typeof look.Icon, `${key}.Icon`).not.toBe("string");

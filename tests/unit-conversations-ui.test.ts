@@ -13,7 +13,11 @@ import { CHANNEL_LOOK } from "@/components/look";
 import conversationsFr from "../messages/fr/conversations.json";
 import commonFr from "../messages/fr/common.json";
 import type { SmsThreadData } from "@/components/clients/sms-thread-card";
-import type { EngineHealth, InboxRow } from "@/components/conversations/conversations-inbox";
+import type {
+  EngineHealth,
+  InboxRow,
+  QueueItem,
+} from "@/components/conversations/conversations-inbox";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 // Les composants importent les actions serveur ; les simuler évite d'entraîner
@@ -612,6 +616,77 @@ describe("fil SMS", () => {
     );
     expect(html).toContain("Simulation");
     expect(html).not.toContain("thread.status.");
+  });
+});
+
+describe("la file d'envoi", () => {
+  const QUEUE: QueueItem[] = [
+    {
+      id: "q1", kind: "send", clientId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      clientName: "Marie Tremblay", when: "2026-08-26T18:00:00.000Z",
+      body: "Bonjour Marie, toujours partante pour jeudi?", source: "agent",
+      campaignName: null, step: null, jobId: "q1",
+    },
+    {
+      id: "q2", kind: "turn", clientId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      clientName: "Jean Roy", when: "2026-08-26T18:05:00.000Z",
+      body: null, source: null, campaignName: null, step: null, jobId: null,
+    },
+    {
+      id: "q3", kind: "touch", clientId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      clientName: "Nathalie Côté", when: "2026-08-29T13:00:00.000Z",
+      body: null, source: null, campaignName: "Vendeur FB", step: 2, jobId: null,
+    },
+  ];
+
+  it("montre QUI recevra un texto, sous ses trois formes", () => {
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: [],
+        queue: QUEUE,
+        currentUserId: "me",
+        health: HEALTH,
+        initialTab: "queue",
+      }),
+    );
+    // L'envoi déjà écrit montre SON texte…
+    expect(html).toContain("Envoi programmé");
+    expect(html).toContain("toujours partante pour jeudi");
+    // …la réponse en préparation dit qu'elle n'existe pas encore…
+    expect(html).toContain("Réponse en préparation");
+    expect(html).toContain("n&#x27;existe pas encore");
+    // …et le barreau de campagne dit sa campagne et son rang.
+    expect(html).toContain("Relance de campagne");
+    expect(html).toContain("Vendeur FB");
+    expect(html).toContain("barreau 2");
+  });
+
+  it("seul l'envoi ENCORE EN FILE offre d'annuler", () => {
+    // Une réponse pas encore écrite et un barreau planifié ne s'annulent pas
+    // ici — offrir le bouton serait mentir sur ce qu'il ferait.
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: [],
+        queue: QUEUE,
+        currentUserId: "me",
+        health: HEALTH,
+        initialTab: "queue",
+      }),
+    );
+    expect((html.match(/>Annuler</g) ?? []).length).toBe(1);
+  });
+
+  it("file vide : un état vide dédié, pas « rien à traiter »", () => {
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: ROWS,
+        queue: [],
+        currentUserId: "me",
+        health: HEALTH,
+        initialTab: "queue",
+      }),
+    );
+    expect(html).toContain("Rien en file");
   });
 });
 

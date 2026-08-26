@@ -81,8 +81,18 @@
     "tabs": {
       "attention": "À traiter",
       "waiting": "En attente du client",
+      "queue": "File d'envoi",
       "refused": "Refus",
       "all": "Toutes"
+    },
+    "queue": {
+      "kind": {
+        "send": "Envoi programmé",
+        "turn": "Réponse en préparation",
+        "touch": "Relance de campagne"
+      },
+      "turnHint": "L'assistant compose sa réponse — le texte n'existe pas encore.",
+      "touchHint": "{campaign} · barreau {step} — le texte sera rédigé à l'envoi."
     },
     "mine": "Les miennes",
     "sections": {
@@ -131,6 +141,10 @@
       "waiting": {
         "title": "Aucune réponse attendue",
         "desc": "L'assistant n'a aucun message resté sans réponse."
+      },
+      "queue": {
+        "title": "Rien en file",
+        "desc": "Aucun envoi programmé, aucune réponse en préparation, aucune relance planifiée."
       },
       "refused": {
         "title": "Aucun refus",

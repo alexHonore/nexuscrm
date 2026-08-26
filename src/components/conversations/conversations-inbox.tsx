@@ -20,6 +20,7 @@ import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   assignConversationAction,
+  cancelQueuedSmsAction,
   handBackToAiAction,
   markConversationHandledAction,
   retryAiTurnAction,
@@ -29,6 +30,7 @@ import {
   ATTENTION_KIND_LOOK,
   ATTENTION_LOOK,
   CONVERSATION_STATE_LOOK,
+  QUEUE_KIND_LOOK,
   TOOL_LOOK,
   LookGlyph,
   LookIcon,
@@ -69,6 +71,30 @@ export type InboxRow = {
   lastAt: string | null;
 };
 
+/**
+ * Une entrée de la FILE D'ENVOI — un texto à venir, sous l'une de ses trois
+ * formes : un envoi déjà écrit qui attend son heure (`send`, annulable), une
+ * réponse que l'assistant compose (`turn`), un barreau de campagne planifié
+ * (`touch`).
+ */
+export type QueueItem = {
+  id: string;
+  kind: "send" | "turn" | "touch";
+  clientId: string | null;
+  clientName: string;
+  /** ISO — quand ça part. */
+  when: string;
+  /** Le texte, quand il existe déjà (envois en file seulement). */
+  body: string | null;
+  /** opener | ladder | agent | human | system — pour les envois en file. */
+  source: string | null;
+  campaignName: string | null;
+  /** Numéro HUMAIN du barreau (1-based) — relances de campagne seulement. */
+  step: number | null;
+  /** Job annulable tant qu'il est en file — envois seulement. */
+  jobId: string | null;
+};
+
 export type EngineHealth = {
   killSwitch: boolean;
   mode: "live" | "sandbox" | "dry_run";
@@ -79,21 +105,23 @@ export type EngineHealth = {
 };
 
 /**
- * Les QUATRE vues (demande d'Alex, 2026-08-25 au soir) :
+ * Les CINQ vues (demandes d'Alex, 2026-08-25/26) :
  *
  *  · « À traiter » — tout ce qui repose sur un humain : les fils qui
  *    réclament une décision ET ceux qu'un humain tient déjà en main.
  *  · « En attente du client » — l'assistant a écrit, la réponse n'est pas
  *    arrivée. Rien à faire, mais on veut le VOIR.
+ *  · « File d'envoi » — qui va recevoir un texto, et quand : envois écrits
+ *    en attente de leur heure, réponses en préparation, relances planifiées.
  *  · « Refus » — les non explicites (refus ferme, pas intéressé, STOP).
  *  · « Toutes » — chaque fil, RANGÉ par situation, avec un en-tête par
  *    groupe — pas une pile plate à déchiffrer.
  */
-type Tab = "attention" | "waiting" | "refused" | "all";
-const TABS: Tab[] = ["attention", "waiting", "refused", "all"];
+type Tab = "attention" | "waiting" | "queue" | "refused" | "all";
+const TABS: Tab[] = ["attention", "waiting", "queue", "refused", "all"];
 
-/** Quels états chaque vue montre. `all` les montre tous, en sections. */
-const TAB_STATES: Record<Exclude<Tab, "all">, ConversationState[]> = {
+/** Quels états chaque vue montre. `all` les montre tous, en sections ; `queue` a sa propre matière. */
+const TAB_STATES: Record<Exclude<Tab, "all" | "queue">, ConversationState[]> = {
   attention: ["attention", "human"],
   waiting: ["ai"],
   refused: ["refused"],
@@ -131,22 +159,27 @@ const DEED_LOOK: Record<ConversationDeed, Look> = {
  */
 export function ConversationsInbox({
   rows,
+  queue = [],
   currentUserId,
   health,
   isAdmin = false,
+  initialTab = "attention",
 }: {
   rows: InboxRow[];
+  /** La file d'envoi — les textos à venir (voir `QueueItem`). */
+  queue?: QueueItem[];
   currentUserId: string;
   health: EngineHealth;
   /** Le rejeu après panne est un geste d'administrateur (l'API le refuse aux autres). */
   isAdmin?: boolean;
+  initialTab?: Tab;
 }) {
   const t = useTranslations("conversations");
   const locale = useLocale();
   const dfnsLocale = locale === "en" ? enUS : fr;
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [tab, setTab] = useState<Tab>("attention");
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [mineOnly, setMineOnly] = useState(false);
 
   useDataChange(["sms"], () => router.refresh());
@@ -181,10 +214,12 @@ export function ConversationsInbox({
     () => ({
       attention: byState.attention.length + byState.human.length,
       waiting: byState.ai.length,
+      // La file ignore « les miennes » : un envoi programmé n'est à personne.
+      queue: queue.length,
       refused: byState.refused.length,
       all: base.length,
     }),
-    [byState, base],
+    [byState, base, queue],
   );
   const mineCount = useMemo(
     () => rows.filter((r) => r.assignedToId === currentUserId).length,
@@ -276,6 +311,22 @@ export function ConversationsInbox({
       emitDataChange("sms");
       if (row.clientId) router.push(`/clients/${row.clientId}`);
       else router.refresh();
+    });
+  };
+
+  // Annuler un envoi encore EN FILE — la seule fenêtre où « annuler » veut
+  // dire quelque chose. Trop tard = on le dit, jamais on ne fait semblant.
+  const cancelQueued = (item: QueueItem) => {
+    if (!item.jobId) return;
+    act(async () => {
+      const result = await cancelQueuedSmsAction(item.jobId!);
+      if (!result.ok) {
+        toast.error(result.error === "alreadySent" ? t("thread.tooLate") : t("error"));
+        // Rafraîchir quand même : l'état a changé sous nos pieds.
+        return true;
+      }
+      toast.success(t("thread.cancelled"));
+      return true;
     });
   };
 
@@ -444,6 +495,18 @@ export function ConversationsInbox({
               </Button>
             </div>
           ) : null}
+        </div>
+      ) : tab === "queue" ? (
+        <div className="space-y-2">
+          {queue.map((item) => (
+            <QueueRowCard
+              key={`${item.kind}:${item.id}`}
+              item={item}
+              pending={pending}
+              onCancel={cancelQueued}
+              dfnsLocale={dfnsLocale}
+            />
+          ))}
         </div>
       ) : tab === "all" ? (
         // « Toutes » n'est pas une pile plate : chaque situation a son
@@ -694,6 +757,89 @@ function InboxRowCard({
                 </Button>
               </>
             ) : null}
+          </div>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+/**
+ * Une entrée de la file d'envoi.
+ *
+ * Trois formes, une même carte : l'envoi déjà écrit montre SON texte et
+ * s'annule tant qu'il est en file ; la réponse en préparation n'a pas encore
+ * de texte — dire qu'elle arrive vaut mieux que faire semblant ; le barreau
+ * de campagne dit sa campagne et son rang, parce que c'est là qu'on va s'il
+ * faut le retenir.
+ */
+function QueueRowCard({
+  item,
+  pending,
+  onCancel,
+  dfnsLocale,
+}: {
+  item: QueueItem;
+  pending: boolean;
+  onCancel: (item: QueueItem) => void;
+  dfnsLocale: typeof fr;
+}) {
+  const t = useTranslations("conversations");
+  const look = QUEUE_KIND_LOOK[item.kind];
+
+  return (
+    <article className="relative flex items-start gap-3 rounded-xl border bg-card p-3 shadow-xs transition-colors md:p-4 hover:border-ring/60 hover:bg-accent/40">
+      {item.clientId ? (
+        <Link
+          href={`/clients/${item.clientId}`}
+          className="absolute inset-0 rounded-xl"
+          aria-label={`${t("inbox.open")} — ${item.clientName}`}
+        />
+      ) : null}
+
+      <LookIcon look={look} className="mt-0.5" />
+
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-sm font-semibold">{item.clientName}</span>
+          <Badge variant="outline" className="gap-1 font-normal" style={lookTint(look)}>
+            <look.Icon aria-hidden />
+            {t(`inbox.queue.kind.${item.kind}`)}
+          </Badge>
+          {item.kind === "send" && item.source ? (
+            <span className="text-xs text-muted-foreground">
+              {t(`thread.source.${item.source}` as never)}
+            </span>
+          ) : null}
+          <span className="flex-1" />
+          <span className="text-xs font-medium whitespace-nowrap" style={{ color: look.color }}>
+            <RelativeTime date={item.when} locale={dfnsLocale} />
+          </span>
+        </div>
+
+        {item.kind === "send" && item.body ? (
+          <p className="line-clamp-2 text-sm text-muted-foreground">« {item.body} »</p>
+        ) : null}
+        {item.kind === "turn" ? (
+          <p className="text-sm text-muted-foreground">{t("inbox.queue.turnHint")}</p>
+        ) : null}
+        {item.kind === "touch" ? (
+          <p className="text-sm text-muted-foreground">
+            {t("inbox.queue.touchHint", { campaign: item.campaignName ?? "—", step: item.step ?? 1 })}
+          </p>
+        ) : null}
+
+        {item.kind === "send" && item.jobId ? (
+          <div className="flex justify-end">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="relative z-10 min-h-11 text-muted-foreground md:min-h-8"
+              disabled={pending}
+              onClick={() => onCancel(item)}
+            >
+              {t("thread.cancelQueued")}
+            </Button>
           </div>
         ) : null}
       </div>
