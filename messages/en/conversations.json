@@ -1,7 +1,7 @@
 {
   "nav": {
     "title": "Conversations",
-    "subtitle": "SMS threads waiting on a human."
+    "subtitle": "Every SMS thread — to handle, human-held, assistant-led, finished."
   },
   "thread": {
     "title": "SMS conversation",
@@ -77,17 +77,29 @@
   },
   "inbox": {
     "title": "Conversations",
-    "subtitle": "Threads waiting on a human.",
+    "subtitle": "Every SMS thread — to handle, human-held, assistant-led, finished.",
     "empty": {
-      "title": "Nothing to handle",
-      "desc": "No conversation is waiting for a reply."
-    },
-    "filters": {
-      "attention": "To handle",
-      "mine": "Mine",
-      "paused": "AI paused",
-      "finished": "Finished",
-      "all": "All"
+      "attention": {
+        "title": "Nothing to handle",
+        "desc": "No conversation is waiting on a human reply."
+      },
+      "human": {
+        "title": "No thread in hand",
+        "desc": "Nobody has taken over a conversation."
+      },
+      "ai": {
+        "title": "No assistant-led thread",
+        "desc": "The assistant has no conversation in flight."
+      },
+      "finished": {
+        "title": "No finished conversation",
+        "desc": "Closed threads, refusals and unsubscribes will land here."
+      },
+      "all": {
+        "title": "No conversations",
+        "desc": "SMS threads will appear here from the first message."
+      },
+      "mine": "No thread is assigned to you in this view."
     },
     "reason": {
       "inbound": "New message",
@@ -111,22 +123,41 @@
       "truncated": "Reply cut off by the model",
       "content_filter": "Reply filtered by the provider"
     },
-    "columns": {
-      "client": "Client",
-      "last": "Last message",
-      "reason": "Reason",
-      "assigned": "Assigned"
-    },
-    "unassigned": "Nobody",
     "assignToMe": "Assign to me",
     "markHandled": "Mark handled",
     "handled": "Conversation handled",
     "open": "Open the client",
-    "count": "{count} waiting",
     "replay": {
       "button": "Resume after an outage",
       "done": "{count, plural, =0 {Nothing to resume — everything is up to date} one {# conversation relaunched} other {# conversations relaunched}}"
-    }
+    },
+    "tabs": {
+      "attention": "To handle",
+      "human": "Human-held",
+      "ai": "Assistant",
+      "finished": "Finished",
+      "all": "All"
+    },
+    "mine": "Mine",
+    "sections": {
+      "reply": "The client is waiting for a reply",
+      "engine": "Technical failures"
+    },
+    "from": {
+      "client": "Client",
+      "assistant": "Assistant",
+      "team": "Us",
+      "campaign": "Campaign",
+      "system": "System"
+    },
+    "state": {
+      "attention": "To handle",
+      "human": "A human has the thread",
+      "ai": "Assistant on it",
+      "finished": "Finished"
+    },
+    "aiWaitingClient": "The assistant replied — waiting on the client.",
+    "you": "You"
   },
   "health": {
     "title": "Engine health",
@@ -145,8 +176,7 @@
     },
     "queue": "{count} queued",
     "failed": "{count} failed",
-    "suppressed": "{count} unsubscribed",
-    "attention": "{count} to handle"
+    "suppressed": "{count} unsubscribed"
   },
   "error": "Something went wrong",
   "assistant": {

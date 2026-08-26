@@ -27,7 +27,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { CHANNEL_LOOK, LookIcon } from "@/components/look";
+import {
+  ATTENTION_LOOK,
+  CHANNEL_LOOK,
+  CONVERSATION_STATE_LOOK,
+  LookIcon,
+  lookTint,
+} from "@/components/look";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -434,11 +440,22 @@ export function SmsThreadCard({
 
         {thread.needsAttention && thread.conversationId ? (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
-            <Badge variant="secondary">
-              {thread.attentionReason
-                ? t(`inbox.reason.${thread.attentionReason}` as never)
-                : t("inbox.filters.attention")}
-            </Badge>
+            {/* Le MÊME vocabulaire que la boîte de réception : la puce du
+                motif porte sa teinte (répondre, panne, terminé) et son
+                pictogramme, pas un gris interchangeable. */}
+            {(() => {
+              const look =
+                (thread.attentionReason ? ATTENTION_LOOK[thread.attentionReason] : undefined) ??
+                CONVERSATION_STATE_LOOK.attention;
+              return (
+                <Badge variant="outline" className="gap-1 font-normal" style={lookTint(look)}>
+                  <look.Icon aria-hidden />
+                  {thread.attentionReason
+                    ? t(`inbox.reason.${thread.attentionReason}` as never)
+                    : t("inbox.state.attention")}
+                </Badge>
+              );
+            })()}
             <span className="flex-1" />
             <Button
               variant="ghost"

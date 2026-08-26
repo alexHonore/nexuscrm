@@ -130,7 +130,10 @@ const ROWS: InboxRow[] = [
     aiEnabled: false,
     assignedToId: null,
     assignedToName: null,
+    assistantName: null,
     lastBody: "Je préfère parler à quelqu'un",
+    lastDirection: "in",
+    lastSource: "human",
     lastAt: "2026-08-21T15:00:00.000Z",
   },
   {
@@ -143,10 +146,49 @@ const ROWS: InboxRow[] = [
     aiEnabled: true,
     assignedToId: "me",
     assignedToName: "Moi",
+    assistantName: "Acheteur FB",
     lastBody: "Merci!",
+    lastDirection: "out",
+    lastSource: "agent",
     lastAt: "2026-08-21T12:00:00.000Z",
   },
 ];
+
+/** Une panne de modèle : mêle « réparer » à « répondre » dans l'onglet à traiter. */
+const ENGINE_ROW: InboxRow = {
+  id: "c3",
+  clientId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+  clientName: "Nathalie Côté",
+  clientPhone: "+14185559999",
+  needsAttention: true,
+  attentionReason: "llm_error",
+  aiEnabled: true,
+  assignedToId: null,
+  assignedToName: null,
+  assistantName: "Acheteur FB",
+  lastBody: "C'est quoi vos frais?",
+  lastDirection: "in",
+  lastSource: "human",
+  lastAt: "2026-08-21T10:00:00.000Z",
+};
+
+/** Un fil clos : le verdict est rendu, il ne compte JAMAIS dans « à traiter ». */
+const FINISHED_ROW: InboxRow = {
+  id: "c4",
+  clientId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+  clientName: "Julie Desrosiers",
+  clientPhone: "+14185558888",
+  needsAttention: true,
+  attentionReason: "closed_goal_reached",
+  aiEnabled: false,
+  assignedToId: null,
+  assignedToName: null,
+  assistantName: "Acheteur FB",
+  lastBody: "Parfait pour mardi 10h!",
+  lastDirection: "in",
+  lastSource: "human",
+  lastAt: "2026-08-21T09:00:00.000Z",
+};
 
 describe("fil SMS", () => {
   it("dit QUI parle pour chaque message", () => {
@@ -340,6 +382,76 @@ describe("boîte de réception", () => {
     expect(html).not.toContain("Jean Roy");
   });
 
+  it("un fil CLOS ne compte pas dans « à traiter », même avec needsAttention", () => {
+    // Le moteur laisse needsAttention vrai en fermant (ça date le verdict) ;
+    // l'écran, lui, doit ranger le fil dans « Terminées » — le mêler aux fils
+    // qui attendent une réponse noierait ce qui attend réellement.
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: [...ROWS, FINISHED_ROW],
+        currentUserId: "me",
+        health: HEALTH,
+      }),
+    );
+    expect(html).not.toContain("Julie Desrosiers");
+  });
+
+  it("répondre et réparer sont DEUX sections, pas un entremêlement", () => {
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: [...ROWS, ENGINE_ROW],
+        currentUserId: "me",
+        health: HEALTH,
+      }),
+    );
+    expect(html).toContain("Le client attend une réponse");
+    expect(html).toContain("Pannes techniques");
+    // Et la panne est bien rangée APRÈS les clients qui attendent.
+    expect(html.indexOf("Marie Tremblay")).toBeLessThan(html.indexOf("Nathalie Côté"));
+  });
+
+  it("chaque dernier message dit QUI l'a écrit", () => {
+    // « Parfait, je vous confirme jeudi » n'a pas le même sens selon que
+    // c'est le client ou l'assistant : sans préfixe, on répond à la mauvaise
+    // personne.
+    const html = wrap(
+      createElement(ConversationsInbox, { rows: ROWS, currentUserId: "me", health: HEALTH }),
+    );
+    expect(html).toContain("Client");
+    expect(html).toContain("Je préfère parler à quelqu");
+  });
+
+  it("toute la carte est un lien vers la fiche", () => {
+    const html = wrap(
+      createElement(ConversationsInbox, { rows: ROWS, currentUserId: "me", health: HEALTH }),
+    );
+    // Viser un petit bouton depuis un cellulaire était le geste le plus
+    // fréquent et le plus pénible de l'écran.
+    expect(html).toContain('href="/clients/cccccccc-cccc-4ccc-8ccc-cccccccccccc"');
+    expect(html).toContain("Ouvrir la fiche — Marie Tremblay");
+  });
+
+  it("dans la file « à traiter », le plus ancien attend en PREMIER", () => {
+    // C'est une file d'attente, pas un journal : le client qui patiente
+    // depuis le plus longtemps passe devant.
+    const older: InboxRow = {
+      ...ROWS[0],
+      id: "c9",
+      clientId: "99999999-9999-4999-8999-999999999999",
+      clientName: "Aline Ancienne",
+      attentionReason: "inbound",
+      lastAt: "2026-08-20T08:00:00.000Z",
+    };
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: [ROWS[0], older],
+        currentUserId: "me",
+        health: HEALTH,
+      }),
+    );
+    expect(html.indexOf("Aline Ancienne")).toBeLessThan(html.indexOf("Marie Tremblay"));
+  });
+
   it("un état vide reste lisible", () => {
     const html = wrap(
       createElement(ConversationsInbox, { rows: [], currentUserId: "me", health: HEALTH }),
@@ -377,6 +489,62 @@ describe("fil SMS", () => {
     );
     expect(html).toContain("Simulation");
     expect(html).not.toContain("thread.status.");
+  });
+});
+
+describe("le modèle d'état d'un fil", () => {
+  it("quatre états exclusifs, dans le bon ordre de priorité", async () => {
+    const { conversationStateOf } = await import("@/components/conversations/state");
+    // Fini gagne sur tout : le moteur laisse needsAttention vrai en fermant.
+    expect(
+      conversationStateOf({ needsAttention: true, attentionReason: "optout", aiEnabled: false }),
+    ).toBe("finished");
+    expect(
+      conversationStateOf({ needsAttention: true, attentionReason: "inbound", aiEnabled: true }),
+    ).toBe("attention");
+    // À traiter gagne sur la pause : couper l'IA ne traite rien.
+    expect(
+      conversationStateOf({ needsAttention: true, attentionReason: "handoff", aiEnabled: false }),
+    ).toBe("attention");
+    expect(
+      conversationStateOf({ needsAttention: false, attentionReason: null, aiEnabled: false }),
+    ).toBe("human");
+    expect(
+      conversationStateOf({ needsAttention: false, attentionReason: null, aiEnabled: true }),
+    ).toBe("ai");
+  });
+
+  it("un motif INCONNU demande un humain, jamais la corbeille", async () => {
+    // Le moteur gagnera d'autres motifs ; le jour où il en écrit un que
+    // l'écran ne connaît pas, ce fil doit réclamer quelqu'un — pas être rangé
+    // dans les pannes ni, pire, dans les fils finis.
+    const { attentionKindOf, conversationStateOf } = await import(
+      "@/components/conversations/state"
+    );
+    expect(attentionKindOf("reason_of_the_future")).toBe("reply");
+    expect(
+      conversationStateOf({
+        needsAttention: true,
+        attentionReason: "reason_of_the_future",
+        aiEnabled: true,
+      }),
+    ).toBe("attention");
+  });
+
+  it("chaque motif du modèle a son libellé français ET anglais", async () => {
+    // Un motif écrit par le moteur sans libellé s'afficherait en clé brute
+    // (« inbox.reason.llm_error ») au milieu de l'écran.
+    const { ATTENTION_REASONS } = await import("@/components/conversations/state");
+    const en = (await import("../messages/en/conversations.json")).default as {
+      inbox: { reason: Record<string, string> };
+    };
+    for (const reason of ATTENTION_REASONS) {
+      expect(
+        (conversationsFr as { inbox: { reason: Record<string, string> } }).inbox.reason[reason],
+        `fr: ${reason}`,
+      ).toBeTruthy();
+      expect(en.inbox.reason[reason], `en: ${reason}`).toBeTruthy();
+    }
   });
 });
 

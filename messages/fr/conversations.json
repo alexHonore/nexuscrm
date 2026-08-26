@@ -1,7 +1,7 @@
 {
   "nav": {
     "title": "Conversations",
-    "subtitle": "Les fils SMS qui attendent une réponse humaine."
+    "subtitle": "Tous les fils SMS — à traiter, en main humaine, menés par l'assistant, terminés."
   },
   "thread": {
     "title": "Conversation SMS",
@@ -77,17 +77,56 @@
   },
   "inbox": {
     "title": "Conversations",
-    "subtitle": "Les fils qui attendent une réponse humaine.",
-    "empty": {
-      "title": "Rien à traiter",
-      "desc": "Aucune conversation n'attend de réponse."
-    },
-    "filters": {
+    "subtitle": "Tous les fils SMS — à traiter, en main humaine, menés par l'assistant, terminés.",
+    "tabs": {
       "attention": "À traiter",
-      "mine": "Les miennes",
-      "paused": "IA en pause",
+      "human": "En main",
+      "ai": "Assistant",
       "finished": "Terminées",
       "all": "Toutes"
+    },
+    "mine": "Les miennes",
+    "sections": {
+      "reply": "Le client attend une réponse",
+      "engine": "Pannes techniques"
+    },
+    "from": {
+      "client": "Client",
+      "assistant": "Assistant",
+      "team": "Nous",
+      "campaign": "Campagne",
+      "system": "Système"
+    },
+    "state": {
+      "attention": "À traiter",
+      "human": "Un humain a la main",
+      "ai": "Assistant en piste",
+      "finished": "Terminée"
+    },
+    "aiWaitingClient": "L'assistant a répondu — en attente du client.",
+    "you": "Vous",
+    "empty": {
+      "attention": {
+        "title": "Rien à traiter",
+        "desc": "Aucune conversation n'attend de réponse humaine."
+      },
+      "human": {
+        "title": "Aucun fil en main",
+        "desc": "Personne n'a pris le contrôle d'une conversation."
+      },
+      "ai": {
+        "title": "Aucun fil mené par l'assistant",
+        "desc": "L'assistant n'a aucune conversation en cours."
+      },
+      "finished": {
+        "title": "Aucune conversation terminée",
+        "desc": "Les fils clos, les refus et les désabonnements se rangeront ici."
+      },
+      "all": {
+        "title": "Aucune conversation",
+        "desc": "Les fils SMS apparaîtront ici dès le premier message."
+      },
+      "mine": "Aucun fil ne vous est attribué dans cette vue."
     },
     "reason": {
       "inbound": "Nouveau message",
@@ -111,18 +150,10 @@
       "truncated": "Réponse coupée par le modèle",
       "content_filter": "Réponse filtrée par le fournisseur"
     },
-    "columns": {
-      "client": "Client",
-      "last": "Dernier message",
-      "reason": "Motif",
-      "assigned": "Assigné"
-    },
-    "unassigned": "Personne",
     "assignToMe": "Me l'attribuer",
     "markHandled": "Marquer traité",
     "handled": "Conversation traitée",
     "open": "Ouvrir la fiche",
-    "count": "{count} en attente",
     "replay": {
       "button": "Reprendre après une panne",
       "done": "{count, plural, =0 {Rien à reprendre — tout est à jour} one {# conversation relancée} other {# conversations relancées}}"
@@ -145,8 +176,7 @@
     },
     "queue": "{count} en file",
     "failed": "{count} en échec",
-    "suppressed": "{count} désabonnés",
-    "attention": "{count} à traiter"
+    "suppressed": "{count} désabonnés"
   },
   "error": "Une erreur est survenue",
   "assistant": {

@@ -17,7 +17,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   ASSISTANT_STATUS_LOOK,
+  ATTENTION_KIND_LOOK,
+  ATTENTION_LOOK,
   CHANNEL_LOOK,
+  CONVERSATION_STATE_LOOK,
   CREATE_MODE_TONE,
   EDITOR_TAB_LOOK,
   GOAL_LOOK,
@@ -31,6 +34,7 @@ import {
   TOOL_LOOK,
   lookTint,
 } from "@/components/look";
+import { ATTENTION_REASONS, attentionKindOf } from "@/components/conversations/state";
 import { assistantStatusEnum } from "@/db/schema-sms";
 import { ASSISTANT_TOOLS, GOAL_TYPES } from "@/lib/assistants/schema";
 import { GUARDRAIL_KINDS, GUARDRAIL_SEVERITIES } from "@/lib/guardrails/types";
@@ -100,6 +104,22 @@ describe("couverture du vocabulaire", () => {
     expect(missing, `états sans look : ${missing.join(", ")}`).toEqual([]);
   });
 
+  it("chaque motif d'attention d'un fil a son pictogramme", () => {
+    // Un vingt-et-unième motif écrit par le moteur sans look retomberait en
+    // pastille grise au milieu de vingt puces illustrées.
+    const missing = ATTENTION_REASONS.filter((r) => !ATTENTION_LOOK[r]);
+    expect(missing, `motifs sans look : ${missing.join(", ")}`).toEqual([]);
+  });
+
+  it("les quatre états d'un fil et les deux familles de motifs ont le leur", () => {
+    for (const state of ["attention", "human", "ai", "finished"]) {
+      expect(CONVERSATION_STATE_LOOK[state], state).toBeTruthy();
+    }
+    for (const kind of ["reply", "engine"] as const) {
+      expect(ATTENTION_KIND_LOOK[kind], kind).toBeTruthy();
+    }
+  });
+
   it("les trois portes de la création ont leur teinte", () => {
     // Elles vivent dans le vocabulaire pour qu'aucun écran n'écrive un hex.
     for (const mode of ["ai", "simple", "complex"] as const) {
@@ -158,6 +178,24 @@ describe("discipline des couleurs", () => {
     expect(RESULT_LOOK.pass.color).not.toBe(RESULT_LOOK.fail.color);
     expect(ORIGIN_LOOK.generated.Icon).not.toBe(ORIGIN_LOOK.handwritten.Icon);
     expect(ORIGIN_LOOK.generated.color).not.toBe(ORIGIN_LOOK.handwritten.color);
+  });
+
+  it("les motifs d'un fil se rangent par ce qu'il y a À FAIRE, pas en vingt couleurs", () => {
+    // Ambre « répondre », rouge « réparer », vert/gris « terminé » : la
+    // couleur dit le métier, le pictogramme identifie le motif — il est donc
+    // unique, sinon deux motifs deviennent la même puce.
+    const icons = ATTENTION_REASONS.map((r) => ATTENTION_LOOK[r].Icon);
+    expect(new Set(icons).size, "deux motifs partagent un pictogramme").toBe(icons.length);
+    expect(new Set(ATTENTION_REASONS.map((r) => ATTENTION_LOOK[r].color)).size)
+      .toBeLessThanOrEqual(4);
+    // Et la teinte d'un motif « à répondre » est celle de la famille
+    // (l'en-tête de section dit la même chose que ses lignes).
+    for (const reason of ATTENTION_REASONS) {
+      const kind = attentionKindOf(reason);
+      if (kind === "reply" || kind === "engine") {
+        expect(ATTENTION_LOOK[reason].color, reason).toBe(ATTENTION_KIND_LOOK[kind].color);
+      }
+    }
   });
 
   it("la teinte douce dérive du concept, elle n'invente pas de hex", () => {
@@ -223,6 +261,9 @@ describe("un pictogramme ne remplace pas un libellé", () => {
       ...GUARDRAIL_KIND_LOOK,
       ...RESULT_LOOK,
       ...ORIGIN_LOOK,
+      ...ATTENTION_LOOK,
+      ...CONVERSATION_STATE_LOOK,
+      ...ATTENTION_KIND_LOOK,
       sms: CHANNEL_LOOK.sms,
     })) {
       expect(typeof look.Icon, `${key}.Icon`).not.toBe("string");

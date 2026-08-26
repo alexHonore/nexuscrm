@@ -5,7 +5,7 @@ import { ConversationsInbox, type InboxRow } from "@/components/conversations/co
 import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/db";
 import { clients, users } from "@/db/schema";
-import { conversations, messages, scheduledJobs, suppressions } from "@/db/schema-sms";
+import { assistants, conversations, messages, scheduledJobs, suppressions } from "@/db/schema-sms";
 import { requireUser } from "@/lib/auth/guards";
 import { settingsSendGate } from "@/lib/sms-server";
 import { resolveSmsMode } from "@/lib/sms/provider";
@@ -29,6 +29,15 @@ export default async function ConversationsPage() {
       body: sql<string>`(array_agg(${messages.body} order by ${messages.createdAt} desc))[1]`.as(
         "last_body",
       ),
+      // QUI a parlé en dernier : sans ça, « Parfait, je vous confirme jeudi »
+      // se lit comme une phrase du client alors que c'est l'assistant — et on
+      // ne peut pas trier ce qui attend une réponse de ce qui en a déjà une.
+      direction: sql<string>`(array_agg(${messages.direction} order by ${messages.createdAt} desc))[1]`.as(
+        "last_direction",
+      ),
+      source: sql<string>`(array_agg(${messages.source} order by ${messages.createdAt} desc))[1]`.as(
+        "last_source",
+      ),
       at: sql<Date>`max(${messages.createdAt})`.as("last_at"),
     })
     .from(messages)
@@ -46,13 +55,17 @@ export default async function ConversationsPage() {
       aiEnabled: conversations.aiEnabled,
       assignedToId: conversations.assignedToId,
       assignedToName: users.name,
+      assistantName: assistants.name,
       lastInboundAt: conversations.lastInboundAt,
       lastBody: lastMessage.body,
+      lastDirection: lastMessage.direction,
+      lastSource: lastMessage.source,
       lastAt: lastMessage.at,
     })
     .from(conversations)
     .leftJoin(clients, eq(clients.id, conversations.clientId))
     .leftJoin(users, eq(users.id, conversations.assignedToId))
+    .leftJoin(assistants, eq(assistants.id, conversations.activeAssistantId))
     .leftJoin(lastMessage, eq(lastMessage.conversationId, conversations.id))
     // Les fils sans aucun message n'ont rien à traiter : ils encombreraient la
     // liste sans jamais rien demander.
@@ -86,7 +99,10 @@ export default async function ConversationsPage() {
     aiEnabled: r.aiEnabled,
     assignedToId: r.assignedToId,
     assignedToName: r.assignedToName,
+    assistantName: r.assistantName,
     lastBody: r.lastBody ?? null,
+    lastDirection: r.lastDirection === "in" || r.lastDirection === "out" ? r.lastDirection : null,
+    lastSource: r.lastSource ?? null,
     lastAt: r.lastAt ? new Date(r.lastAt).toISOString() : null,
   }));
 

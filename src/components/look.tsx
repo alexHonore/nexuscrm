@@ -3,9 +3,13 @@ import {
   ArchiveIcon,
   BadgeQuestionMarkIcon,
   BookOpenTextIcon,
+  BotIcon,
+  BotOffIcon,
   BracesIcon,
   CalendarCheckIcon,
   CalendarClockIcon,
+  CalendarXIcon,
+  CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
   CircleSlashIcon,
@@ -17,6 +21,7 @@ import {
   EyeIcon,
   FileCheckIcon,
   FilterIcon,
+  FilterXIcon,
   FlaskConicalIcon,
   FolderTreeIcon,
   HandIcon,
@@ -27,10 +32,16 @@ import {
   ListOrderedIcon,
   MailIcon,
   MessageCircleQuestionMarkIcon,
+  MessageSquareDotIcon,
+  MessageSquareOffIcon,
   MessageSquareReplyIcon,
   MessageSquareTextIcon,
   MessageSquarePlusIcon,
+  MessageSquareWarningIcon,
+  MessageSquareXIcon,
   MessagesSquareIcon,
+  PackageOpenIcon,
+  UserRoundIcon,
   UserSearchIcon,
   PauseIcon,
   PencilLineIcon,
@@ -42,9 +53,12 @@ import {
   RegexIcon,
   RulerIcon,
   ScaleIcon,
+  ScissorsIcon,
   ScrollTextIcon,
   SearchCheckIcon,
   ShieldIcon,
+  ShieldQuestionMarkIcon,
+  ShieldXIcon,
   SignpostIcon,
   SlidersHorizontalIcon,
   SmartphoneIcon,
@@ -54,6 +68,7 @@ import {
   SquarePenIcon,
   TargetIcon,
   UsersIcon,
+  UnplugIcon,
   VideoIcon,
   WholeWordIcon,
   WrenchIcon,
@@ -430,6 +445,82 @@ export const ORIGIN_LOOK = {
   generated: { color: TONE.raw, Icon: SparklesIcon },
   handwritten: { color: TONE.machinery, Icon: SquarePenIcon },
 } as const satisfies Record<string, Look>;
+
+/**
+ * L'état d'un fil de conversation — QUATRE lectures exclusives.
+ *
+ * La boîte de réception mélangeait tout dans la même pastille bleue : un
+ * client qui attend une réponse, une panne de Twilio, un fil que l'assistant
+ * mène tranquillement et un refus définitif se lisaient pareil. Quatre états,
+ * un pictogramme et une teinte chacun, et un fil est TOUJOURS dans exactement
+ * un des quatre :
+ *
+ *  · `attention` — une action humaine attend : l'ambre du « quelque chose à
+ *    faire », partout dans l'application.
+ *  · `human` — un humain tient la plume (IA en pause) : le bleu de la parole.
+ *  · `ai` — l'assistant mène le fil : le violet de la mécanique.
+ *  · `finished` — le verdict est rendu, il n'y a rien à répondre : le gris
+ *    « hors jeu ».
+ */
+export const CONVERSATION_STATE_LOOK: Record<string, Look> = {
+  attention: { color: TONE.scrutiny, Icon: MessageSquareWarningIcon },
+  human: { color: TONE.speech, Icon: HandIcon },
+  ai: { color: TONE.machinery, Icon: BotIcon },
+  finished: { color: TONE.raw, Icon: CircleCheckIcon },
+};
+
+/**
+ * Le MOTIF pour lequel un fil réclame quelqu'un — ou est terminé.
+ *
+ * Vingt motifs dans la même pastille se lisent un par un ; la couleur les
+ * range d'abord par ce qu'il y a À FAIRE, et le pictogramme identifie :
+ *
+ *  · ambre — RÉPONDRE : le client attend un humain (nouveau message, demande
+ *    de parler à quelqu'un, budget de l'assistant épuisé…).
+ *  · rouge — RÉPARER : une panne technique a laissé le client sans réponse
+ *    (modèle en panne, envoi en échec, réponse bloquée…).
+ *  · vert / gris — TERMINÉ : l'objectif est atteint, ou le fil est clos sans
+ *    suite ; il n'y a rien à faire.
+ *  · le rouge de l'arrêt (octogone) reste réservé au désabonnement : plus
+ *    aucun message ne partira jamais vers ce numéro.
+ */
+/**
+ * Les deux FAMILLES de motifs qui réclament quelqu'un — l'en-tête de section.
+ *
+ * « Répondre » et « réparer » ne sont pas le même métier : l'un se traite au
+ * téléphone ou au clavier, l'autre se rejoue ou se signale. La boîte de
+ * réception les sépare en deux sections plutôt que de les entremêler.
+ */
+export const ATTENTION_KIND_LOOK: Record<"reply" | "engine", Look> = {
+  reply: { color: TONE.scrutiny, Icon: MessageSquareReplyIcon },
+  engine: { color: "#EF4444", Icon: CircleAlertIcon },
+};
+
+export const ATTENTION_LOOK: Record<string, Look> = {
+  // Répondre — le client attend un humain.
+  inbound: { color: TONE.scrutiny, Icon: MessageSquareDotIcon },
+  client_wants_human: { color: TONE.scrutiny, Icon: UserRoundIcon },
+  handoff: { color: TONE.scrutiny, Icon: HandIcon },
+  guardrail: { color: TONE.scrutiny, Icon: ShieldIcon },
+  booking_failed: { color: TONE.scrutiny, Icon: CalendarXIcon },
+  max_turns: { color: TONE.scrutiny, Icon: HourglassIcon },
+  no_assistant: { color: TONE.scrutiny, Icon: BotOffIcon },
+  goal_chain_exhausted: { color: TONE.scrutiny, Icon: PackageOpenIcon },
+  // Réparer — une panne a laissé le client sans réponse.
+  llm_error: { color: "#EF4444", Icon: CpuIcon },
+  no_text: { color: "#EF4444", Icon: MessageSquareOffIcon },
+  blocked_output: { color: "#EF4444", Icon: ShieldXIcon },
+  guardrail_unavailable: { color: "#EF4444", Icon: ShieldQuestionMarkIcon },
+  send_failed: { color: "#EF4444", Icon: UnplugIcon },
+  truncated: { color: "#EF4444", Icon: ScissorsIcon },
+  content_filter: { color: "#EF4444", Icon: FilterXIcon },
+  // Terminé — le verdict est rendu.
+  closed_goal_reached: { color: "#10B981", Icon: TargetIcon },
+  closed_disqualified: { color: TONE.raw, Icon: CircleSlashIcon },
+  closed_not_interested: { color: TONE.raw, Icon: CircleXIcon },
+  hard_refusal: { color: TONE.raw, Icon: MessageSquareXIcon },
+  optout: { color: "#EF4444", Icon: XOctagonIcon },
+};
 
 /**
  * La teinte douce d'un concept, pour un fond de puce ou de bloc.
