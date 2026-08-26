@@ -39,17 +39,23 @@ export const ENGINE_REASONS = [
 ] as const;
 
 /**
- * Le verdict est rendu — clos par l'assistant, refus ferme ou désabonnement.
- * Il n'y a RIEN à répondre : ces fils ont leur onglet (demande d'Alex,
- * 2026-08-25) et ne comptent jamais dans « à traiter ».
+ * Le contact a dit NON — refus ferme, « pas intéressé », ou STOP. Ces fils ont
+ * leur propre vue (demande d'Alex, 2026-08-25 au soir) : un « non » explicite
+ * ne se mélange ni aux fils à traiter, ni aux conclusions heureuses.
  */
-export const OUTCOME_REASONS = [
-  "closed_goal_reached",
-  "closed_disqualified",
-  "closed_not_interested",
-  "hard_refusal",
-  "optout",
-] as const;
+export const REFUSED_REASONS = ["hard_refusal", "optout", "closed_not_interested"] as const;
+
+/**
+ * Conclu sans refus : l'objectif est atteint, ou la personne n'était pas dans
+ * la cible. Rien à faire, rien de fâcheux.
+ */
+export const CONCLUDED_REASONS = ["closed_goal_reached", "closed_disqualified"] as const;
+
+/**
+ * Le verdict est rendu — quelle qu'en soit la couleur. Il n'y a RIEN à
+ * répondre : ces motifs ne comptent jamais dans « à traiter ».
+ */
+export const OUTCOME_REASONS = [...REFUSED_REASONS, ...CONCLUDED_REASONS] as const;
 
 export const ATTENTION_REASONS = [
   ...REPLY_REASONS,
@@ -77,19 +83,30 @@ export function attentionKindOf(reason: string): AttentionKind {
 }
 
 /**
- * Les quatre états exclusifs d'un fil — voir `CONVERSATION_STATE_LOOK`.
+ * Les cinq états exclusifs d'un fil — voir `CONVERSATION_STATE_LOOK`.
  * L'ordre des tests est l'ordre de PRIORITÉ : un fil fini est fini même si
  * `needsAttention` est resté vrai (le moteur le laisse vrai pour dater le
  * verdict), et un fil à traiter le reste même si l'IA est coupée.
+ *
+ *  · `attention` — une action humaine attend.
+ *  · `human` — un humain tient la plume (IA en pause), sans urgence.
+ *  · `ai` — l'assistant mène le fil ; le plus souvent, il a écrit et le
+ *    client n'a pas encore répondu.
+ *  · `refused` — le contact a dit non (refus, pas intéressé, STOP).
+ *  · `concluded` — conclu sans refus (objectif atteint, hors cible).
  */
-export type ConversationState = "attention" | "human" | "ai" | "finished";
+export type ConversationState = "attention" | "human" | "ai" | "refused" | "concluded";
+
+const REFUSED = new Set<string>(REFUSED_REASONS);
 
 export function conversationStateOf(row: {
   needsAttention: boolean;
   attentionReason: string | null;
   aiEnabled: boolean;
 }): ConversationState {
-  if (row.attentionReason !== null && OUTCOME.has(row.attentionReason)) return "finished";
+  if (row.attentionReason !== null && OUTCOME.has(row.attentionReason)) {
+    return REFUSED.has(row.attentionReason) ? "refused" : "concluded";
+  }
   if (row.needsAttention) return "attention";
   if (!row.aiEnabled) return "human";
   return "ai";

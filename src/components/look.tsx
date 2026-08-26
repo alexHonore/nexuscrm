@@ -447,26 +447,31 @@ export const ORIGIN_LOOK = {
 } as const satisfies Record<string, Look>;
 
 /**
- * L'état d'un fil de conversation — QUATRE lectures exclusives.
+ * L'état d'un fil de conversation — CINQ lectures exclusives.
  *
  * La boîte de réception mélangeait tout dans la même pastille bleue : un
  * client qui attend une réponse, une panne de Twilio, un fil que l'assistant
- * mène tranquillement et un refus définitif se lisaient pareil. Quatre états,
+ * mène tranquillement et un refus définitif se lisaient pareil. Cinq états,
  * un pictogramme et une teinte chacun, et un fil est TOUJOURS dans exactement
- * un des quatre :
+ * un des cinq :
  *
  *  · `attention` — une action humaine attend : l'ambre du « quelque chose à
  *    faire », partout dans l'application.
  *  · `human` — un humain tient la plume (IA en pause) : le bleu de la parole.
- *  · `ai` — l'assistant mène le fil : le violet de la mécanique.
- *  · `finished` — le verdict est rendu, il n'y a rien à répondre : le gris
- *    « hors jeu ».
+ *  · `ai` — l'assistant a écrit, le client n'a pas répondu : le violet de la
+ *    mécanique.
+ *  · `refused` — le contact a dit non : l'octogone d'arrêt, en gris — le
+ *    verdict est rendu, ce n'est plus une alerte (le rouge reste à la puce
+ *    « Désabonnement », qui est un interdit d'envoi, pas une humeur).
+ *  · `concluded` — conclu sans refus (objectif atteint, hors cible) : le vert
+ *    « rien à faire ».
  */
 export const CONVERSATION_STATE_LOOK: Record<string, Look> = {
   attention: { color: TONE.scrutiny, Icon: MessageSquareWarningIcon },
   human: { color: TONE.speech, Icon: HandIcon },
   ai: { color: TONE.machinery, Icon: BotIcon },
-  finished: { color: TONE.raw, Icon: CircleCheckIcon },
+  refused: { color: TONE.raw, Icon: XOctagonIcon },
+  concluded: { color: "#10B981", Icon: CircleCheckIcon },
 };
 
 /**

@@ -319,6 +319,80 @@ export async function setConversationAiAction(input: {
   return { ok: true, id: thread.id };
 }
 
+/**
+ * « Rendre à l'IA » — LE geste de la boîte de réception quand la bonne
+ * réponse est : que l'assistant continue.
+ *
+ * Trois choses en un clic, parce qu'aucune des actions existantes ne les
+ * faisait toutes : l'IA reprend la parole (fin de pause), la pastille « à
+ * traiter » tombe (la décision EST le traitement), et si un entrant attend
+ * encore sa réponse, le tour repart tout de suite — sans quoi « rendre à
+ * l'IA » laisserait le client sans réponse jusqu'à son prochain message.
+ */
+export async function handBackToAiAction(conversationId: string): Promise<SmsActionResult> {
+  const user = await getCurrentUser();
+  if (!user) return FORBIDDEN;
+  if (!z.uuid().safeParse(conversationId).success) return INVALID;
+
+  const thread = await db.query.conversations.findFirst({
+    where: eq(conversations.id, conversationId),
+  });
+  if (!thread) return NOT_FOUND;
+
+  // Rendre la main à personne n'est pas rendre la main : sans assistant actif
+  // et compilé, le fil resterait muet en prétendant le contraire.
+  if (!thread.activeAssistantId) return { ok: false, error: "assistantUnavailable" };
+  const assistant = await db.query.assistants.findFirst({
+    where: eq(assistants.id, thread.activeAssistantId),
+    columns: { id: true, status: true, compiledPrompt: true },
+  });
+  if (!assistant || assistant.status !== "active" || !assistant.compiledPrompt) {
+    return { ok: false, error: "assistantUnavailable" };
+  }
+
+  await db
+    .update(conversations)
+    .set({
+      aiEnabled: true,
+      pausedById: null,
+      pausedAt: null,
+      pauseReason: null,
+      needsAttention: false,
+      attentionReason: null,
+    })
+    .where(eq(conversations.id, thread.id));
+
+  const pending = await db.query.messages.findFirst({
+    where: and(
+      eq(messages.conversationId, thread.id),
+      eq(messages.direction, "in"),
+      isNull(messages.processedAt),
+    ),
+    columns: { id: true },
+  });
+  if (pending) {
+    await enqueueJob({
+      type: "agent_turn",
+      runAt: new Date(),
+      payload: { conversationId: thread.id },
+      dedupeKey: `turn:${thread.id}`,
+    });
+    kickDispatch();
+  }
+
+  await logAudit({
+    userId: user.id,
+    action: "conversation.ai_resume",
+    entity: "conversation",
+    entityId: thread.id,
+    detail: { source: "inbox_handback", relaunched: Boolean(pending) },
+  });
+
+  if (thread.clientId) revalidateFor(thread.clientId);
+  else revalidatePath("/conversations");
+  return { ok: true, id: thread.id };
+}
+
 /** Marque un fil comme traité — retire la pastille « à traiter ». */
 export async function markConversationHandledAction(
   conversationId: string,

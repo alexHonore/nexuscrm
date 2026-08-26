@@ -3,9 +3,11 @@
 import { enUS, fr } from "date-fns/locale";
 import {
   AlertTriangleIcon,
+  BotIcon,
   CheckIcon,
   MessageCircleIcon,
   MoonIcon,
+  PencilLineIcon,
   PowerOffIcon,
   RotateCcwIcon,
   SunIcon,
@@ -18,7 +20,9 @@ import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   assignConversationAction,
+  handBackToAiAction,
   markConversationHandledAction,
+  setConversationAiAction,
 } from "@/app/(app)/conversations/actions";
 import {
   ATTENTION_KIND_LOOK,
@@ -69,19 +73,38 @@ export type EngineHealth = {
   suppressed: number;
 };
 
-/** Les onglets : les quatre états exclusifs d'un fil, plus « toutes ». */
-type Tab = ConversationState | "all";
-const TABS: Tab[] = ["attention", "human", "ai", "finished", "all"];
+/**
+ * Les QUATRE vues (demande d'Alex, 2026-08-25 au soir) :
+ *
+ *  · « À traiter » — tout ce qui repose sur un humain : les fils qui
+ *    réclament une décision ET ceux qu'un humain tient déjà en main.
+ *  · « En attente du client » — l'assistant a écrit, la réponse n'est pas
+ *    arrivée. Rien à faire, mais on veut le VOIR.
+ *  · « Refus » — les non explicites (refus ferme, pas intéressé, STOP).
+ *  · « Toutes » — chaque fil, RANGÉ par situation, avec un en-tête par
+ *    groupe — pas une pile plate à déchiffrer.
+ */
+type Tab = "attention" | "waiting" | "refused" | "all";
+const TABS: Tab[] = ["attention", "waiting", "refused", "all"];
+
+/** Quels états chaque vue montre. `all` les montre tous, en sections. */
+const TAB_STATES: Record<Exclude<Tab, "all">, ConversationState[]> = {
+  attention: ["attention", "human"],
+  waiting: ["ai"],
+  refused: ["refused"],
+};
+
+/** L'ordre des sections de « Toutes » : l'urgent d'abord, le clos à la fin. */
+const ALL_SECTIONS: ConversationState[] = ["attention", "human", "ai", "refused", "concluded"];
+
 const POLL_MS = 25_000;
 
 /**
  * Boîte de réception.
  *
  * Une seule règle d'architecture : un fil est TOUJOURS dans exactement un
- * état (`conversationStateOf`), et chaque onglet montre un état. Avant, les
- * onglets se recoupaient (« IA en pause » et « à traiter » partageaient des
- * fils, « les miennes » coupait au travers) et un fil clos portait encore la
- * puce d'alerte de la pause IA : on lisait tout, on ne comprenait rien.
+ * état (`conversationStateOf`), et chaque vue est une liste d'états — les
+ * vues ne se recoupent jamais (« les miennes » reste un filtre transversal).
  *
  * La bande d'état reste en HAUT et non repliée : découvrir après avoir tapé
  * trois réponses que les envois sont suspendus, ou qu'on est en simulation,
@@ -110,62 +133,113 @@ export function ConversationsInbox({
   useDataChange(["sms"], () => router.refresh());
   useVisiblePolling(POLL_MS, () => router.refresh());
 
-  const counts = useMemo(() => {
-    const c: Record<Tab, number> = { attention: 0, human: 0, ai: 0, finished: 0, all: rows.length };
-    for (const row of rows) c[conversationStateOf(row)] += 1;
-    return c;
-  }, [rows]);
+  const base = useMemo(
+    () => (mineOnly ? rows.filter((r) => r.assignedToId === currentUserId) : rows),
+    [rows, mineOnly, currentUserId],
+  );
+
+  const byState = useMemo(() => {
+    const groups: Record<ConversationState, InboxRow[]> = {
+      attention: [],
+      human: [],
+      ai: [],
+      refused: [],
+      concluded: [],
+    };
+    for (const row of base) groups[conversationStateOf(row)].push(row);
+    // « À traiter » est une FILE : le client qui attend depuis le plus
+    // longtemps passe en premier. Les autres vues sont des journaux : le
+    // plus récent d'abord.
+    const time = (r: InboxRow) => (r.lastAt ? Date.parse(r.lastAt) : 0);
+    groups.attention.sort((a, b) => time(a) - time(b));
+    for (const state of ["human", "ai", "refused", "concluded"] as const) {
+      groups[state].sort((a, b) => time(b) - time(a));
+    }
+    return groups;
+  }, [base]);
+
+  const counts = useMemo(
+    () => ({
+      attention: byState.attention.length + byState.human.length,
+      waiting: byState.ai.length,
+      refused: byState.refused.length,
+      all: base.length,
+    }),
+    [byState, base],
+  );
   const mineCount = useMemo(
     () => rows.filter((r) => r.assignedToId === currentUserId).length,
     [rows, currentUserId],
   );
 
-  const visible = useMemo(() => {
-    const base = mineOnly ? rows.filter((r) => r.assignedToId === currentUserId) : rows;
-    const inTab = tab === "all" ? base : base.filter((r) => conversationStateOf(r) === tab);
-    // « À traiter » est une FILE : le client qui attend depuis le plus
-    // longtemps passe en premier. Les autres vues sont des journaux : le plus
-    // récent d'abord.
-    const time = (r: InboxRow) => (r.lastAt ? Date.parse(r.lastAt) : 0);
-    return [...inTab].sort((a, b) => (tab === "attention" ? time(a) - time(b) : time(b) - time(a)));
-  }, [rows, tab, mineOnly, currentUserId]);
-
-  // Dans « à traiter », répondre et réparer ne sont pas le même métier : deux
-  // sections plutôt qu'un entremêlement.
+  // Dans « à traiter », répondre et réparer ne sont pas le même métier.
   const replyRows = useMemo(
-    () => visible.filter((r) => attentionKindOf(r.attentionReason ?? "") === "reply"),
-    [visible],
+    () => byState.attention.filter((r) => attentionKindOf(r.attentionReason ?? "") === "reply"),
+    [byState],
   );
   const engineRows = useMemo(
-    () => visible.filter((r) => attentionKindOf(r.attentionReason ?? "") === "engine"),
-    [visible],
+    () => byState.attention.filter((r) => attentionKindOf(r.attentionReason ?? "") === "engine"),
+    [byState],
   );
 
-  const handle = (row: InboxRow) => {
+  const act = (fn: () => Promise<boolean>) => {
     startTransition(async () => {
-      const result = await markConversationHandledAction(row.id);
-      if (!result.ok) {
-        toast.error(t("error"));
-        return;
-      }
-      toast.success(t("inbox.handled"));
+      const ok = await fn();
+      if (!ok) return;
       emitDataChange("sms");
       router.refresh();
     });
   };
 
-  const claim = (row: InboxRow) => {
-    startTransition(async () => {
-      const result = await assignConversationAction({
-        conversationId: row.id,
-        userId: currentUserId,
-      });
+  const handle = (row: InboxRow) =>
+    act(async () => {
+      const result = await markConversationHandledAction(row.id);
       if (!result.ok) {
         toast.error(t("error"));
-        return;
+        return false;
+      }
+      toast.success(t("inbox.handled"));
+      return true;
+    });
+
+  // « Rendre à l'IA » : l'assistant reprend le fil ET répond tout de suite à
+  // l'entrant qui attend — la décision vaut traitement.
+  const handBack = (row: InboxRow) =>
+    act(async () => {
+      const result = await handBackToAiAction(row.id);
+      if (!result.ok) {
+        toast.error(
+          result.error === "assistantUnavailable" ? t("thread.assistantUnavailable") : t("error"),
+        );
+        return false;
+      }
+      toast.success(t("inbox.handedBack"));
+      return true;
+    });
+
+  // « Je réponds » : prendre le fil (IA coupée, fil attribué) et atterrir
+  // directement dans la zone de rédaction de la fiche. La pastille « à
+  // traiter » ne tombe QUE lorsque la réponse part vraiment (l'envoi manuel
+  // la retire) — cliquer n'est pas répondre.
+  const respond = (row: InboxRow) => {
+    startTransition(async () => {
+      if (row.aiEnabled) {
+        const paused = await setConversationAiAction({
+          conversationId: row.id,
+          enabled: false,
+          reason: null,
+        });
+        if (!paused.ok) {
+          toast.error(t("error"));
+          return;
+        }
+      }
+      if (row.assignedToId !== currentUserId) {
+        await assignConversationAction({ conversationId: row.id, userId: currentUserId });
       }
       emitDataChange("sms");
-      router.refresh();
+      if (row.clientId) router.push(`/clients/${row.clientId}`);
+      else router.refresh();
     });
   };
 
@@ -197,15 +271,26 @@ export function ConversationsInbox({
     }
   };
 
-  const rowProps = { currentUserId, pending, onClaim: claim, onHandle: handle, dfnsLocale };
+  const rowProps = {
+    currentUserId,
+    pending,
+    onHandle: handle,
+    onHandBack: handBack,
+    onRespond: respond,
+    dfnsLocale,
+  };
+
+  const renderRows = (list: InboxRow[]) =>
+    list.map((row) => (
+      <InboxRowCard key={row.id} row={row} state={conversationStateOf(row)} {...rowProps} />
+    ));
+
+  const visibleCount = tab === "all" ? counts.all : counts[tab];
 
   return (
     <div className="space-y-4">
       <HealthStrip health={health} />
 
-      {/* Les onglets sont les QUATRE états, plus « toutes » ; « les miennes »
-          n'est pas un cinquième état, c'est un filtre qui coupe au travers —
-          d'où un interrupteur à part, pas un onglet de plus. */}
       <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
         <div className="flex w-max items-center gap-2">
           {TABS.map((key) => (
@@ -250,7 +335,7 @@ export function ConversationsInbox({
         </div>
       </div>
 
-      {visible.length === 0 ? (
+      {visibleCount === 0 ? (
         <EmptyState
           icon={<MessageCircleIcon />}
           title={t(`inbox.empty.${tab}.title`)}
@@ -265,9 +350,7 @@ export function ConversationsInbox({
                 label={t("inbox.sections.reply")}
                 count={replyRows.length}
               />
-              {replyRows.map((row) => (
-                <InboxRowCard key={row.id} row={row} state="attention" {...rowProps} />
-              ))}
+              {renderRows(replyRows)}
             </section>
           ) : null}
           {engineRows.length > 0 ? (
@@ -291,9 +374,20 @@ export function ConversationsInbox({
                   ) : null
                 }
               />
-              {engineRows.map((row) => (
-                <InboxRowCard key={row.id} row={row} state="attention" {...rowProps} />
-              ))}
+              {renderRows(engineRows)}
+            </section>
+          ) : null}
+          {/* Les fils qu'un humain tient déjà : pas urgents, mais ils sont du
+              travail humain — c'est ICI qu'on doit les retrouver, pas dans un
+              cinquième onglet. */}
+          {byState.human.length > 0 ? (
+            <section className="space-y-2">
+              <SectionHeader
+                look={CONVERSATION_STATE_LOOK.human}
+                label={t("inbox.sections.held")}
+                count={byState.human.length}
+              />
+              {renderRows(byState.human)}
             </section>
           ) : null}
           {/* Pas de panne visible mais un rejeu quand même possible (entrants
@@ -314,16 +408,26 @@ export function ConversationsInbox({
             </div>
           ) : null}
         </div>
+      ) : tab === "all" ? (
+        // « Toutes » n'est pas une pile plate : chaque situation a son
+        // en-tête, pour VOIR clairement — c'est toute sa raison d'être.
+        <div className="space-y-5">
+          {ALL_SECTIONS.map((state) =>
+            byState[state].length > 0 ? (
+              <section key={state} className="space-y-2">
+                <SectionHeader
+                  look={CONVERSATION_STATE_LOOK[state]}
+                  label={t(`inbox.state.${state}`)}
+                  count={byState[state].length}
+                />
+                {renderRows(byState[state])}
+              </section>
+            ) : null,
+          )}
+        </div>
       ) : (
         <div className="space-y-2">
-          {visible.map((row) => (
-            <InboxRowCard
-              key={row.id}
-              row={row}
-              state={tab === "all" ? conversationStateOf(row) : tab}
-              {...rowProps}
-            />
-          ))}
+          {renderRows(TAB_STATES[tab].flatMap((state) => byState[state]))}
         </div>
       )}
     </div>
@@ -357,10 +461,12 @@ function SectionHeader({
 /**
  * Une ligne de la boîte.
  *
- * Toute la carte est UN lien vers la fiche client — viser un petit bouton
- * depuis un cellulaire en pleine journée d'appels était le geste le plus
- * fréquent et le plus pénible de l'écran. Les vrais boutons (s'attribuer,
- * marquer traité) flottent au-dessus du lien (`z-10`).
+ * Toute la carte est UN lien vers la fiche client. Les fils qui réclament une
+ * décision offrent les TROIS réponses possibles, sur place : « Rendre à
+ * l'IA » (l'assistant continue et répond tout de suite), « Je réponds »
+ * (prise en main + la fiche s'ouvre sur la zone de rédaction), « Marquer
+ * traité » (rien à faire). Décider ne doit pas demander d'ouvrir trois
+ * écrans.
  *
  * Et chaque dernier message dit QUI l'a écrit : « Parfait, je vous confirme
  * jeudi » n'a pas le même sens selon que c'est le client ou l'assistant.
@@ -370,25 +476,27 @@ function InboxRowCard({
   state,
   currentUserId,
   pending,
-  onClaim,
   onHandle,
+  onHandBack,
+  onRespond,
   dfnsLocale,
 }: {
   row: InboxRow;
   state: ConversationState;
   currentUserId: string;
   pending: boolean;
-  onClaim: (row: InboxRow) => void;
   onHandle: (row: InboxRow) => void;
+  onHandBack: (row: InboxRow) => void;
+  onRespond: (row: InboxRow) => void;
   dfnsLocale: typeof fr;
 }) {
   const t = useTranslations("conversations");
   const stateLook = CONVERSATION_STATE_LOOK[state];
   // La pastille de gauche porte le MOTIF quand il y en a un (à traiter,
-  // terminée), l'état sinon (assistant, main humaine).
+  // refus, conclu), l'état sinon (assistant, main humaine).
   const reasonLook =
     row.attentionReason !== null ? (ATTENTION_LOOK[row.attentionReason] ?? stateLook) : stateLook;
-  const rowLook = state === "attention" || state === "finished" ? reasonLook : stateLook;
+  const rowLook = state === "human" || state === "ai" ? stateLook : reasonLook;
 
   // Le client a parlé en dernier et le fil est à traiter : c'est LUI qui
   // attend, et depuis l'heure affichée. Le texte reste en pleine couleur.
@@ -404,9 +512,6 @@ function InboxRowCard({
           : row.lastSource === "system"
             ? t("inbox.from.system")
             : t("inbox.from.team");
-
-  const showActions = state === "attention";
-  const assignedToMe = row.assignedToId === currentUserId;
 
   return (
     <article
@@ -435,15 +540,10 @@ function InboxRowCard({
               <reasonLook.Icon aria-hidden />
               {t(`inbox.reason.${row.attentionReason}` as never)}
             </Badge>
-          ) : state !== "attention" ? (
-            <Badge variant="outline" className="gap-1 font-normal" style={lookTint(stateLook)}>
-              <stateLook.Icon aria-hidden />
-              {state === "ai" && row.assistantName ? row.assistantName : t(`inbox.state.${state}`)}
-            </Badge>
           ) : (
             <Badge variant="outline" className="gap-1 font-normal" style={lookTint(stateLook)}>
               <stateLook.Icon aria-hidden />
-              {t("inbox.state.attention")}
+              {state === "ai" && row.assistantName ? row.assistantName : t(`inbox.state.${state}`)}
             </Badge>
           )}
           {/* Un fil à traiter dont l'IA est coupée : personne ne répondra
@@ -483,42 +583,57 @@ function InboxRowCard({
           </p>
         ) : null}
 
-        {/* L'état de l'assistant sur les fils qu'il mène : « en attente du
-            client » quand il a écrit le dernier — le fil ne demande rien. */}
-        {state === "ai" && row.lastDirection === "out" ? (
-          <p className="text-xs text-muted-foreground">{t("inbox.aiWaitingClient")}</p>
+        {/* Sur les fils que l'assistant mène : dire si la balle est chez le
+            client ou si la réponse de l'assistant est en route. */}
+        {state === "ai" ? (
+          <p className="text-xs text-muted-foreground">
+            {row.lastDirection === "out" ? t("inbox.aiWaitingClient") : t("inbox.aiComposing")}
+          </p>
         ) : null}
 
-        {showActions || row.assignedToName ? (
+        {state === "attention" || state === "human" || row.assignedToName ? (
           <div className="flex flex-wrap items-center gap-2 pt-0.5">
             {row.assignedToName ? (
               <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                 <UserRoundIcon aria-hidden className="size-3" />
-                {assignedToMe ? t("inbox.you") : row.assignedToName}
+                {row.assignedToId === currentUserId ? t("inbox.you") : row.assignedToName}
               </span>
             ) : null}
             <span className="flex-1" />
-            {showActions && !assignedToMe ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="relative z-10 min-h-11 md:min-h-8"
-                disabled={pending}
-                onClick={() => onClaim(row)}
-              >
-                {t("inbox.assignToMe")}
-              </Button>
-            ) : null}
-            {showActions ? (
+            {/* Les 2-3 décisions possibles, sur place. « Rendre à l'IA »
+                n'apparaît que si un assistant tient réellement le fil. */}
+            {(state === "attention" || state === "human") && row.assistantName ? (
               <Button
                 variant="outline"
                 size="sm"
                 className="relative z-10 min-h-11 md:min-h-8"
                 disabled={pending}
-                onClick={() => onHandle(row)}
+                onClick={() => onHandBack(row)}
               >
-                <CheckIcon aria-hidden /> {t("inbox.markHandled")}
+                <BotIcon aria-hidden /> {t("inbox.actions.handBack")}
               </Button>
+            ) : null}
+            {state === "attention" ? (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="relative z-10 min-h-11 md:min-h-8"
+                  disabled={pending}
+                  onClick={() => onRespond(row)}
+                >
+                  <PencilLineIcon aria-hidden /> {t("inbox.actions.respond")}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="relative z-10 min-h-11 md:min-h-8"
+                  disabled={pending}
+                  onClick={() => onHandle(row)}
+                >
+                  <CheckIcon aria-hidden /> {t("inbox.markHandled")}
+                </Button>
+              </>
             ) : null}
           </div>
         ) : null}

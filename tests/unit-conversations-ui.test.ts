@@ -26,6 +26,7 @@ vi.mock("@/app/(app)/conversations/actions", () => ({
   setConversationAiAction: vi.fn(),
   markConversationHandledAction: vi.fn(),
   assignConversationAction: vi.fn(),
+  handBackToAiAction: vi.fn(),
 }));
 
 const { SmsThreadCard } = await import("@/components/clients/sms-thread-card");
@@ -188,6 +189,34 @@ const FINISHED_ROW: InboxRow = {
   lastDirection: "in",
   lastSource: "human",
   lastAt: "2026-08-21T09:00:00.000Z",
+};
+
+/** Un refus explicite : sa vue à lui, jamais dans « à traiter ». */
+const REFUSED_ROW: InboxRow = {
+  ...FINISHED_ROW,
+  id: "c5",
+  clientId: "abababab-abab-4bab-8bab-abababababab",
+  clientName: "Robert Bouchard",
+  attentionReason: "hard_refusal",
+  lastBody: "Non merci, plus jamais.",
+};
+
+/** Un fil qu'un humain tient (IA en pause, rien d'urgent). */
+const HELD_ROW: InboxRow = {
+  id: "c6",
+  clientId: "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd",
+  clientName: "François Pelletier",
+  clientPhone: "+14185557777",
+  needsAttention: false,
+  attentionReason: null,
+  aiEnabled: false,
+  assignedToId: "me",
+  assignedToName: "Moi",
+  assistantName: "Acheteur FB",
+  lastBody: "Je vous appelle demain.",
+  lastDirection: "out",
+  lastSource: "human",
+  lastAt: "2026-08-21T11:00:00.000Z",
 };
 
 describe("fil SMS", () => {
@@ -382,18 +411,58 @@ describe("boîte de réception", () => {
     expect(html).not.toContain("Jean Roy");
   });
 
-  it("un fil CLOS ne compte pas dans « à traiter », même avec needsAttention", () => {
+  it("un fil CLOS ou REFUSÉ ne compte pas dans « à traiter », même avec needsAttention", () => {
     // Le moteur laisse needsAttention vrai en fermant (ça date le verdict) ;
-    // l'écran, lui, doit ranger le fil dans « Terminées » — le mêler aux fils
-    // qui attendent une réponse noierait ce qui attend réellement.
+    // l'écran, lui, range le fil dans sa vue (Refus, ou Conclues de
+    // « Toutes ») — le mêler aux fils qui attendent noierait ce qui attend.
     const html = wrap(
       createElement(ConversationsInbox, {
-        rows: [...ROWS, FINISHED_ROW],
+        rows: [...ROWS, FINISHED_ROW, REFUSED_ROW],
         currentUserId: "me",
         health: HEALTH,
       }),
     );
     expect(html).not.toContain("Julie Desrosiers");
+    expect(html).not.toContain("Robert Bouchard");
+  });
+
+  it("un fil TENU par un humain apparaît dans « à traiter », section « Entre vos mains »", () => {
+    // C'est du travail humain : il doit se retrouver là où on cherche le
+    // travail humain — pas dans un cinquième onglet.
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: [...ROWS, HELD_ROW],
+        currentUserId: "me",
+        health: HEALTH,
+      }),
+    );
+    expect(html).toContain("Entre vos mains");
+    expect(html).toContain("François Pelletier");
+  });
+
+  it("un fil à traiter offre les DÉCISIONS sur place : rendre à l'IA, je réponds, traité", () => {
+    // Décider ne doit pas demander d'ouvrir trois écrans. « Rendre à l'IA »
+    // n'apparaît que si un assistant tient réellement le fil.
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: [...ROWS, ENGINE_ROW],
+        currentUserId: "me",
+        health: HEALTH,
+      }),
+    );
+    expect(html).toContain("Rendre à l&#x27;IA");
+    expect(html).toContain("Je réponds");
+    expect(html).toContain("Marquer trait");
+  });
+
+  it("sans assistant sur le fil, « rendre à l'IA » n'est pas offert", () => {
+    // Rendre la main à personne laisserait le fil muet en prétendant le
+    // contraire — Marie n'a pas d'assistant, le bouton n'existe pas.
+    const html = wrap(
+      createElement(ConversationsInbox, { rows: [ROWS[0]], currentUserId: "me", health: HEALTH }),
+    );
+    expect(html).not.toContain("Rendre à l&#x27;IA");
+    expect(html).toContain("Je réponds");
   });
 
   it("répondre et réparer sont DEUX sections, pas un entremêlement", () => {
@@ -493,12 +562,34 @@ describe("fil SMS", () => {
 });
 
 describe("le modèle d'état d'un fil", () => {
-  it("quatre états exclusifs, dans le bon ordre de priorité", async () => {
+  it("cinq états exclusifs, dans le bon ordre de priorité", async () => {
     const { conversationStateOf } = await import("@/components/conversations/state");
-    // Fini gagne sur tout : le moteur laisse needsAttention vrai en fermant.
+    // Un verdict gagne sur tout : le moteur laisse needsAttention vrai en
+    // fermant — et un NON explicite ne se range pas avec les conclusions.
     expect(
       conversationStateOf({ needsAttention: true, attentionReason: "optout", aiEnabled: false }),
-    ).toBe("finished");
+    ).toBe("refused");
+    expect(
+      conversationStateOf({
+        needsAttention: true,
+        attentionReason: "hard_refusal",
+        aiEnabled: false,
+      }),
+    ).toBe("refused");
+    expect(
+      conversationStateOf({
+        needsAttention: true,
+        attentionReason: "closed_not_interested",
+        aiEnabled: false,
+      }),
+    ).toBe("refused");
+    expect(
+      conversationStateOf({
+        needsAttention: true,
+        attentionReason: "closed_goal_reached",
+        aiEnabled: false,
+      }),
+    ).toBe("concluded");
     expect(
       conversationStateOf({ needsAttention: true, attentionReason: "inbound", aiEnabled: true }),
     ).toBe("attention");

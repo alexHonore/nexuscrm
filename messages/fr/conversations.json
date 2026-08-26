@@ -1,7 +1,7 @@
 {
   "nav": {
     "title": "Conversations",
-    "subtitle": "Tous les fils SMS — à traiter, en main humaine, menés par l'assistant, terminés."
+    "subtitle": "Les fils SMS, rangés par situation : à traiter, en attente du client, refus."
   },
   "thread": {
     "title": "Conversation SMS",
@@ -77,18 +77,18 @@
   },
   "inbox": {
     "title": "Conversations",
-    "subtitle": "Tous les fils SMS — à traiter, en main humaine, menés par l'assistant, terminés.",
+    "subtitle": "Les fils SMS, rangés par situation : à traiter, en attente du client, refus.",
     "tabs": {
       "attention": "À traiter",
-      "human": "En main",
-      "ai": "Assistant",
-      "finished": "Terminées",
+      "waiting": "En attente du client",
+      "refused": "Refus",
       "all": "Toutes"
     },
     "mine": "Les miennes",
     "sections": {
       "reply": "Le client attend une réponse",
-      "engine": "Pannes techniques"
+      "engine": "Pannes techniques",
+      "held": "Entre vos mains"
     },
     "from": {
       "client": "Client",
@@ -99,28 +99,31 @@
     },
     "state": {
       "attention": "À traiter",
-      "human": "Un humain a la main",
-      "ai": "Assistant en piste",
-      "finished": "Terminée"
+      "human": "Entre vos mains",
+      "ai": "En attente du client",
+      "refused": "Refus",
+      "concluded": "Conclues"
     },
     "aiWaitingClient": "L'assistant a répondu — en attente du client.",
+    "aiComposing": "Réponse de l'assistant en route.",
     "you": "Vous",
+    "actions": {
+      "handBack": "Rendre à l'IA",
+      "respond": "Je réponds"
+    },
+    "handedBack": "L'assistant reprend le fil",
     "empty": {
       "attention": {
         "title": "Rien à traiter",
-        "desc": "Aucune conversation n'attend de réponse humaine."
+        "desc": "Aucune conversation n'attend d'humain — l'assistant tient le reste."
       },
-      "human": {
-        "title": "Aucun fil en main",
-        "desc": "Personne n'a pris le contrôle d'une conversation."
+      "waiting": {
+        "title": "Aucune réponse attendue",
+        "desc": "L'assistant n'a aucun message resté sans réponse."
       },
-      "ai": {
-        "title": "Aucun fil mené par l'assistant",
-        "desc": "L'assistant n'a aucune conversation en cours."
-      },
-      "finished": {
-        "title": "Aucune conversation terminée",
-        "desc": "Les fils clos, les refus et les désabonnements se rangeront ici."
+      "refused": {
+        "title": "Aucun refus",
+        "desc": "Les refus fermes, « pas intéressé » et désabonnements se rangeront ici."
       },
       "all": {
         "title": "Aucune conversation",

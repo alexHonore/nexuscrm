@@ -111,8 +111,8 @@ describe("couverture du vocabulaire", () => {
     expect(missing, `motifs sans look : ${missing.join(", ")}`).toEqual([]);
   });
 
-  it("les quatre états d'un fil et les deux familles de motifs ont le leur", () => {
-    for (const state of ["attention", "human", "ai", "finished"]) {
+  it("les cinq états d'un fil et les deux familles de motifs ont le leur", () => {
+    for (const state of ["attention", "human", "ai", "refused", "concluded"]) {
       expect(CONVERSATION_STATE_LOOK[state], state).toBeTruthy();
     }
     for (const kind of ["reply", "engine"] as const) {

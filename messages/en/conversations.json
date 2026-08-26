@@ -1,7 +1,7 @@
 {
   "nav": {
     "title": "Conversations",
-    "subtitle": "Every SMS thread — to handle, human-held, assistant-led, finished."
+    "subtitle": "SMS threads, sorted by situation: to handle, awaiting the client, refusals."
   },
   "thread": {
     "title": "SMS conversation",
@@ -77,23 +77,19 @@
   },
   "inbox": {
     "title": "Conversations",
-    "subtitle": "Every SMS thread — to handle, human-held, assistant-led, finished.",
+    "subtitle": "SMS threads, sorted by situation: to handle, awaiting the client, refusals.",
     "empty": {
       "attention": {
         "title": "Nothing to handle",
-        "desc": "No conversation is waiting on a human reply."
+        "desc": "No conversation is waiting on a human — the assistant holds the rest."
       },
-      "human": {
-        "title": "No thread in hand",
-        "desc": "Nobody has taken over a conversation."
+      "waiting": {
+        "title": "No reply awaited",
+        "desc": "The assistant has no message left unanswered."
       },
-      "ai": {
-        "title": "No assistant-led thread",
-        "desc": "The assistant has no conversation in flight."
-      },
-      "finished": {
-        "title": "No finished conversation",
-        "desc": "Closed threads, refusals and unsubscribes will land here."
+      "refused": {
+        "title": "No refusals",
+        "desc": "Hard refusals, \"not interested\" and unsubscribes will land here."
       },
       "all": {
         "title": "No conversations",
@@ -133,15 +129,15 @@
     },
     "tabs": {
       "attention": "To handle",
-      "human": "Human-held",
-      "ai": "Assistant",
-      "finished": "Finished",
+      "waiting": "Awaiting client",
+      "refused": "Refusals",
       "all": "All"
     },
     "mine": "Mine",
     "sections": {
       "reply": "The client is waiting for a reply",
-      "engine": "Technical failures"
+      "engine": "Technical failures",
+      "held": "In your hands"
     },
     "from": {
       "client": "Client",
@@ -152,12 +148,19 @@
     },
     "state": {
       "attention": "To handle",
-      "human": "A human has the thread",
-      "ai": "Assistant on it",
-      "finished": "Finished"
+      "human": "In your hands",
+      "ai": "Awaiting the client",
+      "refused": "Refusals",
+      "concluded": "Concluded"
     },
     "aiWaitingClient": "The assistant replied — waiting on the client.",
-    "you": "You"
+    "you": "You",
+    "aiComposing": "Assistant reply on its way.",
+    "actions": {
+      "handBack": "Hand back to AI",
+      "respond": "I'll reply"
+    },
+    "handedBack": "The assistant takes the thread back"
   },
   "health": {
     "title": "Engine health",
