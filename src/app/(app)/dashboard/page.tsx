@@ -21,13 +21,17 @@ import { appointments, calls, clients, followups } from "@/db/schema";
 import { requireUser } from "@/lib/auth/guards";
 import { formatPhone, phoneMatchKey } from "@/lib/phone";
 import { RedialButton } from "@/components/calls/redial-button";
-import { APP_TZ, torontoDayRange } from "@/components/clients/timezone";
+import { APP_TZ, torontoDayRange, torontoDayStart } from "@/components/clients/timezone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FollowupItem, type FollowupItemData } from "./followup-item";
+import { UpcomingFollowups, type FollowupDayGroup } from "./upcoming-followups";
 import { QuickSearch } from "./quick-search";
+
+/** Horizon de la section « À venir » des suivis : demain → +7 jours civils. */
+const UPCOMING_DAYS = 7;
 
 export default async function DashboardPage() {
   const user = await requireUser();
@@ -37,6 +41,10 @@ export default async function DashboardPage() {
 
   const now = new Date();
   const { start, end } = torontoDayRange(now);
+  // Fin de l'horizon des suivis : minuit de Toronto après les 7 jours qui
+  // suivent aujourd'hui. En jours CIVILS — « + 8 × 24 h » déraperait d'une
+  // heure au changement d'heure et couperait un jour en deux.
+  const upcomingEnd = torontoDayStart(now, 1 + UPCOMING_DAYS);
   const missedWindowStart = new Date(now.getTime() - 7 * 24 * 3600_000);
 
   // Prochains rendez-vous (14 jours), en cours inclus. Le courtier (admin)
@@ -52,15 +60,17 @@ export default async function DashboardPage() {
 
   const [pendingFollowups, upcomingAppointments, upcomingCount, [callStats], bookedToday, missedRows] =
     await Promise.all([
+    // En retard + aujourd'hui + les 7 jours qui viennent, en UNE requête —
+    // l'index (assigned_to_id, due_at) couvre la borne haute.
     db.query.followups.findMany({
       where: and(
         eq(followups.assignedToId, user.id),
         isNull(followups.doneAt),
-        lt(followups.dueAt, end),
+        lt(followups.dueAt, upcomingEnd),
       ),
       with: { client: true },
       orderBy: [asc(followups.dueAt)],
-      limit: 50,
+      limit: 200,
     }),
     db.query.appointments.findMany({
       where: upcomingWhere,
@@ -146,6 +156,11 @@ export default async function DashboardPage() {
     });
   }
 
+  // 16:09 en français, 4:09 PM en anglais — la carte des rendez-vous juste à
+  // côté le fait déjà ; les suivis affichaient l'heure sur 24 h dans les deux
+  // langues, ce qui donnait deux conventions dans la même colonne.
+  const timeFormat = locale === "en" ? "h:mm a" : "HH:mm";
+
   const toItem = (f: (typeof pendingFollowups)[number], overdue: boolean): FollowupItemData => ({
     id: f.id,
     clientId: f.clientId,
@@ -153,18 +168,47 @@ export default async function DashboardPage() {
     phone: f.client?.phone ?? "",
     phoneDisplay: formatPhone(f.client?.phone),
     note: f.note,
-    dueLabel: formatInTimeZone(f.dueAt, APP_TZ, overdue ? "d MMM HH:mm" : "HH:mm", {
+    dueLabel: formatInTimeZone(f.dueAt, APP_TZ, overdue ? `d MMM ${timeFormat}` : timeFormat, {
       locale: dfnsLocale,
     }),
     overdue,
     doNotCall: f.client?.doNotCall ?? false,
   });
 
+  const todayKey = formatInTimeZone(now, APP_TZ, "yyyy-MM-dd");
+  // « Demain » = prochain minuit de Toronto (`end`), pas maintenant + 24 h —
+  // la nuit du passage à l'heure avancée sauterait un jour civil.
+  const tomorrowKey = formatInTimeZone(end, APP_TZ, "yyyy-MM-dd");
+  const dayLabelFormat = locale === "en" ? "EEEE, MMMM d" : "EEEE d MMMM";
+
   const overdueItems = pendingFollowups.filter((f) => f.dueAt < now).map((f) => toItem(f, true));
-  const dueTodayItems = pendingFollowups.filter((f) => f.dueAt >= now).map((f) => toItem(f, false));
+  const dueTodayItems = pendingFollowups
+    .filter((f) => f.dueAt >= now && f.dueAt < end)
+    .map((f) => toItem(f, false));
+
+  // Les suivis des jours qui viennent, groupés par journée de Toronto. La date
+  // vit dans l'en-tête du groupe : chaque ligne ne porte que son heure.
+  const upcomingGroups: FollowupDayGroup[] = [];
+  for (const f of pendingFollowups) {
+    if (f.dueAt < end) continue;
+    const key = formatInTimeZone(f.dueAt, APP_TZ, "yyyy-MM-dd");
+    const last = upcomingGroups[upcomingGroups.length - 1];
+    if (last?.key === key) {
+      last.items.push(toItem(f, false));
+      continue;
+    }
+    upcomingGroups.push({
+      key,
+      label:
+        key === tomorrowKey
+          ? t("followups.tomorrow")
+          : formatInTimeZone(f.dueAt, APP_TZ, dayLabelFormat, { locale: dfnsLocale }),
+      items: [toItem(f, false)],
+    });
+  }
+  const upcomingFollowupCount = upcomingGroups.reduce((n, g) => n + g.items.length, 0);
 
   // Un numéro = une ligne (le plus récent d'abord, avec le nombre de tentatives).
-  const todayKey = formatInTimeZone(now, APP_TZ, "yyyy-MM-dd");
   type MissedGroup = {
     key: string;
     latest: (typeof missedRows)[number];
@@ -195,9 +239,6 @@ export default async function DashboardPage() {
   const missedDisplay = missedGroups.slice(0, 6);
 
   // Prochains rendez-vous groupés par jour (Aujourd'hui / Demain / date).
-  // « Demain » = prochain minuit de Toronto (`end`), pas maintenant + 24 h —
-  // la nuit du passage à l'heure avancée sauterait un jour civil.
-  const tomorrowKey = formatInTimeZone(end, APP_TZ, "yyyy-MM-dd");
   type ApptGroup = { key: string; label: string; items: typeof upcomingAppointments };
   const apptGroups: ApptGroup[] = [];
   for (const a of upcomingAppointments) {
@@ -212,16 +253,10 @@ export default async function DashboardPage() {
         ? t("appointments.today")
         : key === tomorrowKey
           ? t("appointments.tomorrow")
-          : formatInTimeZone(
-              a.startsAt,
-              APP_TZ,
-              locale === "en" ? "EEEE, MMMM d" : "EEEE d MMMM",
-              { locale: dfnsLocale },
-            );
+          : formatInTimeZone(a.startsAt, APP_TZ, dayLabelFormat, { locale: dfnsLocale });
     apptGroups.push({ key, label, items: [a] });
   }
 
-  const timeFormat = locale === "en" ? "h:mm a" : "HH:mm";
   const firstName = user.name.split(/\s+/)[0] ?? user.name;
   const stats = [
     {
@@ -376,7 +411,7 @@ export default async function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {overdueItems.length === 0 && dueTodayItems.length === 0 ? (
+            {pendingFollowups.length === 0 ? (
               <EmptyState
                 className="py-8"
                 icon={<CheckCircle2Icon className="text-emerald-700! dark:text-emerald-400!" />}
@@ -412,6 +447,20 @@ export default async function DashboardPage() {
                         <FollowupItem key={item.id} item={item} />
                       ))}
                     </ul>
+                  </div>
+                ) : null}
+                {upcomingGroups.length > 0 ? (
+                  <div className="space-y-2 border-t pt-4">
+                    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {t("followups.upcoming")}
+                      <Badge variant="secondary" className="tabular-nums">
+                        {upcomingFollowupCount}
+                      </Badge>
+                      <span className="font-normal normal-case">
+                        {t("followups.upcomingRange", { days: UPCOMING_DAYS })}
+                      </span>
+                    </p>
+                    <UpcomingFollowups groups={upcomingGroups} />
                   </div>
                 ) : null}
               </>
