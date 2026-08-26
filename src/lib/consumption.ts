@@ -3,6 +3,7 @@ import { and, gte, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { agentTurnTraces, messages } from "@/db/schema-sms";
 import { dayStartUtc, shiftDateStr } from "@/components/analytics/period";
+import { getOpenRouterAccountUsage } from "@/lib/llm-server/openrouter-usage";
 import { getSetting } from "@/lib/settings";
 import { getTwilioSmsCost } from "@/lib/sms-server/twilio-usage";
 
@@ -12,9 +13,12 @@ import { getTwilioSmsCost } from "@/lib/sms-server/twilio-usage";
  *
  * Deux natures de chiffre, et la distinction est honnête :
  *
- *  · **IA : coût RÉEL.** Chaque tour d'assistant enregistre son coût
- *    (`agent_turn_traces.cost_usd`, calculé d'après la tarification du modèle)
- *    et ses jetons. On somme, on ne recalcule pas.
+ *  · **IA : coût RÉEL.** Chaque tour d'assistant enregistre le coût facturé
+ *    par OpenRouter (`usage.cost` demandé à chaque appel) et ses jetons — le
+ *    TOUR entier depuis le 2026-08-26 : générations, classifieur, juges,
+ *    régénérations, repli. On somme, on ne recalcule pas. En regard, la
+ *    dépense à VIE du compte OpenRouter (API /credits) sert d'ancre : les
+ *    tours antérieurs au correctif sous-comptaient (~1/8 du réel constaté).
  *  · **SMS : coût ESTIMÉ.** Twilio ne nous donne pas le prix par message ; on
  *    compte les SEGMENTS (l'unité facturée, elle, réelle) et on multiplie par
  *    un taux réglé par l'admin (`consumption.smsSegmentCostUsd`). L'UI doit le
@@ -39,6 +43,8 @@ export type ConsumptionReport = {
     /** Coût RÉEL, sommé des traces de tour. */
     costUsd: number;
     byModel: AiModelUsage[];
+    /** L'ancre : dépense à vie et crédits du COMPTE OpenRouter, ou null si indisponible. */
+    account: { totalUsageUsd: number; totalCreditsUsd: number } | null;
   };
   sms: {
     outboundMessages: number;
@@ -96,12 +102,17 @@ export async function getConsumption(from: string, to: string): Promise<Consumpt
     }))
     .sort((a, b) => b.costUsd - a.costUsd || b.turns - a.turns);
 
+  // L'ancre du compte : la seule dépense IA qui ne dépende pas de notre
+  // propre comptage. Injoignable = null, jamais un zéro qui ment.
+  const account = await getOpenRouterAccountUsage();
+
   const ai = {
     turns: byModel.reduce((s, m) => s + m.turns, 0),
     tokensIn: byModel.reduce((s, m) => s + m.tokensIn, 0),
     tokensOut: byModel.reduce((s, m) => s + m.tokensOut, 0),
     costUsd: byModel.reduce((s, m) => s + m.costUsd, 0),
     byModel,
+    account,
   };
 
   // ── SMS : segments comptés (unité facturée), en une passe ───────────────────

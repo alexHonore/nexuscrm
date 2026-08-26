@@ -80,7 +80,7 @@ vi.mock("@/lib/llm-server", () => ({
         return {
           text: isJudge ? llm.judgeJson : llm.classifierJson,
           toolCalls: [],
-          usage: { inputTokens: 10, outputTokens: 5 },
+          usage: { inputTokens: 10, outputTokens: 5, costUsd: 0.001 },
           latencyMs: 5,
           modelServed: input.model,
           raw: {},
@@ -95,7 +95,7 @@ vi.mock("@/lib/llm-server", () => ({
       return {
         text,
         toolCalls: llm.generatorToolCalls,
-        usage: { inputTokens: 100, outputTokens: 20 },
+        usage: { inputTokens: 100, outputTokens: 20, costUsd: 0.01 },
         latencyMs: 42,
         modelServed: "anthropic/claude-sonnet-5",
         upstreamProvider: "Amazon Bedrock",
@@ -259,7 +259,14 @@ describe("runTurn", () => {
     expect(trace.assistantId).toBe(assistant.id);
     expect(trace.systemPrompt).toContain("OACIQ");
     expect(trace.runtimeBlock).toContain("jeudi 14 h"); // disponibilités réelles en L7
-    expect(trace.tokensIn).toBe(100);
+    // Le TOUR entier, pas le dernier appel : générateur (100) + classifieur
+    // et juges (10 chacun). N'écrire que le dernier appel montrait ~1/8 de la
+    // dépense réelle du compte OpenRouter (constat du 2026-08-26).
+    expect(trace.tokensIn).toBeGreaterThanOrEqual(110);
+    expect(trace.tokensOut).toBeGreaterThanOrEqual(25);
+    // Et le COÛT s'additionne de même : 0,01 $ (générateur) + 0,001 $ par
+    // appel de classification/jugement — jamais le seul dernier appel.
+    expect(Number(trace.costUsd)).toBeGreaterThanOrEqual(0.011);
   });
 
   it("§21 — ai_enabled = false : aucun message, aucune trace, sortie immédiate", async () => {

@@ -52,6 +52,7 @@ const DATA: ConsumptionReport = {
       { model: "claude-sonnet-5", turns: 2, tokensIn: 300, tokensOut: 130, costUsd: 0.03 },
       { model: "gpt-4o-mini", turns: 1, tokensIn: 40, tokensOut: 20, costUsd: 0.005 },
     ],
+    account: { totalUsageUsd: 7.14, totalCreditsUsd: 15 },
   },
   sms: {
     outboundMessages: 2,
@@ -76,6 +77,11 @@ describe("ConsumptionSections", () => {
     // SMS — badge « estimation » et les segments comptés.
     expect(html).toContain("estimation");
     expect(html).toContain("Segments");
+    // L'ANCRE du compte OpenRouter : dépense à vie et crédits restants —
+    // le seul chiffre IA qui ne dépende pas de notre propre comptage.
+    expect(html).toContain("Compte OpenRouter");
+    expect(html).toContain("7.14");
+    expect(html).toContain("Crédits restants");
     // Aucune clé i18n nue.
     expect(html).not.toContain("MISSING_MESSAGE");
     expect(html).not.toMatch(/billing\.[a-zA-Z]+/);
@@ -84,7 +90,7 @@ describe("ConsumptionSections", () => {
   it("états vides : le dit sans planter, dans les deux sections", () => {
     const empty: ConsumptionReport = {
       ...DATA,
-      ai: { turns: 0, tokensIn: 0, tokensOut: 0, costUsd: 0, byModel: [] },
+      ai: { turns: 0, tokensIn: 0, tokensOut: 0, costUsd: 0, byModel: [], account: null },
       sms: { outboundMessages: 0, outboundSegments: 0, inboundMessages: 0, inboundSegments: 0, segmentCostUsd: 0.0079, estimatedCostUsd: 0, realCostUsd: null, costSource: "estimate", costUsd: 0 },
     };
     const html = wrap(empty);

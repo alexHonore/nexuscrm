@@ -131,6 +131,10 @@ describe("createOpenRouterProvider", () => {
     // Sans effort demandé : ni `reasoning`, ni marge sur le plafond.
     expect(calls[0].body.reasoning).toBeUndefined();
     expect(calls[0].body.max_tokens).toBe(300);
+    // Le COÛT est demandé à chaque appel : sans `usage.include`, OpenRouter
+    // ne renvoie pas `usage.cost` et la consommation IA se croit à ~1/8 de la
+    // dépense réelle du compte (constat du 2026-08-26).
+    expect(calls[0].body.usage).toEqual({ include: true });
   });
 
   it("traduit le routage en noms OpenRouter — deny + ZDR + aucun reroutage", async () => {

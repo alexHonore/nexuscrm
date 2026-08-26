@@ -12,12 +12,22 @@ import { SignJWT } from "jose";
 import { closeDb, makeClient, makeConversation, makeSmsNumber, makeUser, resetDb, testDb } from "./helpers/db";
 import { agentTurnTraces, messages } from "@/db/schema-sms";
 
-const CTX = vi.hoisted(() => ({ jar: new Map<string, string>(), hdrs: new Headers(), twilioCost: null as null | { costUsd: number; priceUnit: string } }));
+const CTX = vi.hoisted(() => ({
+  jar: new Map<string, string>(),
+  hdrs: new Headers(),
+  twilioCost: null as null | { costUsd: number; priceUnit: string },
+  openrouterAccount: null as null | { totalUsageUsd: number; totalCreditsUsd: number },
+}));
 vi.mock("server-only", () => ({}));
 // Twilio Usage Records : mocké — on ne tape pas le réseau. `twilioCost` null =
 // Twilio indisponible → l'estimation par segments s'applique.
 vi.mock("@/lib/sms-server/twilio-usage", () => ({
   getTwilioSmsCost: async () => CTX.twilioCost,
+}));
+// L'ancre du compte OpenRouter : mockée — on ne tape pas le réseau. null =
+// clé absente ou API injoignable, le rapport doit rester complet sans elle.
+vi.mock("@/lib/llm-server/openrouter-usage", () => ({
+  getOpenRouterAccountUsage: async () => CTX.openrouterAccount,
 }));
 vi.mock("next/headers", () => ({
   cookies: async () => ({
@@ -94,6 +104,22 @@ describe("getConsumption", () => {
     await resetDb();
     CTX.jar.clear();
     CTX.twilioCost = null;
+    CTX.openrouterAccount = null;
+  });
+
+  it("IA : l'ancre du COMPTE OpenRouter accompagne la somme des traces", async () => {
+    // La somme des traces a une histoire (sous-comptage d'avant le correctif) ;
+    // le chiffre du fournisseur, lui, ne dépend pas de notre comptage.
+    CTX.openrouterAccount = { totalUsageUsd: 7.14, totalCreditsUsd: 15 };
+    await scene();
+    const r = await getConsumption(FROM, TO);
+    expect(r.ai.account).toEqual({ totalUsageUsd: 7.14, totalCreditsUsd: 15 });
+  });
+
+  it("IA : sans clé OpenRouter, l'ancre est null — jamais un zéro qui ment", async () => {
+    await scene();
+    const r = await getConsumption(FROM, TO);
+    expect(r.ai.account).toBeNull();
   });
 
   it("IA : somme le coût et les jetons RÉELS par modèle, dans la période", async () => {

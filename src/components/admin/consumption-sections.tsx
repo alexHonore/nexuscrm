@@ -37,6 +37,8 @@ export type ConsumptionReport = {
     tokensOut: number;
     costUsd: number;
     byModel: AiModelUsage[];
+    /** Dépense à vie et crédits du COMPTE OpenRouter — l'ancre, ou null. */
+    account: { totalUsageUsd: number; totalCreditsUsd: number } | null;
   };
   sms: {
     outboundMessages: number;
@@ -225,6 +227,29 @@ export function ConsumptionSections({
               <Stat label={t("billing.aiTokensOut")} value={nf.format(ai.tokensOut)} muted />
               <Stat label={t("billing.aiCost")} value={money(ai.costUsd)} />
             </div>
+
+            {/* L'ANCRE : ce que le compte OpenRouter a réellement brûlé — le
+                seul chiffre IA qui ne dépende pas de notre propre comptage.
+                Les traces d'avant le 2026-08-26 sous-comptaient (~1/8) :
+                l'écart entre la somme des périodes et ce total est normal
+                pour l'historique, plus pour le neuf. */}
+            {ai.account ? (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                <span>
+                  {t("billing.aiAccountUsage")}{" "}
+                  <span className="font-semibold text-foreground tabular-nums">
+                    {money(ai.account.totalUsageUsd)}
+                  </span>
+                </span>
+                <span>
+                  {t("billing.aiAccountRemaining")}{" "}
+                  <span className="font-semibold text-foreground tabular-nums">
+                    {money(Math.max(0, ai.account.totalCreditsUsd - ai.account.totalUsageUsd))}
+                  </span>
+                </span>
+                <span className="w-full sm:w-auto sm:flex-1">{t("billing.aiAccountNote")}</span>
+              </div>
+            ) : null}
 
             <div className="overflow-x-auto">
               <Table>

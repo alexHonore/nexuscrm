@@ -736,7 +736,10 @@
     "unavailable": "Consumption data unavailable — try again.",
     "smsCostReal": "Billed cost (US $)",
     "smsSourceReal": "Real cost billed by Twilio.",
-    "smsSourceEstimate": "Twilio unreachable — estimated: segments × rate."
+    "smsSourceEstimate": "Twilio unreachable — estimated: segments × rate.",
+    "aiAccountUsage": "OpenRouter account — lifetime spend:",
+    "aiAccountRemaining": "Credits left:",
+    "aiAccountNote": "Provider figure (API /credits). Turns before Aug 26, 2026 under-counted: only the last call was summed, without classifier or judges."
   },
   "classification": {
     "title": "Automatic classification",

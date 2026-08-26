@@ -819,6 +819,23 @@ export async function runTurn(
     providerInitError =
       err instanceof LlmUnconfiguredError ? "llm_unconfigured" : err instanceof Error ? err.message : "llm_init_failed";
   }
+  /**
+   * Le compte du TOUR entier — chaque appel au modèle coûte, pas seulement le
+   * dernier. Un tour peut en faire jusqu'à une dizaine : trois passages
+   * d'outils × deux tentatives de garde-fou, le repli, PLUS le classifieur et
+   * chaque juge LLM. N'écrire que l'usage du dernier appel (l'ancien
+   * comportement) montrait ~1/8 de la dépense réelle du compte OpenRouter.
+   */
+  const turnUsage = { tokensIn: 0, tokensOut: 0, costUsd: 0, hasCost: false };
+  const tallyUsage = (out: LLMResult) => {
+    turnUsage.tokensIn += out.usage.inputTokens;
+    turnUsage.tokensOut += out.usage.outputTokens;
+    if (typeof out.usage.costUsd === "number") {
+      turnUsage.costUsd += out.usage.costUsd;
+      turnUsage.hasCost = true;
+    }
+  };
+
   const classifierCall = async ({ system, user }: { system: string; user: string }) => {
     if (!classifierProvider) throw new Error(providerInitError ?? "llm_unconfigured");
     const out = await classifierProvider.generate({
@@ -831,6 +848,7 @@ export async function runTurn(
       // et les juges lisent les mêmes messages du client.
       routing: config.model.routing as unknown as Record<string, unknown>,
     });
+    tallyUsage(out);
     return out.text;
   };
 
@@ -1314,7 +1332,9 @@ export async function runTurn(
     input: Omit<Parameters<typeof generatorProvider.generate>[0], "model">,
   ): Promise<LLMResult> => {
     try {
-      return await generatorProvider.generate({ ...input, model: config.model.model });
+      const out = await generatorProvider.generate({ ...input, model: config.model.model });
+      tallyUsage(out);
+      return out;
     } catch (primaryErr) {
       const fallback = config.model.fallback;
       if (!fallback) throw primaryErr;
@@ -1328,6 +1348,7 @@ export async function runTurn(
       try {
         const out = await fallbackProvider.generate({ ...input, model: fallback.model });
         fallbackUsed = true;
+        tallyUsage(out);
         return out;
       } catch (fallbackErr) {
         const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
@@ -1502,9 +1523,11 @@ export async function runTurn(
         upstreamProvider: result.upstreamProvider ?? null,
         rawResponse: result.raw as Record<string, unknown>,
         latencyMs: result.latencyMs,
-        tokensIn: result.usage.inputTokens,
-        tokensOut: result.usage.outputTokens,
-        costUsd: result.usage.costUsd?.toString(),
+        // Le TOUR entier, pas le dernier appel : générations (passages
+        // d'outils, régénérations, repli) + classifieur + juges.
+        tokensIn: turnUsage.tokensIn,
+        tokensOut: turnUsage.tokensOut,
+        costUsd: turnUsage.hasCost ? turnUsage.costUsd.toFixed(5) : undefined,
       }
     : {};
   const traceCommon = {

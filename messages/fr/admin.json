@@ -736,7 +736,10 @@
     "unavailable": "Données de consommation indisponibles — réessayez.",
     "smsCostReal": "Coût facturé ($ US)",
     "smsSourceReal": "Coût réel facturé par Twilio.",
-    "smsSourceEstimate": "Twilio injoignable — estimation : segments × taux."
+    "smsSourceEstimate": "Twilio injoignable — estimation : segments × taux.",
+    "aiAccountUsage": "Compte OpenRouter — dépense à vie :",
+    "aiAccountRemaining": "Crédits restants :",
+    "aiAccountNote": "Chiffre du fournisseur (API /credits). Les tours antérieurs au 26 août 2026 sous-comptaient : seul le dernier appel était additionné, sans classifieur ni juges."
   },
   "classification": {
     "title": "Classement automatique",

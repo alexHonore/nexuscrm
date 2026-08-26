@@ -65,6 +65,13 @@ export function createOpenRouterProvider(options: OpenRouterOptions): LLMProvide
       const extraBody = {
         ...(provider ? { provider } : {}),
         ...(reasoning ? { reasoning } : {}),
+        // Sans cette demande EXPLICITE, OpenRouter ne renvoie pas `usage.cost` :
+        // 77 % des traces de prod n'avaient AUCUN coût, et la page de
+        // consommation montrait 0,92 $ pendant que le compte en avait brûlé
+        // 7,14 $ (constat du 2026-08-26). Le comptage local des jetons ne
+        // remplace pas ce chiffre — c'est le routeur qui connaît le prix réel
+        // du fournisseur servi.
+        usage: { include: true },
       };
       return chatCompletion(input, {
         url: `${baseUrl}/chat/completions`,
