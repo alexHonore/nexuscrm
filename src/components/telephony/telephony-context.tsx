@@ -24,6 +24,14 @@ import {
 import { toast } from "sonner";
 import { emitDataChange } from "@/lib/live";
 import { formatPhone, normalizePhone } from "@/lib/phone";
+import {
+  getInputChoice,
+  getOutputChoice,
+  primeAudioDevices,
+  setInputChoice,
+  setOutputChoice,
+} from "@/lib/telephony/audio-devices";
+import { primeTones } from "@/lib/telephony/tones";
 import type {
   ActiveCall,
   CallDirection,
@@ -82,6 +90,10 @@ export type TelephonyContextValue = {
   clearPendingDisposition: () => void;
   /** Relance l'inscription SIP après un échec (bouton « Réessayer »). */
   retryRegistration: () => void;
+  /** Haut-parleur de sortie ; `""` = appareil par défaut du système. */
+  setOutputDevice: (deviceId: string) => void;
+  /** Microphone d'entrée ; `""` = défaut. Prend effet même en plein appel. */
+  setInputDevice: (deviceId: string) => void;
 };
 
 type TelephonyConfigResponse = {
@@ -331,6 +343,13 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
       engineRef.current?.destroy();
       engineRef.current = null;
 
+      // Avant tout appel : lister les appareils audio, suivre les branchements,
+      // et surtout créer le contexte des tonalités MAINTENANT pour qu'un clic
+      // quelconque dans le CRM le déverrouille. Une sonnerie fabriquée au
+      // moment de l'appel entrant naîtrait muette (politique d'autoplay).
+      primeAudioDevices();
+      primeTones();
+
       // Toujours re-lue : un « Réessayer » après correction des identifiants
       // par l'admin doit repartir de la config à jour.
       let config: TelephonyConfigResponse;
@@ -447,6 +466,12 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
           if (!cancelled) showError(code);
         },
       });
+
+      // Le moteur vient de naître : lui redonner les appareils choisis. Twilio
+      // reconstruit sa plomberie audio à chaque Device, et « Réessayer » passe
+      // par ici — sans ça, le son retomberait dans les haut-parleurs.
+      void engine.setOutputDevice(getOutputChoice());
+      void engine.setInputDevice(getInputChoice());
     };
 
     bootRef.current = boot;
@@ -575,6 +600,19 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
     void bootRef.current();
   }, []);
 
+  const setOutputDevice = useCallback((deviceId: string) => {
+    // Le magasin persiste le choix ET re-route toutes les sorties déjà vivantes
+    // (élément <audio>, tonalités) ; le moteur ne sert qu'à Twilio, qui a la
+    // sienne.
+    setOutputChoice(deviceId);
+    void engineRef.current?.setOutputDevice(deviceId);
+  }, []);
+
+  const setInputDevice = useCallback((deviceId: string) => {
+    setInputChoice(deviceId);
+    void engineRef.current?.setInputDevice(deviceId);
+  }, []);
+
   const value = useMemo<TelephonyContextValue>(
     () => ({
       provider,
@@ -595,6 +633,8 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
       pendingDisposition,
       clearPendingDisposition,
       retryRegistration,
+      setOutputDevice,
+      setInputDevice,
     }),
     [
       provider,
@@ -615,6 +655,8 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
       pendingDisposition,
       clearPendingDisposition,
       retryRegistration,
+      setOutputDevice,
+      setInputDevice,
     ],
   );
 

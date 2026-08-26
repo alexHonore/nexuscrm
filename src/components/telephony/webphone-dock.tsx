@@ -31,8 +31,16 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
+import { AudioDevicePicker } from "@/components/telephony/audio-device-picker";
+import {
+  startRingtone,
+  stopRingtone,
+  subscribeToneState,
+  tonesAudible,
+  unlockTones,
+} from "@/lib/telephony/tones";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -372,6 +380,9 @@ function DialpadContent({ onCalled }: { onCalled?: () => void }) {
             {t("status.retry")}
           </Button>
         ) : null}
+        {/* Le casque se choisit AVANT de composer — c'est là qu'on y pense,
+            pas une fois que ça sonne dans le mauvais haut-parleur. */}
+        <AudioDevicePicker className="ml-auto size-9" />
       </div>
 
       <div className="flex items-center gap-2">
@@ -581,20 +592,7 @@ function CallControlsSection({ tel }: { tel: TelephonyContextValue }) {
         >
           <Hash className="size-5" />
         </Button>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="secondary"
-                className="size-11"
-                aria-label={t("call.speakerHint")}
-              />
-            }
-          >
-            <Volume2 className="size-5" />
-          </TooltipTrigger>
-          <TooltipContent>{t("call.speakerHint")}</TooltipContent>
-        </Tooltip>
+        <AudioDevicePicker />
         <Button
           onClick={tel.hangup}
           className="h-11 flex-1 bg-red-600 text-white hover:bg-red-700"
@@ -635,63 +633,32 @@ function CallControlsSection({ tel }: { tel: TelephonyContextValue }) {
 
 // ── 3. Appel entrant ────────────────────────────────────────────────────────
 
-/** Sonnerie nord-américaine (440+480 Hz, 2 s / 4 s) — WebAudio, aucun fichier. */
-function useRingtone(active: boolean) {
+/**
+ * Sonnerie d'appel entrant. Le son lui-même vit dans `lib/telephony/tones` —
+ * un contexte audio unique, créé au montage du téléphone et déverrouillé au
+ * premier geste de l'usager. Fabriqué ici, à l'arrivée de l'appel, il naîtrait
+ * suspendu : un appel entrant est un événement réseau, jamais un clic, et
+ * Chrome refuse de faire du bruit sans geste préalable.
+ *
+ * `audible` dit si le son sort VRAIMENT. Quand il ne sort pas (onglet jamais
+ * cliqué depuis le chargement), le popup propose de le débloquer plutôt que
+ * de sonner dans le vide.
+ */
+function useRingtone(active: boolean): boolean {
+  const audible = useSyncExternalStore(subscribeToneState, tonesAudible, () => true);
   useEffect(() => {
     if (!active) return;
-    let ctx: AudioContext | null = null;
-    let interval: ReturnType<typeof setInterval> | null = null;
-    let gain: GainNode | null = null;
-    const oscillators: OscillatorNode[] = [];
-    try {
-      ctx = new AudioContext();
-      void ctx.resume().catch(() => {});
-      gain = ctx.createGain();
-      gain.gain.value = 0;
-      gain.connect(ctx.destination);
-      for (const freq of [440, 480]) {
-        const osc = ctx.createOscillator();
-        osc.type = "sine";
-        osc.frequency.value = freq;
-        osc.connect(gain);
-        osc.start();
-        oscillators.push(osc);
-      }
-      let sec = 0;
-      const cadence = () => {
-        if (!ctx || !gain) return;
-        const on = sec % 6 < 2; // 2 s ON / 4 s OFF
-        gain.gain.setTargetAtTime(on ? 0.12 : 0, ctx.currentTime, 0.02);
-        if (on && sec % 6 === 0 && typeof navigator !== "undefined" && "vibrate" in navigator) {
-          navigator.vibrate?.([400, 200, 400]);
-        }
-        sec += 1;
-      };
-      cadence();
-      interval = setInterval(cadence, 1_000);
-    } catch {
-      // WebAudio indisponible — le popup reste visible, sans son
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-      for (const osc of oscillators) {
-        try {
-          osc.stop();
-        } catch {
-          // déjà arrêté
-        }
-      }
-      gain?.disconnect();
-      void ctx?.close().catch(() => {});
-    };
+    startRingtone();
+    return () => stopRingtone();
   }, [active]);
+  return audible;
 }
 
 function IncomingCallDialog() {
   const t = useTranslations("phone");
   const tel = useTelephony();
   const incoming = tel.incomingCall;
-  useRingtone(incoming !== null);
+  const audible = useRingtone(incoming !== null);
 
   return (
     <Dialog open={incoming !== null} onOpenChange={() => {}}>
@@ -738,6 +705,19 @@ function IncomingCallDialog() {
                 <p className="text-sm text-muted-foreground">{t("incoming.unknown")}</p>
               )}
             </DialogHeader>
+            {audible ? null : (
+              // Le navigateur refuse de faire du bruit tant que la page n'a
+              // pas reçu de geste. Ce bouton EST le geste — et il déverrouille
+              // la sonnerie pour tous les appels suivants de la session.
+              <Button
+                variant="outline"
+                onClick={unlockTones}
+                className="h-11 w-full border-amber-500/40 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-400"
+              >
+                <Volume2 data-icon="inline-start" className="size-4" />
+                {t("incoming.enableSound")}
+              </Button>
+            )}
             <div className="flex w-full gap-3">
               <Button
                 onClick={tel.reject}

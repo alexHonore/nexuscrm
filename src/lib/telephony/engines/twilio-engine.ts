@@ -10,6 +10,7 @@
  */
 
 import { Call, Device } from "@twilio/voice-sdk";
+import { getInputChoice, getOutputChoice, refreshDevices } from "@/lib/telephony/audio-devices";
 import type {
   ActiveCall,
   EngineConfig,
@@ -71,6 +72,11 @@ export class TwilioEngine implements TelephonyEngine {
       this.device.on("incoming", (call: Call) => this.handleIncoming(call));
 
       await this.device.register();
+      // `device.audio` naît avec le Device et repart sur la sortie par défaut :
+      // sans cette relecture, un « Réessayer » (qui reconstruit le moteur)
+      // ramènerait le son dans les haut-parleurs du portable en silence.
+      await this.applyStoredDevices();
+      void refreshDevices();
     } catch (err) {
       this.setRegistration("failed", err instanceof Error ? err.message : String(err));
     }
@@ -129,6 +135,39 @@ export class TwilioEngine implements TelephonyEngine {
 
   sendDTMF(digit: string): void {
     if (/^[\d#*]$/.test(digit)) this.call?.sendDigits(digit);
+  }
+
+  /**
+   * Le SDK Twilio a sa PROPRE sortie et sa PROPRE sonnerie : un `setSinkId` sur
+   * un élément <audio> ne l'atteint pas. Les deux suivent le même appareil,
+   * sinon l'appel part au casque et la sonnerie reste dans le portable.
+   */
+  async setOutputDevice(deviceId: string): Promise<void> {
+    const audio = this.device?.audio;
+    if (!audio?.isOutputSelectionSupported) return; // Safari / Firefox
+    const id = deviceId || "default";
+    try {
+      await audio.speakerDevices.set(id);
+      await audio.ringtoneDevices.set(id);
+    } catch {
+      // Appareil disparu : le SDK reste sur le défaut, sans casser l'appel.
+    }
+  }
+
+  async setInputDevice(deviceId: string): Promise<void> {
+    const audio = this.device?.audio;
+    if (!audio) return;
+    try {
+      if (deviceId) await audio.setInputDevice(deviceId);
+      else await audio.unsetInputDevice();
+    } catch {
+      this.events?.onError("mic_unavailable");
+    }
+  }
+
+  private async applyStoredDevices(): Promise<void> {
+    await this.setOutputDevice(getOutputChoice());
+    await this.setInputDevice(getInputChoice());
   }
 
   destroy(): void {

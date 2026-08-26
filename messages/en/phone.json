@@ -25,16 +25,26 @@
     "hold": "Put on hold",
     "resume": "Resume call",
     "dtmf": "Keypad (DTMF)",
-    "speakerHint": "Adjust the volume with your device controls",
     "hangup": "Hang up",
     "unknownNumber": "Unknown number"
+  },
+  "audio": {
+    "title": "Call audio",
+    "output": "Speaker",
+    "input": "Microphone",
+    "systemDefault": "System default device",
+    "anonymous": "Device",
+    "missing": "The selected device is not plugged in — sound goes to the default.",
+    "reveal": "Show device names",
+    "outputUnsupported": "This browser cannot choose the speaker. Use Chrome or Edge, or change the output in your system settings."
   },
   "incoming": {
     "title": "Incoming call",
     "answer": "Answer",
     "decline": "Decline",
     "unknown": "Unrecognized number — no client record",
-    "viewClient": "Client record"
+    "viewClient": "Client record",
+    "enableSound": "Turn on ringtone sound"
   },
   "missed": {
     "toast": "Missed call from {name}",

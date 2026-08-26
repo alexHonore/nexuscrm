@@ -30,8 +30,6 @@ import JsSIP from "jssip";
 import type {
   EndEvent,
   IceCandidateEvent,
-  IncomingEvent,
-  OutgoingEvent,
   PeerConnectionEvent,
   RTCSession,
 } from "jssip/lib/RTCSession";
@@ -40,6 +38,13 @@ import type {
   RTCSessionEvent,
   UnRegisteredEvent,
 } from "jssip/lib/UA";
+import {
+  getInputChoice,
+  refreshDevices,
+  registerSink,
+  sinkForElement,
+} from "@/lib/telephony/audio-devices";
+import { startRingback, stopRingback } from "@/lib/telephony/tones";
 import type {
   ActiveCall,
   EngineConfig,
@@ -53,15 +58,26 @@ const PC_CONFIG: RTCConfiguration = {
   bundlePolicy: "balanced",
 };
 
-/** Contraintes audio « qualité d'abord » — identiques en sortant et en entrant. */
-const MEDIA_CONSTRAINTS: MediaStreamConstraints = {
-  audio: {
-    echoCancellation: true,
-    noiseSuppression: true,
-    autoGainControl: true,
-  },
-  video: false,
-};
+/**
+ * Contraintes audio « qualité d'abord » — identiques en sortant et en entrant.
+ * `deviceId: { exact }` quand un micro est choisi : « ce casque-là », pas « à
+ * peu près ». Le repli sur le défaut si l'appareil a disparu est dans
+ * acquireMic — sans lui, débrancher un casque USB empêcherait d'appeler.
+ */
+function mediaConstraints(deviceId: string): MediaStreamConstraints {
+  return {
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+    },
+    video: false,
+  };
+}
+
+/** Cadence de lecture des statistiques RTP pendant la sonnerie. */
+const RTP_POLL_MS = 250;
 
 /** Fins d'appel « normales » qui ne méritent pas de toast d'erreur. */
 const NORMAL_END_CAUSES = new Set<string>([
@@ -204,7 +220,11 @@ export class JsSipEngine implements TelephonyEngine {
    * de garde doit le dire.
    */
   private sawIceCandidate = false;
-  private ringback: { ctx: AudioContext; timer: ReturnType<typeof setInterval> } | null = null;
+  /** Tonalité de retour d'appel en cours (le son vit dans `tones.ts`). */
+  private ringbackOn = false;
+  /** Sondage des paquets RTP entrants — coupe la tonalité au vrai son. */
+  private rtpPoll: ReturnType<typeof setInterval> | null = null;
+  private releaseAudioSink: (() => void) | null = null;
 
   get registrationState(): RegistrationState {
     return this.registration;
@@ -225,6 +245,9 @@ export class JsSipEngine implements TelephonyEngine {
     this.audio.setAttribute("playsinline", "true");
     this.audio.style.display = "none";
     document.body.appendChild(this.audio);
+    // Le haut-parleur choisi s'applique DÈS MAINTENANT : le casque sélectionné
+    // hier reçoit l'appel d'aujourd'hui sans que l'usager y retouche.
+    this.releaseAudioSink = registerSink(sinkForElement(this.audio));
 
     const domain = config.sipDomain || "sip.voip.ms";
     const socket = new JsSIP.WebSocketInterface(config.wssUrl);
@@ -322,7 +345,7 @@ export class JsSipEngine implements TelephonyEngine {
     let session: RTCSession;
     try {
       session = this.ua.call(target, {
-        mediaConstraints: MEDIA_CONSTRAINTS,
+        mediaConstraints: mediaConstraints(getInputChoice()),
         mediaStream: stream,
         pcConfig: PC_CONFIG,
         // Forme legacy attendue par la pile WebRTC de JsSIP (1 = true).
@@ -347,7 +370,7 @@ export class JsSipEngine implements TelephonyEngine {
   answer(): void {
     if (!this.session || this.call?.direction !== "inbound") return;
     this.session.answer({
-      mediaConstraints: MEDIA_CONSTRAINTS,
+      mediaConstraints: mediaConstraints(getInputChoice()),
       pcConfig: PC_CONFIG,
     });
   }
@@ -401,6 +424,52 @@ export class JsSipEngine implements TelephonyEngine {
     }
   }
 
+  /**
+   * Le registre de `audio-devices` route déjà l'élément <audio> et le contexte
+   * des tonalités. Rien à faire ici de plus que d'honorer le contrat commun
+   * aux deux moteurs — Twilio, lui, a sa propre plomberie de sortie.
+   */
+  async setOutputDevice(): Promise<void> {
+    // Volontairement vide : voir le commentaire ci-dessus.
+  }
+
+  /**
+   * Changer de micro EN PLEIN APPEL : on remplace la piste envoyée. Pas de
+   * re-négociation SDP — voip.ms refuse les session timers et une nouvelle
+   * offre repasserait par trimSdpForPstn, avec le risque de MTU que l'on sait.
+   */
+  async setInputDevice(deviceId: string): Promise<void> {
+    const pc = this.session?.connection;
+    if (!pc) return; // hors appel : le choix est déjà mémorisé par le magasin
+    const sender = pc.getSenders().find((s) => s.track?.kind === "audio");
+    if (!sender) return;
+
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(mediaConstraints(deviceId));
+    } catch {
+      this.events?.onError("mic_unavailable");
+      return;
+    }
+    const track = stream.getAudioTracks()[0];
+    if (!track) {
+      for (const t of stream.getTracks()) t.stop();
+      return;
+    }
+    // La sourdine en cours doit survivre au changement d'appareil : sinon
+    // l'agent se croit muet et parle dans le vide (ou l'inverse, bien pire).
+    track.enabled = sender.track?.enabled ?? true;
+    try {
+      await sender.replaceTrack(track);
+    } catch {
+      for (const t of stream.getTracks()) t.stop();
+      this.events?.onError("mic_unavailable");
+      return;
+    }
+    this.releaseLocalStream();
+    this.localStream = stream;
+  }
+
   destroy(): void {
     this.destroyed = true;
     this.clearReconnectTimer();
@@ -422,6 +491,8 @@ export class JsSipEngine implements TelephonyEngine {
     }
     this.ua = null;
     if (this.audio) {
+      this.releaseAudioSink?.();
+      this.releaseAudioSink = null;
       this.audio.srcObject = null;
       this.audio.remove();
       this.audio = null;
@@ -435,7 +506,7 @@ export class JsSipEngine implements TelephonyEngine {
    * introuvable / expiré) et rappel si l'invite du navigateur reste sans
    * réponse — au lieu d'un « Connexion… » silencieux.
    */
-  private async acquireMic(): Promise<MediaStream> {
+  private async acquireMic(deviceId: string = getInputChoice()): Promise<MediaStream> {
     const media = typeof navigator === "undefined" ? undefined : navigator.mediaDevices;
     if (!media?.getUserMedia) {
       this.events?.onError("mic_unavailable");
@@ -444,11 +515,11 @@ export class JsSipEngine implements TelephonyEngine {
     const hintTimer = setTimeout(() => this.events?.onError("mic_prompt"), MIC_HINT_MS);
     let timedOut = false;
     try {
-      return await Promise.race([
-        media.getUserMedia(MEDIA_CONSTRAINTS).then((stream) => {
-          if (!timedOut) return stream;
+      const stream = await Promise.race([
+        media.getUserMedia(mediaConstraints(deviceId)).then((s) => {
+          if (!timedOut) return s;
           // Permission accordée après l'abandon : libérer ce flux orphelin.
-          for (const track of stream.getTracks()) track.stop();
+          for (const track of s.getTracks()) track.stop();
           throw new Error("mic_timeout");
         }),
         new Promise<never>((_, reject) =>
@@ -458,12 +529,24 @@ export class JsSipEngine implements TelephonyEngine {
           }, MIC_MAX_MS),
         ),
       ]);
+      // Le micro accordé, enumerateDevices() livre enfin les LIBELLÉS : c'est
+      // le seul moment où le sélecteur peut afficher « Casque Jabra » plutôt
+      // que « Périphérique 2 ».
+      void refreshDevices();
+      return stream;
     } catch (err) {
       // `instanceof DOMException` est faux d'un realm à l'autre (iframe) et
       // avec certains polyfills : on lit `name`/`message` sans contrainte de
       // type, sinon un refus de micro serait annoncé « aucun micro » et
       // l'agent chercherait un problème de matériel au lieu d'autoriser.
       const { name = "", message = "" } = (err ?? {}) as { name?: string; message?: string };
+      // Micro choisi mais débranché depuis le dernier appel : reprendre sur le
+      // défaut plutôt que de refuser l'appel. Le choix reste mémorisé — il
+      // reprendra effet au rebranchement.
+      if (deviceId && (name === "OverconstrainedError" || name === "NotFoundError")) {
+        clearTimeout(hintTimer);
+        return this.acquireMic("");
+      }
       const denied =
         name === "NotAllowedError" ||
         name === "SecurityError" ||
@@ -529,18 +612,17 @@ export class JsSipEngine implements TelephonyEngine {
       if (!this.iceMaxTimer) this.iceMaxTimer = setTimeout(e.ready, ICE_MAX_MS);
     });
 
-    session.on("progress", (e: IncomingEvent | OutgoingEvent) => {
+    session.on("progress", () => {
       if (this.call?.direction !== "outbound") return;
       this.clearDialWatchdog();
-      const response = (e as Partial<OutgoingEvent>).response as
-        | { body?: string | null }
-        | undefined;
-      if (response?.body) {
-        // 183 avec SDP : voip.ms envoie la tonalité (early media) — la nôtre se tait.
-        this.stopRingback();
-      } else {
-        this.startRingback();
-      }
+      // TOUJOURS sonner. L'ancienne version se taisait dès qu'un 183 portait du
+      // SDP, en supposant que l'opérateur enverrait sa propre tonalité — mais
+      // un 183 annonce seulement qu'un flux EXISTE, pas qu'il PORTE du son, et
+      // le choix entre 180 et 183 appartient au transporteur du numéro appelé.
+      // D'où le « des fois ça ne sonne pas » : même ligne, même CRM, un numéro
+      // sonne et le suivant reste muet. Notre tonalité se tait maintenant sur
+      // du VRAI son (paquets RTP reçus), pas sur une promesse de signalisation.
+      this.startRingback();
       this.events?.onCallStateChange("ringing", this.call);
     });
 
@@ -596,58 +678,92 @@ export class JsSipEngine implements TelephonyEngine {
     const attach = (pc: RTCPeerConnection) => {
       pc.addEventListener("track", (e: RTCTrackEvent) => {
         if (e.track.kind !== "audio") return;
-        // De l'audio distant arrive (early media ou réponse) : notre tonalité se tait.
-        this.stopRingback();
+        // NE PAS couper la tonalité ici. Cet événement se déclenche quand la
+        // description distante est POSÉE, pas quand du son arrive : couper là
+        // laissait l'agent dans le silence pendant toute la sonnerie. C'est le
+        // sondage RTP ci-dessous qui tranche, sur des paquets réellement reçus.
         const stream = e.streams[0] ?? new MediaStream([e.track]);
         if (this.audio) {
           this.audio.srcObject = stream;
-          void this.audio.play().catch(() => {
-            // Autoplay bloqué avant premier geste — l'audio démarre au clic suivant.
-          });
+          this.playRemoteAudio();
         }
+        this.watchInboundRtp(pc);
       });
     };
     if (session.connection) attach(session.connection);
     session.on("peerconnection", (e: PeerConnectionEvent) => attach(e.peerconnection));
   }
 
-  /** Tonalité de retour d'appel nord-américaine : 440+480 Hz, 2 s / 4 s. */
-  private startRingback(): void {
-    if (this.ringback) return;
-    try {
-      const ctx = new AudioContext();
-      void ctx.resume().catch(() => {});
-      const gain = ctx.createGain();
-      gain.gain.value = 0;
-      gain.connect(ctx.destination);
-      for (const freq of [440, 480]) {
-        const osc = ctx.createOscillator();
-        osc.frequency.value = freq;
-        osc.connect(gain);
-        osc.start();
-      }
-      const RING_ON_S = 2;
-      const CYCLE_S = 6;
-      const LEVEL = 0.08;
-      let at = ctx.currentTime + 0.05;
-      const cycle = () => {
-        gain.gain.setValueAtTime(LEVEL, at);
-        gain.gain.setValueAtTime(0, at + RING_ON_S);
-        at += CYCLE_S;
+  /**
+   * Lance la voix distante, et REÉSSAIE au prochain geste si le fureteur la
+   * refuse. Un ancien commentaire promettait ce rattrapage sans l'implémenter :
+   * l'appel restait alors muet du début à la fin, sans le moindre message —
+   * l'agent parlait dans le vide en croyant que la ligne était mauvaise.
+   */
+  private playRemoteAudio(): void {
+    const audio = this.audio;
+    if (!audio) return;
+    void audio.play().catch(() => {
+      if (typeof document === "undefined" || typeof document.addEventListener !== "function") return;
+      const retry = () => {
+        document.removeEventListener("pointerdown", retry, true);
+        document.removeEventListener("keydown", retry, true);
+        // L'appel a pu se terminer entre-temps : ne pas ressusciter un flux mort.
+        if (this.audio === audio && audio.srcObject) void audio.play().catch(() => {});
       };
-      cycle();
-      const timer = setInterval(cycle, CYCLE_S * 1000);
-      this.ringback = { ctx, timer };
-    } catch {
-      // WebAudio indisponible — tant pis pour la tonalité locale.
+      document.addEventListener("pointerdown", retry, true);
+      document.addEventListener("keydown", retry, true);
+    });
+  }
+
+  /**
+   * Coupe la tonalité locale à la PREMIÈRE preuve de son distant — un paquet
+   * RTP entrant compté par le navigateur. Tant qu'aucun n'arrive (pré-réponse
+   * muette, media bloqué par le réseau), l'agent continue d'entendre sonner
+   * plutôt que d'écouter un silence qu'il ne sait pas interpréter.
+   */
+  private watchInboundRtp(pc: RTCPeerConnection): void {
+    if (this.rtpPoll || !this.ringbackOn) return;
+    this.rtpPoll = setInterval(() => {
+      if (!this.ringbackOn) {
+        this.clearRtpPoll();
+        return;
+      }
+      void pc
+        .getStats()
+        .then((stats) => {
+          let received = 0;
+          stats.forEach((report) => {
+            const r = report as { type?: string; kind?: string; packetsReceived?: number };
+            if (r.type === "inbound-rtp" && r.kind === "audio") received += r.packetsReceived ?? 0;
+          });
+          if (received > 0) this.stopRingback();
+        })
+        .catch(() => {
+          // getStats indisponible : la tonalité s'arrêtera au décroché.
+        });
+    }, RTP_POLL_MS);
+  }
+
+  private clearRtpPoll(): void {
+    if (this.rtpPoll) {
+      clearInterval(this.rtpPoll);
+      this.rtpPoll = null;
     }
   }
 
+  /** Tonalité de retour d'appel nord-américaine — voir `tones.ts`. */
+  private startRingback(): void {
+    if (this.ringbackOn) return;
+    this.ringbackOn = true;
+    startRingback();
+  }
+
   private stopRingback(): void {
-    if (!this.ringback) return;
-    clearInterval(this.ringback.timer);
-    void this.ringback.ctx.close().catch(() => {});
-    this.ringback = null;
+    this.clearRtpPoll();
+    if (!this.ringbackOn) return;
+    this.ringbackOn = false;
+    stopRingback();
   }
 
   private releaseLocalStream(): void {

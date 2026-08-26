@@ -25,16 +25,26 @@
     "hold": "Mettre en attente",
     "resume": "Reprendre l'appel",
     "dtmf": "Clavier (DTMF)",
-    "speakerHint": "Réglez le volume avec les contrôles de votre appareil",
     "hangup": "Raccrocher",
     "unknownNumber": "Numéro inconnu"
+  },
+  "audio": {
+    "title": "Son de l'appel",
+    "output": "Haut-parleur",
+    "input": "Microphone",
+    "systemDefault": "Appareil par défaut",
+    "anonymous": "Appareil",
+    "missing": "L'appareil choisi n'est pas branché — le son passe par le défaut.",
+    "reveal": "Afficher le nom des appareils",
+    "outputUnsupported": "Ce navigateur ne permet pas de choisir le haut-parleur. Utilisez Chrome ou Edge, ou changez la sortie dans les réglages du système."
   },
   "incoming": {
     "title": "Appel entrant",
     "answer": "Répondre",
     "decline": "Refuser",
     "unknown": "Numéro non reconnu — aucune fiche client",
-    "viewClient": "Fiche client"
+    "viewClient": "Fiche client",
+    "enableSound": "Activer le son de la sonnerie"
   },
   "missed": {
     "toast": "Appel manqué de {name}",

@@ -590,54 +590,105 @@ describe("chien de garde de composition", () => {
   });
 });
 
+/**
+ * La tonalité de retour d'appel — le « des fois, ça ne sonne pas » du courtier.
+ *
+ * L'ancienne règle inférait l'audibilité de la SIGNALISATION : un 183 portant
+ * du SDP se voyait refuser la tonalité locale, au motif que l'opérateur allait
+ * envoyer la sienne. Mais un 183 annonce qu'un flux EXISTE, pas qu'il PORTE du
+ * son, et c'est le transporteur du numéro appelé — pas notre ligne — qui
+ * choisit entre 180 et 183. D'où un silence qui frappait un numéro sur deux,
+ * sans rien de reproductible à montrer.
+ *
+ * La règle est maintenant : on sonne toujours, et on ne se tait que sur du
+ * VRAI son — un paquet RTP entrant compté par le navigateur.
+ */
 describe("tonalité de retour d'appel", () => {
+  /** Piste audio distante + statistiques RTP pilotables depuis le test. */
+  function stubPeerConnection(packetsReceived: () => number) {
+    const listeners = new Map<string, (e: unknown) => void>();
+    const pc = {
+      addEventListener: (type: string, fn: (e: unknown) => void) => listeners.set(type, fn),
+      getStats: () =>
+        Promise.resolve({
+          forEach: (fn: (r: unknown) => void) =>
+            fn({ type: "inbound-rtp", kind: "audio", packetsReceived: packetsReceived() }),
+        }),
+    };
+    const emitTrack = () =>
+      listeners.get("track")?.({ track: { kind: "audio" }, streams: [{}] });
+    return { pc, emitTrack };
+  }
+
   it("sonne sur un 180 sans SDP", async () => {
     const { engine } = await bootEngine();
+    const tones = await import("@/lib/telephony/tones");
+    const start = vi.spyOn(tones, "startRingback");
     await dialWithMic(engine);
-    const created = vi.fn();
-    vi.stubGlobal(
-      "AudioContext",
-      class {
-        currentTime = 0;
-        destination = {};
-        constructor() {
-          created();
-        }
-        resume = () => Promise.resolve();
-        close = () => Promise.resolve();
-        createGain = () => ({ gain: { value: 0, setValueAtTime: vi.fn() }, connect: vi.fn() });
-        createOscillator = () => ({ frequency: { value: 0 }, connect: vi.fn(), start: vi.fn() });
-      },
-    );
 
     h.state.session?.emit("progress", { originator: "remote", response: { body: null } });
-    expect(created).toHaveBeenCalled();
+    expect(start).toHaveBeenCalled();
   });
 
-  it("reste muette sur un 183 avec SDP (voip.ms envoie déjà l'audio)", async () => {
+  it("sonne AUSSI sur un 183 avec SDP — un flux annoncé n'est pas un flux audible", async () => {
     const { engine } = await bootEngine();
+    const tones = await import("@/lib/telephony/tones");
+    const start = vi.spyOn(tones, "startRingback");
     await dialWithMic(engine);
-    const created = vi.fn();
-    vi.stubGlobal(
-      "AudioContext",
-      class {
-        currentTime = 0;
-        destination = {};
-        constructor() {
-          created();
-        }
-        resume = () => Promise.resolve();
-        close = () => Promise.resolve();
-        createGain = () => ({ gain: { value: 0, setValueAtTime: vi.fn() }, connect: vi.fn() });
-        createOscillator = () => ({ frequency: { value: 0 }, connect: vi.fn(), start: vi.fn() });
-      },
-    );
 
     h.state.session?.emit("progress", {
       originator: "remote",
       response: { body: "v=0\r\no=- 1 1 IN IP4 1.2.3.4\r\n" },
     });
-    expect(created).not.toHaveBeenCalled();
+    expect(start).toHaveBeenCalled();
+  });
+
+  it("ne se tait PAS à la seule arrivée de la piste distante", async () => {
+    const { engine } = await bootEngine();
+    const tones = await import("@/lib/telephony/tones");
+    const stop = vi.spyOn(tones, "stopRingback");
+    await dialWithMic(engine);
+
+    // La piste apparaît quand la description distante est posée — bien avant
+    // le moindre paquet. C'est précisément là que l'ancienne version coupait.
+    const { pc, emitTrack } = stubPeerConnection(() => 0);
+    h.state.session?.emit("peerconnection", { peerconnection: pc });
+    h.state.session?.emit("progress", { originator: "remote", response: { body: null } });
+    emitTrack();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it("se tait dès le premier paquet RTP reçu", async () => {
+    const { engine } = await bootEngine();
+    const tones = await import("@/lib/telephony/tones");
+    const stop = vi.spyOn(tones, "stopRingback");
+    await dialWithMic(engine);
+
+    let packets = 0;
+    const { pc, emitTrack } = stubPeerConnection(() => packets);
+    h.state.session?.emit("peerconnection", { peerconnection: pc });
+    h.state.session?.emit("progress", { originator: "remote", response: { body: null } });
+    emitTrack();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(stop).not.toHaveBeenCalled();
+
+    packets = 3; // l'opérateur pousse enfin sa tonalité
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(stop).toHaveBeenCalled();
+  });
+
+  it("se tait au décroché même si aucun paquet n'a jamais été compté", async () => {
+    const { engine } = await bootEngine();
+    const tones = await import("@/lib/telephony/tones");
+    const stop = vi.spyOn(tones, "stopRingback");
+    await dialWithMic(engine);
+
+    h.state.session?.emit("progress", { originator: "remote", response: { body: null } });
+    h.state.session?.emit("accepted", {});
+
+    expect(stop).toHaveBeenCalled();
   });
 });
 

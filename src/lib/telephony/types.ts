@@ -62,5 +62,19 @@ export interface TelephonyEngine {
   mute(muted: boolean): void;
   hold(held: boolean): void;
   sendDTMF(digit: string): void;
+  /**
+   * Haut-parleur de sortie ; `""` = appareil par défaut du système.
+   * Chrome/Edge seulement (setSinkId) — ailleurs, sans effet et sans erreur.
+   * Ré-appliqué à chaque init() : reconstruire le moteur (« Réessayer »)
+   * repartirait sinon sur la sortie par défaut.
+   */
+  setOutputDevice(deviceId: string): Promise<void>;
+  /**
+   * Microphone d'entrée ; `""` = défaut. Hors appel, le choix est simplement
+   * mémorisé pour le prochain getUserMedia. EN appel, la piste envoyée est
+   * remplacée (replaceTrack) — surtout pas de re-INVITE : voip.ms refuse les
+   * session timers et l'offre repasserait par trimSdpForPstn.
+   */
+  setInputDevice(deviceId: string): Promise<void>;
   destroy(): void;
 }
