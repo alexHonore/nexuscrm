@@ -312,8 +312,9 @@ export function BillingClient() {
   const aiCost = consReady ? consumption.ai.costUsd : 0;
   // Le coût affiché : le réel de Twilio quand on l'a, sinon l'estimation.
   const smsCost = consReady ? consumption.sms.costUsd : 0;
+  const transcriptsCost = consReady ? consumption.transcripts.costUsd : 0;
   const totalComplete = voipReady && consReady;
-  const grandTotal = voipCost + aiCost + smsCost;
+  const grandTotal = voipCost + aiCost + smsCost + transcriptsCost;
 
   return (
     <div className="space-y-6">
@@ -416,6 +417,10 @@ export function BillingClient() {
             <span>
               <span className="text-muted-foreground">{t("billing.sectionAi")} · </span>
               {consReady ? money(aiCost) : "—"}
+            </span>
+            <span>
+              <span className="text-muted-foreground">{t("billing.sectionTranscripts")} · </span>
+              {consReady ? money(transcriptsCost) : "—"}
             </span>
           </div>
         </CardContent>

@@ -106,6 +106,11 @@ export function createOpenRouterProvider(options: OpenRouterOptions): LLMProvide
         const supported = asArray(model.supported_parameters).filter(
           (p): p is string => typeof p === "string",
         );
+        // Modalités d'entrée du catalogue — c'est ce qui distingue un modèle
+        // capable d'écouter un enregistrement d'appel d'un modèle texte.
+        const modalities = asArray(asRecord(model.architecture).input_modalities).filter(
+          (m): m is string => typeof m === "string",
+        );
         const inputPrice = perMTok(pricing.prompt);
         const outputPrice = perMTok(pricing.completion);
         return {
@@ -114,6 +119,7 @@ export function createOpenRouterProvider(options: OpenRouterOptions): LLMProvide
           contextTokens: numberOr(model.context_length, 0),
           supportsTools: supported.includes("tools"),
           supportsReasoning: supported.includes("reasoning"),
+          supportsAudio: modalities.includes("audio"),
           ...(inputPrice === undefined ? {} : { inputPerMTok: inputPrice }),
           ...(outputPrice === undefined ? {} : { outputPerMTok: outputPrice }),
         };

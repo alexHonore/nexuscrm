@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, lt, lte, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, lte, notInArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { scheduledJobs } from "@/db/schema-sms";
 import { MAX_ATTEMPTS, RETRY_BACKOFF_MS, type ScheduledJob } from "./types";
@@ -81,12 +81,29 @@ export async function enqueueJob(
  * by a concurrent claimer are skipped, never awaited — the two result sets are
  * always disjoint.
  */
-export async function claimDueJobs(limit = 50, now: Date = new Date()): Promise<ScheduledJob[]> {
+export async function claimDueJobs(
+  limit = 50,
+  now: Date = new Date(),
+  /**
+   * Couloirs d'exécution : le cycle SMS EXCLUT les types lourds (notes
+   * d'appel — minutes d'audio + modèle, dizaines de secondes par job) pour
+   * qu'ils ne fassent jamais attendre un envoi client ; leur cycle dédié ne
+   * réclame QUE les siens. Sans filtre : tout, comme avant.
+   */
+  types: { only?: string[]; exclude?: string[] } = {},
+): Promise<ScheduledJob[]> {
   return db.transaction(async (tx) => {
     const due = await tx
       .select({ id: scheduledJobs.id })
       .from(scheduledJobs)
-      .where(and(eq(scheduledJobs.status, "pending"), lte(scheduledJobs.runAt, now)))
+      .where(
+        and(
+          eq(scheduledJobs.status, "pending"),
+          lte(scheduledJobs.runAt, now),
+          types.only ? inArray(scheduledJobs.type, types.only) : undefined,
+          types.exclude ? notInArray(scheduledJobs.type, types.exclude) : undefined,
+        ),
+      )
       .orderBy(asc(scheduledJobs.runAt))
       .limit(limit)
       .for("update", { skipLocked: true });

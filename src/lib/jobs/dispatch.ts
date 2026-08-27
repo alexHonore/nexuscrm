@@ -4,6 +4,7 @@ import { agentTurnTraces, scheduledJobs } from "@/db/schema-sms";
 import { handleAgentTurn } from "./handlers/agent-turn";
 import { handleSendSms } from "./handlers/send-sms";
 import { handleCampaignTouch } from "./handlers/campaign-touch";
+import { handleCallTranscript } from "./handlers/call-transcript";
 import { queueDueTouches, sweepDueCampaigns } from "@/lib/campaigns-server/match";
 import { reconcileTwilioMessages } from "./reconcile";
 import {
@@ -147,6 +148,7 @@ export async function runDispatchCycle(
     send_sms: (job) => handleSendSms(job, now),
     agent_turn: (job) => handleAgentTurn(job),
     campaign_touch: (job) => handleCampaignTouch(job, now),
+    call_transcript: (job) => handleCallTranscript(job),
   };
 
   const counts: DispatchCounts = {
@@ -196,11 +198,16 @@ export async function runDispatchCycle(
 
   const limit = opts.limit ?? 50;
   const jobs: ScheduledJob[] = [];
+  const runOne = makeJobRunner(registry, counts, now);
   // Réclamer par lots : un lot réclamé est un lot qu'on TRAITERA dans le
   // budget ; réclamer cinquante jobs d'un coup puis mourir à mi-chemin les
   // laissait « running » dix minutes.
   while (jobs.length < limit && !overBudget()) {
-    const batch = await claimDueJobs(Math.min(CLAIM_BATCH, limit - jobs.length), now());
+    // Les notes d'appel ont leur PROPRE cycle (runTranscriptCycle) : un job
+    // audio dure des dizaines de secondes et ferait attendre les SMS clients.
+    const batch = await claimDueJobs(Math.min(CLAIM_BATCH, limit - jobs.length), now(), {
+      exclude: ["call_transcript"],
+    });
     if (batch.length === 0) break;
     jobs.push(...batch);
     for (const job of batch) await runOne(job);
@@ -212,8 +219,15 @@ export async function runDispatchCycle(
   // forme » sur la page de mise en service.
   await recordHeartbeat(now());
   return counts;
+}
 
-  async function runOne(job: ScheduledJob): Promise<void> {
+/** Exécute et règle UN job réclamé — partagé entre le cycle SMS et le cycle notes d'appel. */
+function makeJobRunner(
+  registry: Record<string, JobHandler>,
+  counts: DispatchCounts,
+  now: () => Date,
+): (job: ScheduledJob) => Promise<void> {
+  return async function runOne(job: ScheduledJob): Promise<void> {
     const startedMs = Date.now();
     const handler = registry[job.type];
     if (handler === undefined) {
@@ -254,5 +268,51 @@ export async function runDispatchCycle(
       outcomeLabel = "failed";
     }
     logExecuted(job, outcomeLabel, Date.now() - startedMs);
+  };
+}
+
+/**
+ * Cycle DÉDIÉ aux notes d'appel (`call_transcript`) — hors du cycle SMS.
+ *
+ * Pourquoi un couloir séparé : un job audio tient des MINUTES d'enregistrement
+ * (téléchargement voip.ms + modèle multimodal, jusqu'à ~340 s au pire) là où
+ * un envoi SMS tient en secondes. Dans le même couloir, vingt notes d'appel
+ * mises en file par la synchronisation CDR passeraient DEVANT les réponses
+ * d'assistant aux clients (réclamation stricte par runAt), et un seul job
+ * audio pouvait avaler le budget du cycle en laissant neuf SMS co-réclamés
+ * bloqués « running » dix minutes.
+ *
+ * Ici : réclamation UN par UN (une mort en plein vol n'échoue qu'un job), et
+ * on ne réclame le suivant que s'il reste assez de budget pour le pire cas.
+ */
+export async function runTranscriptCycle(
+  opts: { limit?: number; now?: () => Date; handler?: JobHandler } = {},
+): Promise<DispatchCounts> {
+  const now = opts.now ?? (() => new Date());
+  const startedAt = Date.now();
+  // Le pire job (voip.ms 100 s + téléchargement 60 s + modèle 180 s) doit
+  // finir AVANT le plafond de 300 s de la fonction : on ne réclame que si
+  // moins de 90 s se sont écoulées — après, on laisse au prochain passage.
+  const canClaimMore = () => Date.now() - startedAt < 90_000;
+  const registry: Record<string, JobHandler> = {
+    call_transcript: opts.handler ?? ((job) => handleCallTranscript(job)),
+  };
+  const counts: DispatchCounts = {
+    claimed: 0,
+    done: 0,
+    skipped: 0,
+    rescheduled: 0,
+    failed: 0,
+    requeued: 0,
+  };
+  const runOne = makeJobRunner(registry, counts, now);
+
+  const limit = opts.limit ?? 20;
+  while (counts.claimed < limit && canClaimMore()) {
+    const batch = await claimDueJobs(1, now(), { only: ["call_transcript"] });
+    if (batch.length === 0) break;
+    counts.claimed += 1;
+    await runOne(batch[0]);
   }
+  return counts;
 }

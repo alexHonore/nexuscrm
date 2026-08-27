@@ -1,7 +1,7 @@
 import "server-only";
 import { and, gte, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { agentTurnTraces, messages } from "@/db/schema-sms";
+import { agentTurnTraces, callTranscripts, messages } from "@/db/schema-sms";
 import { dayStartUtc, shiftDateStr } from "@/components/analytics/period";
 import { getOpenRouterAccountUsage } from "@/lib/llm-server/openrouter-usage";
 import { getSetting } from "@/lib/settings";
@@ -28,6 +28,15 @@ import { getTwilioSmsCost } from "@/lib/sms-server/twilio-usage";
 export type AiModelUsage = {
   model: string;
   turns: number;
+  tokensIn: number;
+  tokensOut: number;
+  costUsd: number;
+};
+
+export type TranscriptModelUsage = {
+  model: string;
+  calls: number;
+  audioSeconds: number;
   tokensIn: number;
   tokensOut: number;
   costUsd: number;
@@ -61,6 +70,18 @@ export type ConsumptionReport = {
     costSource: "twilio" | "estimate";
     /** Le coût à AFFICHER : le réel de Twilio quand on l'a, sinon l'estimation. */
     costUsd: number;
+  };
+  /** Notes d'appel IA — coût RÉEL (usage.cost d'OpenRouter), comme l'IA SMS. */
+  transcripts: {
+    /** Appels résumés (rangées `done`). */
+    calls: number;
+    audioSeconds: number;
+    tokensIn: number;
+    tokensOut: number;
+    costUsd: number;
+    failed: number;
+    skipped: number;
+    byModel: TranscriptModelUsage[];
   };
 };
 
@@ -115,6 +136,48 @@ export async function getConsumption(from: string, to: string): Promise<Consumpt
     account,
   };
 
+  // ── Notes d'appel IA : par modèle, coût et jetons réels ────────────────────
+  // Les rangées `failed`/`skipped` comptent séparément (aucun coût la plupart
+  // du temps, mais leurs jetons/coûts éventuels sont sommés quand même : un
+  // échec APRÈS l'appel au modèle a bel et bien été facturé).
+  const trRows = await db
+    .select({
+      model: sql<string>`coalesce(${callTranscripts.modelServed}, ${callTranscripts.modelRequested})`,
+      calls: sql<number>`count(*) filter (where ${callTranscripts.status} = 'done')::int`,
+      failed: sql<number>`count(*) filter (where ${callTranscripts.status} = 'failed')::int`,
+      skipped: sql<number>`count(*) filter (where ${callTranscripts.status} = 'skipped')::int`,
+      audioSeconds: sql<string>`coalesce(sum(${callTranscripts.audioSeconds}) filter (where ${callTranscripts.status} = 'done'), 0)`,
+      tokensIn: sql<string>`coalesce(sum(${callTranscripts.tokensIn}), 0)`,
+      tokensOut: sql<string>`coalesce(sum(${callTranscripts.tokensOut}), 0)`,
+      costUsd: sql<string>`coalesce(sum(${callTranscripts.costUsd}), 0)`,
+    })
+    .from(callTranscripts)
+    .where(and(gte(callTranscripts.createdAt, start), lt(callTranscripts.createdAt, end)))
+    .groupBy(sql`1`);
+
+  const trByModel: TranscriptModelUsage[] = trRows
+    .filter((r) => num(r.calls) > 0 || num(r.costUsd) > 0)
+    .map((r) => ({
+      model: r.model || "—",
+      calls: num(r.calls),
+      audioSeconds: num(r.audioSeconds),
+      tokensIn: num(r.tokensIn),
+      tokensOut: num(r.tokensOut),
+      costUsd: num(r.costUsd),
+    }))
+    .sort((a, b) => b.costUsd - a.costUsd || b.calls - a.calls);
+
+  const transcripts = {
+    calls: trByModel.reduce((s, m) => s + m.calls, 0),
+    audioSeconds: trByModel.reduce((s, m) => s + m.audioSeconds, 0),
+    tokensIn: trRows.reduce((s, r) => s + num(r.tokensIn), 0),
+    tokensOut: trRows.reduce((s, r) => s + num(r.tokensOut), 0),
+    costUsd: trRows.reduce((s, r) => s + num(r.costUsd), 0),
+    failed: trRows.reduce((s, r) => s + num(r.failed), 0),
+    skipped: trRows.reduce((s, r) => s + num(r.skipped), 0),
+    byModel: trByModel,
+  };
+
   // ── SMS : segments comptés (unité facturée), en une passe ───────────────────
   // Sortants : seulement ceux réellement partis chez Twilio (twilio_sid posé) —
   // un message « sauté » ou « échoué » avant l'envoi n'est pas facturé.
@@ -147,5 +210,5 @@ export async function getConsumption(from: string, to: string): Promise<Consumpt
     costUsd: real ? real.costUsd : estimatedCostUsd,
   };
 
-  return { from, to, ai, sms };
+  return { from, to, ai, sms, transcripts };
 }

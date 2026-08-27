@@ -141,6 +141,40 @@ export const consumptionSettingsSchema = z.object({
 });
 export type ConsumptionSettings = z.infer<typeof consumptionSettingsSchema>;
 
+/**
+ * Les NOTES D'APPEL par IA : chaque appel enregistré est transcrit puis résumé
+ * par un modèle audio, et la note atterrit en commentaire sur la fiche.
+ *
+ * Éteint par défaut : chaque appel traité COÛTE de l'argent (l'audio entier
+ * part chez le modèle), et l'admin doit choisir son modèle et son niveau de
+ * détail avant que la facture ne commence. Les bornes de durée sont la garde
+ * de coût : sous `minSeconds` il n'y a rien à résumer (répondeur, faux
+ * numéro) ; au-delà de `maxMinutes` l'audio devient trop lourd pour une seule
+ * requête.
+ */
+export const transcriptsSettingsSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** Niveau de détail de la note poussée en commentaire. */
+  detail: z.enum(["brief", "standard", "detailed"]).default("standard"),
+  /**
+   * Langue de la NOTE (une donnée de fiche, pas un texte d'interface) — même
+   * logique que la langue d'un assistant : jamais le cookie NEXT_LOCALE.
+   */
+  language: z.enum(["fr", "en"]).default("fr"),
+  /**
+   * Modèle OpenRouter ACCEPTANT L'AUDIO (l'appel part en `input_audio`, pas en
+   * texte). Toujours via OpenRouter : c'est le seul fournisseur câblé dont le
+   * routage impose deny + ZDR (Loi 25) sur un contenu aussi sensible qu'un
+   * appel enregistré.
+   */
+  model: z.string().trim().min(1).max(200).default("google/gemini-2.5-flash"),
+  minSeconds: z.number().int().min(5).max(600).default(20),
+  maxMinutes: z.number().int().min(1).max(120).default(30),
+  /** Conserver le verbatim en base (la note, elle, est toujours conservée). */
+  keepTranscript: z.boolean().default(true),
+});
+export type TranscriptsSettings = z.infer<typeof transcriptsSettingsSchema>;
+
 const SCHEMAS = {
   booking: bookingSettingsSchema,
   google: googleSettingsSchema,
@@ -148,6 +182,7 @@ const SCHEMAS = {
   sms: smsSettingsSchema,
   classification: classificationSettingsSchema,
   consumption: consumptionSettingsSchema,
+  transcripts: transcriptsSettingsSchema,
 } as const;
 
 export type SettingKey = keyof typeof SCHEMAS;

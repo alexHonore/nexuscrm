@@ -34,6 +34,9 @@ const ENGINE_PATHS = [
   // Les gestionnaires de tâches sont le DERNIER maillon : c'est
   // `handlers/send-sms.ts` qui remet le texte au transporteur.
   "src/lib/jobs",
+  // Les notes d'appel : leur langue vient du réglage `transcripts.language`,
+  // jamais de l'écran — même règle que la langue d'un assistant.
+  "src/lib/transcripts",
 ];
 
 /**

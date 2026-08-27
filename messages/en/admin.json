@@ -457,6 +457,31 @@
       "ipHint": "The voip.ms API requires the server IP address to be allowed (Main menu → SOAP and REST/JSON API).",
       "twilioEnvNote": "Twilio environment variables present (values are never displayed):"
     },
+    "transcripts": {
+      "title": "AI call notes",
+      "desc": "Every recorded call is listened to by a model, summarized, and the note is pushed as a comment on the client's record.",
+      "enabled": "Enable call notes",
+      "enabledDesc": "Processes recordings attached by the voip.ms sync (catch-up: last 72 hours). Every processed call is billed to the OpenRouter account — the cost shows on the Consumption page.",
+      "detail": "Level of detail",
+      "detailBrief": "Brief — one to three sentences",
+      "detailStandard": "Standard — short structured note",
+      "detailDetailed": "Detailed — complete note with quotes",
+      "language": "Notes language",
+      "languageFr": "French",
+      "languageEn": "English",
+      "model": "Model (OpenRouter)",
+      "modelPick": "Pick an audio model…",
+      "modelHint": "Only models that accept audio input are listed. The free-text field lets you enter an id missing from the catalog.",
+      "modelsReload": "Reload",
+      "modelsLoadError": "Could not load the model catalog",
+      "minSeconds": "Minimum duration (seconds)",
+      "minSecondsHint": "Below this threshold there is nothing to summarize (voicemail, wrong number): the call is skipped at no cost.",
+      "maxMinutes": "Maximum duration (minutes)",
+      "maxMinutesHint": "Beyond this, the audio is too heavy for a single request: the call is skipped.",
+      "keepTranscript": "Keep the transcript",
+      "keepTranscriptHint": "Stores the full transcript in the database in addition to the note (more billed output tokens).",
+      "envNote": "OPENROUTER_API_KEY is missing: no notes will be produced until the key is configured."
+    },
     "killSwitch": {
       "title": "Kill switch",
       "desc": "Stops EVERY SMS send, whatever the mode, until lifted by hand.",
@@ -710,7 +735,7 @@
     "confirmMismatch": "The digits you typed do not match the number.",
     "recurringNote": "Monthly number rental is not shown here: only the period's calls are priced.",
     "grandTotal": "Period total (US $)",
-    "grandTotalNote": "voip.ms telephony (real) + Twilio SMS (real if available, otherwise estimated) + AI assistants (real).",
+    "grandTotalNote": "voip.ms telephony (real) + Twilio SMS (real if available, otherwise estimated) + AI assistants (real) + AI call notes (real).",
     "sectionTelephony": "Telephony (voip.ms)",
     "sectionSms": "SMS (Twilio)",
     "sectionAi": "Assistants (AI)",
@@ -739,7 +764,11 @@
     "smsSourceEstimate": "Twilio unreachable — estimated: segments × rate.",
     "aiAccountUsage": "OpenRouter account — lifetime spend:",
     "aiAccountRemaining": "Credits left:",
-    "aiAccountNote": "Provider figure (API /credits). Turns before Aug 26, 2026 under-counted: only the last call was summed, without classifier or judges."
+    "aiAccountNote": "Provider figure (API /credits). Turns before Aug 26, 2026 under-counted: only the last call was summed, without classifier or judges.",
+    "sectionTranscripts": "AI call notes",
+    "transcriptCalls": "Calls summarized",
+    "transcriptEmpty": "No call notes over the period.",
+    "transcriptIssues": "{failed} failed · {skipped} skipped (too short, no client record…) over the period."
   },
   "classification": {
     "title": "Automatic classification",

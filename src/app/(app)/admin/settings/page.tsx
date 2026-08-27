@@ -4,6 +4,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { BookingCard, GoogleCard, KillSwitchCard, TelephonyCard } from "@/components/admin/settings-client";
 import { ClassificationCard } from "@/components/admin/classification-card";
 import { SmsNumbersCard } from "@/components/admin/sms-numbers-card";
+import { TranscriptsCard } from "@/components/admin/transcripts-card";
 import { listSmsNumbersForAdmin } from "@/lib/sms-server/numbers";
 import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/db";
@@ -18,7 +19,7 @@ export default async function AdminSettingsPage() {
   const t = await getTranslations("admin");
 
   const locale = docLocale(await getLocale());
-  const [google, booking, telephony, sms, numbers, classification, categoryRows] =
+  const [google, booking, telephony, sms, numbers, classification, transcripts, categoryRows] =
     await Promise.all([
       getSetting("google"),
       getSetting("booking"),
@@ -26,6 +27,7 @@ export default async function AdminSettingsPage() {
       getSetting("sms"),
       listSmsNumbersForAdmin(),
       getSetting("classification"),
+      getSetting("transcripts"),
       db.select().from(categories).orderBy(asc(categories.sortOrder)),
     ]);
 
@@ -78,6 +80,20 @@ export default async function AdminSettingsPage() {
       <ClassificationCard
         initial={classification.rules}
         categories={categoryChoices}
+      />
+
+      <TranscriptsCard
+        initial={{
+          enabled: transcripts.enabled,
+          detail: transcripts.detail,
+          language: transcripts.language,
+          model: transcripts.model,
+          minSeconds: transcripts.minSeconds,
+          maxMinutes: transcripts.maxMinutes,
+          keepTranscript: transcripts.keepTranscript,
+        }}
+        // Booléen seulement — jamais la valeur.
+        openrouterConfigured={Boolean(process.env.OPENROUTER_API_KEY)}
       />
 
       <KillSwitchCard

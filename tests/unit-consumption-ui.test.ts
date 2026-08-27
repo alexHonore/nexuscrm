@@ -65,6 +65,25 @@ const DATA: ConsumptionReport = {
     costSource: "estimate",
     costUsd: 0.0316,
   },
+  transcripts: {
+    calls: 4,
+    audioSeconds: 720,
+    tokensIn: 5200,
+    tokensOut: 610,
+    costUsd: 0.048,
+    failed: 1,
+    skipped: 2,
+    byModel: [
+      {
+        model: "google/gemini-2.5-flash",
+        calls: 4,
+        audioSeconds: 720,
+        tokensIn: 5200,
+        tokensOut: 610,
+        costUsd: 0.048,
+      },
+    ],
+  },
 };
 
 describe("ConsumptionSections", () => {
@@ -82,20 +101,28 @@ describe("ConsumptionSections", () => {
     expect(html).toContain("Compte OpenRouter");
     expect(html).toContain("7.14");
     expect(html).toContain("Crédits restants");
+    // Notes d'appel — appels résumés, minutes et coût réel par modèle.
+    // (renderToStaticMarkup encode l'apostrophe en &#x27;)
+    expect(html).toContain("Notes d&#x27;appel (IA)");
+    expect(html).toContain("google/gemini-2.5-flash");
+    expect(html).toContain("Appels résumés");
+    expect(html).toContain("0.05"); // money(0.048)
     // Aucune clé i18n nue.
     expect(html).not.toContain("MISSING_MESSAGE");
     expect(html).not.toMatch(/billing\.[a-zA-Z]+/);
   });
 
-  it("états vides : le dit sans planter, dans les deux sections", () => {
+  it("états vides : le dit sans planter, dans les trois sections", () => {
     const empty: ConsumptionReport = {
       ...DATA,
       ai: { turns: 0, tokensIn: 0, tokensOut: 0, costUsd: 0, byModel: [], account: null },
       sms: { outboundMessages: 0, outboundSegments: 0, inboundMessages: 0, inboundSegments: 0, segmentCostUsd: 0.0079, estimatedCostUsd: 0, realCostUsd: null, costSource: "estimate", costUsd: 0 },
+      transcripts: { calls: 0, audioSeconds: 0, tokensIn: 0, tokensOut: 0, costUsd: 0, failed: 0, skipped: 0, byModel: [] },
     };
     const html = wrap(empty);
     expect(html).toContain("Aucun tour");
     expect(html).toContain("Aucun SMS");
+    expect(html).toContain("Aucune note d&#x27;appel");
     expect(html).not.toContain("MISSING_MESSAGE");
   });
 

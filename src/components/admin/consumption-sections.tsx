@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Loader2, MessageSquare } from "lucide-react";
+import { AudioLines, Bot, Loader2, MessageSquare } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -51,6 +51,26 @@ export type ConsumptionReport = {
     costSource: "twilio" | "estimate";
     costUsd: number;
   };
+  /** Notes d'appel IA — coût RÉEL (usage.cost d'OpenRouter). */
+  transcripts: {
+    calls: number;
+    audioSeconds: number;
+    tokensIn: number;
+    tokensOut: number;
+    costUsd: number;
+    failed: number;
+    skipped: number;
+    byModel: TranscriptModelUsage[];
+  };
+};
+
+export type TranscriptModelUsage = {
+  model: string;
+  calls: number;
+  audioSeconds: number;
+  tokensIn: number;
+  tokensOut: number;
+  costUsd: number;
 };
 
 /** Une tuile chiffre + libellé. */
@@ -95,6 +115,7 @@ export function ConsumptionSections({
 
   const sms = data?.sms;
   const ai = data?.ai;
+  const transcripts = data?.transcripts;
 
   // Sans données : distinguer « en cours », « indisponible » et « rien ». Un
   // échec ne doit PAS se lire comme « 0 $ dépensé » sur une page de dépense.
@@ -281,6 +302,81 @@ export function ConsumptionSections({
         ) : (
           <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
             {t("billing.aiEmpty")}
+          </p>
+        )}
+      </section>
+
+      {/* ── Notes d'appel IA ─────────────────────────────────────────────── */}
+      <section className="space-y-3">
+        <div className="flex items-center gap-2">
+          <AudioLines className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold">{t("billing.sectionTranscripts")}</h2>
+          <Badge variant="secondary">{t("billing.realBadge")}</Badge>
+          {loading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+        </div>
+
+        {!data ? (
+          noDataNode
+        ) : transcripts &&
+          (transcripts.calls > 0 ||
+            transcripts.costUsd > 0 ||
+            // Une période 100 % échecs/écartés doit MONTRER ces compteurs —
+            // « aucune note » cacherait une panne (et sa dépense éventuelle).
+            transcripts.failed > 0 ||
+            transcripts.skipped > 0) ? (
+          <>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <Stat label={t("billing.transcriptCalls")} value={nf.format(transcripts.calls)} muted />
+              <Stat
+                label={t("billing.minutes")}
+                value={nf.format(Math.round(transcripts.audioSeconds / 60))}
+                muted
+              />
+              <Stat label={t("billing.aiTokensOut")} value={nf.format(transcripts.tokensOut)} muted />
+              <Stat label={t("billing.aiCost")} value={money(transcripts.costUsd)} />
+            </div>
+
+            {transcripts.failed > 0 || transcripts.skipped > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {t("billing.transcriptIssues", {
+                  failed: nf.format(transcripts.failed),
+                  skipped: nf.format(transcripts.skipped),
+                })}
+              </p>
+            ) : null}
+
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("billing.model")}</TableHead>
+                    <TableHead className="text-right">{t("billing.transcriptCalls")}</TableHead>
+                    <TableHead className="text-right">{t("billing.minutes")}</TableHead>
+                    <TableHead className="text-right">{t("billing.aiTokensOut")}</TableHead>
+                    <TableHead className="text-right">{t("billing.aiCost")}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {transcripts.byModel.map((m) => (
+                    <TableRow key={m.model}>
+                      <TableCell className="max-w-48 truncate font-mono text-xs">{m.model}</TableCell>
+                      <TableCell className="text-right tabular-nums">{nf.format(m.calls)}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {nf.format(Math.round(m.audioSeconds / 60))}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {nf.format(m.tokensOut)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{money(m.costUsd)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
+        ) : (
+          <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+            {t("billing.transcriptEmpty")}
           </p>
         )}
       </section>

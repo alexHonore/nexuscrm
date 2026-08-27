@@ -457,6 +457,31 @@
       "ipHint": "L'API voip.ms exige que l'adresse IP du serveur soit autorisée (Menu principal → SOAP and REST/JSON API).",
       "twilioEnvNote": "Présence des variables d'environnement Twilio (les valeurs ne sont jamais affichées) :"
     },
+    "transcripts": {
+      "title": "Notes d'appel (IA)",
+      "desc": "Chaque appel enregistré est écouté par un modèle, résumé, et la note est poussée en commentaire sur la fiche du client.",
+      "enabled": "Activer les notes d'appel",
+      "enabledDesc": "Traite les enregistrements rattachés par la synchronisation voip.ms (rattrapage : 72 dernières heures). Chaque appel traité est facturé au compte OpenRouter — le coût apparaît sur la page Consommation.",
+      "detail": "Niveau de détail",
+      "detailBrief": "Bref — une à trois phrases",
+      "detailStandard": "Standard — note courte et structurée",
+      "detailDetailed": "Détaillé — note complète avec citations",
+      "language": "Langue des notes",
+      "languageFr": "Français",
+      "languageEn": "Anglais",
+      "model": "Modèle (OpenRouter)",
+      "modelPick": "Choisir un modèle audio…",
+      "modelHint": "Seuls les modèles qui acceptent l'audio en entrée figurent dans la liste. Le champ libre permet d'entrer un identifiant absent du catalogue.",
+      "modelsReload": "Recharger",
+      "modelsLoadError": "Impossible de charger le catalogue de modèles",
+      "minSeconds": "Durée minimale (secondes)",
+      "minSecondsHint": "Sous ce seuil, rien à résumer (répondeur, faux numéro) : l'appel est ignoré sans frais.",
+      "maxMinutes": "Durée maximale (minutes)",
+      "maxMinutesHint": "Au-delà, l'audio est trop lourd pour une seule requête : l'appel est ignoré.",
+      "keepTranscript": "Conserver le verbatim",
+      "keepTranscriptHint": "Garde la transcription complète en base en plus de la note (plus de jetons de sortie facturés).",
+      "envNote": "OPENROUTER_API_KEY est absente : les notes ne seront pas produites tant que la clé n'est pas configurée."
+    },
     "killSwitch": {
       "title": "Interrupteur d'arrêt",
       "desc": "Coupe TOUT envoi SMS, quel que soit le mode, jusqu'à ce qu'il soit relevé à la main.",
@@ -710,7 +735,7 @@
     "confirmMismatch": "Les chiffres saisis ne correspondent pas au numéro.",
     "recurringNote": "La location mensuelle des numéros n'apparaît pas ici : seuls les appels de la période sont chiffrés.",
     "grandTotal": "Total de la période ($ US)",
-    "grandTotalNote": "Téléphonie voip.ms (réel) + SMS Twilio (réel si disponible, sinon estimé) + assistants IA (réel).",
+    "grandTotalNote": "Téléphonie voip.ms (réel) + SMS Twilio (réel si disponible, sinon estimé) + assistants IA (réel) + notes d'appel IA (réel).",
     "sectionTelephony": "Téléphonie (voip.ms)",
     "sectionSms": "SMS (Twilio)",
     "sectionAi": "Assistants (IA)",
@@ -739,7 +764,11 @@
     "smsSourceEstimate": "Twilio injoignable — estimation : segments × taux.",
     "aiAccountUsage": "Compte OpenRouter — dépense à vie :",
     "aiAccountRemaining": "Crédits restants :",
-    "aiAccountNote": "Chiffre du fournisseur (API /credits). Les tours antérieurs au 26 août 2026 sous-comptaient : seul le dernier appel était additionné, sans classifieur ni juges."
+    "aiAccountNote": "Chiffre du fournisseur (API /credits). Les tours antérieurs au 26 août 2026 sous-comptaient : seul le dernier appel était additionné, sans classifieur ni juges.",
+    "sectionTranscripts": "Notes d'appel (IA)",
+    "transcriptCalls": "Appels résumés",
+    "transcriptEmpty": "Aucune note d'appel sur la période.",
+    "transcriptIssues": "{failed} en échec · {skipped} ignoré(s) (trop court, sans fiche…) sur la période."
   },
   "classification": {
     "title": "Classement automatique",

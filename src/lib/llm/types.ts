@@ -14,6 +14,11 @@ export interface ModelDescriptor {
   supportsTools: boolean;
   /** Le modèle accepte-t-il un niveau de réflexion? Décide de l'étape « effort ». */
   supportsReasoning?: boolean;
+  /**
+   * Le modèle accepte-t-il l'AUDIO en entrée (`input_audio`)? Seul OpenRouter
+   * publie cette modalité dans son catalogue ; absent = inconnu, pas « non ».
+   */
+  supportsAudio?: boolean;
   /** USD per million tokens — informative; billing reads response usage. */
   inputPerMTok?: number;
   outputPerMTok?: number;

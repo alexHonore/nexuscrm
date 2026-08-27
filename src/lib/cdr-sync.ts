@@ -6,6 +6,8 @@ import { missedCallNotification } from "@/components/clients/notification-conten
 import { db } from "@/db";
 import { calls, clients, notifications, users } from "@/db/schema";
 import { normalizePhone, phoneMatchKey } from "@/lib/phone";
+import { kickTranscripts } from "@/lib/jobs/kick";
+import { queueTranscriptJobs } from "@/lib/transcripts/sweep";
 import {
   extractRecordingUrl,
   getCallRecordings,
@@ -162,6 +164,8 @@ export type CdrSyncResult = {
     recordingsFound: number;
     recordingsAttached: number;
     recordingsWithoutUrl: number;
+    /** Jobs `call_transcript` mis en file pour les enregistrements sans note IA. */
+    transcriptsQueued: number;
   };
   /**
    * Noms des champs renvoyés par voip.ms pour un enregistrement SANS URL
@@ -184,6 +188,7 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
     recordingsFound: 0,
     recordingsAttached: 0,
     recordingsWithoutUrl: 0,
+    transcriptsQueued: 0,
   };
   const errors: string[] = [];
   const recordingFields = new Set<string>();
@@ -547,6 +552,20 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
 
   if (!ranToCompletion) {
     pushError("sync_already_running");
+  }
+
+  // ── 7. Notes d'appel IA — APRÈS la transaction ──
+  // Le balayage met en file un job `call_transcript` par enregistrement sans
+  // note (réglage `transcripts` éteint = 0). Hors du verrou : les rangées
+  // recordingUrl sont déjà validées, et une erreur ici ne doit pas faire
+  // annuler la synchronisation elle-même.
+  try {
+    counts.transcriptsQueued = await queueTranscriptJobs();
+    // Coup d'envoi du couloir dédié : les jobs viennent d'être mis en file,
+    // autant en traiter quelques-uns tout de suite (le cron vide le reste).
+    if (counts.transcriptsQueued > 0) kickTranscripts();
+  } catch (err) {
+    pushError(`transcripts: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   return { counts, recordingFields: [...recordingFields], errors };

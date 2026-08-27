@@ -13,7 +13,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { clients, users } from "./schema";
+import { calls, clients, comments, users } from "./schema";
 
 // ── SMS engine — phase 1 (numbers, consent ledger, suppressions, threads) ────
 // Separate module so src/db/schema.ts stays untouched; merged in src/db/index.ts
@@ -529,6 +529,54 @@ export const agentTurnTraces = pgTable(
   ],
 );
 
+/**
+ * Résumés IA des appels enregistrés — un par appel, poussé en commentaire sur
+ * la fiche du client. La rangée garde tout ce que la page de consommation doit
+ * additionner (jetons, coût réel OpenRouter) ET la matière première (verbatim,
+ * note) : le commentaire, lui, ne montre que la note.
+ *
+ * Une rangée par appel, même sautée ou en échec : c'est elle qui dit au
+ * balayage de cdr-sync « déjà traité, ne remets pas en file ». Sans les
+ * rangées `skipped`/`failed`, chaque synchronisation horaire recréerait un job
+ * (et re-paierait le modèle) pour les mêmes appels trop courts ou en panne.
+ */
+export const callTranscripts = pgTable(
+  "call_transcripts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    callId: uuid("call_id")
+      .notNull()
+      .references(() => calls.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
+    /** done | skipped | failed */
+    status: text("status").notNull(),
+    /** Pourquoi sauté/échoué : too_short, too_long, no_client, no_audio, ou l'erreur. */
+    reason: text("reason"),
+    /** Verbatim diarisé (si le réglage le conserve) et note poussée en commentaire. */
+    transcript: text("transcript"),
+    summary: text("summary"),
+    commentId: uuid("comment_id").references(() => comments.id, { onDelete: "set null" }),
+    /** Réglages au moment du traitement — le réglage courant peut avoir changé. */
+    language: text("language"),
+    detail: text("detail"),
+    provider: text("provider"),
+    modelRequested: text("model_requested"),
+    /** Ce que le routeur a réellement servi — diverge du demandé sur OpenRouter. */
+    modelServed: text("model_served"),
+    /** Durée de l'appel envoyée au modèle (approximation de l'audio). */
+    audioSeconds: integer("audio_seconds"),
+    tokensIn: integer("tokens_in"),
+    tokensOut: integer("tokens_out"),
+    costUsd: numeric("cost_usd", { precision: 10, scale: 5 }),
+    latencyMs: integer("latency_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("call_transcripts_call_uq").on(t.callId),
+    index("call_transcripts_created_idx").on(t.createdAt),
+  ],
+);
+
 // ── SMS engine — phase 6 (campagnes) ────────────────────────────────────────
 
 export const campaigns = pgTable(
@@ -743,6 +791,12 @@ export const agentTurnTracesRelations = relations(agentTurnTraces, ({ one }) => 
     fields: [agentTurnTraces.assistantId],
     references: [assistants.id],
   }),
+}));
+
+export const callTranscriptsRelations = relations(callTranscripts, ({ one }) => ({
+  call: one(calls, { fields: [callTranscripts.callId], references: [calls.id] }),
+  client: one(clients, { fields: [callTranscripts.clientId], references: [clients.id] }),
+  comment: one(comments, { fields: [callTranscripts.commentId], references: [comments.id] }),
 }));
 
 export const guardrailRunsRelations = relations(guardrailRuns, ({ one }) => ({
