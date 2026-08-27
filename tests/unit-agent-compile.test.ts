@@ -528,6 +528,112 @@ describe("compileAssistantPrompt — objectif et approche, révision 2026-08-22"
     expect(l3).not.toContain("avant ta première proposition");
   });
 
+  it("§ L3 : le mode STRICTE rend la phrase d'origine à l'octet près", () => {
+    // Le prompt compilé dort sur la fiche, sans empreinte ni version de
+    // compilateur : rien ne détecte qu'il ne correspond plus à sa
+    // configuration. Ce test EST la protection du cache — s'il tombe, toute la
+    // flotte sert un prompt périmé, en silence, jusqu'à la prochaine
+    // recompilation manuelle.
+    const l3 = compileAssistantPrompt(buildConfig(), core, packs, rules).layers.find(
+      (l) => l.id === "L3",
+    )!.text;
+
+    expect(l3.split("\n")).toContain(
+      "Tu disposes de 3 questions de qualification EN TOUT, pour toute la conversation. Sers-t'en pour obtenir les informations requises ; une fois ce nombre atteint, tu ne poses plus de question de qualification et tu proposes avec ce que tu as.",
+    );
+  });
+
+  it("§ L3 : le mode SOUPLE remplace le mur par une cible et un plafond", () => {
+    const l3 = compileAssistantPrompt(
+      buildConfig({ approach: { qualificationMode: "flexible", questionBudget: 3, questionCeiling: 6 } }),
+      core,
+      packs,
+      rules,
+    ).layers.find((l) => l.id === "L3")!.text;
+
+    // La phrase du mode stricte a disparu — pas seulement changé de mots.
+    expect(l3).not.toContain("questions de qualification EN TOUT");
+    expect(l3).toContain("Tu en vises 3 pour toute la conversation et tu n'en poses jamais plus de 6");
+    // Les quatre règles qui FONT la souplesse.
+    expect(l3).toContain("Répondre à une question de la personne ne consomme rien");
+    expect(l3).toContain("Tu ne poses JAMAIS une question dont tu as déjà la réponse");
+    expect(l3).toContain("tu arrêtes de qualifier et tu proposes, même s'il te reste des questions");
+    // Le mur reste un mur.
+    expect(l3).toContain("À 6 questions, c'est fini");
+  });
+
+  it("§ L3 : souple enseigne d'enregistrer ce que la fiche sait déjà", () => {
+    // Sans cette ligne, le mode souple se piège : la réservation ne regarde
+    // QUE ce qui a été enregistré pendant la conversation (runtime.ts, la carte
+    // `qualification`), jamais la fiche. « Ne redemande pas ce que la fiche
+    // sait » + « propose dès que tu as tout » = réservation refusée pour une
+    // information que l'assistant avait sous les yeux.
+    const l3 = compileAssistantPrompt(
+      buildConfig({ approach: { qualificationMode: "flexible" } }),
+      core,
+      packs,
+      rules,
+    ).layers.find((l) => l.id === "L3")!.text;
+
+    expect(l3).toContain("update_qualification");
+  });
+
+  it("§ L3 : un plafond sous la cible est relevé, jamais rendu tel quel", () => {
+    // Deux nombres qui se contredisent dans la même consigne la font écarter
+    // en entier, cible comprise. Le schéma ne peut pas croiser les deux champs
+    // (des fiches en base deviendraient illisibles) — c'est donc ici.
+    const l3 = compileAssistantPrompt(
+      buildConfig({ approach: { qualificationMode: "flexible", questionBudget: 5, questionCeiling: 2 } }),
+      core,
+      packs,
+      rules,
+    ).layers.find((l) => l.id === "L3")!.text;
+
+    expect(l3).toContain("tu n'en poses jamais plus de 5");
+    expect(l3).toContain("À 5 questions, c'est fini");
+    expect(l3).not.toContain("plus de 2");
+    // Et SURTOUT : la permission de dépasser disparaît avec la marge. La
+    // laisser autoriserait explicitement à franchir un nombre que les deux
+    // autres phrases déclarent absolu — la contradiction que le relèvement
+    // devait supprimer, réintroduite un cran plus bas.
+    expect(l3).not.toContain("Tu ne dépasses");
+  });
+
+  it("§ L3 : la permission de dépasser n'existe QUE s'il y a une marge", () => {
+    const stretch = (budget: number, ceiling: number) =>
+      compileAssistantPrompt(
+        buildConfig({
+          approach: { qualificationMode: "flexible", questionBudget: budget, questionCeiling: ceiling },
+        }),
+        core,
+        packs,
+        rules,
+      )
+        .layers.find((l) => l.id === "L3")!
+        .text.includes("Tu ne dépasses");
+
+    expect(stretch(3, 6)).toBe(true); // une vraie marge : la règle a un objet
+    expect(stretch(5, 5)).toBe(false); // cible = plafond, aucune marge
+    expect(stretch(8, 2)).toBe(false); // plafond relevé à la cible
+  });
+
+  it("§ une fiche existante reste STRICTE — le défaut ne bascule personne", () => {
+    // `approach` est du jsonb : aucune fiche en base ne porte les nouvelles
+    // clés, et la config est re-parsée à chaque lecture. Un défaut « flexible »
+    // basculerait toute la flotte à sa prochaine recompilation.
+    const legacy = assistantConfigSchema.parse({
+      ...baseInput(),
+      approach: { persistence: 3, questionBudget: 8 },
+    });
+
+    expect(legacy.approach.qualificationMode).toBe("strict");
+    expect(
+      compileAssistantPrompt(legacy, core, packs, rules)
+        .layers.find((l) => l.id === "L3")!
+        .text,
+    ).toContain("8 questions de qualification EN TOUT");
+  });
+
   it("L3 : « beaucoup » d'émojis est un quatrième cran, distinct de « modéré »", () => {
     const phrase = (emoji: string) =>
       compileAssistantPrompt(buildConfig({ approach: { emoji } }), core, packs, rules)

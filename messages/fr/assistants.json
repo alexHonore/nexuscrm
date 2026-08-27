@@ -445,6 +445,7 @@
       "hoursFrom": "De (h)",
       "hoursTo": "À (h)",
       "hoursNote": "0 à 23 pour le début, 1 à 24 pour la fin. La fin doit suivre le début.",
+      "ceilingBelowTarget": "Le plafond est sous la cible : il sera relevé à la cible. Un plafond en dessous de la cible ne veut rien dire.",
       "hoursInvalid": "Chaque fenêtre doit finir après son début."
     },
     "guardrailsSection": {

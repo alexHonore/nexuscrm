@@ -314,13 +314,59 @@ function buildApproachLayer(config: AssistantConfig): string {
       : "Tutoie la personne (« tu »).",
   );
   lines.push(`Persistance : ${PERSISTENCE_PHRASES[approach.persistence]}.`);
-  // Un plafond ABSOLU, pas « avant la première proposition » : l'ancienne
-  // formulation laissait l'assistant relancer un interrogatoire après un
-  // premier refus, comme si le compteur repartait de zéro.
-  lines.push(
-    `Tu disposes de ${approach.questionBudget} questions de qualification EN TOUT, pour toute la conversation. ` +
-      `Sers-t'en pour obtenir les informations requises ; une fois ce nombre atteint, tu ne poses plus de question de qualification et tu proposes avec ce que tu as.`,
-  );
+  if (approach.qualificationMode === "strict") {
+    // Un plafond ABSOLU, pas « avant la première proposition » : l'ancienne
+    // formulation laissait l'assistant relancer un interrogatoire après un
+    // premier refus, comme si le compteur repartait de zéro.
+    //
+    // Ce texte est reproduit à l'IDENTIQUE, à la même place du tableau : le
+    // prompt compilé est mis en cache sur la fiche, sans empreinte ni version
+    // de compilateur. Le moindre octet qui bouge ici et toute la flotte sert
+    // un prompt qui ne correspond plus à sa configuration, en silence.
+    lines.push(
+      `Tu disposes de ${approach.questionBudget} questions de qualification EN TOUT, pour toute la conversation. ` +
+        `Sers-t'en pour obtenir les informations requises ; une fois ce nombre atteint, tu ne poses plus de question de qualification et tu proposes avec ce que tu as.`,
+    );
+  } else {
+    // Le plafond ne passe JAMAIS sous la cible : deux nombres qui se
+    // contredisent dans la même consigne la font écarter en entier, cible
+    // comprise. Le schéma ne croise pas les deux champs (il rendrait des
+    // fiches existantes illisibles) — on relève ici.
+    const ceiling = Math.max(approach.questionBudget, approach.questionCeiling);
+    lines.push(
+      // La cible arrive APRÈS le critère : ouvrir sur un nombre en fait un
+      // quota à dépenser, ce que le mode souple cherche précisément à défaire.
+      `Qualification : chaque question que tu poses sert à obtenir une information requise qui te manque ENCORE. Tu en vises ${approach.questionBudget} pour toute la conversation et tu n'en poses jamais plus de ${ceiling} : ce sont des bornes, pas des quotas à dépenser.`,
+      "Ce compte ne vise que les questions de qualification que TU poses. Répondre à une question de la personne ne consomme rien ; une relance pour obtenir la rencontre relève de la persistance, pas de ce budget.",
+      "Tu ne poses JAMAIS une question dont tu as déjà la réponse : ce que rappelle la ligne « Qualification obtenue » du bloc d'exécution, ce que la fiche du contact indique, et ce que la personne vient d'écrire sont acquis. Redemander « pour confirmer » se voit et ne rapporte rien.",
+      // Sans cette ligne, le mode souple se piège lui-même : la réservation ne
+      // regarde QUE ce qui a été enregistré pendant la conversation, jamais la
+      // fiche. « Ne redemande pas ce que la fiche sait » + « propose dès que
+      // tu as tout » = une réservation refusée pour une information que
+      // l'assistant avait sous les yeux.
+      "Avant de proposer une rencontre, enregistre avec `update_qualification` — quand l'outil t'est offert — les informations requises que tu tiens déjà de la fiche ou de la conversation : sans elles la réservation est refusée, et tu devrais redemander ce que tu savais.",
+      "Dès que les informations requises du palier ACTIF sont réunies, tu arrêtes de qualifier et tu proposes, même s'il te reste des questions. Si le palier actif ne propose aucune rencontre, tu suis sa consigne et tu conclus poliment plutôt que de continuer à qualifier.",
+      "Chaque question doit rapprocher de l'objectif : si sa réponse ne changerait ni ce que tu proposes, ni le moment que tu proposes, tu ne la poses pas. Aucune question « pour le dossier ».",
+      "Une seule question par message, jamais deux regroupées. Reformuler une question déjà posée compte de nouveau : avant d'écrire un point d'interrogation, relis le fil et compte celles que tu as déjà posées.",
+    );
+    // La zone de dépassement n'existe que si le plafond est AU-DESSUS de la
+    // cible. Quand les deux se rejoignent — plafond réglé sous la cible et
+    // relevé, ou simplement égal — décrire un dépassement autoriserait
+    // explicitement à franchir un nombre que les deux autres phrases
+    // déclarent absolu. C'est exactement la contradiction que le relèvement
+    // devait supprimer, réintroduite un cran plus bas.
+    if (ceiling > approach.questionBudget) {
+      // Le dépassement se gagne sur ce qui MANQUE d'abord, sur l'engagement
+      // ensuite. L'inverse récompensait le contact le plus curieux — celui
+      // qu'il fallait justement amener au rendez-vous le plus vite.
+      lines.push(
+        `Tu ne dépasses ${approach.questionBudget} que si une information requise te manque ENCORE et que la personne est engagée : elle développe ses réponses, elle pose ses propres questions. Un « oui », un « ok », une réponse d'un mot ne sont pas de l'engagement — tu proposes.`,
+      );
+    }
+    lines.push(
+      `À ${ceiling} questions, c'est fini : tu ne poses plus aucune question de qualification et tu proposes avec ce que tu as. Tu continues de répondre à ce qu'elle demande.`,
+    );
+  }
   lines.push(`Jamais plus de ${approach.maxChars} caractères.`);
   lines.push(`Chaleur : ${styleLevelPhrase(approach.warmth)}.`);
   lines.push(`Proactivité : ${styleLevelPhrase(approach.proactivity)}.`);

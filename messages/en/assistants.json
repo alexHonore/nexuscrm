@@ -445,6 +445,7 @@
       "hoursFrom": "From (h)",
       "hoursTo": "To (h)",
       "hoursNote": "0–23 for the start, 1–24 for the end. The end must be after the start.",
+      "ceilingBelowTarget": "The ceiling is below the target: it will be raised to the target. A ceiling under the target means nothing.",
       "hoursInvalid": "Each window must end after it starts."
     },
     "guardrailsSection": {

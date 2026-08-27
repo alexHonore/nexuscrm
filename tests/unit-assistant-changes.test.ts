@@ -114,6 +114,20 @@ describe("diffConfig", () => {
     expect(d.needsRecompile).toBe(true);
   });
 
+  it("§ basculer stricte → souple attend la recompilation, et le DIT", () => {
+    // Le mode ne vit que dans le prompt compilé. S'il tombait dans aucune des
+    // deux listes, la fiche annoncerait « 0 réglage en attente » au-dessus
+    // d'un prompt qui décrit encore l'autre mode — exactement le mensonge que
+    // ce module existe pour empêcher.
+    const after = base();
+    after.approach.qualificationMode = "flexible";
+    after.approach.questionCeiling = 6;
+    const d = diffConfig(base(), after);
+    expect(d.immediate).toEqual([]);
+    expect(d.pending).toEqual(["approach.qualificationMode", "approach.questionCeiling"]);
+    expect(d.needsRecompile).toBe(true);
+  });
+
   it("seuls les réglages strictement relus à l'exécution laissent le prompt intact", () => {
     for (const mutate of [
       (c: AssistantConfig) => void (c.approach.maxTurns = 20),

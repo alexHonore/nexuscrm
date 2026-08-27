@@ -284,10 +284,28 @@ export const PARAM_DOCS_EN: Record<string, ParamDocText> = {
   },
   "approach.questionBudget": {
     label: "Question budget",
-    what: "The TOTAL number of qualification questions the assistant may ask in the whole conversation. It has to obtain the required information within that budget; once spent, it offers with what it has.",
+    what: "The number of qualification questions the assistant devotes to the whole conversation. In STRICT mode it is an absolute ceiling: once spent, it offers with what it has. In FLEXIBLE mode it is a target — the wall is the question ceiling.",
     why: "Every question is one more chance for the person not to answer. Qualifying enough without turning the exchange into an interrogation is the central trade-off of an SMS assistant.",
-    effect: "A numeric instruction in L3. It is an ABSOLUTE ceiling since 2026-08-22: the previous wording (\"before the first offer\") let the assistant restart an interrogation after a first refusal, as if the counter reset.",
-    pitfalls: "Beyond 3, the mid-conversation drop-off rate rises noticeably. Symptom: threads that stop after the second or third question.",
+    effect: "A numeric instruction in L3. What the number MEANS depends on the qualification mode: in strict mode it is an absolute ceiling (since 2026-08-22 — the previous wording, \"before the first offer\", let the assistant restart an interrogation after a first refusal); in flexible mode it is a target, and the question ceiling becomes the wall.",
+    pitfalls: "Beyond 3, the mid-conversation drop-off rate rises noticeably. Symptom: threads that stop after the second or third question. In STRICT mode, a budget smaller than the number of required fields is a contradiction: the assistant will never be allowed to book. That is exactly what flexible mode fixes.",
+  },
+  "approach.qualificationMode": {
+    label: "Qualification mode",
+    what: "How the question budget is read. \"Strict\": the assistant asks its number of questions, then offers. \"Flexible\": the budget becomes a target and the question ceiling becomes the wall — answering the person's own question costs nothing, something already known is never asked again, and the assistant offers as soon as it holds the required fields instead of spending its quota.",
+    why: "A fixed number treats someone who said everything in their first message exactly like someone who answers \"ok\". Flexible mode lets the conversation set the pace without loosening the target: the assistant can write less when it already knows enough, and a little more when the person is genuinely engaged.",
+    effect: "Changes the qualification paragraph compiled into L3. Strict mode reproduces the original text byte for byte — switching modes requires a recompile, like everything that lives in the prompt.",
+    pitfalls: "Flexible is not \"no limit\": the question ceiling and the message budget are still walls. And flexible does not replace a well-chosen list of required fields — that list is what tells the assistant it is done; the budget only bounds it.",
+    allowed: {
+      strict: "Strict — the budget is a wall",
+      flexible: "Flexible — the budget is a target, the assistant adapts",
+    },
+  },
+  "approach.questionCeiling": {
+    label: "Question ceiling",
+    what: "In flexible mode: the number of qualification questions past which the assistant stops asking, whatever happens. It goes beyond the target only when a required field is still missing AND the person is engaged. Ignored in strict mode.",
+    why: "\"Flexible\" with no wall turns into an interrogation as soon as someone answers willingly. The ceiling is what makes flexibility safe: the conversation sets the pace, never the end.",
+    effect: "Compiled into L3, in flexible mode only. A ceiling below the target is raised to the target at compile time: two numbers contradicting each other in one instruction get the whole instruction ignored.",
+    pitfalls: "A ceiling far above the target (10 against 3) makes the target decorative: the gap is what the assistant allows itself, not a reserve. Two above the target is a good starting point.",
   },
   "approach.maxChars": {
     label: "Maximum length",

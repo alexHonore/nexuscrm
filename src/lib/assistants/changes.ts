@@ -38,6 +38,11 @@ const PROMPT_PREFIXES = [
   "approach.proactivity",
   "approach.emoji",
   "approach.questionBudget",
+  // Le mode et son plafond ne vivent QUE dans le prompt, comme le budget
+  // qu'ils gouvernent : basculer strict → souple sans recompiler laisserait
+  // l'assistant lire la consigne d'hier.
+  "approach.qualificationMode",
+  "approach.questionCeiling",
   "approach.persistence",
   "approach.maxChars",
   // L2 : type d'objectif, durée, champs requis, chaîne de replis.

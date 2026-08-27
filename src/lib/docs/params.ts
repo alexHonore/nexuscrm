@@ -398,15 +398,55 @@ const approach: ParamDoc[] = [
     required: true,
     defaultValue: 3,
     whatFr:
-      "Le nombre TOTAL de questions de qualification que l'assistant a le droit de poser dans toute la conversation. Il doit obtenir les informations requises dans ce budget ; une fois épuisé, il propose avec ce qu'il a.",
+      "Le nombre de questions de qualification que l'assistant consacre à toute la conversation. En mode STRICT, c'est un plafond absolu : une fois épuisé, il propose avec ce qu'il a. En mode SOUPLE, c'est une cible — le mur, c'est le plafond de questions.",
     whyFr:
       "Chaque question est une occasion de ne pas répondre. Qualifier suffisamment sans transformer l'échange en interrogatoire est l'arbitrage central d'un assistant SMS.",
     effectFr:
-      "Consigne chiffrée en L3. C'est un plafond ABSOLU depuis le 2026-08-22 : la formulation précédente (« avant la première proposition ») laissait l'assistant relancer un interrogatoire après un premier refus, comme si le compteur repartait de zéro.",
+      "Consigne chiffrée en L3. Ce que ce nombre VEUT DIRE dépend du mode de qualification : en mode strict c'est un plafond absolu (depuis le 2026-08-22 — la formulation précédente, « avant la première proposition », laissait l'assistant relancer un interrogatoire après un premier refus) ; en mode souple c'est une cible, et c'est le plafond de questions qui devient le mur.",
     pitfallsFr:
-      "Au-delà de 3, le taux d'abandon en cours de conversation monte nettement. Symptôme : des fils qui s'arrêtent après la deuxième ou troisième question. Un budget plus petit que le nombre d'informations requises est contradictoire : l'assistant n'aura jamais le droit de réserver.",
-    related: ["goal.primary.requiredFields", "approach.persistence"],
+      "Au-delà de 3, le taux d'abandon en cours de conversation monte nettement. Symptôme : des fils qui s'arrêtent après la deuxième ou troisième question. En mode STRICT, un budget plus petit que le nombre d'informations requises est contradictoire : l'assistant n'aura jamais le droit de réserver. C'est exactement ce que le mode souple corrige.",
+    related: ["goal.primary.requiredFields", "approach.persistence", "approach.qualificationMode"],
     example: 3,
+  }),
+  doc({
+    path: "approach.qualificationMode",
+    section: "approach",
+    labelFr: "Mode de qualification",
+    type: "enum",
+    required: true,
+    defaultValue: "strict",
+    allowed: [
+      { value: "strict", labelFr: "Strict — le budget est un mur" },
+      { value: "flexible", labelFr: "Souple — le budget est une cible, l'assistant s'adapte" },
+    ],
+    whatFr:
+      "Comment se lit le budget de questions. « Strict » : l'assistant pose son nombre de questions, puis propose. « Souple » : le budget devient une cible et le plafond de questions devient le mur — répondre à une question de la personne ne consomme rien, une information déjà connue ne se redemande pas, et l'assistant propose dès qu'il tient les informations requises au lieu de finir son quota.",
+    whyFr:
+      "Un nombre fixe traite de la même façon quelqu'un qui a tout dit dans son premier message et quelqu'un qui répond par « ok ». Le mode souple laisse la conversation décider, sans lâcher l'objectif : l'assistant peut écrire moins quand il en sait déjà assez, et un peu plus quand la personne s'engage vraiment.",
+    effectFr:
+      "Change le paragraphe de qualification compilé en L3. Le mode strict produit le texte d'origine, à l'octet près — basculer d'un mode à l'autre demande une recompilation, comme tout ce qui vit dans le prompt.",
+    pitfallsFr:
+      "Souple n'est pas « sans limite » : le plafond de questions et le budget de messages restent des murs. Et souple ne remplace pas des informations requises bien choisies — c'est la liste des informations requises qui dit quand l'assistant a fini, le budget ne fait que le borner.",
+    related: ["approach.questionBudget", "approach.questionCeiling", "goal.primary.requiredFields"],
+    example: "strict",
+  }),
+  doc({
+    path: "approach.questionCeiling",
+    section: "approach",
+    labelFr: "Plafond de questions",
+    type: "int",
+    required: true,
+    defaultValue: 5,
+    whatFr:
+      "En mode souple : le nombre de questions de qualification au-delà duquel l'assistant n'insiste plus, quoi qu'il arrive. Il ne dépasse la cible que s'il lui manque encore une information requise ET que la personne s'engage. Ignoré en mode strict.",
+    whyFr:
+      "« Souple » sans mur devient un interrogatoire dès que quelqu'un répond volontiers. Le plafond est ce qui rend la souplesse tenable : la conversation décide du rythme, jamais de la fin.",
+    effectFr:
+      "Compilé en L3, uniquement en mode souple. Un plafond inférieur à la cible est relevé à la cible au moment de compiler : deux nombres qui se contredisent dans la même consigne la font écarter en entier.",
+    pitfallsFr:
+      "Un plafond très au-dessus de la cible (10 contre 3) rend la cible décorative : l'écart est ce que l'assistant s'autorise, pas une réserve. Deux de plus que la cible est un bon point de départ.",
+    related: ["approach.qualificationMode", "approach.questionBudget", "approach.maxTurns"],
+    example: 5,
   }),
   doc({
     path: "approach.maxChars",

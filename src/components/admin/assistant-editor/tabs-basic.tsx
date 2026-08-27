@@ -964,6 +964,19 @@ export function ApproachTab({ config, update }: TabProps) {
             value={config.approach.proactivity}
             onChange={(v) => update((d) => void (d.approach.proactivity = v))}
           />
+          {/* Le mode AVANT le nombre : c'est lui qui dit si « 3 » est un mur
+              ou une cible. Dans l'autre ordre, on règle un nombre dont on ne
+              sait pas encore ce qu'il veut dire. */}
+          <EnumField
+            path="approach.qualificationMode"
+            value={config.approach.qualificationMode}
+            onChange={(v) =>
+              update(
+                (d) =>
+                  void (d.approach.qualificationMode = v as "strict" | "flexible"),
+              )
+            }
+          />
           <NumberField
             path="approach.questionBudget"
             value={config.approach.questionBudget}
@@ -971,6 +984,18 @@ export function ApproachTab({ config, update }: TabProps) {
             max={10}
             onChange={(v) => update((d) => void (d.approach.questionBudget = v))}
           />
+          {/* Le plafond n'a de sens qu'en mode souple : en mode stricte, le
+              budget EST le mur, et afficher un second nombre inerte ferait
+              croire à un réglage qui ne fait rien. */}
+          {config.approach.qualificationMode === "flexible" ? (
+            <NumberField
+              path="approach.questionCeiling"
+              value={config.approach.questionCeiling}
+              min={1}
+              max={12}
+              onChange={(v) => update((d) => void (d.approach.questionCeiling = v))}
+            />
+          ) : null}
           <NumberField
             path="approach.maxChars"
             value={config.approach.maxChars}
@@ -986,6 +1011,15 @@ export function ApproachTab({ config, update }: TabProps) {
             onChange={(v) => update((d) => void (d.approach.maxTurns = v))}
           />
         </Fields>
+        {/* Un plafond sous la cible, c'est une consigne qui se contredit. Le
+            compilateur relève le plafond plutôt que d'écrire les deux nombres,
+            mais l'administrateur doit savoir que son réglage est ignoré. */}
+        {config.approach.qualificationMode === "flexible" &&
+        config.approach.questionCeiling < config.approach.questionBudget ? (
+          <p className="mt-3 text-xs text-destructive">
+            {t("editor.approach.ceilingBelowTarget")}
+          </p>
+        ) : null}
       </Panel>
 
       {/* Heures de travail — propre à CET assistant. Le garde-fou contre un

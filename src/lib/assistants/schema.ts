@@ -259,6 +259,38 @@ export const approachSchema = z.object({
    * plafond est maintenant absolu — au-delà, il propose avec ce qu'il a.
    */
   questionBudget: z.number().int().min(1).max(10).default(3),
+  /**
+   * Comment se LIT le budget ci-dessus — pas combien il vaut.
+   *
+   * « strict » : le budget est un mur. C'est le comportement d'origine, et il
+   * a un défaut : un budget plus petit que le nombre d'informations requises
+   * est une contradiction, et l'assistant pose ses trois questions même quand
+   * la personne vient de tout dire dans son premier message.
+   *
+   * « flexible » : le budget devient une CIBLE, `questionCeiling` le mur. Ce
+   * qui bouge, ce n'est pas la rigueur, c'est le comptage — répondre à une
+   * question ne consomme rien, une information déjà connue ne se redemande
+   * pas, et l'assistant propose dès qu'il a ce qu'il faut au lieu de finir son
+   * quota.
+   *
+   * Le défaut est « strict » et ne peut pas être autre chose : `approach` est
+   * une colonne jsonb dont aucune fiche existante ne porte cette clé, et
+   * `assistantRowToConfig` la relit à chaque lecture. Un défaut « flexible »
+   * basculerait TOUTE la flotte à sa prochaine recompilation, sans que
+   * personne ne l'ait demandé.
+   */
+  qualificationMode: z.enum(["strict", "flexible"]).default("strict"),
+  /**
+   * En mode flexible : le nombre de questions au-delà duquel l'assistant
+   * n'insiste plus, quoi qu'il arrive. Ignoré en mode strict.
+   *
+   * Volontairement PAS croisé avec `questionBudget` par un `.superRefine` :
+   * des fiches en base portent déjà un budget de 8 sans cette clé, et un
+   * refus croisé ferait échouer `assistantRowToConfig` à CHAQUE lecture — la
+   * fiche deviendrait illisible. Le compilateur relève le plafond sous la
+   * cible (`Math.max`), et l'éditeur le signale.
+   */
+  questionCeiling: z.number().int().min(1).max(12).default(5),
   /** Longueur maximale d'un SMS sortant (caractères). */
   maxChars: z.number().int().min(120).max(480).default(300),
   proactivity: z.number().int().min(1).max(5).default(3),
