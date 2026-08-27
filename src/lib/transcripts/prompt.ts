@@ -11,7 +11,7 @@ import { enUS, fr } from "date-fns/locale";
  * interdit d'ailleurs next-intl dans ce dossier.
  */
 
-export type TranscriptDetail = "brief" | "standard" | "detailed";
+export type TranscriptDetail = "brief" | "standard" | "detailed" | "exhaustive";
 export type TranscriptLanguage = "fr" | "en";
 
 export interface TranscriptCallFacts {
@@ -23,6 +23,15 @@ export interface TranscriptCallFacts {
   agentName: string | null;
   /** Nom du client sur la fiche. */
   clientName: string | null;
+  /**
+   * Repères de VOCABULAIRE tirés de la fiche (ville, adresse) : les noms
+   * propres sont ce qu'un modèle entend le plus mal sur de l'audio téléphone
+   * (« Sainte-Foy » → « cinq fois », mesuré). Les donner d'avance corrige la
+   * transcription — mais ils ne doivent JAMAIS entrer dans la note s'ils ne
+   * sont pas prononcés (le prompt le dit explicitement).
+   */
+  clientCity: string | null;
+  clientAddress: string | null;
 }
 
 export interface TranscriptPromptInput {
@@ -33,8 +42,12 @@ export interface TranscriptPromptInput {
   call: TranscriptCallFacts;
 }
 
-/** Bornes dures sur ce qu'on stocke/pousse — le modèle peut déborder ses consignes. */
-export const SUMMARY_MAX_CHARS = 3000;
+/**
+ * Bornes dures sur ce qu'on stocke/pousse — le modèle peut déborder ses
+ * consignes. 6000 laisse de la marge au niveau « exhaustif » (cible 4000) ;
+ * les autres niveaux visent bien en dessous.
+ */
+export const SUMMARY_MAX_CHARS = 6000;
 export const TRANSCRIPT_MAX_CHARS = 100_000;
 
 const DETAIL_FR: Record<TranscriptDetail, string> = {
@@ -44,6 +57,8 @@ const DETAIL_FR: Record<TranscriptDetail, string> = {
     "Rédige une note COURTE et structurée : l'objet de l'appel, les points clés (projet immobilier, échéance, secteur, budget s'ils sont mentionnés), les objections soulevées, et la prochaine étape convenue. Vise moins de 900 caractères.",
   detailed:
     "Rédige une note COMPLÈTE : résumé de l'échange, détails du projet immobilier (échéance, secteur, budget, motivation), objections et réponses données, ton et réceptivité du client, engagements pris de part et d'autre, et actions à prendre. Cite entre guillemets une ou deux phrases marquantes du client si utile. Vise moins de 2000 caractères.",
+  exhaustive:
+    "Rédige une note EXHAUSTIVE : un compte rendu chronologique où TOUT ce qui est dit est consigné, horodaté en [mm:ss] aux moments clés. Consigne chaque renseignement, même ceux qui semblent sans importance : noms, dates, montants, adresses, préférences, contraintes, détails personnels ou anecdotiques (famille, travail, horaires, humeur), hésitations et changements de ton, objections et formulations exactes, engagements des deux côtés. Structure : Objet · Déroulé horodaté · Renseignements factuels · Objections et réponses · Engagements et prochaine étape. Vise moins de 4000 caractères.",
 };
 
 const DETAIL_EN: Record<TranscriptDetail, string> = {
@@ -53,6 +68,8 @@ const DETAIL_EN: Record<TranscriptDetail, string> = {
     "Write a SHORT, structured note: the purpose of the call, the key points (real-estate project, timeline, area, budget if mentioned), objections raised, and the agreed next step. Aim for under 900 characters.",
   detailed:
     "Write a COMPLETE note: summary of the exchange, project details (timeline, area, budget, motivation), objections and how they were answered, the client's tone and receptiveness, commitments made on both sides, and actions to take. Quote one or two notable client sentences if useful. Aim for under 2000 characters.",
+  exhaustive:
+    "Write an EXHAUSTIVE note: a chronological account where EVERYTHING said is recorded, timestamped [mm:ss] at key moments. Record every piece of information, even those that seem unimportant: names, dates, amounts, addresses, preferences, constraints, personal or anecdotal details (family, work, schedule, mood), hesitations and shifts in tone, objections with their exact wording, commitments on both sides. Structure: Purpose · Timestamped account · Factual details · Objections and answers · Commitments and next step. Aim for under 4000 characters.",
 };
 
 /**
@@ -64,10 +81,13 @@ export function buildTranscriptSystem(input: TranscriptPromptInput): string {
   const wantTranscript = input.keepTranscript;
   if (input.language === "fr") {
     return [
-      "Tu écoutes l'enregistrement d'un appel entre un téléphoniste d'un courtier immobilier québécois et un client potentiel.",
+      "Tu écoutes l'enregistrement d'un appel TÉLÉPHONIQUE (qualité téléphone, deux interlocuteurs, français québécois) entre un téléphoniste d'un courtier immobilier québécois et un client potentiel.",
       wantTranscript
         ? "Transcris d'abord fidèlement la conversation en identifiant les interlocuteurs (« Téléphoniste : », « Client : »)."
         : "Écoute la conversation en entier avant de rédiger.",
+      // Les noms propres, montants et dates sont ce que l'audio téléphone
+      // abîme le plus — et ce que l'équipe relit le plus attentivement.
+      "Porte une attention particulière aux noms propres, adresses, secteurs, montants, dates et numéros. Un mot ou passage incompréhensible s'écrit [inaudible] — n'invente JAMAIS un mot plausible à la place.",
       DETAIL_FR[input.detail],
       "La note est écrite en français, pour l'équipe interne — factuelle, sans flatterie ni remplissage. N'invente RIEN : si un renseignement n'est pas dans l'appel, il n'est pas dans la note.",
       "Si l'enregistrement ne contient pas d'échange utile (silence, boîte vocale, faux numéro), dis-le en une phrase à la place de la note.",
@@ -77,10 +97,11 @@ export function buildTranscriptSystem(input: TranscriptPromptInput): string {
     ].join("\n");
   }
   return [
-    "You are listening to a recorded call between a phone agent working for a Québec real-estate broker and a potential client.",
+    "You are listening to a recorded PHONE call (telephone audio quality, two speakers, Québec French) between a phone agent working for a Québec real-estate broker and a potential client.",
     wantTranscript
       ? 'First transcribe the conversation faithfully, labelling the speakers ("Agent:", "Client:").'
       : "Listen to the whole conversation before writing.",
+    "Pay particular attention to proper nouns, addresses, neighbourhoods, amounts, dates and numbers. Write [inaudible] for any word or passage you cannot make out — NEVER invent a plausible word instead.",
     DETAIL_EN[input.detail],
     "The note is written in English, for the internal team — factual, no filler. Do NOT invent anything: if a detail is not in the call, it is not in the note.",
     "If the recording contains no useful exchange (silence, voicemail, wrong number), say so in one sentence instead of the note.",
@@ -101,11 +122,26 @@ export function buildTranscriptUserText(input: TranscriptPromptInput): string {
     input.language === "fr" ? "d MMMM yyyy, HH 'h' mm" : "MMMM d, yyyy, h:mm a",
     { locale: input.language === "fr" ? fr : enUS },
   );
+  // Repères tirés de la fiche : ils GUIDENT l'oreille (orthographe des noms
+  // propres), ils ne nourrissent pas la note — le garde-fou est dans la
+  // phrase elle-même, pas seulement dans le prompt système.
+  const vocabFr = [
+    call.clientCity ? `ville : ${call.clientCity}` : null,
+    call.clientAddress ? `adresse : ${call.clientAddress}` : null,
+  ].filter(Boolean);
+  const vocabEn = [
+    call.clientCity ? `city: ${call.clientCity}` : null,
+    call.clientAddress ? `address: ${call.clientAddress}` : null,
+  ].filter(Boolean);
+
   if (input.language === "fr") {
     return [
       `Appel ${call.direction === "outbound" ? "sortant" : "entrant"} du ${when} (durée ${mins} min ${secs} s).`,
       call.agentName ? `Téléphoniste : ${call.agentName}.` : null,
       call.clientName ? `Client (selon la fiche) : ${call.clientName}.` : null,
+      vocabFr.length > 0
+        ? `Repères d'orthographe tirés de la fiche, s'ils sont prononcés (${vocabFr.join(" ; ")}) — ne les mets PAS dans la note s'ils ne sont pas dits dans l'appel.`
+        : null,
     ]
       .filter(Boolean)
       .join(" ");
@@ -114,6 +150,9 @@ export function buildTranscriptUserText(input: TranscriptPromptInput): string {
     `${call.direction === "outbound" ? "Outbound" : "Inbound"} call on ${when} (duration ${mins} min ${secs} s).`,
     call.agentName ? `Agent: ${call.agentName}.` : null,
     call.clientName ? `Client (per the CRM record): ${call.clientName}.` : null,
+    vocabEn.length > 0
+      ? `Spelling hints from the CRM record, if spoken (${vocabEn.join("; ")}) — do NOT put them in the note unless actually said in the call.`
+      : null,
   ]
     .filter(Boolean)
     .join(" ");

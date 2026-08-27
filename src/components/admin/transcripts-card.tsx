@@ -29,7 +29,7 @@ import { api } from "./api";
 
 export type TranscriptsFormValues = {
   enabled: boolean;
-  detail: "brief" | "standard" | "detailed";
+  detail: "brief" | "standard" | "detailed" | "exhaustive";
   language: "fr" | "en";
   model: string;
   minSeconds: number;
@@ -147,6 +147,7 @@ export function TranscriptsCard({
                 { value: "brief", label: t("settings.transcripts.detailBrief") },
                 { value: "standard", label: t("settings.transcripts.detailStandard") },
                 { value: "detailed", label: t("settings.transcripts.detailDetailed") },
+                { value: "exhaustive", label: t("settings.transcripts.detailExhaustive") },
               ]}
               value={form.detail}
               onValueChange={(v) =>
@@ -160,6 +161,9 @@ export function TranscriptsCard({
                 <SelectItem value="brief">{t("settings.transcripts.detailBrief")}</SelectItem>
                 <SelectItem value="standard">{t("settings.transcripts.detailStandard")}</SelectItem>
                 <SelectItem value="detailed">{t("settings.transcripts.detailDetailed")}</SelectItem>
+                <SelectItem value="exhaustive">
+                  {t("settings.transcripts.detailExhaustive")}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>

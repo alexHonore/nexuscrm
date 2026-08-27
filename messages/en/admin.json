@@ -466,6 +466,7 @@
       "detailBrief": "Brief — one to three sentences",
       "detailStandard": "Standard — short structured note",
       "detailDetailed": "Detailed — complete note with quotes",
+      "detailExhaustive": "Exhaustive — everything recorded, timestamped, even the incidental",
       "language": "Notes language",
       "languageFr": "French",
       "languageEn": "English",

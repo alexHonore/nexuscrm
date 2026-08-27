@@ -154,8 +154,12 @@ export type ConsumptionSettings = z.infer<typeof consumptionSettingsSchema>;
  */
 export const transcriptsSettingsSchema = z.object({
   enabled: z.boolean().default(false),
-  /** Niveau de détail de la note poussée en commentaire. */
-  detail: z.enum(["brief", "standard", "detailed"]).default("standard"),
+  /**
+   * Niveau de détail de la note poussée en commentaire. `exhaustive` :
+   * compte rendu chronologique horodaté où TOUT est consigné, même
+   * l'accessoire — pour qui veut la mémoire complète de l'appel sur la fiche.
+   */
+  detail: z.enum(["brief", "standard", "detailed", "exhaustive"]).default("standard"),
   /**
    * Langue de la NOTE (une donnée de fiche, pas un texte d'interface) — même
    * logique que la langue d'un assistant : jamais le cookie NEXT_LOCALE.

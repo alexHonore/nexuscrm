@@ -20,6 +20,8 @@ const CALL: TranscriptPromptInput["call"] = {
   startedAt: new Date("2026-08-27T18:03:00Z"),
   agentName: "Marie Tremblay",
   clientName: "Jean Untel",
+  clientCity: "Sainte-Foy",
+  clientAddress: "123 rue du Campanile",
 };
 
 function input(overrides: Partial<TranscriptPromptInput> = {}): TranscriptPromptInput {
@@ -35,6 +37,11 @@ describe("réglage transcripts", () => {
     expect(cfg.minSeconds).toBeGreaterThan(0);
     expect(cfg.maxMinutes).toBeGreaterThan(0);
     expect(cfg.model).toContain("/"); // identifiant routeur, ex. google/gemini-2.5-flash
+  });
+
+  it("accepte le niveau exhaustif", () => {
+    const cfg = transcriptsSettingsSchema.parse({ detail: "exhaustive" });
+    expect(cfg.detail).toBe("exhaustive");
   });
 });
 
@@ -53,6 +60,26 @@ describe("buildTranscriptSystem", () => {
     expect(sys).not.toContain('"transcript"');
     expect(sys).toContain('"summary"');
   });
+
+  it("arme l'oreille : audio téléphone, noms propres, [inaudible] plutôt qu'inventer", () => {
+    const sys = buildTranscriptSystem(input());
+    expect(sys).toContain("TÉLÉPHONIQUE");
+    expect(sys).toContain("noms propres");
+    expect(sys).toContain("[inaudible]");
+    const en = buildTranscriptSystem(input({ language: "en" }));
+    expect(en).toContain("[inaudible]");
+    expect(en).toContain("proper nouns");
+  });
+
+  it("niveau exhaustif : chronologie horodatée où même l'accessoire est consigné", () => {
+    const sys = buildTranscriptSystem(input({ detail: "exhaustive" }));
+    expect(sys).toContain("EXHAUSTIVE");
+    expect(sys).toContain("[mm:ss]");
+    expect(sys).toContain("même ceux qui semblent sans importance");
+    const en = buildTranscriptSystem(input({ detail: "exhaustive", language: "en" }));
+    expect(en).toContain("[mm:ss]");
+    expect(en).toContain("even those that seem unimportant");
+  });
 });
 
 describe("buildTranscriptUserText", () => {
@@ -64,6 +91,21 @@ describe("buildTranscriptUserText", () => {
     expect(text).toContain("4 min 12 s");
     expect(text).toContain("Marie Tremblay");
     expect(text).toContain("Jean Untel");
+  });
+
+  it("donne la ville et l'adresse de la fiche comme repères d'orthographe, avec le garde-fou", () => {
+    const text = buildTranscriptUserText(input());
+    // Le cas mesuré : « Sainte-Foy » transcrit « cinq fois » sans repère.
+    expect(text).toContain("Sainte-Foy");
+    expect(text).toContain("123 rue du Campanile");
+    expect(text).toContain("ne les mets PAS dans la note");
+  });
+
+  it("sans ville ni adresse sur la fiche : aucun bloc de repères", () => {
+    const text = buildTranscriptUserText(
+      input({ call: { ...CALL, clientCity: null, clientAddress: null } }),
+    );
+    expect(text).not.toContain("Repères");
   });
 });
 

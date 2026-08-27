@@ -59,7 +59,16 @@ export type TranscriptRunOutcome =
  */
 function maxTokensFor(cfg: TranscriptsSettings): number {
   if (cfg.keepTranscript) return 20_000;
-  return cfg.detail === "brief" ? 500 : cfg.detail === "standard" ? 1200 : 2500;
+  switch (cfg.detail) {
+    case "brief":
+      return 500;
+    case "standard":
+      return 1200;
+    case "detailed":
+      return 2500;
+    case "exhaustive":
+      return 4000;
+  }
 }
 
 /**
@@ -181,6 +190,10 @@ export async function runCallTranscript(
     startedAt: call.startedAt,
     agentName: call.user?.name ?? null,
     clientName: call.client?.fullName ?? null,
+    // Repères d'orthographe pour l'oreille du modèle (voir prompt.ts) — les
+    // noms propres de la fiche sont ce que l'audio téléphone abîme le plus.
+    clientCity: call.client?.city ?? null,
+    clientAddress: call.client?.address ?? null,
   };
   const promptInput = {
     language: cfg.language,

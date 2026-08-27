@@ -163,6 +163,36 @@ describe("handleCallTranscript", () => {
     expect(row?.commentId).toBe(comment?.id);
   });
 
+  it("transmet la ville et l'adresse de la fiche comme repères d'orthographe au modèle", async () => {
+    await enable();
+    const user = await makeUser();
+    const client = await makeClient({ city: "Sainte-Foy", address: "123 rue du Campanile" });
+    const [call] = await db
+      .insert(calls)
+      .values({
+        userId: user.id,
+        clientId: client.id,
+        direction: "outbound",
+        startedAt: new Date(),
+        durationSec: 180,
+        recordingUrl: RECORDING,
+        provider: "voipms",
+      })
+      .returning();
+
+    let seenUserText = "";
+    const deps: TranscriptDeps = {
+      ...okDeps,
+      generate: async (input) => {
+        seenUserText = input.userText;
+        return llmResult(JSON.stringify({ summary: "ok." }));
+      },
+    };
+    await handleCallTranscript(fakeJob({ callId: call.id }), deps);
+    expect(seenUserText).toContain("Sainte-Foy");
+    expect(seenUserText).toContain("123 rue du Campanile");
+  });
+
   it("ne conserve pas le verbatim quand keepTranscript est faux", async () => {
     await enable({ keepTranscript: false });
     const call = await makeCall();
