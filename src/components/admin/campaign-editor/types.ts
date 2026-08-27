@@ -12,6 +12,12 @@ export type CampaignEditorData = {
   enrollments: EnrollmentRow[];
   /** Résultats par variante — inscrits, réponses, arrêts. */
   variantStats: { variant: string; enrolled: number; replied: number; stopped: number }[];
+  /**
+   * Inscriptions TERMINÉES que l'échelle actuelle dépasse — celles qui ont fini
+   * avant que les derniers barreaux n'existent. Compté sur toute la campagne,
+   * pas sur les cent lignes affichées.
+   */
+  reopenableCount: number;
 };
 
 export type EnrollmentRow = {

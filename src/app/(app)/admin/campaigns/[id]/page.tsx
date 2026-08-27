@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { categories, clients, sources, users } from "@/db/schema";
 import { assistants, campaignEnrollments, campaigns, smsNumbers } from "@/db/schema-sms";
 import { requireAdmin } from "@/lib/auth/guards";
+import { countReopenCandidates } from "@/lib/campaigns-server/reopen";
 import { campaignRowToConfig } from "@/lib/campaigns/schema";
 
 export default async function CampaignEditorPage({
@@ -21,9 +22,18 @@ export default async function CampaignEditorPage({
 
   const row = await db.query.campaigns.findFirst({ where: eq(campaigns.id, id) });
   if (!row) notFound();
+  const config = campaignRowToConfig(row);
 
-  const [assistantRows, numberRows, categoryRows, sourceRows, userRows, enrollmentRows, statRows] =
-    await Promise.all([
+  const [
+    assistantRows,
+    numberRows,
+    categoryRows,
+    sourceRows,
+    userRows,
+    enrollmentRows,
+    statRows,
+    reopenableCount,
+  ] = await Promise.all([
       db
         .select({ id: assistants.id, name: assistants.name, status: assistants.status })
         .from(assistants)
@@ -72,6 +82,10 @@ export default async function CampaignEditorPage({
         .from(campaignEnrollments)
         .where(eq(campaignEnrollments.campaignId, id))
         .groupBy(campaignEnrollments.variant),
+      // Combien d'inscriptions terminées attendent les barreaux ajoutés depuis.
+      // Compté sur TOUTE la campagne, pas sur les cent lignes affichées : c'est
+      // précisément ce que l'écran ne montre pas qui dort depuis des mois.
+      countReopenCandidates(id, config.ladder.length),
     ]);
 
   const enrollments: EnrollmentRow[] = enrollmentRows.map((e) => ({
@@ -88,8 +102,9 @@ export default async function CampaignEditorPage({
 
   const data: CampaignEditorData = {
     id: row.id,
-    config: campaignRowToConfig(row),
+    config,
     status: row.status,
+    reopenableCount,
     assistants: assistantRows,
     numbers: numberRows,
     categories: categoryRows,

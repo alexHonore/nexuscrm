@@ -15,7 +15,11 @@ import {
   smsNumbers,
 } from "@/db/schema-sms";
 import { requireUser } from "@/lib/auth/guards";
-import { enrollmentInFlight, enrollmentPaused } from "@/lib/campaigns/enrollment-status";
+import {
+  enrollmentInFlight,
+  enrollmentPaused,
+  enrollmentReopenable,
+} from "@/lib/campaigns/enrollment-status";
 import { dispositionDisplayMap } from "@/lib/dispositions";
 import { APP_TZ } from "@/components/clients/timezone";
 import { ClientHeader } from "@/components/clients/client-header";
@@ -135,6 +139,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
       status: campaignEnrollments.status,
       step: campaignEnrollments.step,
       nextTouchAt: campaignEnrollments.nextTouchAt,
+      endedAt: campaignEnrollments.endedAt,
       endReason: campaignEnrollments.endReason,
       enrolledAt: campaignEnrollments.enrolledAt,
       campaignName: campaigns.name,
@@ -149,6 +154,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
 
   const clientEnrollments: ClientEnrollmentData[] = enrollmentRows.map((row) => {
     const paused = enrollmentPaused(row);
+    const ladderLength = Array.isArray(row.ladder) ? row.ladder.length : 0;
     return {
       id: row.id,
       campaignId: row.campaignId,
@@ -156,8 +162,12 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
       displayStatus: paused ? "paused" : row.status,
       inFlight: enrollmentInFlight(row.status),
       paused,
+      // C'est cette carte qui rend le trou visible : « Terminée · 1/3 messages
+      // envoyés » se lit déjà ici, parce que le total suit l'échelle ACTUELLE
+      // pendant que le compte des envois reste figé. D'où le bouton.
+      reopenable: enrollmentReopenable(row, { ladderLength }).allowed,
       sent: row.step,
-      total: Array.isArray(row.ladder) ? row.ladder.length : 0,
+      total: ladderLength,
       nextTouchAt: row.nextTouchAt?.toISOString() ?? null,
       enrolledAt: row.enrolledAt.toISOString(),
       endReason: row.endReason,

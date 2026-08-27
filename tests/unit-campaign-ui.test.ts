@@ -68,6 +68,7 @@ const DATA: CampaignEditorData = {
     { variant: "direct", enrolled: 70, replied: 9, stopped: 3 },
     { variant: "doux", enrolled: 30, replied: 5, stopped: 0 },
   ],
+  reopenableCount: 0,
 };
 
 function wrap(element: React.ReactElement): string {
@@ -81,7 +82,7 @@ function wrap(element: React.ReactElement): string {
   );
 }
 
-const tabProps = { config: CONFIG, update: () => {}, data: DATA };
+const tabProps = { config: CONFIG, update: () => {}, data: DATA, dirty: false, onReopened: () => {} };
 
 describe("liste des campagnes", () => {
   it("montre réponses ET arrêts côte à côte", () => {
@@ -175,7 +176,7 @@ describe("onglets rendus isolément", () => {
 
   it("Inscriptions : un arrêt affiche son motif", () => {
     const html = wrap(
-      createElement(EnrollmentsTab, { ...tabProps, onEnroll: () => {}, enrolling: false, onAction: () => {}, actingId: null, onBulk: () => {}, bulkBusy: false, onAdded: () => {} }),
+      createElement(EnrollmentsTab, { ...tabProps, onEnroll: () => {}, enrolling: false, onAction: () => {}, actingId: null, onBulk: () => {}, bulkBusy: false, onAdded: () => {}, dirty: false }),
     );
     expect(html).toContain("Marie Tremblay");
     expect(html).toContain("Arrêtée");
@@ -214,6 +215,7 @@ describe("onglets rendus isolément", () => {
         onBulk: () => {},
         bulkBusy: false,
         onAdded: () => {},
+        dirty: false,
       }),
     );
     // Le nom mène à la fiche.
@@ -252,6 +254,7 @@ describe("onglets rendus isolément", () => {
         onBulk: () => {},
         bulkBusy: false,
         onAdded: () => {},
+        dirty: false,
       }),
     );
     expect(html).toContain("En pause");
@@ -277,13 +280,91 @@ describe("onglets rendus isolément", () => {
     expect(html).toContain("#F59E0B");
   });
 
+  it("Échelle : rallonger sans relancer laisse des fiches derrière — l'écran le dit", () => {
+    // Le piège que ce texte désamorce : ajouter un barreau ne rattrape PERSONNE.
+    // Sans cet avertissement, l'administrateur conclut que la campagne est cassée.
+    const html = wrap(
+      createElement(LadderTab, { ...tabProps, data: { ...DATA, reopenableCount: 12 } }),
+    );
+    expect(html).toContain("12");
+    expect(html).toContain("jamais reçu les nouveaux barreaux");
+    expect(html).toContain("Relancer les terminées (12)");
+  });
+
+  it("Échelle : l'avertissement se conjugue au singulier pour une seule fiche", () => {
+    // « 1 inscriptions terminées n'ont jamais reçu » : la faute que personne ne
+    // relit, et qui se voit tout de suite sur une petite campagne.
+    const html = wrap(
+      createElement(LadderTab, { ...tabProps, data: { ...DATA, reopenableCount: 1 } }),
+    );
+    expect(html).toContain("1 inscription terminée");
+    expect(html).not.toContain("inscriptions terminées");
+  });
+
+  it("Inscriptions : une inscription terminée que l'échelle dépasse propose « Relancer »", () => {
+    const data: CampaignEditorData = {
+      ...DATA,
+      reopenableCount: 1,
+      enrollments: [
+        {
+          id: "77777777-7777-4777-8777-777777777777",
+          clientId: "88888888-8888-4888-8888-888888888888",
+          clientName: "Luc Gagnon",
+          variant: "direct",
+          // Finie quand l'échelle n'avait qu'un barreau ; elle en a deux.
+          status: "completed",
+          step: 1,
+          nextTouchAt: null,
+          endedAt: "2026-06-18T14:00:00.000Z",
+          endReason: "ladder_exhausted",
+        },
+      ],
+    };
+    const html = wrap(
+      createElement(EnrollmentsTab, {
+        ...tabProps,
+        data,
+        onEnroll: () => {},
+        enrolling: false,
+        onAction: () => {},
+        actingId: null,
+        onBulk: () => {},
+        bulkBusy: false,
+        onAdded: () => {},
+        dirty: false,
+      }),
+    );
+    expect(html).toContain("Relancer");
+    // Une inscription close reste close : pas de pause ni de retrait dessus.
+    expect(html).not.toContain("Mettre en pause");
+  });
+
+  it("Inscriptions : un arrêt ne propose jamais « Relancer »", () => {
+    // DATA porte une inscription « arrêtée » (désabonnement) : un refus exprimé
+    // ne se repêche pas, et le bouton ne doit même pas exister.
+    const html = wrap(
+      createElement(EnrollmentsTab, {
+        ...tabProps,
+        onEnroll: () => {},
+        enrolling: false,
+        onAction: () => {},
+        actingId: null,
+        onBulk: () => {},
+        bulkBusy: false,
+        onAdded: () => {},
+        dirty: false,
+      }),
+    );
+    expect(html).not.toContain("Relancer");
+  });
+
   it("aucun onglet ne laisse fuir une clé i18n", () => {
     for (const html of [
       wrap(createElement(TriggerTab, tabProps)),
       wrap(createElement(LadderTab, tabProps)),
       wrap(createElement(VariantsTab, tabProps)),
       wrap(createElement(AudienceTab, tabProps)),
-      wrap(createElement(EnrollmentsTab, { ...tabProps, onEnroll: () => {}, enrolling: false, onAction: () => {}, actingId: null, onBulk: () => {}, bulkBusy: false, onAdded: () => {} })),
+      wrap(createElement(EnrollmentsTab, { ...tabProps, onEnroll: () => {}, enrolling: false, onAction: () => {}, actingId: null, onBulk: () => {}, bulkBusy: false, onAdded: () => {}, dirty: false })),
     ]) {
       expect(html).not.toContain("MISSING_MESSAGE");
       expect(html).not.toMatch(/editor\.[a-zA-Z]+\./);

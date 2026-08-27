@@ -2,10 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
-import {
-  applyEnrollmentAction,
-  type EnrollmentActionError,
-} from "@/lib/campaigns-server/enrollment-admin";
+import { applyEnrollmentAction } from "@/lib/campaigns-server/enrollment-admin";
 
 /**
  * PATCH /api/campaigns/:id/enrollments/:enrollmentId
@@ -14,20 +11,15 @@ import {
  *  - `pause`  : l'inscription reste inscrite mais sort de la file d'envoi.
  *  - `resume` : elle repart où elle en était.
  *  - `remove` : le client est retiré de la campagne (inscription close).
+ *  - `reopen` : une inscription TERMINÉE repart au barreau où elle s'était
+ *               arrêtée, parce que l'échelle a grandi depuis.
  *
  * Réservé à l'admin (les téléphonistes ne touchent jamais aux campagnes), et
  * l'inscription doit appartenir à CETTE campagne — sinon 404, jamais un accès
  * croisé. Chaque geste est audité.
  */
 
-const bodySchema = z.object({ action: z.enum(["pause", "resume", "remove"]) });
-
-const ERROR_STATUS: Record<EnrollmentActionError, number> = {
-  not_found: 404,
-  not_in_flight: 409,
-  already_paused: 409,
-  not_paused: 409,
-};
+const bodySchema = z.object({ action: z.enum(["pause", "resume", "remove", "reopen"]) });
 
 const UUID = z.uuid();
 
@@ -56,7 +48,12 @@ export async function PATCH(
 
   const result = await applyEnrollmentAction(id, enrollmentId, parsed.data.action);
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: ERROR_STATUS[result.error] });
+    // Une seule règle, et elle vaut pour tous les motifs présents et à venir :
+    // l'inscription n'existe pas (ou pas ici) → 404 ; sinon l'état refuse le
+    // geste → 409. Une table motif par motif finissait par oublier le dernier
+    // ajouté, et l'oubli sortait en `undefined` — donc en 200.
+    const status = result.error === "not_found" ? 404 : 409;
+    return NextResponse.json({ error: result.error }, { status });
   }
 
   await logAudit({

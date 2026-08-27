@@ -1,5 +1,4 @@
-import { and, eq, gte, inArray, sql } from "drizzle-orm";
-import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
 import { conversations, messages, smsNumbers } from "@/db/schema-sms";
@@ -10,6 +9,7 @@ import { resolveQuietHours } from "@/lib/assistants/quiet-hours";
 import { analyzeSms } from "@/lib/sms/segments";
 import type { SendResult } from "@/lib/sms/types";
 import { getSmsProvider } from "@/lib/sms-server";
+import { nextTorontoDayStart, outboundCountToday } from "@/lib/sms-server/daily-cap";
 import { notifyHumans } from "@/lib/sms-server/notify";
 
 /**
@@ -33,13 +33,6 @@ import { notifyHumans } from "@/lib/sms-server/notify";
  * plus la rangée : Twilio a peut-être accepté, et la reprise renverrait un
  * doublon. On marque « unknown », on prévient, on n'insiste pas.
  */
-
-const TORONTO = "America/Toronto";
-const startOfTorontoDay = (now: Date): Date =>
-  fromZonedTime(`${formatInTimeZone(now, TORONTO, "yyyy-MM-dd")}T00:00:00`, TORONTO);
-
-/** Statuts qui comptent dans le plafond du jour : tout ce qui a quitté la maison. */
-const COUNTED = ["queued", "sending", "sent", "delivered", "accepted", "undelivered", "failed", "unknown"];
 
 export async function handleSendSms(
   job: ScheduledJob,
@@ -84,21 +77,10 @@ export async function handleSendSms(
     columns: { id: true, dailyCap: true },
   });
   if (payload.automated && number) {
-    const [row] = await db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(messages)
-      .innerJoin(conversations, eq(conversations.id, messages.conversationId))
-      .where(
-        and(
-          eq(conversations.smsNumberId, number.id),
-          eq(messages.direction, "out"),
-          gte(messages.createdAt, startOfTorontoDay(now())),
-          inArray(messages.status, COUNTED),
-        ),
-      );
-    if ((row?.n ?? 0) >= number.dailyCap) {
-      const tomorrow = new Date(startOfTorontoDay(now()).getTime() + 24 * 60 * 60 * 1000);
-      return { outcome: "reschedule", runAt: nextSendTime(tomorrow, quietHours) };
+    // Le MÊME compte que celui sur lequel la relance calcule son étalement
+    // (`sms-server/daily-cap.ts`) : deux copies finiraient par diverger.
+    if ((await outboundCountToday(number.id, now())) >= number.dailyCap) {
+      return { outcome: "reschedule", runAt: nextSendTime(nextTorontoDayStart(now()), quietHours) };
     }
   }
 

@@ -30,6 +30,30 @@ const TAB_IDS = ["basics", "trigger", "audience", "ladder", "variants", "enrollm
 /** Motifs de refus connus — seuls ceux-là ont une étiquette traduite. */
 const ENROLL_REFUSAL_KEYS = new Set<string>(ENROLL_REFUSALS);
 
+/** Motifs de refus d'une relance, côté personne puis côté campagne. */
+const REOPEN_REFUSAL_KEYS = new Set<string>([
+  "not_found",
+  "not_closed",
+  "not_ladder_end",
+  "nothing_new",
+  "no_phone",
+  "suppressed",
+  "do_not_call",
+  "replied_since",
+  "live_conversation",
+  "ai_paused",
+  "left_audience",
+  "assistant_inactive",
+  "conflict",
+]);
+const REOPEN_GATE_KEYS = new Set<string>([
+  "kill_switch",
+  "campaign_not_active",
+  "outside_window",
+  "empty_ladder",
+  "no_sender",
+]);
+
 /**
  * Éditeur de campagne.
  *
@@ -157,10 +181,10 @@ export function CampaignEditor({ data }: { data: CampaignEditorData }) {
     }
   };
 
-  /** Pause / reprise / retrait d'UNE inscription. */
+  /** Pause / reprise / retrait / relance d'UNE inscription. */
   const enrollmentAction = async (
     enrollmentId: string,
-    action: "pause" | "resume" | "remove",
+    action: "pause" | "resume" | "remove" | "reopen",
     clientName: string,
   ) => {
     // Le retrait sort le client de la campagne : on le confirme, nommément.
@@ -176,11 +200,26 @@ export function CampaignEditor({ data }: { data: CampaignEditorData }) {
         method: "PATCH",
         body: JSON.stringify({ action }),
       });
-      const toastKey = { pause: "paused", resume: "resumed", remove: "removed" }[action];
+      const toastKey = {
+        pause: "paused",
+        resume: "resumed",
+        remove: "removed",
+        reopen: "reopenedOne",
+      }[action];
       toast.success(t(`editor.enrollments.toast.${toastKey}` as never));
       router.refresh();
-    } catch {
-      toast.error(t("editor.enrollments.toast.failed"));
+    } catch (err) {
+      // Une relance refusée a TOUJOURS un motif utile — désabonnement, réponse
+      // depuis, fil repris par un humain. « Action impossible » laisserait
+      // l'administrateur sans rien à corriger.
+      const code = err instanceof ApiError ? err.code : "";
+      toast.error(
+        action === "reopen" && REOPEN_REFUSAL_KEYS.has(code)
+          ? t(`editor.enrollments.reopenRefusal.${code}` as never)
+          : action === "reopen" && REOPEN_GATE_KEYS.has(code)
+            ? t(`editor.enrollments.reopenError.${code}` as never)
+            : t("editor.enrollments.toast.failed"),
+      );
     } finally {
       setActingEnrollment(null);
     }
@@ -325,7 +364,7 @@ export function CampaignEditor({ data }: { data: CampaignEditorData }) {
           <AudienceTab {...tabProps} />
         </TabsContent>
         <TabsContent value="ladder" className="pt-4">
-          <LadderTab {...tabProps} />
+          <LadderTab {...tabProps} dirty={dirty} onReopened={() => router.refresh()} />
         </TabsContent>
         <TabsContent value="variants" className="pt-4">
           <VariantsTab {...tabProps} />
@@ -342,6 +381,7 @@ export function CampaignEditor({ data }: { data: CampaignEditorData }) {
             onBulk={(ids, action) => void enrollmentBulk(ids, action)}
             bulkBusy={bulkBusy}
             onAdded={() => router.refresh()}
+            dirty={dirty}
           />
         </TabsContent>
       </Tabs>

@@ -15,10 +15,21 @@ import {
   enrollmentInFlight,
   enrollmentPaused,
 } from "@/lib/campaigns/enrollment-status";
+import {
+  reopenEnrollments,
+  type ReopenGateError,
+  type ReopenRowRefusal,
+} from "./reopen";
 
 /**
  * Actions manuelles de l'administrateur sur UNE inscription : la mettre en
- * pause, la reprendre, ou retirer le client de la campagne.
+ * pause, la reprendre, retirer le client de la campagne, ou RELANCER une
+ * inscription terminée quand l'échelle a grandi depuis (`reopen.ts`).
+ *
+ * « Reprendre » et « relancer » ne se confondent pas : la première sort une
+ * inscription VIVANTE de la pause où l'administrateur l'a mise, la seconde
+ * rouvre une inscription CLOSE parce qu'il reste des barreaux qui n'existaient
+ * pas quand elle s'est terminée.
  *
  * Le schéma est gelé : pas de statut « en pause » dédié. On s'appuie donc sur
  * un invariant du planificateur (voir `queueDueTouches` : il ne sélectionne
@@ -38,7 +49,12 @@ export type EnrollmentActionError =
   | "not_found"
   | "not_in_flight"
   | "already_paused"
-  | "not_paused";
+  | "not_paused"
+  // La relance a ses propres refus — ceux de la campagne comme ceux de la
+  // personne. Ils remontent tels quels : « action impossible » ne dit pas à
+  // l'administrateur si c'est le numéro qui manque ou la personne qui a dit non.
+  | ReopenGateError
+  | ReopenRowRefusal;
 
 export type EnrollmentActionResult =
   | { ok: true; clientId: string }
@@ -173,7 +189,27 @@ export async function removeEnrollment(
   return { ok: true, clientId: e.clientId };
 }
 
-export type EnrollmentAction = "pause" | "resume" | "remove";
+/**
+ * Relance UNE inscription terminée. Le travail est fait par le module de
+ * relance — même lecture, mêmes refus, même étalement que le geste en lot :
+ * une deuxième implémentation « pour un cas simple » finirait par autoriser
+ * ici ce que l'autre refuse.
+ */
+export async function reopenEnrollment(
+  campaignId: string,
+  enrollmentId: string,
+  now = new Date(),
+): Promise<EnrollmentActionResult> {
+  const result = await reopenEnrollments(campaignId, { enrollmentIds: [enrollmentId], now });
+  if (!result.ok) return { ok: false, error: result.error };
+  const [reopened] = result.planned;
+  if (reopened) return { ok: true, clientId: reopened.clientId };
+  // Un seul candidat : le rapport ne contient qu'un motif, et c'est le sien.
+  const [refusal] = Object.keys(result.refused) as ReopenRowRefusal[];
+  return { ok: false, error: refusal ?? "not_found" };
+}
+
+export type EnrollmentAction = "pause" | "resume" | "remove" | "reopen";
 
 /** Aiguillage unique — le point d'entrée de la route. */
 export async function applyEnrollmentAction(
@@ -189,5 +225,7 @@ export async function applyEnrollmentAction(
       return resumeEnrollment(campaignId, enrollmentId, now);
     case "remove":
       return removeEnrollment(campaignId, enrollmentId, now);
+    case "reopen":
+      return reopenEnrollment(campaignId, enrollmentId, now);
   }
 }

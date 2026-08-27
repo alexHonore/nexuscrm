@@ -1,6 +1,15 @@
 "use client";
 
-import { AlertTriangle, Loader2, Pause, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Loader2,
+  Pause,
+  Play,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
@@ -41,8 +50,13 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { TRIGGER_KINDS } from "@/lib/campaigns/schema";
 import { planLadder } from "@/lib/campaigns/ladder";
-import { enrollmentInFlight, enrollmentPaused } from "@/lib/campaigns/enrollment-status";
+import {
+  enrollmentInFlight,
+  enrollmentPaused,
+  enrollmentReopenable,
+} from "@/lib/campaigns/enrollment-status";
 import { AddClientsDialog } from "./add-clients-dialog";
+import { ReopenDialog } from "./reopen-dialog";
 import { analyzeSms } from "@/lib/sms/segments";
 import { cn } from "@/lib/utils";
 import { api } from "../api";
@@ -603,7 +617,18 @@ export function AudienceTab({ config, update, data }: CampaignTabProps) {
 
 // ── Échelle ──────────────────────────────────────────────────────────────────
 
-export function LadderTab({ config, update }: CampaignTabProps) {
+export function LadderTab({
+  config,
+  update,
+  data,
+  dirty,
+  onReopened,
+}: CampaignTabProps & {
+  /** L'échelle a des modifications non enregistrées. */
+  dirty: boolean;
+  /** Des inscriptions viennent de repartir — recharger. */
+  onReopened: () => void;
+}) {
   const t = useTranslations("campaigns");
   const now = new Date();
   const plan = planLadder(config.ladder, now);
@@ -624,6 +649,29 @@ export function LadderTab({ config, update }: CampaignTabProps) {
         <Alert>
           <AlertTriangle />
           <AlertDescription>{t("editor.ladder.empty")}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {/* Rallonger une échelle ne rattrape PERSONNE : les fiches qui ont fini
+          l'ancienne sont closes, et rien ne les rouvre — ni l'inscription de
+          l'audience, qui exclut les déjà-inscrits, ni l'index unique. Le dire
+          ICI, là où les barreaux s'ajoutent, plutôt que de laisser
+          l'administrateur conclure que la campagne est cassée. */}
+      {data.reopenableCount > 0 ? (
+        <Alert>
+          <AlertTriangle />
+          <AlertDescription className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <span className="min-w-0 flex-1">
+              {t("editor.enrollments.ladderGrew", { count: data.reopenableCount })}
+            </span>
+            <ReopenDialog
+              campaignId={data.id}
+              count={data.reopenableCount}
+              dirty={dirty}
+              size="sm"
+              onDone={onReopened}
+            />
+          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -917,11 +965,16 @@ export function EnrollmentsTab({
   onBulk,
   bulkBusy,
   onAdded,
+  dirty,
 }: CampaignTabProps & {
   onEnroll: () => void;
   enrolling: boolean;
-  /** Pause / reprise / retrait d'UNE inscription. */
-  onAction: (enrollmentId: string, action: "pause" | "resume" | "remove", clientName: string) => void;
+  /** Pause / reprise / retrait / relance d'UNE inscription. */
+  onAction: (
+    enrollmentId: string,
+    action: "pause" | "resume" | "remove" | "reopen",
+    clientName: string,
+  ) => void;
   /** L'inscription dont une action est en cours — ses boutons tournent. */
   actingId: string | null;
   /** Action sur un LOT d'inscriptions sélectionnées. */
@@ -930,6 +983,8 @@ export function EnrollmentsTab({
   bulkBusy: boolean;
   /** Des fiches viennent d'être ajoutées — recharger la liste. */
   onAdded: () => void;
+  /** L'échelle a des modifications non enregistrées. */
+  dirty: boolean;
 }) {
   const t = useTranslations("campaigns");
   // Sélection pour les actions en lot — uniquement des inscriptions EN VOL
@@ -964,10 +1019,23 @@ export function EnrollmentsTab({
           users={data.users}
           onAdded={onAdded}
         />
-        <Button onClick={onEnroll} disabled={enrolling} className="min-h-11 md:min-h-9">
-          {enrolling ? <Loader2 className="animate-spin" /> : <Plus />}
-          {enrolling ? t("editor.enrollments.enrolling") : t("editor.enrollments.enrollNow")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Portée CAMPAGNE, pas sélection : cet écran n'affiche que les cent
+              inscriptions les plus récentes, et ce qu'on ne voit pas est
+              justement ce qui dort depuis des mois. */}
+          {data.reopenableCount > 0 ? (
+            <ReopenDialog
+              campaignId={data.id}
+              count={data.reopenableCount}
+              dirty={dirty}
+              onDone={onAdded}
+            />
+          ) : null}
+          <Button onClick={onEnroll} disabled={enrolling} className="min-h-11 md:min-h-9">
+            {enrolling ? <Loader2 className="animate-spin" /> : <Plus />}
+            {enrolling ? t("editor.enrollments.enrolling") : t("editor.enrollments.enrollNow")}
+          </Button>
+        </div>
       </div>
 
       {/* Barre d'actions en lot — visible dès qu'une inscription est cochée. */}
@@ -1055,6 +1123,12 @@ export function EnrollmentsTab({
                 const paused = enrollmentPaused(row);
                 const displayStatus = paused ? "paused" : row.status;
                 const inFlight = enrollmentInFlight(row.status);
+                // L'échelle ENREGISTRÉE fait foi, pas le brouillon : le bouton
+                // ne doit pas promettre un barreau que le serveur ne connaît
+                // pas encore.
+                const reopenable = enrollmentReopenable(row, {
+                  ladderLength: data.config.ladder.length,
+                }).allowed;
                 const acting = actingId === row.id;
                 const anyActing = actingId !== null;
                 return (
@@ -1152,6 +1226,21 @@ export function EnrollmentsTab({
                             <Trash2 /> {t("editor.enrollments.remove")}
                           </Button>
                         </div>
+                      ) : reopenable ? (
+                        // Terminée AVANT que les derniers barreaux n'existent :
+                        // elle peut reprendre la suite. Le geste est refusé
+                        // tant que l'échelle n'est pas enregistrée.
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="min-h-11 md:min-h-8"
+                          disabled={anyActing || dirty}
+                          title={dirty ? t("editor.enrollments.reopenDirty") : undefined}
+                          onClick={() => onAction(row.id, "reopen", row.clientName)}
+                        >
+                          {acting ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+                          {t("editor.enrollments.reopen")}
+                        </Button>
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}

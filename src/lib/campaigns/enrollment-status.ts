@@ -29,6 +29,12 @@ export const REMOVED_REASON = "removed_by_admin";
  * la main (`removeEnrollment`).
  */
 export const LEFT_AUDIENCE_REASON = "left_audience";
+/**
+ * Motif de clôture d'une échelle allée jusqu'à son dernier barreau, écrit par
+ * `runTouch`. C'est le SEUL motif de clôture qu'une relance peut rouvrir : il
+ * dit « on a tout dit », pas « cette personne ne veut plus ».
+ */
+export const LADDER_EXHAUSTED_REASON = "ladder_exhausted";
 
 const IN_FLIGHT = new Set(["pending", "active"]);
 
@@ -48,4 +54,57 @@ export function enrollmentPaused(e: {
   endReason: string | null;
 }): boolean {
   return enrollmentInFlight(e.status) && e.nextTouchAt == null && e.endReason === PAUSED_REASON;
+}
+
+/** Pourquoi une inscription terminée ne se relance PAS. */
+export type ReopenRefusal =
+  /** Encore en vol (ou en pause) : le geste s'appelle « Reprendre », pas « Relancer ». */
+  | "not_closed"
+  /** Close pour autre chose qu'une échelle finie — un refus ne se repêche jamais. */
+  | "not_ladder_end"
+  /** Échelle finie, mais rien de neuf : la campagne n'a pas grandi depuis. */
+  | "nothing_new";
+
+export type ReopenDecision = { allowed: true } | { allowed: false; refusal: ReopenRefusal };
+
+/**
+ * Peut-on RELANCER cette inscription terminée, c'est-à-dire la remettre en vol
+ * au barreau où elle s'est arrêtée parce que l'échelle a GRANDI depuis ?
+ *
+ * Une seule porte : l'échelle est allée jusqu'au bout (`completed` +
+ * `ladder_exhausted`) et la campagne compte désormais plus de barreaux que
+ * cette inscription n'en a consommés. Tout le reste — un désabonnement, un
+ * « ne pas appeler », une réponse, un rendez-vous, un retrait, une sortie
+ * d'audience — n'est pas une échelle finie et ne se relance jamais : ce sont
+ * des décisions PRISES SUR LA PERSONNE, et rallonger une échelle ne les annule
+ * pas.
+ *
+ * Le `step` n'est jamais rembobiné : les barreaux déjà tracés
+ * (`campaign_touches`, unique sur `(inscription, barreau)`) ne repartent pas.
+ * Relancer, c'est envoyer la SUITE, pas recommencer.
+ *
+ * ⚠️ Ce prédicat autorise le BOUTON, jamais l'envoi. Un STOP arrivé APRÈS la
+ * clôture laisse l'inscription intacte — `markEnrollmentsStopped` ne touche que
+ * les inscriptions en vol — alors que la suppression, elle, est bien écrite.
+ * Le serveur revérifie donc tout au moment de relancer
+ * (`campaigns-server/reopen.ts`), et c'est lui qui décide.
+ */
+export function enrollmentReopenable(
+  e: { status: string; step: number; endedAt: Date | string | null; endReason: string | null },
+  opts: { ladderLength: number },
+): ReopenDecision {
+  // Une inscription en vol n'a rien à rouvrir ; une pause manuelle non plus —
+  // elle porte `end_reason` sans être close, et c'est « Reprendre » qui la sort
+  // de la file d'attente.
+  if (enrollmentInFlight(e.status) || e.endedAt == null) {
+    return { allowed: false, refusal: "not_closed" };
+  }
+  if (e.status !== "completed" || e.endReason !== LADDER_EXHAUSTED_REASON) {
+    return { allowed: false, refusal: "not_ladder_end" };
+  }
+  // Rien de neuf : la remettre en vol la ferait re-clôturer au premier cycle
+  // (`canSendTouch` refuse « échelle épuisée »), en réécrivant `ended_at` avec
+  // la date du jour — une perte d'histoire pour zéro message.
+  if (e.step >= opts.ladderLength) return { allowed: false, refusal: "nothing_new" };
+  return { allowed: true };
 }

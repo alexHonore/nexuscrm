@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
-import { api } from "@/components/admin/api";
+import { ApiError, api } from "@/components/admin/api";
 import { ENROLLMENT_STATUS_LOOK, LookIcon } from "@/components/look";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +33,12 @@ export type ClientEnrollmentData = {
   /** Encore vivante (pending/active) : les actions n'ont de sens que là. */
   inFlight: boolean;
   paused: boolean;
+  /**
+   * Terminée AVANT que les derniers barreaux de la campagne n'existent : elle
+   * peut reprendre la suite. Calculé côté serveur — la carte affiche, elle ne
+   * refait pas l'arithmétique de l'échelle.
+   */
+  reopenable: boolean;
   /** Barreaux déjà partis / longueur de l'échelle. */
   sent: number;
   total: number;
@@ -41,6 +47,14 @@ export type ClientEnrollmentData = {
   endReason: string | null;
   assistantName: string | null;
 };
+
+/** Le mot juste après chaque geste — la cascade de ternaires en oubliait un. */
+const TOAST_KEY = {
+  pause: "paused",
+  resume: "resumed",
+  remove: "removed",
+  reopen: "reopenedOne",
+} as const;
 
 export function CampaignEnrollmentsCard({
   clientName,
@@ -61,7 +75,10 @@ export function CampaignEnrollmentsCard({
   const fmt = (iso: string) =>
     formatInTimeZone(new Date(iso), APP_TZ, "EEE d MMM, HH:mm", { locale: dfnsLocale });
 
-  const act = async (e: ClientEnrollmentData, action: "pause" | "resume" | "remove") => {
+  const act = async (
+    e: ClientEnrollmentData,
+    action: "pause" | "resume" | "remove" | "reopen",
+  ) => {
     if (
       action === "remove" &&
       !window.confirm(tc("editor.enrollments.removeConfirm", { name: clientName }))
@@ -73,19 +90,25 @@ export function CampaignEnrollmentsCard({
         method: "PATCH",
         body: JSON.stringify({ action }),
       });
-      toast.success(
-        tc(
-          action === "pause"
-            ? "editor.enrollments.toast.paused"
-            : action === "resume"
-              ? "editor.enrollments.toast.resumed"
-              : "editor.enrollments.toast.removed",
-        ),
-      );
+      toast.success(tc(`editor.enrollments.toast.${TOAST_KEY[action]}` as never));
       emitDataChange("sms");
       router.refresh();
-    } catch {
-      toast.error(tc("editor.enrollments.toast.failed"));
+    } catch (err) {
+      // Deux familles de motifs, et cette carte rencontre surtout la seconde :
+      // ce qui écarte CETTE inscription (`reopenRefusal`), et ce qui bloque
+      // toute la campagne (`reopenError` — campagne en pause, fenêtre fermée,
+      // aucun numéro d'envoi). La fiche client affiche le bouton sans rien
+      // savoir de l'état de la campagne ; lui répondre « action impossible »
+      // ne laisserait rien à corriger.
+      const code = err instanceof ApiError ? err.code : "";
+      const named = ["reopenRefusal", "reopenError"]
+        .map((group) => `editor.enrollments.${group}.${code}`)
+        .find((key) => tc.has(key as never));
+      toast.error(
+        action === "reopen" && named !== undefined
+          ? tc(named as never)
+          : tc("editor.enrollments.toast.failed"),
+      );
     } finally {
       setBusyId(null);
     }
@@ -176,6 +199,21 @@ export function CampaignEnrollmentsCard({
                         onClick={() => act(e, "remove")}
                       >
                         {tc("editor.enrollments.remove")}
+                      </Button>
+                    </div>
+                  ) : isAdmin && e.reopenable ? (
+                    // « Terminée · 1/3 messages envoyés » se lisait déjà ici :
+                    // l'échelle a grandi, cette fiche n'a jamais reçu la suite.
+                    // Le bouton est la réponse à ce que la carte annonce déjà.
+                    <div className="shrink-0">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="min-h-11 md:min-h-8"
+                        disabled={busyId === e.id}
+                        onClick={() => act(e, "reopen")}
+                      >
+                        {tc("editor.enrollments.reopen")}
                       </Button>
                     </div>
                   ) : null}
