@@ -17,13 +17,16 @@
 import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
+import { fr } from "date-fns/locale";
 import { formatInTimeZone } from "date-fns-tz";
 import { describe, expect, it, vi } from "vitest";
+import conversationsFr from "../messages/fr/conversations.json";
 import dashboardEn from "../messages/en/dashboard.json";
 import dashboardFr from "../messages/fr/dashboard.json";
 import { APP_TZ, torontoDayRange, torontoDayStart } from "@/components/clients/timezone";
 import type { FollowupItemData } from "@/app/(app)/dashboard/followup-item";
 import type { FollowupDayGroup } from "@/app/(app)/dashboard/upcoming-followups";
+import type { AttentionRowData } from "@/app/(app)/dashboard/attention-list";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("@/app/(app)/clients/actions", () => ({ completeFollowupAction: vi.fn() }));
@@ -32,6 +35,7 @@ vi.mock("@/components/telephony/telephony-context", () => ({
 }));
 
 const { UpcomingFollowups } = await import("@/app/(app)/dashboard/upcoming-followups");
+const { AttentionList } = await import("@/app/(app)/dashboard/attention-list");
 
 // ── L'horizon ────────────────────────────────────────────────────────────────
 
@@ -125,6 +129,67 @@ function render(dayGroups: FollowupDayGroup[], locale: "fr" | "en" = "fr"): stri
 }
 
 const rowCount = (html: string) => (html.match(/aria-label="Ouvrir la fiche"/g) ?? []).length;
+
+/** La carte « SMS IA — à reprendre », rendue avec les VRAIS messages des deux modules. */
+function renderAttention(rows: AttentionRowData[], hidden = 0): string {
+  return renderToStaticMarkup(
+    // eslint-disable-next-line react/no-children-prop
+    createElement(NextIntlClientProvider, {
+      locale: "fr",
+      timeZone: APP_TZ,
+      messages: {
+        dashboard: dashboardFr,
+        conversations: conversationsFr,
+      } as unknown as IntlMessages,
+      children: createElement(AttentionList, { rows, hidden, dfnsLocale: fr }),
+    }),
+  );
+}
+
+const attentionRow = (over: Partial<AttentionRowData> = {}): AttentionRowData => ({
+  id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  clientId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  clientName: "Marie Tremblay",
+  clientPhone: "+14185551234",
+  attentionReason: "handoff",
+  lastAt: "2026-08-21T15:00:00.000Z",
+  ...over,
+});
+
+describe("tableau de bord — les fils rendus par l'assistant SMS", () => {
+  it("nomme la personne, le motif, et mène à sa fiche", () => {
+    const html = renderAttention([attentionRow()]);
+    expect(html).toContain("Marie Tremblay");
+    // Le motif est TRADUIT, et il vient du module des conversations.
+    expect(html).toContain("Passé à un humain");
+    expect(html).toContain('href="/clients/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"');
+  });
+
+  it("§ un motif inconnu s'affiche tel quel plutôt qu'en clé i18n", () => {
+    // Le moteur peut écrire un motif qu'aucune traduction ne connaît encore ;
+    // « inbox.reason.quelque_chose » à l'écran serait pire que le mot brut.
+    const html = renderAttention([attentionRow({ attentionReason: "motif_futur" })]);
+    expect(html).toContain("motif_futur");
+    expect(html).not.toContain("inbox.reason.");
+  });
+
+  it("sans fiche rattachée, la ligne mène quand même quelque part", () => {
+    const html = renderAttention([attentionRow({ clientId: null, clientName: null })]);
+    expect(html).toContain('href="/conversations"');
+    // Faute de nom, le numéro — jamais une ligne vide.
+    expect(html).toContain("418");
+  });
+
+  it("ce qui n'est pas montré est compté ET atteignable", () => {
+    const html = renderAttention([attentionRow()], 4);
+    expect(html).toContain("et 4 autres");
+    expect(html).toContain('href="/conversations"');
+  });
+
+  it("un seul de plus se dit au singulier", () => {
+    expect(renderAttention([attentionRow()], 1)).toContain("et 1 autre");
+  });
+});
 
 describe("suivis à venir — repliage", () => {
   it("montre tout tant que la semaine tient dans la carte", () => {

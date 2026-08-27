@@ -18,16 +18,19 @@ import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { db } from "@/db";
 import { appointments, calls, clients, followups } from "@/db/schema";
+import { conversations } from "@/db/schema-sms";
 import { requireUser } from "@/lib/auth/guards";
 import { formatPhone, phoneMatchKey } from "@/lib/phone";
 import { RedialButton } from "@/components/calls/redial-button";
 import { APP_TZ, torontoDayRange, torontoDayStart } from "@/components/clients/timezone";
+import { CONVERSATION_STATE_LOOK, LookIcon } from "@/components/look";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FollowupItem, type FollowupItemData } from "./followup-item";
 import { UpcomingFollowups, type FollowupDayGroup } from "./upcoming-followups";
+import { AttentionList } from "./attention-list";
 import { QuickSearch } from "./quick-search";
 
 /** Horizon de la section « À venir » des suivis : demain → +7 jours civils. */
@@ -58,8 +61,24 @@ export default async function DashboardPage() {
     lt(appointments.startsAt, upcomingHorizon),
   );
 
-  const [pendingFollowups, upcomingAppointments, upcomingCount, [callStats], bookedToday, missedRows] =
-    await Promise.all([
+  // Les fils que l'assistant SMS a rendus à un humain. Le courtier les voit
+  // tous — chaque conversation rendue est la sienne ; un téléphoniste ne voit
+  // que celles qui lui sont assignées, comme pour ses suivis et ses rendez-vous.
+  const attentionWhere = and(
+    eq(conversations.needsAttention, true),
+    ...(user.role === "admin" ? [] : [eq(conversations.assignedToId, user.id)]),
+  );
+
+  const [
+    pendingFollowups,
+    upcomingAppointments,
+    upcomingCount,
+    [callStats],
+    bookedToday,
+    missedRows,
+    attentionRows,
+    attentionCount,
+  ] = await Promise.all([
     // En retard + aujourd'hui + les 7 jours qui viennent, en UNE requête —
     // l'index (assigned_to_id, due_at) couvre la borne haute.
     db.query.followups.findMany({
@@ -119,6 +138,24 @@ export default async function DashboardPage() {
       )
       .orderBy(desc(calls.startedAt))
       .limit(50),
+    // Les fils rendus à un humain — les plus récents d'abord. Le fil est
+    // toujours rattaché à une fiche : c'est elle qu'on ouvre pour répondre.
+    db
+      .select({
+        id: conversations.id,
+        clientId: conversations.clientId,
+        clientName: clients.fullName,
+        clientPhone: conversations.clientPhone,
+        attentionReason: conversations.attentionReason,
+        lastInboundAt: conversations.lastInboundAt,
+        lastOutboundAt: conversations.lastOutboundAt,
+      })
+      .from(conversations)
+      .leftJoin(clients, eq(clients.id, conversations.clientId))
+      .where(attentionWhere)
+      .orderBy(desc(conversations.lastInboundAt))
+      .limit(6),
+    db.$count(conversations, attentionWhere),
   ]);
 
   // « Jamais retourné » : aucun appel POSTÉRIEUR, de qui que ce soit dans
@@ -464,6 +501,54 @@ export default async function DashboardPage() {
                   </div>
                 ) : null}
               </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Ce que l'assistant SMS a rendu à un humain. Placé À CÔTÉ des suivis :
+            c'est du travail humain dû MAINTENANT, au même titre qu'une relance
+            en retard — pas une statistique du moteur. La bande de santé du
+            moteur, elle, reste dans les conversations et reste au courtier. */}
+        <Card className="shadow-xs">
+          <CardHeader className="border-b">
+            <CardTitle className="flex items-center gap-2">
+              <LookIcon look={CONVERSATION_STATE_LOOK.attention} />
+              {t("attention.title")}
+              <Badge variant="secondary" className="tabular-nums">
+                {attentionCount}
+              </Badge>
+            </CardTitle>
+            <CardAction>
+              <Button
+                variant="ghost"
+                className="min-h-11 text-muted-foreground md:min-h-8"
+                render={<Link href="/conversations" />}
+              >
+                {t("attention.openInbox")}
+                <ChevronRightIcon />
+              </Button>
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            {attentionRows.length === 0 ? (
+              <EmptyState
+                className="py-8"
+                icon={<CheckCircle2Icon className="text-emerald-700! dark:text-emerald-400!" />}
+                title={t("attention.empty")}
+              />
+            ) : (
+              <AttentionList
+                rows={attentionRows.map((row) => ({
+                  id: row.id,
+                  clientId: row.clientId,
+                  clientName: row.clientName,
+                  clientPhone: row.clientPhone,
+                  attentionReason: row.attentionReason,
+                  lastAt: (row.lastInboundAt ?? row.lastOutboundAt)?.toISOString() ?? null,
+                }))}
+                hidden={attentionCount - attentionRows.length}
+                dfnsLocale={dfnsLocale}
+              />
             )}
           </CardContent>
         </Card>

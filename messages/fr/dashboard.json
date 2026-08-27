@@ -27,6 +27,12 @@
     "done": "Suivi terminé",
     "doNotCall": "Ne pas appeler"
   },
+  "attention": {
+    "title": "SMS IA — à reprendre",
+    "empty": "Rien à reprendre : l'assistant tient tous ses fils.",
+    "openInbox": "Conversations",
+    "more": "{count, plural, one {et # autre} other {et # autres}}"
+  },
   "appointments": {
     "title": "Prochains rendez-vous",
     "empty": "Aucun rendez-vous à venir.",

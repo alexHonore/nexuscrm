@@ -27,6 +27,12 @@
     "done": "Follow-up completed",
     "doNotCall": "Do not call"
   },
+  "attention": {
+    "title": "AI SMS — needs you",
+    "empty": "Nothing to take over: the assistant is holding every thread.",
+    "openInbox": "Conversations",
+    "more": "{count, plural, one {and # more} other {and # more}}"
+  },
   "appointments": {
     "title": "Upcoming appointments",
     "empty": "No upcoming appointments.",
