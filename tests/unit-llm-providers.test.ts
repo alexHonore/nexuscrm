@@ -24,12 +24,13 @@ import { createOpenAiProvider, isOpenAiReasoningModel } from "@/lib/llm/openai";
 import { UTILITY_MODEL_BY_PROVIDER } from "@/lib/llm/defaults";
 import { groupToolResults } from "@/lib/llm/messages";
 import { REASONING_BUDGET_TOKENS } from "@/lib/llm/reasoning";
-import { generateWithFallback } from "@/lib/llm/route";
+import { generateWithChain } from "@/lib/llm/route";
 import {
   LLMProviderError,
   type GenerateInput,
   type LLMMessage,
   type LLMProvider,
+  type ProviderId,
 } from "@/lib/llm/types";
 
 // ── Faux transport ───────────────────────────────────────────────────────────
@@ -730,8 +731,11 @@ describe("UTILITY_MODEL_BY_PROVIDER", () => {
 
 describe("erreurs normalisées", () => {
   it("500 → rejouable, 400 → non rejouable", async () => {
+    // `attempts: 1` : ce test porte sur la CLASSIFICATION de l'erreur, pas sur
+    // la reprise (testée plus bas) — sans ça il attendrait les reprises.
     const server = createOpenRouterProvider({
       apiKey: "k",
+      retry: { attempts: 1 },
       fetchFn: makeFetch(500, { error: { message: "upstream down" } }).fetchFn,
     });
     await expect(server.generate(INPUT)).rejects.toMatchObject({
@@ -755,6 +759,7 @@ describe("erreurs normalisées", () => {
     // 2026-08-25.
     const throttled = createOpenRouterProvider({
       apiKey: "k",
+      retry: { attempts: 1 },
       fetchFn: makeFetch(200, {
         error: { message: "openai/gpt-5.6-luna is temporarily rate-limited upstream", code: 429 },
       }).fetchFn,
@@ -810,12 +815,124 @@ describe("erreurs normalisées", () => {
   });
 });
 
-describe("generateWithFallback", () => {
-  const fakeProvider = (impl: LLMProvider["generate"]): LLMProvider => ({
-    id: "anthropic",
-    generate: impl,
-    listModels: async () => [],
+// ── Reprise sur place (transport) ────────────────────────────────────────────
+
+describe("reprise d'un refus passager", () => {
+  const ANSWER = {
+    model: "anthropic/claude-sonnet-5",
+    choices: [{ finish_reason: "stop", message: { content: "Bonjour Marie!" } }],
+    usage: { prompt_tokens: 1, completion_tokens: 1 },
+  };
+
+  /** Répond `status` les `failures` premières fois, puis 200. */
+  function flakyFetch(status: number, failures: number, payload: unknown, headers: HeadersInit = {}) {
+    let seen = 0;
+    const fetchFn: typeof fetch = async () => {
+      seen += 1;
+      if (seen <= failures) {
+        return new Response(JSON.stringify({ error: { message: "rate-limited upstream" } }), {
+          status,
+          headers,
+        });
+      }
+      return new Response(JSON.stringify(payload), { status: 200 });
+    };
+    return { fetchFn, seen: () => seen };
+  }
+
+  it("un 429 est rejoué sur le MÊME modèle et finit par aboutir", async () => {
+    // Le message exact vu en production : « temporarily rate-limited upstream.
+    // Please retry shortly ». Sans reprise, une fixture de la suite virait au
+    // rouge (« erreur du modèle : llm_upstream_429 ») pour deux secondes
+    // d'embouteillage, et l'assistant devenait inactivable.
+    const waits: number[] = [];
+    const flaky = flakyFetch(429, 2, ANSWER);
+    const provider = createOpenRouterProvider({
+      apiKey: "k",
+      fetchFn: flaky.fetchFn,
+      sleepFn: async (ms) => void waits.push(ms),
+    });
+
+    const result = await provider.generate(INPUT);
+
+    expect(result.text).toBe("Bonjour Marie!");
+    expect(flaky.seen()).toBe(3);
+    // Attente croissante : deux appels collés ne feraient que consommer deux
+    // refus de plus.
+    expect(waits).toHaveLength(2);
+    expect(waits[1]).toBeGreaterThan(waits[0]);
   });
+
+  it("une erreur GLISSÉE dans un 200 est reprise elle aussi", async () => {
+    let seen = 0;
+    const fetchFn: typeof fetch = async () => {
+      seen += 1;
+      return new Response(
+        JSON.stringify(
+          seen === 1 ? { error: { message: "rate-limited upstream", code: 429 } } : ANSWER,
+        ),
+        { status: 200 },
+      );
+    };
+    const provider = createOpenRouterProvider({ apiKey: "k", fetchFn, sleepFn: async () => {} });
+
+    expect((await provider.generate(INPUT)).text).toBe("Bonjour Marie!");
+    expect(seen).toBe(2);
+  });
+
+  it("`Retry-After` de l'amont l'emporte sur notre progression", async () => {
+    const waits: number[] = [];
+    const flaky = flakyFetch(429, 1, ANSWER, { "retry-after": "2" });
+    const provider = createOpenRouterProvider({
+      apiKey: "k",
+      fetchFn: flaky.fetchFn,
+      sleepFn: async (ms) => void waits.push(ms),
+    });
+
+    await provider.generate(INPUT);
+    expect(waits).toEqual([2000]);
+  });
+
+  it("une requête FAUTIVE n'est jamais rejouée — la facture doublerait pour rien", async () => {
+    const flaky = flakyFetch(400, 5, ANSWER);
+    const provider = createOpenRouterProvider({
+      apiKey: "k",
+      fetchFn: flaky.fetchFn,
+      sleepFn: async () => {},
+    });
+
+    await expect(provider.generate(INPUT)).rejects.toMatchObject({ status: 400 });
+    expect(flaky.seen()).toBe(1);
+  });
+
+  it("un compte à sec (402) n'est pas repris : attendre n'y change rien", async () => {
+    const flaky = flakyFetch(402, 5, ANSWER);
+    const provider = createOpenRouterProvider({
+      apiKey: "k",
+      fetchFn: flaky.fetchFn,
+      sleepFn: async () => {},
+    });
+
+    await expect(provider.generate(INPUT)).rejects.toMatchObject({ status: 402 });
+    expect(flaky.seen()).toBe(1);
+  });
+
+  it("un amont durablement encombré finit par remonter, sans boucler", async () => {
+    const flaky = flakyFetch(429, 99, ANSWER);
+    const provider = createOpenRouterProvider({
+      apiKey: "k",
+      fetchFn: flaky.fetchFn,
+      sleepFn: async () => {},
+    });
+
+    await expect(provider.generate(INPUT)).rejects.toMatchObject({ status: 429 });
+    expect(flaky.seen()).toBe(3);
+  });
+});
+
+// ── Chaîne de replis ─────────────────────────────────────────────────────────
+
+describe("generateWithChain", () => {
   const ok = {
     text: "ok",
     toolCalls: [],
@@ -824,53 +941,163 @@ describe("generateWithFallback", () => {
     modelServed: "claude-sonnet-5",
     raw: {},
   };
+  const fakeProvider = (id: ProviderId, impl: LLMProvider["generate"]): LLMProvider => ({
+    id,
+    generate: impl,
+    listModels: async () => [],
+  });
+  const down = (status: number, retryable = true) =>
+    async (): Promise<never> => {
+      throw new LLMProviderError(`down ${status}`, "openrouter", status, retryable);
+    };
+  const CHAIN_INPUT = { ...INPUT, routing: { zdr: true } };
+  delete (CHAIN_INPUT as { model?: string }).model;
 
-  it("rejoue UNE fois chez le repli, avec l'identifiant de modèle du repli", async () => {
-    let seenModel = "";
-    const primary = fakeProvider(async () => {
-      throw new LLMProviderError("down", "openrouter", 503, true);
-    });
-    const fallback = fakeProvider(async (input) => {
-      seenModel = input.model;
-      return ok;
-    });
+  it("descend la chaîne jusqu'au cran qui répond, avec SON identifiant", async () => {
+    const seen: string[] = [];
+    const resolve = (id: ProviderId) =>
+      fakeProvider(id, async (input) => {
+        seen.push(`${id}/${input.model}`);
+        if (id !== "google") throw new LLMProviderError("down", id, 503, true);
+        return ok;
+      });
 
-    const { result, usedFallback } = await generateWithFallback(primary, fallback, {
-      ...INPUT,
-      fallbackModel: "claude-sonnet-5",
-    });
+    const outcome = await generateWithChain(
+      [
+        { provider: "openrouter", model: "openai/gpt-5.6-luna" },
+        { provider: "anthropic", model: "claude-sonnet-5" },
+        { provider: "google", model: "gemini-2.5-pro" },
+      ],
+      CHAIN_INPUT,
+      { resolve },
+    );
 
-    expect(usedFallback).toBe(true);
-    expect(result.text).toBe("ok");
-    expect(seenModel).toBe("claude-sonnet-5");
+    expect(outcome.rung).toBe(2);
+    expect(outcome.used).toEqual({ provider: "google", model: "gemini-2.5-pro" });
+    expect(seen).toEqual([
+      "openrouter/openai/gpt-5.6-luna",
+      "anthropic/claude-sonnet-5",
+      "google/gemini-2.5-pro",
+    ]);
   });
 
-  it("une erreur non rejouable remonte sans appeler le repli", async () => {
-    let called = false;
-    const primary = fakeProvider(async () => {
-      throw new LLMProviderError("bad request", "openrouter", 400, false);
-    });
-    const fallback = fakeProvider(async () => {
-      called = true;
-      return ok;
-    });
+  it("l'objet de routage ne part QUE chez OpenRouter", async () => {
+    const routings: (unknown | undefined)[] = [];
+    const resolve = (id: ProviderId) =>
+      fakeProvider(id, async (input) => {
+        routings.push(input.routing);
+        if (id === "openrouter") throw new LLMProviderError("down", id, 503, true);
+        return ok;
+      });
 
-    await expect(generateWithFallback(primary, fallback, INPUT)).rejects.toMatchObject({
-      status: 400,
-    });
-    expect(called).toBe(false);
+    await generateWithChain(
+      [
+        { provider: "openrouter", model: "x" },
+        { provider: "anthropic", model: "claude-sonnet-5" },
+      ],
+      CHAIN_INPUT,
+      { resolve },
+    );
+
+    expect(routings[0]).toEqual({ zdr: true });
+    expect(routings[1]).toBeUndefined();
   });
 
-  it("sans repli configuré, l'erreur remonte", async () => {
-    const primary = fakeProvider(async () => {
-      throw new LLMProviderError("down", "openrouter", 503, true);
-    });
-    await expect(generateWithFallback(primary, null, INPUT)).rejects.toMatchObject({ status: 503 });
+  it("un cran SANS CLÉ est sauté, pas fatal", async () => {
+    const resolve = (id: ProviderId) => {
+      if (id === "anthropic") throw new Error("llm_provider_unconfigured: anthropic");
+      if (id === "openrouter") return fakeProvider(id, down(503));
+      return fakeProvider(id, async () => ok);
+    };
+
+    const outcome = await generateWithChain(
+      [
+        { provider: "openrouter", model: "x" },
+        { provider: "anthropic", model: "claude-sonnet-5" },
+        { provider: "openai", model: "gpt-5" },
+      ],
+      CHAIN_INPUT,
+      { resolve },
+    );
+
+    expect(outcome.rung).toBe(2);
+    expect(outcome.failures.map((f) => f.provider)).toEqual(["openrouter", "anthropic"]);
   });
 
-  it("le chemin heureux n'utilise jamais le repli", async () => {
-    const primary = fakeProvider(async () => ok);
-    const { usedFallback } = await generateWithFallback(primary, null, INPUT);
-    expect(usedFallback).toBe(false);
+  it("une erreur non rejouable arrête la chaîne sans essayer les replis", async () => {
+    let calls = 0;
+    const resolve = (id: ProviderId) =>
+      fakeProvider(id, async () => {
+        calls += 1;
+        throw new LLMProviderError("bad request", id, 400, false);
+      });
+
+    await expect(
+      generateWithChain(
+        [
+          { provider: "openrouter", model: "x" },
+          { provider: "anthropic", model: "claude-sonnet-5" },
+        ],
+        CHAIN_INPUT,
+        { resolve },
+      ),
+    ).rejects.toMatchObject({ name: "LLMChainError" });
+    expect(calls).toBe(1);
+  });
+
+  it("chaîne épuisée : la panne PRIMAIRE reste le diagnostic, les crans s'y annotent", async () => {
+    const resolve = (id: ProviderId) =>
+      fakeProvider(
+        id,
+        id === "openrouter" ? down(402) : down(503),
+      );
+
+    let message = "";
+    try {
+      await generateWithChain(
+        [
+          { provider: "openrouter", model: "x" },
+          { provider: "anthropic", model: "claude-sonnet-5" },
+        ],
+        CHAIN_INPUT,
+        { resolve },
+      );
+    } catch (err) {
+      message = (err as Error).message;
+    }
+
+    expect(message).toBe("down 402 (repli 1 anthropic/claude-sonnet-5 : down 503)");
+  });
+
+  it("le budget de temps arrête la chaîne au lieu de la laisser déborder", async () => {
+    let calls = 0;
+    const resolve = (id: ProviderId) =>
+      fakeProvider(id, async () => {
+        calls += 1;
+        throw new LLMProviderError("down", id, 503, true);
+      });
+
+    await expect(
+      generateWithChain(
+        [
+          { provider: "openrouter", model: "x" },
+          { provider: "anthropic", model: "claude-sonnet-5" },
+        ],
+        CHAIN_INPUT,
+        { resolve, now: () => 1_000 },
+        { deadline: 500 },
+      ),
+    ).rejects.toMatchObject({ name: "LLMChainError" });
+    expect(calls).toBe(0);
+  });
+
+  it("le chemin heureux ne descend jamais la chaîne", async () => {
+    const outcome = await generateWithChain(
+      [{ provider: "openrouter", model: "x" }],
+      CHAIN_INPUT,
+      { resolve: (id) => fakeProvider(id, async () => ok) },
+    );
+    expect(outcome.rung).toBe(0);
+    expect(outcome.failures).toEqual([]);
   });
 });

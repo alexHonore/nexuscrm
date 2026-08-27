@@ -923,18 +923,19 @@ const model: ParamDoc[] = [
     example: "google/gemini-2.5-flash",
   }),
   doc({
-    path: "model.fallback",
+    path: "model.fallbacks",
     section: "model",
-    labelFr: "Repli",
+    labelFr: "Chaîne de replis",
     type: "object",
     required: false,
-    whatFr: "Le fournisseur et le modèle utilisés si le principal échoue de façon rejouable.",
+    whatFr:
+      "Les fournisseurs et modèles appelés, DANS L'ORDRE, si le principal échoue de façon rejouable. Jusqu'à trois crans.",
     whyFr:
-      "Une panne 5xx ou un délai dépassé ne doit pas faire taire l'assistant. Le repli est explicite ici, jamais décidé par le routeur.",
+      "Une panne 5xx, un délai dépassé ou un compte à sec ne doit pas faire taire l'assistant. Le repli est explicite ici, jamais décidé par le routeur — et un seul remplaçant ne suffit pas les jours où l'incident touche tout le monde.",
     effectFr:
-      "Une erreur rejouable déclenche UN seul nouvel essai chez le repli. Une erreur non rejouable (requête fautive) remonte telle quelle.",
+      "Un encombrement passager (429, 5xx) est d'abord REPRIS sur le modèle principal, brièvement. S'il persiste, les crans sont essayés dans l'ordre, le premier qui répond gagne. Une erreur non rejouable (requête fautive) remonte telle quelle, sans descendre la chaîne.",
     pitfallsFr:
-      "Oublier que l'identifiant du modèle diffère chez le repli : le nouvel essai échoue alors aussi.",
+      "Oublier que l'identifiant du modèle diffère chez le repli : le nouvel essai échoue alors aussi. Symptôme : une alerte qui nomme la panne d'origine suivie de « (repli 1 … : llm_http_404) ».",
     related: ["model.provider", "model.routing.allowFallbacks"],
   }),
   doc({
@@ -986,7 +987,7 @@ const model: ParamDoc[] = [
     effectFr: "Envoyé dans l'objet de routage. Notre propre repli reste explicite.",
     pitfallsFr:
       "L'activer pour « améliorer la disponibilité » réintroduit l'incertitude sur le traitement des données.",
-    related: ["model.fallback"],
+    related: ["model.fallbacks"],
     example: false,
   }),
   doc({
@@ -1182,7 +1183,7 @@ const prompt: ParamDoc[] = [
 
 const extras: ParamDoc[] = [
   doc({
-    path: "model.fallback.provider",
+    path: "model.fallbacks[].provider",
     section: "model",
     labelFr: "Fournisseur de repli",
     type: "enum",
@@ -1194,28 +1195,28 @@ const extras: ParamDoc[] = [
       { value: "google", labelFr: "Google — direct" },
       { value: "openai", labelFr: "OpenAI — direct" },
     ],
-    whatFr: "Le fournisseur utilisé quand le principal échoue de façon rejouable.",
+    whatFr: "Le fournisseur utilisé à ce cran quand les précédents ont échoué.",
     whyFr:
-      "Un repli chez un AUTRE fournisseur protège d'une panne du premier ; un repli chez le même ne protège que d'un incident passager.",
-    effectFr: "Utilisé pour l'unique nouvelle tentative après une erreur rejouable.",
+      "Un repli chez un AUTRE fournisseur protège d'une panne du premier ; un repli chez le même ne protège que d'un incident passager. Trois crans chez trois fournisseurs différents, c'est le maximum de protection possible.",
+    effectFr: "Essayé dans l'ordre des crans, après une erreur rejouable au cran précédent.",
     pitfallsFr:
-      "Choisir un fournisseur dont la clé n'est pas configurée : le repli échoue aussi et le tour se solde par une escalade.",
-    related: ["model.fallback.model", "model.provider"],
+      "Choisir un fournisseur dont la clé n'est pas configurée : ce cran est SAUTÉ (la porte de mise en service le signale), et si tous le sont, le tour se solde par une escalade.",
+    related: ["model.fallbacks[].model", "model.provider"],
     example: "anthropic",
   }),
   doc({
-    path: "model.fallback.model",
+    path: "model.fallbacks[].model",
     section: "model",
     labelFr: "Modèle de repli",
     type: "string",
     required: false,
     defaultValue: "claude-sonnet-5",
-    whatFr: "Le modèle appelé chez le fournisseur de repli.",
+    whatFr: "Le modèle appelé chez le fournisseur de ce cran.",
     whyFr: "Les identifiants diffèrent d'un fournisseur à l'autre : le repli a besoin du sien.",
-    effectFr: "Remplace l'identifiant du modèle lors de la tentative de repli.",
+    effectFr: "Remplace l'identifiant du modèle lors de la tentative de ce cran.",
     pitfallsFr:
       "Y recopier l'identifiant du routeur (« anthropic/claude-sonnet-5 ») alors que le direct attend « claude-sonnet-5 » : le repli échoue au moment précis où on en a besoin.",
-    related: ["model.fallback.provider"],
+    related: ["model.fallbacks[].provider"],
     example: "claude-sonnet-5",
   }),
   doc({

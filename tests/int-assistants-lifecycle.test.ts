@@ -20,6 +20,7 @@ import { closeDb, makeUser, resetDb, sqlRaw, testDb } from "./helpers/db";
 import { auditLogs } from "@/db/schema";
 import { assistants, assistantVersions, guardrailFixtures, guardrailRuns } from "@/db/schema-sms";
 import { assistantConfigSchema } from "@/lib/assistants/schema";
+import { LLMProviderError } from "@/lib/llm/types";
 
 const ctx = vi.hoisted(() => ({
   cookies: new Map<string, string>(),
@@ -27,6 +28,8 @@ const ctx = vi.hoisted(() => ({
   hooks: {
     beforeCore: null as null | (() => Promise<void>),
     onGenerate: null as null | (() => Promise<void>),
+    /** Panne qui DURE : elle frappe tous les crans, pas seulement le premier. */
+    persistentGenerateError: null as string | null,
   },
 }));
 
@@ -61,6 +64,9 @@ vi.mock("@/lib/llm-server", () => ({
       // Le juge (classifieur) est reconnaissable à ses paramètres fixes.
       if (input.temperature === 0 && input.maxTokens === 300) {
         return { text: '{"passed":true,"reason":"conforme"}', toolCalls: [] };
+      }
+      if (ctx.hooks.persistentGenerateError) {
+        throw new LLMProviderError(ctx.hooks.persistentGenerateError, "openrouter", 503, true);
       }
       const hook = ctx.hooks.onGenerate;
       ctx.hooks.onGenerate = null;
@@ -130,6 +136,7 @@ beforeEach(async () => {
   ctx.cookies.clear();
   ctx.hooks.beforeCore = null;
   ctx.hooks.onGenerate = null;
+  ctx.hooks.persistentGenerateError = null;
   const admin = await makeUser({ role: "admin" });
   adminId = admin.id;
   const token = await new SignJWT({ uid: admin.id, role: "admin", tv: admin.tokenVersion, remember: false })
@@ -239,6 +246,44 @@ describe("suite — compare-and-set", () => {
     expect(outcome.passed).toBe(true);
     expect(outcome.superseded).toBe(false);
     expect((await rowOf(a.id)).suitePassed).toBe(true);
+  });
+
+  it("un 429 passager de l'amont ne peint plus la fixture en rouge", async () => {
+    // Le cas signalé le 2026-08-27 : « Raison de l'échec : erreur du modèle :
+    // llm_upstream_429 … Please retry shortly ». La suite appelait le modèle
+    // SANS repli ni reprise : trois secondes d'embouteillage rendaient
+    // l'assistant inactivable et forçaient à repayer les quatorze fixtures.
+    const a = await makeAssistant();
+    await compileAssistant(a.id, adminId);
+    await onlyOwnFixture(a.id);
+
+    ctx.hooks.onGenerate = async () => {
+      throw new LLMProviderError(
+        "llm_upstream_429: openai/gpt-5.6-luna is temporarily rate-limited upstream",
+        "openrouter",
+        429,
+        true,
+      );
+    };
+
+    const outcome = await runAssistantSuite(a.id, adminId);
+
+    expect(outcome.results.map((r) => r.reason)).toEqual([null]);
+    expect(outcome.passed).toBe(true);
+    expect((await rowOf(a.id)).suitePassed).toBe(true);
+  });
+
+  it("une panne QUI DURE reste un échec de fixture, pas un faux vert", async () => {
+    const a = await makeAssistant();
+    await compileAssistant(a.id, adminId);
+    await onlyOwnFixture(a.id);
+    // Le crochet ne se désarme pas : tous les crans tombent.
+    ctx.hooks.persistentGenerateError = "llm_http_503: upstream down";
+
+    const outcome = await runAssistantSuite(a.id, adminId);
+
+    expect(outcome.passed).toBe(false);
+    expect(outcome.results[0]?.reason).toMatch(/erreur du modèle : llm_http_503/);
   });
 
   it("une sauvegarde PENDANT la suite : le vert n'est PAS posé, l'exécution est marquée écartée", async () => {

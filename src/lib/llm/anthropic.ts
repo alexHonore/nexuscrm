@@ -5,6 +5,7 @@ import {
   callJson,
   numberOr,
   stringOr,
+  type RetryPolicy,
 } from "./http";
 import { groupToolResults } from "./messages";
 import { finishFields, reasoningBudgetTokens } from "./reasoning";
@@ -34,6 +35,10 @@ export interface AnthropicOptions {
   baseUrl?: string;
   fetchFn?: typeof fetch;
   timeoutMs?: number;
+  /** Reprise sur place d'un refus passager (429, 5xx) — voir `RetryPolicy`. */
+  retry?: Partial<RetryPolicy>;
+  /** Injecté par les tests : attendre pour de vrai les rendrait interminables. */
+  sleepFn?: (ms: number) => Promise<void>;
 }
 
 /**
@@ -140,6 +145,8 @@ export function createAnthropicProvider(options: AnthropicOptions): LLMProvider 
         provider: "anthropic",
         fetchFn,
         timeoutMs,
+        retry: options.retry,
+        sleepFn: options.sleepFn,
       });
 
       const root = asRecord(json);
@@ -179,6 +186,8 @@ export function createAnthropicProvider(options: AnthropicOptions): LLMProvider 
         provider: "anthropic",
         fetchFn,
         timeoutMs,
+        retry: options.retry,
+        sleepFn: options.sleepFn,
       });
       return asArray(asRecord(json).data).map((entry) => {
         const model = asRecord(entry);

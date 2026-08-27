@@ -5,6 +5,7 @@ import {
   numberOr,
   parseToolArguments,
   stringOr,
+  type RetryPolicy,
 } from "./http";
 import { finishFields } from "./reasoning";
 import type { FinishReason, GenerateInput, LLMResult, ToolCall, ToolDef } from "./types";
@@ -156,6 +157,9 @@ export interface ChatCallOptions {
   provider: "openrouter" | "openai";
   fetchFn: typeof fetch;
   timeoutMs: number;
+  /** Reprise sur place d'un refus passager (429, 5xx) — voir `RetryPolicy`. */
+  retry?: Partial<RetryPolicy>;
+  sleepFn?: (ms: number) => Promise<void>;
   bodyOptions?: ChatBodyOptions;
   extraBody?: Record<string, unknown>;
 }
@@ -171,6 +175,8 @@ export async function chatCompletion(
     provider: options.provider,
     fetchFn: options.fetchFn,
     timeoutMs: options.timeoutMs,
+    retry: options.retry,
+    sleepFn: options.sleepFn,
   });
   return parseChatResponse(json, input.model, latencyMs);
 }

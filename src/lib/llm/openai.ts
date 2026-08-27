@@ -1,4 +1,4 @@
-import { DEFAULT_LLM_TIMEOUT_MS, asArray, asRecord, callJson, stringOr } from "./http";
+import { DEFAULT_LLM_TIMEOUT_MS, asArray, asRecord, callJson, stringOr, type RetryPolicy } from "./http";
 import { chatCompletion } from "./openai-compatible";
 import { reasoningBudgetTokens } from "./reasoning";
 import type { GenerateInput, LLMProvider, LLMResult, ModelDescriptor } from "./types";
@@ -17,6 +17,10 @@ export interface OpenAiOptions {
   baseUrl?: string;
   fetchFn?: typeof fetch;
   timeoutMs?: number;
+  /** Reprise sur place d'un refus passager (429, 5xx) — voir `RetryPolicy`. */
+  retry?: Partial<RetryPolicy>;
+  /** Injecté par les tests : attendre pour de vrai les rendrait interminables. */
+  sleepFn?: (ms: number) => Promise<void>;
 }
 
 /**
@@ -49,6 +53,8 @@ export function createOpenAiProvider(options: OpenAiOptions): LLMProvider {
         provider: "openai",
         fetchFn,
         timeoutMs,
+        retry: options.retry,
+        sleepFn: options.sleepFn,
         bodyOptions: {
           // Accepté par tous les modèles OpenAI, exigé par ceux qui raisonnent.
           maxTokensField: "max_completion_tokens",
@@ -70,6 +76,8 @@ export function createOpenAiProvider(options: OpenAiOptions): LLMProvider {
         provider: "openai",
         fetchFn,
         timeoutMs,
+        retry: options.retry,
+        sleepFn: options.sleepFn,
       });
       return asArray(asRecord(json).data).map((entry) => {
         const model = asRecord(entry);

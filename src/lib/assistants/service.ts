@@ -18,7 +18,14 @@ import {
 import { runFixture, runnableFixtures, suitePassed } from "@/lib/guardrails/runner";
 import { objectionItemSchema, type FixtureData, type FixtureResult } from "@/lib/guardrails/types";
 import { getLlmProvider } from "@/lib/llm-server";
-import { assistantRowToConfig, customQualificationFields, type AssistantConfig } from "./schema";
+import { generateWithChain } from "@/lib/llm/route";
+import {
+  assistantRowToConfig,
+  classifierChain,
+  customQualificationFields,
+  modelChain,
+  type AssistantConfig,
+} from "./schema";
 import { simulatedSlotsText } from "@/lib/agent/tool-simulation";
 
 /**
@@ -256,8 +263,17 @@ export async function runAssistantSuite(
   ]);
   const fixtures = runnableFixtures([...coreFixtures, ...ownFixtures]);
 
-  const generator = getLlmProvider(config.model.provider);
-  const classifier = getLlmProvider(config.model.classifier.provider);
+  // La suite appelle les modèles par la MÊME chaîne que la production. Sans
+  // elle, un « llm_upstream_429 » de trois secondes chez l'amont peignait une
+  // fixture en rouge (« erreur du modèle : … »), donc rendait l'assistant
+  // inactivable, pour un incident que la production aurait absorbé.
+  const generatorRungs = modelChain(config.model);
+  const classifierRungs = classifierChain(config.model);
+  // La clé du modèle principal reste vérifiée d'emblée : sans elle, la suite
+  // n'a rien à dire d'utile et l'écran doit répondre « fournisseur non
+  // configuré », pas quatorze fixtures rouges.
+  getLlmProvider(config.model.provider);
+  getLlmProvider(config.model.classifier.provider);
 
   const [run] = await db
     .insert(guardrailRuns)
@@ -307,23 +323,29 @@ export async function runAssistantSuite(
       runtimeBlockFor(row, config, fixture),
       {
         generate: async ({ system, messages }) => {
-          const out = await generator.generate({
-            system,
-            messages,
-            model: config.model.model,
-            maxTokens: config.model.maxTokens,
-            temperature: config.model.temperature,
-            routing: config.model.routing as unknown as Record<string, unknown>,
-            ...(config.model.reasoningEffort === "none"
-              ? {}
-              : { reasoningEffort: config.model.reasoningEffort }),
-            // Les outils DOIVENT être offerts : sans eux le modèle ne peut
-            // jamais en appeler un, `mustCallTool` échoue toujours et
-            // `mustNotCallTool` réussit toujours — deux fixtures « STOP »
-            // bloquantes restaient rouges pour de bon, rendant impossible
-            // l'activation de tout assistant exigeant une suite verte.
-            tools: toolDefsFor(config.tools, customQualificationFields(config.goal)),
-          });
+          const { result: out } = await generateWithChain(
+            generatorRungs,
+            {
+              system,
+              messages,
+              maxTokens: config.model.maxTokens,
+              temperature: config.model.temperature,
+              routing: config.model.routing as unknown as Record<string, unknown>,
+              ...(config.model.reasoningEffort === "none"
+                ? {}
+                : { reasoningEffort: config.model.reasoningEffort }),
+              // Les outils DOIVENT être offerts : sans eux le modèle ne peut
+              // jamais en appeler un, `mustCallTool` échoue toujours et
+              // `mustNotCallTool` réussit toujours — deux fixtures « STOP »
+              // bloquantes restaient rouges pour de bon, rendant impossible
+              // l'activation de tout assistant exigeant une suite verte.
+              tools: toolDefsFor(config.tools, customQualificationFields(config.goal)),
+            },
+            { resolve: getLlmProvider },
+            // La chaîne ne s'engage pas au-delà du budget de la suite : mieux
+            // vaut une fixture « non exécutée » qu'une fonction tuée en vol.
+            { deadline },
+          );
           // Outils SIMULÉS : on note les appels, aucun handler ne tourne.
           return {
             text: out.text,
@@ -334,14 +356,18 @@ export async function runAssistantSuite(
           };
         },
         judge: async ({ system, user }) => {
-          const out = await classifier.generate({
-            system,
-            messages: [{ role: "user", content: user }],
-            model: config.model.classifier.model,
-            maxTokens: 300,
-            temperature: 0,
-          });
-          return out.text;
+          const { result } = await generateWithChain(
+            classifierRungs,
+            {
+              system,
+              messages: [{ role: "user", content: user }],
+              maxTokens: 300,
+              temperature: 0,
+            },
+            { resolve: getLlmProvider },
+            { deadline },
+          );
+          return result.text;
         },
         rules,
       },

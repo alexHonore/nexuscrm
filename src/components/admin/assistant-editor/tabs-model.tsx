@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { EDITOR_TAB_LOOK } from "@/components/look";
-import { PROVIDER_IDS, type ProviderId } from "@/lib/assistants/schema";
+import { DEFAULT_MODEL_FALLBACK, PROVIDER_IDS, type ProviderId } from "@/lib/assistants/schema";
 import type { ModelDescriptor } from "@/lib/llm/types";
 import { ModelPicker } from "../model-picker";
 import { api } from "../api";
@@ -171,47 +171,73 @@ export function ModelTab({ config, update }: TabProps) {
         </Fields>
       </Panel>
 
+      {/* Les replis sont une CHAÎNE : le premier qui répond gagne. Trois crans
+          parce qu'un incident ne s'arrête pas au premier remplaçant — un 429
+          chez le routeur un jour où le direct est saturé laissait l'assistant
+          muet. */}
       <Panel
         look={look}
         title={t("editor.model.sectionFallback")}
         description={t("editor.model.sectionFallbackHint")}
         actions={
-          <Switch
-            checked={config.model.fallback !== null}
-            aria-label={t("editor.model.sectionFallback")}
-            onCheckedChange={(next) =>
+          <Button
+            variant="outline"
+            size="sm"
+            className="min-h-11 md:min-h-9"
+            onClick={() =>
               update((d) => {
-                d.model.fallback = next
-                  ? { provider: "anthropic", model: "claude-sonnet-5" }
-                  : null;
+                d.model.fallbacks.push({ ...DEFAULT_MODEL_FALLBACK });
               })
             }
-          />
+            disabled={config.model.fallbacks.length >= 3}
+          >
+            <Plus /> {t("editor.model.addFallback")}
+          </Button>
         }
+        contentClassName="space-y-3"
       >
-        {config.model.fallback ? (
-          <Fields>
-            <ProviderSelect
-              path="model.fallback.provider"
-              value={config.model.fallback.provider}
-              onChange={(v) =>
-                update((d) => void (d.model.fallback && (d.model.fallback.provider = v)))
-              }
-            />
-            <div className="space-y-1.5">
-              <FieldLabel path="model.fallback.model" htmlFor="f-fallback-model" />
-              <Input
-                id="f-fallback-model"
-                value={config.model.fallback.model}
-                onChange={(e) =>
-                  update((d) => void (d.model.fallback && (d.model.fallback.model = e.target.value)))
-                }
-                className="min-h-11 font-mono text-xs md:min-h-9"
-              />
-            </div>
-          </Fields>
-        ) : (
+        {config.model.fallbacks.length === 0 ? (
           <EmptyRow>{t("editor.model.noFallback")}</EmptyRow>
+        ) : (
+          config.model.fallbacks.map((rung, i) => (
+            <div key={i} className="space-y-3 rounded-lg border bg-muted/20 p-3 md:p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="secondary" className="shrink-0">
+                  {t("editor.model.fallbackAt", { n: i + 1 })}
+                </Badge>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto min-h-11 shrink-0 text-destructive md:min-h-9"
+                  onClick={() => update((d) => void d.model.fallbacks.splice(i, 1))}
+                >
+                  <Trash2 /> {t("editor.model.removeFallback")}
+                </Button>
+              </div>
+              <Fields>
+                <ProviderSelect
+                  path={`model.fallbacks[${i}].provider`}
+                  value={rung.provider}
+                  onChange={(v) => {
+                    update((d) => void (d.model.fallbacks[i].provider = v));
+                    void load(v);
+                  }}
+                />
+                {/* Le catalogue du fournisseur de repli aide à ne pas recopier
+                    l'identifiant du routeur chez un direct — l'erreur qui fait
+                    échouer le repli au moment précis où on en a besoin. */}
+                <ModelSelect
+                  path={`model.fallbacks[${i}].model`}
+                  provider={rung.provider}
+                  models={catalog[rung.provider]}
+                  loading={loading === rung.provider}
+                  value={rung.model}
+                  onChange={(v) => update((d) => void (d.model.fallbacks[i].model = v))}
+                  onReload={() => void load(rung.provider)}
+                />
+              </Fields>
+            </div>
+          ))
         )}
       </Panel>
 

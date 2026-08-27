@@ -15,8 +15,11 @@ import {
 } from "@/db/schema-sms";
 import {
   assistantRowToConfig,
+  classifierChain,
   customQualificationFields,
+  modelChain,
   type AssistantConfig,
+  type ModelRef,
 } from "@/lib/assistants/schema";
 import { logAudit } from "@/lib/audit";
 import { categoryEntryPatch } from "@/lib/dispositions";
@@ -33,8 +36,9 @@ import { enabledRules } from "@/lib/guardrails/resolve";
 import type { RuleData, RuleVerdict } from "@/lib/guardrails/types";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { LlmUnconfiguredError, getLlmProvider } from "@/lib/llm-server";
+import { generateWithChain } from "@/lib/llm/route";
 import type { LLMMessage } from "@/lib/llm/types";
-import type { LLMResult, ToolCall } from "@/lib/llm/types";
+import type { GenerateInput, LLMResult, ProviderId, ToolCall } from "@/lib/llm/types";
 import { suppressPhone } from "@/lib/sms-server";
 import { notifyHumans } from "@/lib/sms-server/notify";
 import { detectOptOut } from "@/lib/sms/optout";
@@ -838,17 +842,33 @@ export async function runTurn(
     receivedAt: m.createdAt.toISOString(),
   }));
 
+  // Les deux chaînes du tour : le modèle visé d'abord, ses replis ensuite.
+  const generatorRungs = modelChain(config.model);
+  const classifierRungs = classifierChain(config.model);
+  /** Un cran servable au moins — sinon le tour n'a aucun modèle à appeler. */
+  const anyKey = (rungs: { provider: ProviderId }[]) =>
+    rungs.some((rung) => {
+      try {
+        getLlmProvider(rung.provider);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
   // Une clé manquante lançait AVANT tout filet : pas de trace, pas de pastille,
   // entrants laissés en l'air. On la traite comme une panne de modèle, plus bas.
+  // Mais elle n'est FATALE que si aucun repli ne peut servir : une clé
+  // principale absente pendant qu'un repli est réglé n'a plus à faire taire
+  // l'assistant.
   let providerInitError: string | null = null;
-  let generator: ReturnType<typeof getLlmProvider> | null = null;
-  let classifierProvider: ReturnType<typeof getLlmProvider> | null = null;
   try {
-    generator = getLlmProvider(config.model.provider);
-    classifierProvider = getLlmProvider(config.model.classifier.provider);
+    getLlmProvider(config.model.provider);
+    getLlmProvider(config.model.classifier.provider);
   } catch (err) {
-    providerInitError =
+    const message =
       err instanceof LlmUnconfiguredError ? "llm_unconfigured" : err instanceof Error ? err.message : "llm_init_failed";
+    if (!anyKey(generatorRungs) || !anyKey(classifierRungs)) providerInitError = message;
   }
   /**
    * Le compte du TOUR entier — chaque appel au modèle coûte, pas seulement le
@@ -867,20 +887,30 @@ export async function runTurn(
     }
   };
 
+  /**
+   * Le classifieur passe par la MÊME chaîne de replis que le générateur.
+   *
+   * Les juges échouent par fermeture : classifieur en panne, plus AUCUN
+   * message ne part. Un modèle de repli — même bien plus cher — coûte moins
+   * qu'une conversation escaladée vers un humain pour un 429 de trois
+   * secondes.
+   */
   const classifierCall = async ({ system, user }: { system: string; user: string }) => {
-    if (!classifierProvider) throw new Error(providerInitError ?? "llm_unconfigured");
-    const out = await classifierProvider.generate({
-      system,
-      messages: [{ role: "user", content: user }],
-      model: config.model.classifier.model,
-      maxTokens: 300,
-      temperature: 0,
-      // Mêmes exigences de confidentialité que le générateur : le classifieur
-      // et les juges lisent les mêmes messages du client.
-      routing: config.model.routing as unknown as Record<string, unknown>,
-    });
-    tallyUsage(out);
-    return out.text;
+    const { result } = await generateWithChain(
+      classifierRungs,
+      {
+        system,
+        messages: [{ role: "user", content: user }],
+        maxTokens: 300,
+        temperature: 0,
+        // Mêmes exigences de confidentialité que le générateur : le classifieur
+        // et les juges lisent les mêmes messages du client.
+        routing: config.model.routing as unknown as Record<string, unknown>,
+      },
+      { resolve: getLlmProvider },
+    );
+    tallyUsage(result);
+    return result.text;
   };
 
   const traceBase = {
@@ -1090,8 +1120,8 @@ export async function runTurn(
 
   // Clé de modèle absente : même contrat qu'une panne du modèle, avant même de
   // réfléchir. Tant qu'il reste des tentatives, les entrants restent à traiter.
-  if (providerInitError !== null || generator === null) {
-    const reason = providerInitError ?? "llm_unconfigured";
+  if (providerInitError !== null) {
+    const reason = providerInitError;
     const final = options.finalAttempt === true;
     return commit({
       outcome: "error",
@@ -1107,7 +1137,6 @@ export async function runTurn(
       events: [{ type: "llm_error", payload: { stage: "init", error: reason } }],
     });
   }
-  const generatorProvider = generator;
 
   // ═══ 2. RÉFLEXION (hors transaction, hors verrou) ════════════════════════
 
@@ -1353,7 +1382,8 @@ export async function runTurn(
   let bookedNow = false;
   let closedOutcome: ToolRunResult["closedOutcome"] = null;
   let transferTo: string | null = null;
-  let fallbackUsed = false;
+  /** Le cran qui a servi, s'il a fallu descendre la chaîne — null sinon. */
+  const chainUse: { fallbackRung: ModelRef | null } = { fallbackRung: null };
   let extraParagraphs = 0;
   const intents = [
     ...(classification.wantsHuman ? ["handoff"] : []),
@@ -1361,43 +1391,23 @@ export async function runTurn(
   ];
 
   /**
-   * Un appel au générateur, avec repli configuré. Le repli n'était jamais
-   * utilisé : le modèle principal en panne, le tour finissait en erreur alors
-   * qu'un second fournisseur était réglé exactement pour ça.
+   * Un appel au générateur, à travers la chaîne de replis.
    *
-   * La panne PRIMAIRE reste le diagnostic. Un repli sans clé (ou en panne à
-   * son tour) s'y ANNOTE au lieu de la remplacer : le repli par défaut est
-   * `anthropic` et sa clé absente faisait dire « llm_provider_unconfigured »
-   * à chaque alerte pendant que la vraie cause (crédits OpenRouter épuisés,
-   * llm_http_402) restait invisible.
+   * Le repli n'était jamais utilisé : le modèle principal en panne, le tour
+   * finissait en erreur alors qu'un second fournisseur était réglé exactement
+   * pour ça. Il y a maintenant jusqu'à trois crans, et un embouteillage
+   * passager (429) est d'abord rejoué sur le même modèle par le transport.
+   *
+   * La panne PRIMAIRE reste le diagnostic : les crans suivants s'y ANNOTENT au
+   * lieu de la remplacer (voir `LLMChainError`).
    */
   const generateWithFallback = async (
-    input: Omit<Parameters<typeof generatorProvider.generate>[0], "model">,
+    input: Omit<GenerateInput, "model">,
   ): Promise<LLMResult> => {
-    try {
-      const out = await generatorProvider.generate({ ...input, model: config.model.model });
-      tallyUsage(out);
-      return out;
-    } catch (primaryErr) {
-      const fallback = config.model.fallback;
-      if (!fallback) throw primaryErr;
-      const primaryMsg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
-      let fallbackProvider: ReturnType<typeof getLlmProvider>;
-      try {
-        fallbackProvider = getLlmProvider(fallback.provider);
-      } catch {
-        throw new Error(`${primaryMsg} (repli ${fallback.provider} sans clé configurée)`);
-      }
-      try {
-        const out = await fallbackProvider.generate({ ...input, model: fallback.model });
-        fallbackUsed = true;
-        tallyUsage(out);
-        return out;
-      } catch (fallbackErr) {
-        const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-        throw new Error(`${primaryMsg} (repli ${fallback.provider}/${fallback.model} : ${fallbackMsg})`);
-      }
-    }
+    const outcome = await generateWithChain(generatorRungs, input, { resolve: getLlmProvider });
+    if (outcome.rung > 0) chainUse.fallbackRung = outcome.used;
+    tallyUsage(outcome.result);
+    return outcome.result;
   };
   /** Refus successifs — journalises meme quand la regeneration finit par passer. */
   const blockedAttempts: string[][] = [];
@@ -1538,8 +1548,16 @@ export async function runTurn(
       ...(effect.detail ? { error: effect.detail } : {}),
     },
   })));
-  if (fallbackUsed) {
-    events.push({ type: "fallback_used", payload: { model: config.model.fallback?.model ?? null } });
+  if (chainUse.fallbackRung) {
+    // Le modèle qui a VRAIMENT répondu, pas le premier repli de la liste :
+    // avec trois crans, nommer le mauvais rend la trace trompeuse.
+    events.push({
+      type: "fallback_used",
+      payload: {
+        provider: chainUse.fallbackRung.provider,
+        model: chainUse.fallbackRung.model,
+      },
+    });
   }
   if (proactive && outreach) {
     events.push({

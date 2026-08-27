@@ -3,13 +3,19 @@ import { eq } from "drizzle-orm";
 import { formatInTimeZone } from "date-fns-tz";
 import { db } from "@/db";
 import { assistants } from "@/db/schema-sms";
-import { assistantRowToConfig, customQualificationFields } from "@/lib/assistants/schema";
+import {
+  assistantRowToConfig,
+  classifierChain,
+  customQualificationFields,
+  modelChain,
+} from "@/lib/assistants/schema";
 import { resolvedRulesFor } from "@/lib/assistants/service";
 import { blockingFailures, evaluateOutputRules } from "@/lib/guardrails/filter";
 import { judgeWithLlm } from "@/lib/guardrails/judge";
 import { enabledRules } from "@/lib/guardrails/resolve";
 import type { RuleData, RuleVerdict } from "@/lib/guardrails/types";
 import type { LLMMessage, LLMResult } from "@/lib/llm/types";
+import { generateWithChain } from "@/lib/llm/route";
 import { getLlmProvider } from "@/lib/llm-server";
 import { APP_TZ } from "@/components/clients/timezone";
 import { DEFAULT_QUIET_HOURS } from "@/lib/sms/quiet-hours";
@@ -223,18 +229,23 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
   const rules = await resolvedRulesFor(input.assistantId);
 
   const tracker = usageTracker();
-  const generator = getLlmProvider(config.model.provider);
-  const classifierProvider = getLlmProvider(config.model.classifier.provider);
+  // Mêmes chaînes de replis qu'en production : l'aperçu doit échouer et se
+  // rattraper comme le vrai moteur, sinon il ment sur ce qui va se passer.
+  const generatorRungs = modelChain(config.model);
+  const classifierRungs = classifierChain(config.model);
   const classifierCall = async (p: { system: string; user: string }) => {
-    const out = await classifierProvider.generate({
-      system: p.system,
-      messages: [{ role: "user", content: p.user }],
-      model: config.model.classifier.model,
-      maxTokens: 300,
-      temperature: 0,
-    });
-    tracker.add(out, false);
-    return out.text;
+    const { result } = await generateWithChain(
+      classifierRungs,
+      {
+        system: p.system,
+        messages: [{ role: "user", content: p.user }],
+        maxTokens: 300,
+        temperature: 0,
+      },
+      { resolve: getLlmProvider },
+    );
+    tracker.add(result, false);
+    return result.text;
   };
 
   // La production n'a jamais de message vide dans un fil : un brouillon bloqué
@@ -437,20 +448,24 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
 
     for (let round = 0; round < 2; round += 1) {
       try {
-        result = await generator.generate({
-          system: system + correction,
-          messages: turnMessages,
-          // Les outils DOIVENT être offerts : sans eux, le modèle ne peut jamais
-          // en appeler un et l'aperçu ne montrerait pas le comportement réel.
-          tools,
-          model: config.model.model,
-          maxTokens: config.model.maxTokens,
-          temperature: config.model.temperature,
-          routing: config.model.routing as unknown as Record<string, unknown>,
-          ...(config.model.reasoningEffort === "none"
-            ? {}
-            : { reasoningEffort: config.model.reasoningEffort }),
-        });
+        const outcome = await generateWithChain(
+          generatorRungs,
+          {
+            system: system + correction,
+            messages: turnMessages,
+            // Les outils DOIVENT être offerts : sans eux, le modèle ne peut jamais
+            // en appeler un et l'aperçu ne montrerait pas le comportement réel.
+            tools,
+            maxTokens: config.model.maxTokens,
+            temperature: config.model.temperature,
+            routing: config.model.routing as unknown as Record<string, unknown>,
+            ...(config.model.reasoningEffort === "none"
+              ? {}
+              : { reasoningEffort: config.model.reasoningEffort }),
+          },
+          { resolve: getLlmProvider },
+        );
+        result = outcome.result;
         tracker.add(result, true);
       } catch (err) {
         llmError = err instanceof Error ? err.message : String(err);

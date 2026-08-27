@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { assistants, campaigns, smsNumbers } from "@/db/schema-sms";
 import { getSetting } from "@/lib/settings";
+import { withModelFallbackChain } from "@/lib/assistants/schema";
 import { configuredProviders } from "@/lib/llm-server";
 import { resolveSmsMode } from "@/lib/sms/provider";
 import { DEFAULT_QUIET_HOURS } from "@/lib/sms/quiet-hours";
@@ -60,10 +61,12 @@ export async function collectPreflight(now = new Date()): Promise<PreflightRepor
   const assistantsMissingModelKey: string[] = [];
   const assistantsMissingFallbackKey: string[] = [];
   for (const row of activeAssistantModels) {
-    const model = (row.model ?? {}) as {
+    // `withModelFallbackChain` : les rangées d'avant la chaîne portent encore
+    // `fallback` (un seul cran) — la porte doit les lire comme l'exécution.
+    const model = (withModelFallbackChain(row.model) ?? {}) as {
       provider?: string;
       classifier?: { provider?: string } | null;
-      fallback?: { provider?: string } | null;
+      fallbacks?: { provider?: string }[];
     };
     const missing = [
       ...new Set(
@@ -73,9 +76,17 @@ export async function collectPreflight(now = new Date()): Promise<PreflightRepor
       ),
     ];
     if (missing.length > 0) assistantsMissingModelKey.push(`${row.name} : ${missing.join(", ")}`);
-    const fallbackProvider = model.fallback?.provider;
-    if (typeof fallbackProvider === "string" && !providersConfigured.includes(fallbackProvider)) {
-      assistantsMissingFallbackKey.push(`${row.name} : ${fallbackProvider}`);
+    // TOUS les crans sont vérifiés : un troisième repli sans clé est un repli
+    // qui n'existe pas, et il vaut mieux le savoir avant l'incident.
+    const missingFallback = [
+      ...new Set(
+        (model.fallbacks ?? [])
+          .map((rung) => rung?.provider)
+          .filter((p): p is string => typeof p === "string" && !providersConfigured.includes(p)),
+      ),
+    ];
+    if (missingFallback.length > 0) {
+      assistantsMissingFallbackKey.push(`${row.name} : ${missingFallback.join(", ")}`);
     }
   }
 

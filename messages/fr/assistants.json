@@ -344,9 +344,12 @@
       "sectionMainHint": "Celui qui écrit les messages envoyés aux clients.",
       "sectionClassifier": "Classificateur",
       "sectionClassifierHint": "Un second modèle, plus petit, qui lit les réponses entrantes. Un modèle rapide et peu coûteux suffit.",
-      "sectionFallback": "Repli",
-      "sectionFallbackHint": "Le modèle appelé si le principal est indisponible. Sans repli, le message n'est pas envoyé.",
-      "noFallback": "Aucun repli : si le modèle principal ne répond pas, le message n'est pas envoyé."
+      "sectionFallback": "Replis",
+      "sectionFallbackHint": "Les modèles appelés si le principal est indisponible, dans l'ordre : le premier qui répond gagne. Jusqu'à trois. Un encombrement passager est d'abord repris sur le modèle principal.",
+      "noFallback": "Aucun repli : si le modèle principal ne répond pas, le message n'est pas envoyé.",
+      "addFallback": "Ajouter un repli",
+      "removeFallback": "Retirer",
+      "fallbackAt": "Repli {n}"
     },
     "prompt": {
       "modeComposed": "Composé depuis les onglets",

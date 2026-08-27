@@ -344,9 +344,12 @@
       "sectionMainHint": "The one that writes the messages sent to clients.",
       "sectionClassifier": "Classifier",
       "sectionClassifierHint": "A second, smaller model that reads incoming replies. Fast and cheap is enough.",
-      "sectionFallback": "Fallback",
-      "sectionFallbackHint": "The model called if the main one is unavailable. With no fallback, the message is not sent.",
-      "noFallback": "No fallback: if the main model does not answer, the message is not sent."
+      "sectionFallback": "Fallbacks",
+      "sectionFallbackHint": "The models called if the main one is unavailable, in order: the first one that answers wins. Up to three. A passing traffic jam is first retried on the main model.",
+      "noFallback": "No fallback: if the main model does not answer, the message is not sent.",
+      "addFallback": "Add a fallback",
+      "removeFallback": "Remove",
+      "fallbackAt": "Fallback {n}"
     },
     "prompt": {
       "modeComposed": "Composed from the tabs",

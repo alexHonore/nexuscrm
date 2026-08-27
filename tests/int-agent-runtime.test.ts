@@ -1209,7 +1209,12 @@ describe("statut, outils et pannes (revue)", () => {
     const { conversation, assistant } = await scene();
     await testDb
       .update(assistants)
-      .set({ model: { ...(assistant.model as object), fallback: { provider: "openrouter", model: "fallback-model" } } })
+      .set({
+        model: {
+          ...(assistant.model as object),
+          fallbacks: [{ provider: "openrouter", model: "fallback-model" }],
+        },
+      })
       .where(eq(assistants.id, assistant.id));
     await inbound(conversation.id, "Allo?");
     // Le générateur principal échoue, le repli (autre identifiant) répond.
@@ -1223,6 +1228,60 @@ describe("statut, outils et pannes (revue)", () => {
     expect(await eventsOf(conversation.id)).toContain("fallback_used");
   });
 
+  it("descend TOUTE la chaîne : le troisième cran répond quand les deux premiers tombent", async () => {
+    // Un seul remplaçant ne suffit pas les jours où l'incident touche tout le
+    // monde : les crans sont essayés dans l'ordre, le premier qui répond gagne.
+    const { conversation, assistant } = await scene();
+    await testDb
+      .update(assistants)
+      .set({
+        model: {
+          ...(assistant.model as object),
+          fallbacks: [
+            { provider: "openrouter", model: "repli-1" },
+            { provider: "openrouter", model: "repli-2" },
+            { provider: "openrouter", model: "repli-3" },
+          ],
+        },
+      })
+      .where(eq(assistants.id, assistant.id));
+    await inbound(conversation.id, "Allo?");
+    llm.onGenerate = async () => {
+      const last = llm.calls[llm.calls.length - 1];
+      if (last && ["generator-model", "repli-1", "repli-2"].includes(last.model)) {
+        throw new Error(`${last.model} down`);
+      }
+    };
+
+    const result = await runTurn(conversation.id);
+
+    expect(result.outcome).toBe("sent");
+    expect(llm.calls.map((c) => c.model)).toEqual(
+      expect.arrayContaining(["generator-model", "repli-1", "repli-2", "repli-3"]),
+    );
+    expect(await eventsOf(conversation.id)).toContain("fallback_used");
+  });
+
+  it("une fiche écrite AVANT la chaîne garde son repli", async () => {
+    // Les rangées en base portent encore `model.fallback` (un seul cran) :
+    // les relire sans conversion perdrait le repli de l'exploitant.
+    const { conversation, assistant } = await scene();
+    const legacy = { ...(assistant.model as Record<string, unknown>) };
+    delete legacy.fallbacks;
+    await testDb
+      .update(assistants)
+      .set({ model: { ...legacy, fallback: { provider: "openrouter", model: "vieux-repli" } } })
+      .where(eq(assistants.id, assistant.id));
+    await inbound(conversation.id, "Allo?");
+    llm.onGenerate = async () => {
+      const last = llm.calls[llm.calls.length - 1];
+      if (last?.model === "generator-model") throw new Error("primary down");
+    };
+
+    expect((await runTurn(conversation.id)).outcome).toBe("sent");
+    expect(llm.calls.some((c) => c.model === "vieux-repli")).toBe(true);
+  });
+
   it("un repli SANS CLÉ n'efface pas la panne d'origine : l'alerte dit les deux", async () => {
     // L'incident réel : crédits OpenRouter épuisés (llm_http_402), repli
     // anthropic sans clé — et chaque notification disait seulement
@@ -1234,8 +1293,10 @@ describe("statut, outils et pannes (revue)", () => {
 
     const result = await runTurn(conversation.id, { finalAttempt: true });
     expect(result.outcome).toBe("error");
-    expect(result.reason).toContain("llm_http_402");
-    expect(result.reason).toContain("repli anthropic sans clé configurée");
+    // La panne PRIMAIRE ouvre le message ; le cran fautif s'y annote.
+    expect(result.reason).toMatch(/^llm_http_402/);
+    expect(result.reason).toContain("repli 1 anthropic/claude-sonnet-5");
+    expect(result.reason).toContain("llm_provider_unconfigured: anthropic");
 
     const notes = await testDb.select().from(notifications);
     const note = notes.find((n) => n.type === "sms_error");

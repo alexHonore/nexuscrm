@@ -381,7 +381,9 @@ describe("simulateTurn", () => {
     const result = await simulateTurn({ assistantId: assistant.id, history: [], inbound: "allo" });
     expect(result.outcome).toBe("error");
     expect(result.reason).toBe("llm_error");
-    expect(result.error).toBe("llm_http_503");
+    // La panne PRIMAIRE ouvre le message ; les crans de repli, tombés à leur
+    // tour, s'y annotent — l'aperçu descend la chaîne comme la production.
+    expect(result.error).toMatch(/^llm_http_503/);
   });
 
   // ── Ouverture et relance ──────────────────────────────────────────────────

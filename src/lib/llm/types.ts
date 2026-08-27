@@ -128,6 +128,12 @@ export class LLMProviderError extends Error {
     readonly provider: ProviderId,
     readonly status?: number,
     readonly retryable = false,
+    /**
+     * Attente demandée par l'amont (en-tête `Retry-After`), en millisecondes.
+     * Un 429 dit souvent COMBIEN de temps attendre : reprendre plus tôt ne
+     * fait que consommer un deuxième refus.
+     */
+    readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = "LLMProviderError";

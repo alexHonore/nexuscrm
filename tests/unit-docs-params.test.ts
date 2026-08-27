@@ -97,7 +97,7 @@ describe("registre de documentation", () => {
       if (path.startsWith("guardrails.") || path.startsWith("campaign.")) return false;
       // Entrées « conteneur » : elles documentent la structure elle-même
       // (la chaîne de replis, le bloc de repli, les surcouches), pas une feuille.
-      if (["goal.fallbacks", "model.fallback", "layerOverrides", "layerOverrides.mode", "layerOverrides.text"].includes(path)) return false;
+      if (["goal.fallbacks", "model.fallbacks", "layerOverrides", "layerOverrides.mode", "layerOverrides.text"].includes(path)) return false;
       return true;
     });
     expect(orphans, `Documentation orpheline : ${orphans.join(", ")}`).toEqual([]);

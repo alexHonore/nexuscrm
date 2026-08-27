@@ -29,6 +29,7 @@ const { ApproachTab, KnowledgeTab, ObjectionsTab, ToolsTab } = await import(
   "@/components/admin/assistant-editor/tabs-basic"
 );
 const { PromptTab, TestTab } = await import("@/components/admin/assistant-editor/tabs-advanced");
+const { ModelTab } = await import("@/components/admin/assistant-editor/tabs-model");
 const { GoalTab, IdentityTab } = await import("@/components/admin/assistant-editor/tabs-basic");
 
 type IntlMessages = ComponentProps<typeof NextIntlClientProvider>["messages"];
@@ -411,6 +412,44 @@ describe("onglets rendus isolément", () => {
     // La réponse fautive est montrée : sans elle on ne sait pas quoi corriger.
     expect(html).toContain("450 000");
     expect(html).toContain("1/2");
+  });
+
+  it("Modèle : les replis sont une CHAÎNE numérotée, chacun avec son fournisseur", () => {
+    // Un seul repli ne suffit pas les jours où l'incident touche tout le monde
+    // (« llm_upstream_429 » chez le routeur pendant que le direct est saturé).
+    const chained = {
+      ...tabProps,
+      config: {
+        ...CONFIG,
+        model: {
+          ...CONFIG.model,
+          fallbacks: [
+            { provider: "anthropic" as const, model: "claude-sonnet-5" },
+            { provider: "google" as const, model: "gemini-2.5-pro" },
+          ],
+        },
+      },
+    };
+    const html = renderTab(createElement(ModelTab, chained));
+
+    expect(html).toContain("Repli 1");
+    expect(html).toContain("Repli 2");
+    expect(html).toContain("claude-sonnet-5");
+    expect(html).toContain("gemini-2.5-pro");
+    expect(html).toContain("Ajouter un repli");
+    // L'aide du gabarit atteint chaque cran concret.
+    expect(html).toContain("Aide — Fournisseur de repli");
+    expect(html).not.toContain("MISSING_MESSAGE");
+  });
+
+  it("Modèle : une chaîne vide le DIT au lieu d'un cadre muet", () => {
+    const none = {
+      ...tabProps,
+      config: { ...CONFIG, model: { ...CONFIG.model, fallbacks: [] } },
+    };
+    const html = renderTab(createElement(ModelTab, none));
+    expect(html).toContain("Aucun repli");
+    expect(html).not.toContain("Repli 1");
   });
 
   it("Objectif : le type choisi est EXPLIQUÉ sous le sélecteur", () => {

@@ -14,8 +14,12 @@ import {
   assistantConfigInputSchema,
   assistantConfigSchema,
   customQualificationFields,
+  classifierChain,
   goalConfigSchema,
   goalStepSchema,
+  modelChain,
+  withModelFallbackChain,
+  DEFAULT_MODEL_FALLBACK,
 } from "@/lib/assistants/schema";
 
 describe("goalStepSchema — type de rendez-vous", () => {
@@ -129,5 +133,76 @@ describe("customQualificationFields", () => {
       fallbacks: [],
     });
     expect(customQualificationFields(goal)).toEqual([]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Chaîne de replis du modèle
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("model.fallbacks — la chaîne de replis", () => {
+  const parse = (model: unknown) =>
+    assistantConfigSchema.parse({
+      name: "X",
+      identity: {},
+      goal: { primary: { type: "phone_call", durationMin: 10 }, fallbacks: [] },
+      approach: {},
+      model,
+    }).model;
+
+  it("sans rien dire : un cran de repli, chez un fournisseur DIRECT", () => {
+    expect(parse({}).fallbacks).toEqual([DEFAULT_MODEL_FALLBACK]);
+    expect(DEFAULT_MODEL_FALLBACK.provider).not.toBe("openrouter");
+  });
+
+  it("accepte trois crans, refuse le quatrième", () => {
+    const three = [
+      { provider: "anthropic", model: "claude-sonnet-5" },
+      { provider: "google", model: "gemini-2.5-pro" },
+      { provider: "openai", model: "gpt-5" },
+    ];
+    expect(parse({ fallbacks: three }).fallbacks).toHaveLength(3);
+    expect(() => parse({ fallbacks: [...three, { provider: "openrouter", model: "x" }] })).toThrow();
+  });
+
+  it("un tableau vide = aucun repli, et ça se relit tel quel", () => {
+    expect(parse({ fallbacks: [] }).fallbacks).toEqual([]);
+  });
+
+  it("une fiche d'AVANT la chaîne garde son repli — et un `fallback: null` reste sans repli", () => {
+    // Les rangées déjà en base portent `fallback: {…} | null`. Les relire
+    // telles quelles remettrait le repli du DÉFAUT à la place de celui que
+    // l'exploitant a choisi (ou retiré).
+    expect(
+      parse(withModelFallbackChain({ fallback: { provider: "google", model: "gemini-2.5-pro" } }))
+        .fallbacks,
+    ).toEqual([{ provider: "google", model: "gemini-2.5-pro" }]);
+    expect(parse(withModelFallbackChain({ fallback: null })).fallbacks).toEqual([]);
+  });
+
+  it("la conversion ne touche PAS une fiche déjà convertie", () => {
+    const already = { fallbacks: [{ provider: "openai", model: "gpt-5" }], fallback: null };
+    expect(parse(withModelFallbackChain(already)).fallbacks).toEqual([
+      { provider: "openai", model: "gpt-5" },
+    ]);
+  });
+
+  it("les chaînes d'appel commencent par le modèle visé, replis ensuite", () => {
+    const model = parse({
+      provider: "openrouter",
+      model: "openai/gpt-5.6-luna",
+      classifier: { provider: "openrouter", model: "google/gemini-2.5-flash" },
+      fallbacks: [{ provider: "anthropic", model: "claude-sonnet-5" }],
+    });
+    expect(modelChain(model)).toEqual([
+      { provider: "openrouter", model: "openai/gpt-5.6-luna" },
+      { provider: "anthropic", model: "claude-sonnet-5" },
+    ]);
+    // Le classifieur hérite des MÊMES replis : les juges échouent par
+    // fermeture, un classifieur en panne fait taire tout l'assistant.
+    expect(classifierChain(model)).toEqual([
+      { provider: "openrouter", model: "google/gemini-2.5-flash" },
+      { provider: "anthropic", model: "claude-sonnet-5" },
+    ]);
   });
 });

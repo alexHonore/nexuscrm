@@ -5,6 +5,7 @@ import {
   assistantConfigSchema,
   identitySchema,
   modelConfigSchema,
+  withModelFallbackChain,
   type AssistantConfig,
 } from "./schema";
 import {
@@ -477,9 +478,21 @@ export interface ParseResult {
   warnings: ImportWarning[];
 }
 
+/** `assistant.model.fallback` (ancien) → `assistant.model.fallbacks`. */
+function withBundleFallbackChain(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const doc = raw as { assistant?: unknown };
+  if (doc.assistant === null || typeof doc.assistant !== "object") return raw;
+  const assistant = doc.assistant as { model?: unknown };
+  if (!("model" in assistant)) return raw;
+  return { ...doc, assistant: { ...assistant, model: withModelFallbackChain(assistant.model) } };
+}
+
 /** Relit un document. Lève une erreur zod si la forme est invalide. */
 export function parseBundle(raw: unknown): ParseResult {
-  const bundle = bundleSchema.parse(raw);
+  // Un fichier exporté AVANT la chaîne de replis porte `model.fallback` : sans
+  // cette conversion son repli disparaît en silence à la relecture.
+  const bundle = bundleSchema.parse(withBundleFallbackChain(raw));
   const warnings: ImportWarning[] = [];
 
   // Ce que le fichier ne disait PAS, et que le schéma a complété.

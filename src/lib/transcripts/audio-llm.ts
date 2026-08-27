@@ -71,6 +71,10 @@ export async function generateFromAudio(input: AudioGenerateInput): Promise<LLMR
     provider: "openrouter",
     fetchFn: input.fetchFn ?? fetch,
     timeoutMs: input.timeoutMs ?? AUDIO_LLM_TIMEOUT_MS,
+    // UNE seule reprise ici, là où le moteur SMS en accorde deux : un appel
+    // audio tient déjà jusqu'à 180 s et le job dispose de 300 s. Le job, lui,
+    // est de toute façon remis en file après une erreur passagère.
+    retry: { attempts: 2 },
   });
   return parseChatResponse(json, input.model, latencyMs);
 }

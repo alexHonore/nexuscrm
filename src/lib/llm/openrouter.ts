@@ -1,4 +1,4 @@
-import { asArray, asRecord, callJson, numberOr, stringOr } from "./http";
+import { asArray, asRecord, callJson, numberOr, stringOr, type RetryPolicy } from "./http";
 import { DEFAULT_LLM_TIMEOUT_MS } from "./http";
 import { chatCompletion } from "./openai-compatible";
 import { reasoningBudgetTokens } from "./reasoning";
@@ -27,6 +27,10 @@ export interface OpenRouterOptions {
   title?: string;
   fetchFn?: typeof fetch;
   timeoutMs?: number;
+  /** Reprise sur place d'un refus passager (429, 5xx) — voir `RetryPolicy`. */
+  retry?: Partial<RetryPolicy>;
+  /** Injecté par les tests : attendre pour de vrai les rendrait interminables. */
+  sleepFn?: (ms: number) => Promise<void>;
 }
 
 /** Traduit l'objet routing camelCase de la config vers les noms d'OpenRouter. */
@@ -79,6 +83,8 @@ export function createOpenRouterProvider(options: OpenRouterOptions): LLMProvide
         provider: "openrouter",
         fetchFn,
         timeoutMs,
+        retry: options.retry,
+        sleepFn: options.sleepFn,
         // Le routeur taille le budget de réflexion EN PROPORTION de max_tokens
         // (chez Anthropic, « high » en prend ~80 %) : sans marge, un plafond de
         // 300 jetons laisse une soixantaine de jetons de texte — coupé net.
@@ -95,6 +101,8 @@ export function createOpenRouterProvider(options: OpenRouterOptions): LLMProvide
         provider: "openrouter",
         fetchFn,
         timeoutMs,
+        retry: options.retry,
+        sleepFn: options.sleepFn,
       });
       return asArray(asRecord(json).data).map((entry) => {
         const model = asRecord(entry);

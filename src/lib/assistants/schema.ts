@@ -359,6 +359,10 @@ const modelRefSchema = z.object({
   provider: z.enum(PROVIDER_IDS),
   model: z.string().trim().min(1),
 });
+export type ModelRef = z.infer<typeof modelRefSchema>;
+
+/** Cran de repli posé par défaut — un fournisseur DIRECT, pas le routeur. */
+export const DEFAULT_MODEL_FALLBACK: ModelRef = { provider: "anthropic", model: "claude-sonnet-5" };
 
 export const modelConfigSchema = z.object({
   provider: z.enum(PROVIDER_IDS).default("openrouter"),
@@ -377,7 +381,15 @@ export const modelConfigSchema = z.object({
   // (valeur litterale du cahier) n'existe pas chez OpenRouter et faisait echouer
   // tous les appels classifieur et juge — donc tout bloquer.
   classifier: modelRefSchema.default({ provider: "openrouter", model: "google/gemini-2.5-flash" }),
-  fallback: modelRefSchema.nullable().default({ provider: "anthropic", model: "claude-sonnet-5" }),
+  /**
+   * Les replis, DANS L'ORDRE : le premier qui répond gagne.
+   *
+   * Trois crans et non un seul parce qu'un incident ne s'arrête pas au premier
+   * remplaçant : « llm_upstream_429 » chez le routeur un jour où le repli
+   * direct est lui aussi saturé laissait l'assistant muet. Un tableau vide =
+   * aucun repli : le modèle principal en panne, le message ne part pas.
+   */
+  fallbacks: z.array(modelRefSchema).max(3).default([DEFAULT_MODEL_FALLBACK]),
   /** OpenRouter uniquement — ignoré par les fournisseurs directs. Défauts non
    * négociables pour ces données (noms, numéros, projets de Québécois) :
    * deny + ZDR + pas de reroutage silencieux (§18.3). */
@@ -391,6 +403,33 @@ export const modelConfigSchema = z.object({
     .default({ dataCollection: "deny", zdr: true, allowFallbacks: false, only: [] }),
 });
 export type ModelConfig = z.infer<typeof modelConfigSchema>;
+
+/**
+ * Bloc `model` d'AVANT la chaîne de replis → forme actuelle.
+ *
+ * Les fiches déjà en base portent `fallback: {…} | null`, un seul cran. Les
+ * relire telles quelles perdrait le repli de l'exploitant et lui remettrait
+ * celui du défaut : la conversion se fait à la lecture, jamais par une
+ * migration de la colonne. À appliquer partout où du jsonb BRUT entre —
+ * lecture de rangée, fichier d'import, JSON collé dans l'onglet avancé.
+ */
+export function withModelFallbackChain(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const model = raw as Record<string, unknown>;
+  if (!("fallback" in model) || "fallbacks" in model) return raw;
+  const { fallback, ...rest } = model;
+  return { ...rest, fallbacks: fallback === null || fallback === undefined ? [] : [fallback] };
+}
+
+/** La chaîne complète : le modèle principal d'abord, ses replis ensuite. */
+export function modelChain(model: ModelConfig): ModelRef[] {
+  return [{ provider: model.provider, model: model.model }, ...model.fallbacks];
+}
+
+/** Idem pour le classifieur : ses replis sont ceux du générateur. */
+export function classifierChain(model: ModelConfig): ModelRef[] {
+  return [model.classifier, ...model.fallbacks];
+}
 
 // ── Prompt (modes, surcouches, L7) ───────────────────────────────────────────
 
@@ -502,7 +541,8 @@ export function assistantRowToConfig(row: {
     knowledge: row.knowledge,
     objectionPacks: row.objectionPacks,
     tools: row.tools,
-    model: row.model,
+    // Rangée écrite avant la chaîne de replis : `fallback` devient `fallbacks`.
+    model: withModelFallbackChain(row.model),
     promptMode: row.promptMode,
     systemPromptOverride: row.systemPromptOverride,
     layerOverrides: row.layerOverrides,

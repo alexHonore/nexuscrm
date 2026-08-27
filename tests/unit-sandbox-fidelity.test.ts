@@ -47,9 +47,21 @@ describe("fidélité du bac à sable", () => {
     for (const text of [source, runtime]) {
       expect(text).toContain("customQualificationFields(config.goal)");
     }
-    const start = source.indexOf("generator.generate({");
-    const call = source.slice(start, source.indexOf("});", start));
+    const start = source.indexOf("generateWithChain(\n          generatorRungs,");
+    expect(start).toBeGreaterThan(-1);
+    const call = source.slice(start, source.indexOf("{ resolve: getLlmProvider }", start));
     expect(call).toMatch(/^\s*tools,\s*$/m);
+  });
+
+  it("appelle les modèles par la MÊME chaîne de replis que la production", () => {
+    // Un aperçu qui n'a qu'un modèle là où la production en a quatre ne dit
+    // rien de ce qui arrivera un jour d'incident : la chaîne est la même des
+    // deux côtés, générateur ET classifieur.
+    for (const text of [source, runtime]) {
+      expect(text).toContain("modelChain(config.model)");
+      expect(text).toContain("classifierChain(config.model)");
+      expect(text).toContain("generateWithChain(");
+    }
   });
 
   it("joue la MÊME clôture polie qu'en production sur un refus ferme", () => {
@@ -83,7 +95,7 @@ describe("fidélité du bac à sable", () => {
 
   it("classe l'entrant avec le classifieur de l'assistant et RAPPORTE ses pannes", () => {
     expect(source).toContain("classifyInbound");
-    expect(source).toContain("config.model.classifier.model");
+    expect(source).toContain("classifierChain(config.model)");
     expect(source).toContain("classifierError");
   });
 
@@ -96,7 +108,7 @@ describe("fidélité du bac à sable", () => {
     // Désabonnement, refus ferme, budget de tours, chaîne épuisée, demande
     // d'humain : la production n'appelle pas le modèle — l'aperçu non plus.
     const gates = source.indexOf("classification.optOut");
-    const generate = source.indexOf("generator.generate(");
+    const generate = source.indexOf("generateWithChain(\n          generatorRungs,");
     expect(gates).toBeGreaterThan(-1);
     expect(gates).toBeLessThan(generate);
     for (const reason of [

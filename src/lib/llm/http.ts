@@ -13,6 +13,34 @@ import { LLMProviderError, type ProviderId } from "./types";
 
 export const DEFAULT_LLM_TIMEOUT_MS = 60_000;
 
+/**
+ * Reprise sur LE MÊME modèle, avant tout repli.
+ *
+ * « openai/gpt-5.6-luna is temporarily rate-limited upstream. Please retry
+ * shortly » : l'amont demande littéralement une reprise, et sans elle un
+ * embouteillage de deux secondes faisait échouer une fixture de la suite (donc
+ * bloquait l'activation) ou escaladait une conversation vers un humain. Un
+ * refus 429 ou 5xx n'a rien produit : le rejouer ne coûte rien de plus.
+ *
+ * Ce qui n'est PAS repris ici : le délai dépassé (l'amont peut être en train
+ * de rédiger — payer deux fois, et 3 × 60 s dépasse le temps de la fonction)
+ * et le 402 (le compte est à sec : attendre n'y changera rien). Ces deux-là
+ * sont l'affaire du repli, qui change de modèle — voir `route.ts`.
+ */
+export interface RetryPolicy {
+  /** Tentatives TOTALES, reprises comprises. 1 = aucune reprise. */
+  attempts: number;
+  baseDelayMs: number;
+  /** Plafond d'attente, `Retry-After` de l'amont compris. */
+  maxDelayMs: number;
+}
+
+export const DEFAULT_RETRY_POLICY: RetryPolicy = {
+  attempts: 3,
+  baseDelayMs: 800,
+  maxDelayMs: 10_000,
+};
+
 export interface HttpCallInput {
   url: string;
   method?: "GET" | "POST";
@@ -21,12 +49,56 @@ export interface HttpCallInput {
   provider: ProviderId;
   fetchFn: typeof fetch;
   timeoutMs: number;
+  /** Politique de reprise — défauts ci-dessus si absente. */
+  retry?: Partial<RetryPolicy>;
+  /** Injecté par les tests : attendre pour de vrai rendrait la suite interminable. */
+  sleepFn?: (ms: number) => Promise<void>;
 }
 
-/** Retourne le JSON parsé et la latence mesurée. Lève un LLMProviderError. */
+/** Un embouteillage passager, par opposition à une requête fautive. */
+function isCongestion(status: number | undefined): boolean {
+  return status !== undefined && (status === 429 || status >= 500);
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Attente avant la reprise `attempt` (1 = première reprise) : progression
+ * géométrique, bruitée de ±25 % pour ne pas relancer douze conversations à la
+ * milliseconde près, et remplacée par `Retry-After` quand l'amont l'a dit.
+ */
+function delayFor(attempt: number, policy: RetryPolicy, retryAfterMs: number | undefined): number {
+  const base = retryAfterMs ?? policy.baseDelayMs * Math.pow(3, attempt - 1);
+  const jittered = retryAfterMs === undefined ? base * (0.75 + Math.random() * 0.5) : base;
+  return Math.round(Math.min(policy.maxDelayMs, jittered));
+}
+
+/**
+ * Retourne le JSON parsé et la latence mesurée. Lève un LLMProviderError.
+ *
+ * Un refus passager (429, 5xx) est rejoué sur place avant de remonter : voir
+ * `RetryPolicy`. La latence retournée est celle de la tentative qui a abouti.
+ */
 export async function callJson(
   input: HttpCallInput,
 ): Promise<{ json: unknown; latencyMs: number }> {
+  const policy: RetryPolicy = { ...DEFAULT_RETRY_POLICY, ...input.retry };
+  const wait = input.sleepFn ?? sleep;
+
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await attemptJson(input);
+    } catch (err) {
+      const congested =
+        err instanceof LLMProviderError && err.retryable && isCongestion(err.status);
+      if (!congested || attempt >= policy.attempts) throw err;
+      await wait(delayFor(attempt, policy, (err as LLMProviderError).retryAfterMs));
+    }
+  }
+}
+
+/** UNE tentative — sans reprise ni attente. */
+async function attemptJson(input: HttpCallInput): Promise<{ json: unknown; latencyMs: number }> {
   const startedAt = Date.now();
   let res: Response;
   try {
@@ -60,6 +132,7 @@ export async function callJson(
       input.provider,
       res.status,
       res.status >= 500 || res.status === 429 || res.status === 402,
+      retryAfterMs(res.headers),
     );
   }
 
@@ -89,10 +162,25 @@ export async function callJson(
         embedded.code === 429 ||
         embedded.code === 408 ||
         embedded.code === 402,
+      retryAfterMs(res.headers),
     );
   }
 
   return { json, latencyMs: Date.now() - startedAt };
+}
+
+/**
+ * `Retry-After` en millisecondes — secondes ou date HTTP, les deux formes
+ * existent. Une valeur illisible vaut « rien dit », pas zéro.
+ */
+function retryAfterMs(headers: Headers): number | undefined {
+  const raw = headers.get("retry-after");
+  if (!raw) return undefined;
+  const seconds = Number(raw.trim());
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
+  const at = Date.parse(raw);
+  if (Number.isNaN(at)) return undefined;
+  return Math.max(0, at - Date.now());
 }
 
 /** L'erreur qu'un relais glisse dans un corps 2xx, ou null si le corps est sain. */

@@ -548,12 +548,12 @@ export const PARAM_DOCS_EN: Record<string, ParamDocText> = {
     effect: "Called once per inbound message, and once more for each \"llm_judge\" rule.",
     pitfalls: "An invalid id makes the judges fail, and they fail closed: NO message goes out any more and the conversation is flagged \"guardrail unavailable\". That is exactly what happens with a \"-latest\" alias that has been withdrawn.",
   },
-  "model.fallback": {
-    label: "Fallback",
-    what: "The provider and the model used if the main one fails in a retryable way.",
-    why: "A 5xx outage or a timeout must not silence the assistant. The fallback is explicit here, never decided by the router.",
-    effect: "A retryable error triggers ONE single retry on the fallback. A non-retryable error (a malformed request) is surfaced as is.",
-    pitfalls: "Forgetting that the model id differs on the fallback: the retry then fails too.",
+  "model.fallbacks": {
+    label: "Fallback chain",
+    what: "The providers and models called, IN ORDER, if the main one fails in a retryable way. Up to three rungs.",
+    why: "A 5xx outage, a timeout or an empty account must not silence the assistant. The fallback is explicit here, never decided by the router — and one single stand-in is not enough on the days the incident hits everyone.",
+    effect: "A passing traffic jam (429, 5xx) is first RETRIED on the main model, briefly. If it persists, the rungs are tried in order and the first that answers wins. A non-retryable error (a malformed request) is surfaced as is, without walking the chain.",
+    pitfalls: "Forgetting that the model id differs on the fallback: the retry then fails too. Symptom: an alert naming the original outage followed by \"(repli 1 … : llm_http_404)\".",
   },
   "model.routing.dataCollection": {
     label: "Data collection (OpenRouter)",
@@ -667,12 +667,12 @@ export const PARAM_DOCS_EN: Record<string, ParamDocText> = {
       "en-CA": "Canadian English",
     },
   },
-  "model.fallback.provider": {
+  "model.fallbacks[].provider": {
     label: "Fallback provider",
-    what: "The provider used when the main one fails in a retryable way.",
-    why: "A fallback at ANOTHER provider protects you from an outage at the first; a fallback at the same one only protects you from a passing incident.",
-    effect: "Used for the single retry after a retryable error.",
-    pitfalls: "Choosing a provider whose key is not configured: the fallback fails too and the turn ends in an escalation.",
+    what: "The provider used at this rung once the previous ones have failed.",
+    why: "A fallback at ANOTHER provider protects you from an outage at the first; a fallback at the same one only protects you from a passing incident. Three rungs at three different providers is as much protection as this can give.",
+    effect: "Tried in rung order, after a retryable error at the previous rung.",
+    pitfalls: "Choosing a provider whose key is not configured: that rung is SKIPPED (the go-live gate flags it), and if every rung is, the turn ends in an escalation.",
     allowed: {
       "openrouter": "OpenRouter",
       "anthropic": "Anthropic — direct",
@@ -680,11 +680,11 @@ export const PARAM_DOCS_EN: Record<string, ParamDocText> = {
       "openai": "OpenAI — direct",
     },
   },
-  "model.fallback.model": {
+  "model.fallbacks[].model": {
     label: "Fallback model",
-    what: "The model called at the fallback provider.",
+    what: "The model called at this rung's provider.",
     why: "Ids differ from one provider to the next: the fallback needs its own.",
-    effect: "Replaces the model id during the fallback attempt.",
+    effect: "Replaces the model id for this rung's attempt.",
     pitfalls: "Copying the router's id into it (\"anthropic/claude-sonnet-5\") when the direct provider expects \"claude-sonnet-5\": the fallback fails at exactly the moment you need it.",
   },
   "layerOverrides.mode": {
