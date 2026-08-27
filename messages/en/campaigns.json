@@ -308,6 +308,8 @@
         "added": "{added} enrolled, {skipped} skipped.",
         "bulkDone": "{done} enrollment(s) processed, {failed} skipped."
       },
+      "searchPlaceholder": "Search a client by name…",
+      "searchNone": "No shown enrollment matches “{query}”. This list holds only its 100 most recent enrollments.",
       "addTrigger": "Add clients",
       "addTitle": "Add clients to the campaign",
       "addHint": "Search records and check the ones to enroll. Eligibility (number, opt-out, already enrolled) is checked per record.",

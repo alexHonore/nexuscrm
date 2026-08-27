@@ -996,18 +996,38 @@ export function EnrollmentsTab({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const ladderLength = data.config.ladder.length;
   const isReopenable = (row: EnrollmentRow) => enrollmentReopenable(row, { ladderLength }).allowed;
+  const isSelectable = (row: EnrollmentRow) => enrollmentInFlight(row.status) || isReopenable(row);
 
-  const inFlightIds = data.enrollments.filter((e) => enrollmentInFlight(e.status)).map((e) => e.id);
-  const reopenableIds = data.enrollments.filter(isReopenable).map((e) => e.id);
-  const selectableIds = [...inFlightIds, ...reopenableIds];
-  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+  // Recherche par nom — l'écran plafonne à cent inscriptions, et retrouver
+  // quelqu'un à l'œil dans cent noms n'est pas raisonnable. Le filtre est
+  // LOCAL : il porte sur les lignes déjà chargées, pas sur la base, et il le
+  // dit quand il ne trouve rien plutôt que de laisser croire à une liste vide.
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLowerCase();
+  const rows =
+    needle === ""
+      ? data.enrollments
+      : data.enrollments.filter((e) => e.clientName.toLowerCase().includes(needle));
 
+  // « Tout cocher » ne coche QUE ce qui est à l'écran : sous un filtre, cocher
+  // en douce des lignes que l'administrateur ne voit pas serait le pire des
+  // pièges — il agirait en lot sur une liste qu'il croit avoir lue.
+  const visibleSelectableIds = rows.filter(isSelectable).map((e) => e.id);
+  const allSelected =
+    visibleSelectableIds.length > 0 && visibleSelectableIds.every((id) => selected.has(id));
+
+  // Les actions, elles, portent sur TOUTE la sélection, y compris ce qu'un
+  // filtre masque depuis : on peut chercher « Marie », la cocher, chercher
+  // « Luc », le cocher, puis agir sur les deux. Le compteur « n sélectionnée(s) »
+  // reste la vérité de ce qui partira.
+  const bySelection = (predicate: (row: EnrollmentRow) => boolean) =>
+    data.enrollments.filter((e) => selected.has(e.id) && predicate(e)).map((e) => e.id);
   // Une sélection peut mélanger les deux familles : chaque action ne porte que
-  // sur les lignes qu'elle sait traiter, et les boutons n'apparaissent que
-  // s'il y en a. Envoyer tout à tout le monde ferait compter en « échecs » des
+  // sur les lignes qu'elle sait traiter, et ses boutons n'apparaissent que s'il
+  // y en a. Envoyer tout à tout le monde ferait compter en « échecs » des
   // lignes sur lesquelles l'action n'avait simplement aucun sens.
-  const selectedInFlight = inFlightIds.filter((id) => selected.has(id));
-  const selectedReopenable = reopenableIds.filter((id) => selected.has(id));
+  const selectedInFlight = bySelection((e) => enrollmentInFlight(e.status));
+  const selectedReopenable = bySelection(isReopenable);
 
   const toggleOne = (id: string, on: boolean) =>
     setSelected((s) => {
@@ -1016,7 +1036,15 @@ export function EnrollmentsTab({
       else next.delete(id);
       return next;
     });
-  const toggleAll = (on: boolean) => setSelected(on ? new Set(selectableIds) : new Set());
+  const toggleAll = (on: boolean) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      for (const id of visibleSelectableIds) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
   const runBulk = (action: "pause" | "resume" | "remove") => {
     if (selectedInFlight.length === 0) return;
     onBulk(selectedInFlight, action);
@@ -1124,9 +1152,23 @@ export function EnrollmentsTab({
         </div>
       ) : null}
 
+      {data.enrollments.length > 0 ? (
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t("editor.enrollments.searchPlaceholder")}
+          aria-label={t("editor.enrollments.searchPlaceholder")}
+          className="min-h-11 md:min-h-9"
+        />
+      ) : null}
+
       {data.enrollments.length === 0 ? (
         <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
           {t("editor.enrollments.empty")}
+        </p>
+      ) : rows.length === 0 ? (
+        <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+          {t("editor.enrollments.searchNone", { query: query.trim() })}
         </p>
       ) : (
         <div className="overflow-x-auto">
@@ -1134,11 +1176,13 @@ export function EnrollmentsTab({
             <TableHeader>
               <TableRow>
                 <TableHead className="w-8">
-                  {/* Tout cocher — seulement les inscriptions EN VOL. */}
+                  {/* Tout cocher — ce qui est actionnable ET visible. */}
                   <Checkbox
-                    aria-label={t("editor.enrollments.selected", { count: selectableIds.length })}
+                    aria-label={t("editor.enrollments.selected", {
+                      count: visibleSelectableIds.length,
+                    })}
                     checked={allSelected}
-                    disabled={selectableIds.length === 0}
+                    disabled={visibleSelectableIds.length === 0}
                     onCheckedChange={(on) => toggleAll(Boolean(on))}
                   />
                 </TableHead>
@@ -1154,7 +1198,7 @@ export function EnrollmentsTab({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.enrollments.map((row) => {
+              {rows.map((row) => {
                 // Une pause manuelle se lit sur trois champs (voir
                 // `enrollment-status.ts`) : on la montre comme un état à part,
                 // pas comme « en cours ».

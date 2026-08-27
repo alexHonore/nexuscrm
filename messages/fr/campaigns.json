@@ -308,6 +308,8 @@
         "added": "{added} inscrit(s), {skipped} écarté(s).",
         "bulkDone": "{done} inscription(s) traitée(s), {failed} ignorée(s)."
       },
+      "searchPlaceholder": "Chercher un client par son nom…",
+      "searchNone": "Aucune inscription affichée ne correspond à « {query} ». La liste montre les 100 inscriptions les plus récentes.",
       "addTrigger": "Ajouter des clients",
       "addTitle": "Ajouter des clients à la campagne",
       "addHint": "Cherchez des fiches et cochez celles à inscrire. L’éligibilité (numéro, désabonnement, déjà inscrite) est vérifiée fiche par fiche.",

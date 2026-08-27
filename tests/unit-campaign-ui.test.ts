@@ -387,6 +387,42 @@ describe("onglets rendus isolément", () => {
     expect((html.match(/Relancer</g) ?? []).length).toBeGreaterThanOrEqual(2);
   });
 
+  it("Inscriptions : un champ de recherche est offert dès qu'il y a des lignes", () => {
+    const html = wrap(
+      createElement(EnrollmentsTab, {
+        ...tabProps,
+        onEnroll: () => {},
+        enrolling: false,
+        onAction: () => {},
+        actingId: null,
+        onBulk: () => {},
+        bulkBusy: false,
+        onAdded: () => {},
+        dirty: false,
+      }),
+    );
+    expect(html).toContain("Chercher un client par son nom");
+  });
+
+  it("Inscriptions : sans ligne, pas de champ de recherche à remplir pour rien", () => {
+    const html = wrap(
+      createElement(EnrollmentsTab, {
+        ...tabProps,
+        data: { ...DATA, enrollments: [] },
+        onEnroll: () => {},
+        enrolling: false,
+        onAction: () => {},
+        actingId: null,
+        onBulk: () => {},
+        bulkBusy: false,
+        onAdded: () => {},
+        dirty: false,
+      }),
+    );
+    expect(html).not.toContain("Chercher un client par son nom");
+    expect(html).toContain("Personne n'est encore inscrit".replace(/'/g, "&#x27;"));
+  });
+
   it("Inscriptions : un arrêt ne propose jamais « Relancer »", () => {
     // DATA porte une inscription « arrêtée » (désabonnement) : un refus exprimé
     // ne se repêche pas, et le bouton ne doit même pas exister.
