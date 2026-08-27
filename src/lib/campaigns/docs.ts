@@ -137,6 +137,8 @@ export const CAMPAIGN_FIELD_DOCS: CampaignFieldDoc[] = [
     labelFr: "Échelle",
     whatFr: "La liste ordonnée des messages : ouverture, puis relances. Huit barreaux au plus.",
     whyFr: "C'est l'échelle qui décide du rythme. Un seul barreau = un message et c'est tout ; trois = on insiste. Une réponse du contact arrête l'échelle.",
+    pitfallsFr:
+      "Rallonger l'échelle ne rattrape PERSONNE : les fiches qui ont fini l'ancienne restent « Terminée » et ne recevront jamais les barreaux ajoutés — ni l'inscription de l'audience ni un nouveau déclencheur ne les repêche, un client n'entrant qu'une fois dans une campagne. C'est « Relancer les terminées », dans l'onglet Échelle, qui les remet en vol, au barreau où elles s'étaient arrêtées.",
   },
   {
     path: "ladder[].delayHours",

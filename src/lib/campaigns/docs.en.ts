@@ -97,6 +97,8 @@ export const CAMPAIGN_FIELD_TEXT_EN: Record<string, CampaignFieldText> = {
     label: "Ladder",
     what: "The ordered list of messages: opener, then follow-ups. Eight rungs at most.",
     why: "The ladder is what decides the pace. A single rung = one message and that is it; three = you are insisting. A reply from the contact stops the ladder.",
+    pitfalls:
+      "Lengthening a ladder catches NOBODY up: records having finished the older one stay marked Completed and will never receive added rungs — neither enrolling an audience nor a fresh trigger fishes them back, since any given client enters a campaign only once. Use \"Restart completed ones\", from within its Ladder tab, to put them back in flight at whatever rung they stopped at.",
   },
   "ladder[].delayHours": {
     label: "Delay (hours)",
