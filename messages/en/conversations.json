@@ -164,7 +164,8 @@
     "actions": {
       "handBack": "Hand back to AI",
       "respond": "I'll reply",
-      "retry": "Try again"
+      "retry": "Try again",
+      "classify": "Classify"
     },
     "handedBack": "The assistant takes the thread back",
     "retried": "The turn is back in flight — the assistant retries right away",
@@ -185,7 +186,8 @@
       },
       "turnHint": "The assistant is composing its reply — the text does not exist yet.",
       "touchHint": "{campaign} · rung {step} — the text will be written at send time."
-    }
+    },
+    "classified": "Client classified."
   },
   "health": {
     "title": "Engine health",

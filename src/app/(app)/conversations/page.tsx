@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { MessageCircle } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import {
   ConversationsInbox,
   type InboxRow,
@@ -9,7 +9,7 @@ import {
 import { deedOf, CONVERSATION_DEEDS, type ConversationDeed } from "@/components/conversations/state";
 import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/db";
-import { clients, users } from "@/db/schema";
+import { categories, clients, users } from "@/db/schema";
 import {
   agentEvents,
   assistants,
@@ -267,6 +267,18 @@ export default async function ConversationsPage() {
       ])
     : [false, [], []];
 
+  const locale = await getLocale();
+  // Les catégories du pipeline — pour classer une fiche sans quitter la boîte.
+  // Chargées pour tout le monde : ranger une fiche n'est pas un geste d'admin,
+  // c'est le travail d'après-conversation.
+  const pipeline = await db.query.categories.findMany({
+    orderBy: [asc(categories.sortOrder), asc(categories.id)],
+  });
+  const categoryOptions = pipeline.map((c) => ({
+    id: c.id,
+    label: locale === "en" ? c.nameEn : c.nameFr,
+  }));
+
   const items: InboxRow[] = rows.map((r) => ({
     id: r.id,
     clientId: r.clientId,
@@ -297,6 +309,7 @@ export default async function ConversationsPage() {
         queue={queue}
         currentUserId={user.id}
         isAdmin={isAdmin}
+        categories={categoryOptions}
         health={
           isAdmin
             ? {

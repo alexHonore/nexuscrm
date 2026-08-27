@@ -32,6 +32,7 @@ vi.mock("@/app/(app)/conversations/actions", () => ({
   assignConversationAction: vi.fn(),
   handBackToAiAction: vi.fn(),
   retryAiTurnAction: vi.fn(),
+  classifyConversationClientAction: vi.fn(),
 }));
 
 const { SmsThreadCard } = await import("@/components/clients/sms-thread-card");
@@ -381,6 +382,57 @@ describe("boîte de réception", () => {
     // Son travail à lui, en revanche, est intact.
     expect(html).toContain("Marie Tremblay");
     expect(html).toContain("À traiter");
+  });
+
+  it("§ « Entre vos mains » propose de classer la fiche", () => {
+    // La décision qui reste sur un fil qu'un humain tient est souvent « il
+    // n'est plus intéressé ». La prendre ici range la fiche — et libère du
+    // même geste les campagnes qui ne visent plus sa nouvelle catégorie.
+    const held: InboxRow = {
+      ...ROWS[0],
+      id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      needsAttention: false,
+      attentionReason: null,
+      aiEnabled: false,
+      assignedToId: "me",
+      assignedToName: "Alex",
+    };
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: [held],
+        currentUserId: "me",
+        health: null,
+        isAdmin: false,
+        categories: [
+          { id: 1, label: "À rappeler" },
+          { id: 2, label: "Pas intéressé" },
+        ],
+      }),
+    );
+    // Le déclencheur seulement : Base UI rend la liste des options dans un
+    // portail, à l'ouverture — elle n'est pas dans le rendu serveur.
+    expect(html).toContain('aria-label="Classer"');
+    expect(html).toContain("Entre vos mains");
+  });
+
+  it("sans catégorie configurée, aucun bouton « Classer » qui ne mène nulle part", () => {
+    const held: InboxRow = {
+      ...ROWS[0],
+      needsAttention: false,
+      attentionReason: null,
+      assignedToId: "me",
+      assignedToName: "Alex",
+    };
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: [held],
+        currentUserId: "me",
+        health: null,
+        isAdmin: false,
+        categories: [],
+      }),
+    );
+    expect(html).not.toContain("Classer");
   });
 
   it("l'administrateur, lui, garde la bande d'état et la file", () => {

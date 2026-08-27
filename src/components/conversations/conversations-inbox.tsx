@@ -11,6 +11,7 @@ import {
   PowerOffIcon,
   RotateCcwIcon,
   SunIcon,
+  TagIcon,
   UserRoundIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -21,6 +22,7 @@ import { toast } from "sonner";
 import {
   assignConversationAction,
   cancelQueuedSmsAction,
+  classifyConversationClientAction,
   handBackToAiAction,
   markConversationHandledAction,
   retryAiTurnAction,
@@ -47,6 +49,12 @@ import { RelativeTime } from "@/components/relative-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select";
 import { emitDataChange, useDataChange, useVisiblePolling } from "@/lib/live";
 import { cn } from "@/lib/utils";
 
@@ -168,6 +176,7 @@ const DEED_LOOK: Record<ConversationDeed, Look> = {
 export function ConversationsInbox({
   rows,
   queue = [],
+  categories = [],
   currentUserId,
   health,
   isAdmin = false,
@@ -179,6 +188,8 @@ export function ConversationsInbox({
   currentUserId: string;
   /** `null` pour un téléphoniste : la donnée ne lui est pas envoyée. */
   health: EngineHealth | null;
+  /** Catégories du pipeline — pour classer une fiche sans quitter la boîte. */
+  categories?: { id: number; label: string }[];
   /** Le rejeu après panne est un geste d'administrateur (l'API le refuse aux autres). */
   isAdmin?: boolean;
   initialTab?: Tab;
@@ -253,6 +264,27 @@ export function ConversationsInbox({
       router.refresh();
     });
   };
+
+  /**
+   * Classer la fiche depuis la boîte — « il n'est plus intéressé » se décide
+   * en lisant le fil, pas en ouvrant la fiche dans un autre onglet.
+   *
+   * Ranger une fiche a un effet au-delà du pipeline : une campagne qui ne vise
+   * plus sa nouvelle catégorie la LIBÈRE (voir `releaseCategoryMismatches`).
+   * C'est le « terminer la campagne » qu'on cherche ici, et c'est pour ça que
+   * ce geste-là est le bon plutôt qu'un retrait manuel campagne par campagne.
+   */
+  const classify = (row: InboxRow, categoryId: number) =>
+    act(async () => {
+      if (!row.clientId) return false;
+      const result = await classifyConversationClientAction(row.clientId, categoryId);
+      if (!result.ok) {
+        toast.error(t("error"));
+        return false;
+      }
+      toast.success(t("inbox.classified"));
+      return true;
+    });
 
   const handle = (row: InboxRow) =>
     act(async () => {
@@ -374,6 +406,8 @@ export function ConversationsInbox({
     onHandBack: handBack,
     onRetry: retry,
     onRespond: respond,
+    onClassify: classify,
+    categories,
     dfnsLocale,
   };
 
@@ -589,6 +623,8 @@ function InboxRowCard({
   onHandBack,
   onRetry,
   onRespond,
+  onClassify,
+  categories,
   dfnsLocale,
 }: {
   row: InboxRow;
@@ -599,6 +635,8 @@ function InboxRowCard({
   onHandBack: (row: InboxRow) => void;
   onRetry: (row: InboxRow) => void;
   onRespond: (row: InboxRow) => void;
+  onClassify: (row: InboxRow, categoryId: number) => void;
+  categories: { id: number; label: string }[];
   dfnsLocale: typeof fr;
 }) {
   const t = useTranslations("conversations");
@@ -743,6 +781,33 @@ function InboxRowCard({
                 {isEngine ? <RotateCcwIcon aria-hidden /> : <BotIcon aria-hidden />}
                 {isEngine ? t("inbox.actions.retry") : t("inbox.actions.handBack")}
               </Button>
+            ) : null}
+            {/* Un fil qu'un humain tient déjà : la décision qui reste est
+                souvent « il n'est plus intéressé ». La prendre ICI range la
+                fiche dans le pipeline — et libère du même geste les campagnes
+                qui ne visent plus sa nouvelle catégorie. */}
+            {state === "human" && row.clientId && categories.length > 0 ? (
+              <Select
+                items={categories.map((c) => ({ value: String(c.id), label: c.label }))}
+                value=""
+                onValueChange={(v) => onClassify(row, Number(v))}
+                disabled={pending}
+              >
+                <SelectTrigger
+                  className="relative z-10 min-h-11 w-auto md:min-h-8"
+                  aria-label={t("inbox.actions.classify")}
+                >
+                  <TagIcon aria-hidden />
+                  <span>{t("inbox.actions.classify")}</span>
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             ) : null}
             {state === "attention" ? (
               <>

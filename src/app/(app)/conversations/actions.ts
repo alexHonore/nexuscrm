@@ -19,6 +19,7 @@ import { getCurrentUser } from "@/lib/auth/guards";
 import { cancelPendingJobs, enqueueJob } from "@/lib/jobs/queue";
 import { kickDispatch } from "@/lib/jobs/kick";
 import { analyzeSms } from "@/lib/sms/segments";
+import { setClientCategoryAction } from "../clients/actions";
 
 /**
  * Actions du fil SMS — accessibles aux TÉLÉPHONISTES.
@@ -687,4 +688,25 @@ export async function cancelOutboundSmsAction(messageId: string): Promise<SmsAct
   });
   if (thread?.clientId) revalidateFor(thread.clientId);
   return { ok: true, id: messageId };
+}
+
+/**
+ * Classer la fiche d'un fil — depuis la boîte de réception.
+ *
+ * Un simple relais vers l'action des fiches : la règle de classement (statut
+ * « ne pas appeler » qui coche `doNotCall`, journal d'audit, déclencheur de
+ * changement de catégorie) vit là-bas et n'a aucune raison d'exister en deux
+ * exemplaires. Ce qui justifie le relais, c'est l'IMPORT : la boîte est un
+ * composant client, et `clients/actions` traîne des modules « server-only »
+ * qu'il ne peut pas charger.
+ *
+ * Effet de bord VOULU, et c'est tout l'intérêt du geste : ranger une fiche
+ * libère les campagnes qui ne visent plus sa nouvelle catégorie.
+ */
+export async function classifyConversationClientAction(
+  clientId: string,
+  categoryId: number,
+): Promise<{ ok: boolean }> {
+  const result = await setClientCategoryAction(clientId, categoryId);
+  return { ok: result.ok };
 }
