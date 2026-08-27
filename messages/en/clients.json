@@ -266,7 +266,9 @@
     "categorized": "{count, plural, =0 {No clients changed} one {# client recategorized} other {# clients recategorized}}",
     "sourced": "{count, plural, =0 {No clients changed} one {# client updated} other {# clients updated}}",
     "deleted": "{count, plural, =0 {No clients deleted} one {# client deleted} other {# clients deleted}}",
-    "clear": "Clear selection"
+    "clear": "Clear selection",
+    "campaign": "Campaign",
+    "enrolled": "{count, plural, =0 {Nobody enrolled in “{campaign}”} one {# record enrolled in “{campaign}”} other {# records enrolled in “{campaign}”}}"
   },
   "meta": {
     "created": "Created {date}",

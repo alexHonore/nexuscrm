@@ -67,6 +67,7 @@ import {
 } from "@/components/ui/table";
 import { APP_TZ } from "@/components/clients/timezone";
 import { BULK_MAX } from "@/lib/bulk";
+import { ENROLL_REFUSALS } from "@/lib/campaigns/eligibility";
 import { emitDataChange } from "@/lib/live";
 import { formatPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
@@ -148,6 +149,9 @@ function subscribeHiddenColumns(onChange: () => void): () => void {
  * actions aux téléphonistes — la sélection cachée n'est pas la protection.
  * Mobile : le tableau devient une liste de cartes cochables.
  */
+/** Motifs de refus connus — seuls ceux-là ont une étiquette traduite. */
+const ENROLL_REFUSAL_KEYS = new Set<string>(ENROLL_REFUSALS);
+
 export function ClientsTable({
   items,
   loading,
@@ -155,6 +159,7 @@ export function ClientsTable({
   categories,
   sources,
   users,
+  campaigns,
   sortKey,
   sortDir,
   onSort,
@@ -166,6 +171,8 @@ export function ClientsTable({
   categories: PanelCategory[];
   sources: FilterOption[];
   users: FilterOption[];
+  /** Campagnes SMS — pour inscrire une sélection d'un geste. */
+  campaigns: FilterOption[];
   sortKey: ClientSortKey;
   sortDir: ClientSortDir;
   onSort: (key: Exclude<ClientSortKey, "activity">) => void;
@@ -173,6 +180,9 @@ export function ClientsTable({
   now: number;
 }) {
   const t = useTranslations("clients");
+  // Les motifs de refus appartiennent au module des campagnes : on les LIT
+  // chez lui plutôt que d'en recopier onze ici.
+  const tc = useTranslations("campaigns");
   const locale = useLocale();
   const router = useRouter();
   const dfnsLocale = locale === "en" ? enUS : fr;
@@ -273,6 +283,63 @@ export function ClientsTable({
       }
       toast.success(t(successKey, { count: done }));
       setDeleteOpen(false);
+      clearSelection();
+      emitDataChange("clients");
+      router.refresh();
+    });
+  };
+
+  /**
+   * Inscrire la sélection à une campagne.
+   *
+   * Passe par la MÊME route que « Ajouter des clients » de l'éditeur de
+   * campagne, et pas par une action à part : l'éligibilité (numéro,
+   * désabonnement, déjà inscrit, plafonds), le garde admin et le journal
+   * d'audit y vivent déjà. Les réécrire ici les condamnerait à diverger.
+   *
+   * Le rapport n'est pas un simple compte : inscrire échoue pour des raisons
+   * qu'il faut NOMMER — « 12 inscrits, 8 écartés » sans motif ne dit pas s'il
+   * faut relever un plafond ou constater que tout le monde y était déjà.
+   */
+  const enrollSelection = (campaignId: string, campaignName: string) => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    startTransition(async () => {
+      let added = 0;
+      const refusals = new Map<string, number>();
+      for (let i = 0; i < ids.length; i += BULK_MAX) {
+        let payload: { added?: number; results?: { refusal?: string }[] };
+        try {
+          const res = await fetch(`/api/campaigns/${campaignId}/enrollments`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ clientIds: ids.slice(i, i + BULK_MAX) }),
+          });
+          if (!res.ok) throw new Error(String(res.status));
+          payload = (await res.json()) as typeof payload;
+        } catch {
+          toast.error(
+            added > 0 ? t("errors.bulkPartial", { done: added, total: ids.length }) : t("errors.generic"),
+          );
+          if (added > 0) {
+            clearSelection();
+            emitDataChange("clients");
+            router.refresh();
+          }
+          return;
+        }
+        added += payload.added ?? 0;
+        for (const r of payload.results ?? []) {
+          if (r.refusal) refusals.set(r.refusal, (refusals.get(r.refusal) ?? 0) + 1);
+        }
+      }
+      const breakdown = [...refusals.entries()]
+        .filter(([reason]) => ENROLL_REFUSAL_KEYS.has(reason))
+        .map(([reason, n]) => `${tc(`editor.enrollments.refusal.${reason}` as never)} : ${n}`);
+      toast.success(
+        t("bulk.enrolled", { count: added, campaign: campaignName }),
+        breakdown.length > 0 ? { description: breakdown.join(" · ") } : undefined,
+      );
       clearSelection();
       emitDataChange("clients");
       router.refresh();
@@ -778,6 +845,32 @@ export function ClientsTable({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+
+            {/* Inscrire la sélection à une campagne. Absent s'il n'y en a
+                aucune : un menu vide se clique une fois, jamais deux. */}
+            {campaigns.length > 0 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="outline" className="min-h-11 md:min-h-8" disabled={pending} />
+                  }
+                >
+                  <MegaphoneIcon />
+                  {t("bulk.campaign")}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-48">
+                  {campaigns.map((c) => (
+                    <DropdownMenuItem
+                      key={c.value}
+                      className="min-h-10"
+                      onClick={() => enrollSelection(c.value, c.label)}
+                    >
+                      {c.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
 
             <DropdownMenu>
               <DropdownMenuTrigger

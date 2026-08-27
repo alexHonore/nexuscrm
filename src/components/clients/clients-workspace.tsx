@@ -1258,6 +1258,7 @@ export function ClientsWorkspace({
                   categories={categories}
                   sources={sources}
                   users={users}
+                  campaigns={campaigns}
                   sortKey={sortKey}
                   sortDir={sortDir}
                   onSort={onSort}
