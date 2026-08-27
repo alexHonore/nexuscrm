@@ -16,7 +16,7 @@
     "overdue": "En retard",
     "dueToday": "À faire aujourd'hui",
     "upcoming": "À venir",
-    "upcomingRange": "{days} prochains jours",
+    "upcomingRange": "les {months} prochains mois",
     "tomorrow": "Demain",
     "showMore": "{count, plural, one {Voir le suivant} other {Voir les # suivants}}",
     "showLess": "Réduire",
@@ -25,7 +25,9 @@
     "open": "Ouvrir la fiche",
     "markDone": "Terminer",
     "done": "Suivi terminé",
-    "doNotCall": "Ne pas appeler"
+    "doNotCall": "Ne pas appeler",
+    "truncated": "{count, plural, one {# suivi plus lointain n'est pas affiché} other {# suivis plus lointains ne sont pas affichés}}",
+    "aiScheduled": "IA"
   },
   "attention": {
     "title": "SMS IA — à reprendre",

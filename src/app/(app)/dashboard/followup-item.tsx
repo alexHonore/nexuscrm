@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckIcon, PhoneIcon, PhoneOffIcon, UserRoundIcon } from "lucide-react";
+import { BotIcon, CheckIcon, PhoneIcon, PhoneOffIcon, UserRoundIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -22,6 +22,8 @@ export type FollowupItemData = {
   overdue: boolean;
   /** `clients.doNotCall` — gate ABSOLU : le bouton d'appel reste désactivé. */
   doNotCall: boolean;
+  /** Programmé par l'assistant SMS plutôt que par quelqu'un de l'équipe. */
+  aiScheduled: boolean;
 };
 
 export function FollowupItem({ item }: { item: FollowupItemData }) {
@@ -61,6 +63,16 @@ export function FollowupItem({ item }: { item: FollowupItemData }) {
             />
           ) : null}
           <span className="truncate">{item.clientName}</span>
+          {/* D'où vient ce rappel. Les deux familles partagent la liste ; sans
+              cette marque, « rappeler en septembre » promis par l'assistant se
+              lit comme une note qu'on aurait prise soi-même — et on ne sait
+              plus lequel des deux a déjà parlé au client. */}
+          {item.aiScheduled ? (
+            <BotIcon
+              aria-label={t("followups.aiScheduled")}
+              className="size-3.5 shrink-0 text-muted-foreground"
+            />
+          ) : null}
         </Link>
         <p className="truncate text-xs text-muted-foreground">
           <span className={cn("font-medium tabular-nums", item.overdue && "text-destructive")}>

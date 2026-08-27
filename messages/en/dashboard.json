@@ -16,7 +16,7 @@
     "overdue": "Overdue",
     "dueToday": "Due today",
     "upcoming": "Upcoming",
-    "upcomingRange": "next {days} days",
+    "upcomingRange": "the next {months} months",
     "tomorrow": "Tomorrow",
     "showMore": "{count, plural, one {Show 1 more} other {Show # more}}",
     "showLess": "Show less",
@@ -25,7 +25,9 @@
     "open": "Open client",
     "markDone": "Mark done",
     "done": "Follow-up completed",
-    "doNotCall": "Do not call"
+    "doNotCall": "Do not call",
+    "truncated": "{count, plural, one {# later follow-up is not shown} other {# later follow-ups are not shown}}",
+    "aiScheduled": "AI"
   },
   "attention": {
     "title": "AI SMS — needs you",

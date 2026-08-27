@@ -45,6 +45,7 @@ const BASE: FollowupItemData = {
   dueLabel: "10:00",
   overdue: false,
   doNotCall: false,
+  aiScheduled: false,
 };
 
 function callButton(html: string): string {

@@ -23,7 +23,12 @@ import { describe, expect, it, vi } from "vitest";
 import conversationsFr from "../messages/fr/conversations.json";
 import dashboardEn from "../messages/en/dashboard.json";
 import dashboardFr from "../messages/fr/dashboard.json";
-import { APP_TZ, torontoDayRange, torontoDayStart } from "@/components/clients/timezone";
+import {
+  APP_TZ,
+  torontoDayRange,
+  torontoDayStart,
+  torontoMonthStart,
+} from "@/components/clients/timezone";
 import type { FollowupItemData } from "@/app/(app)/dashboard/followup-item";
 import type { FollowupDayGroup } from "@/app/(app)/dashboard/upcoming-followups";
 import type { AttentionRowData } from "@/app/(app)/dashboard/attention-list";
@@ -36,6 +41,7 @@ vi.mock("@/components/telephony/telephony-context", () => ({
 
 const { UpcomingFollowups } = await import("@/app/(app)/dashboard/upcoming-followups");
 const { AttentionList } = await import("@/app/(app)/dashboard/attention-list");
+const { FollowupItem } = await import("@/app/(app)/dashboard/followup-item");
 
 // ── L'horizon ────────────────────────────────────────────────────────────────
 
@@ -104,7 +110,23 @@ function item(id: string): FollowupItemData {
     dueLabel: "10:00",
     overdue: false,
     doNotCall: false,
+    aiScheduled: false,
   };
+}
+
+const ITEM_BASE = item("f1");
+
+/** Une ligne de suivi seule — les deux modules de messages, comme à l'écran. */
+function renderItem(data: FollowupItemData): string {
+  return renderToStaticMarkup(
+    // eslint-disable-next-line react/no-children-prop
+    createElement(NextIntlClientProvider, {
+      locale: "fr",
+      timeZone: APP_TZ,
+      messages: { dashboard: dashboardFr } as unknown as IntlMessages,
+      children: createElement(FollowupItem, { item: data }),
+    }),
+  );
 }
 
 function groups(perDay: number[]): FollowupDayGroup[] {
@@ -154,6 +176,42 @@ const attentionRow = (over: Partial<AttentionRowData> = {}): AttentionRowData =>
   attentionReason: "handoff",
   lastAt: "2026-08-21T15:00:00.000Z",
   ...over,
+});
+
+describe("§ horizon des suivis — trois mois CIVILS", () => {
+  it("compte des mois, pas des multiples de 30 jours", () => {
+    // « + 90 jours » depuis le 31 janvier tombe le 1er mai ; trois mois civils
+    // valent le 30 avril. Un horizon en jours dérape d'un jour à chaque mois
+    // court, et la borne ne tombe plus sur un minuit attendu.
+    const jan31 = new Date("2026-01-31T17:00:00.000Z"); // midi à Toronto
+    expect(formatInTimeZone(torontoMonthStart(jan31, 3), APP_TZ, "yyyy-MM-dd")).toBe("2026-04-30");
+  });
+
+  it("la borne est un minuit de Toronto, même à travers un changement d'heure", () => {
+    // Décembre → mars traverse le passage à l'heure avancée.
+    const dec = new Date("2025-12-15T17:00:00.000Z");
+    const end = torontoMonthStart(dec, 3);
+    expect(formatInTimeZone(end, APP_TZ, "yyyy-MM-dd HH:mm")).toBe("2026-03-15 00:00");
+  });
+
+  it("l'horizon englobe bien un rappel lointain que sept jours cachaient", () => {
+    const now = new Date("2026-08-27T15:00:00.000Z");
+    const inTwoMonths = torontoDayStart(now, 60);
+    expect(inTwoMonths.getTime()).toBeLessThan(torontoMonthStart(now, 3).getTime());
+    expect(inTwoMonths.getTime()).toBeGreaterThan(torontoDayStart(now, 8).getTime());
+  });
+});
+
+describe("suivi programmé par l'assistant", () => {
+  it("§ porte une marque qui le distingue d'un rappel humain", () => {
+    // Les deux familles partagent la liste : sans la marque, « rappeler en
+    // septembre » promis par l'assistant se lit comme une note qu'on aurait
+    // prise soi-même.
+    const ai = renderItem({ ...ITEM_BASE, aiScheduled: true });
+    const human = renderItem({ ...ITEM_BASE, aiScheduled: false });
+    expect(ai).toContain('aria-label="IA"');
+    expect(human).not.toContain('aria-label="IA"');
+  });
 });
 
 describe("tableau de bord — les fils rendus par l'assistant SMS", () => {

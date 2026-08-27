@@ -22,7 +22,7 @@ import { conversations } from "@/db/schema-sms";
 import { requireUser } from "@/lib/auth/guards";
 import { formatPhone, phoneMatchKey } from "@/lib/phone";
 import { RedialButton } from "@/components/calls/redial-button";
-import { APP_TZ, torontoDayRange, torontoDayStart } from "@/components/clients/timezone";
+import { APP_TZ, torontoDayRange, torontoMonthStart } from "@/components/clients/timezone";
 import { CONVERSATION_STATE_LOOK, LookIcon } from "@/components/look";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,8 +33,24 @@ import { UpcomingFollowups, type FollowupDayGroup } from "./upcoming-followups";
 import { AttentionList } from "./attention-list";
 import { QuickSearch } from "./quick-search";
 
-/** Horizon de la section « À venir » des suivis : demain → +7 jours civils. */
-const UPCOMING_DAYS = 7;
+/**
+ * Horizon de la section « À venir » des suivis : demain → +3 mois civils.
+ *
+ * Sept jours cachaient tout ce que l'assistant SMS programme au-delà de la
+ * semaine — « rappelez-moi en septembre » disparaissait de la carte jusqu'à ce
+ * qu'il soit presque trop tard. Les rappels de l'IA vivent dans CETTE liste,
+ * mêlés aux rappels humains ; leur horizon doit donc être celui du plus lointain
+ * des deux.
+ */
+const UPCOMING_MONTHS = 3;
+
+/**
+ * Plafond de lignes chargées. Trois mois de relances peuvent en faire des
+ * centaines ; on en charge un lot et on COMPTE le reste à part, plutôt que de
+ * tronquer en silence. Le tri par échéance garantit que ce qui saute est le
+ * plus lointain — jamais un retard.
+ */
+const FOLLOWUP_FETCH_LIMIT = 500;
 
 export default async function DashboardPage() {
   const user = await requireUser();
@@ -44,10 +60,10 @@ export default async function DashboardPage() {
 
   const now = new Date();
   const { start, end } = torontoDayRange(now);
-  // Fin de l'horizon des suivis : minuit de Toronto après les 7 jours qui
-  // suivent aujourd'hui. En jours CIVILS — « + 8 × 24 h » déraperait d'une
-  // heure au changement d'heure et couperait un jour en deux.
-  const upcomingEnd = torontoDayStart(now, 1 + UPCOMING_DAYS);
+  // Fin de l'horizon des suivis : minuit de Toronto trois mois CIVILS plus
+  // loin — « + 90 × 24 h » déraperait d'une heure au changement d'heure et
+  // couperait un jour en deux.
+  const upcomingEnd = torontoMonthStart(now, UPCOMING_MONTHS);
   const missedWindowStart = new Date(now.getTime() - 7 * 24 * 3600_000);
 
   // Prochains rendez-vous (14 jours), en cours inclus. Le courtier (admin)
@@ -78,6 +94,7 @@ export default async function DashboardPage() {
     missedRows,
     attentionRows,
     attentionCount,
+    pendingFollowupTotal,
   ] = await Promise.all([
     // En retard + aujourd'hui + les 7 jours qui viennent, en UNE requête —
     // l'index (assigned_to_id, due_at) couvre la borne haute.
@@ -89,7 +106,7 @@ export default async function DashboardPage() {
       ),
       with: { client: true },
       orderBy: [asc(followups.dueAt)],
-      limit: 200,
+      limit: FOLLOWUP_FETCH_LIMIT,
     }),
     db.query.appointments.findMany({
       where: upcomingWhere,
@@ -156,6 +173,15 @@ export default async function DashboardPage() {
       .orderBy(desc(conversations.lastInboundAt))
       .limit(6),
     db.$count(conversations, attentionWhere),
+    // Le VRAI nombre, pour que le plafond de chargement ne mente jamais.
+    db.$count(
+      followups,
+      and(
+        eq(followups.assignedToId, user.id),
+        isNull(followups.doneAt),
+        lt(followups.dueAt, upcomingEnd),
+      ),
+    ),
   ]);
 
   // « Jamais retourné » : aucun appel POSTÉRIEUR, de qui que ce soit dans
@@ -210,6 +236,11 @@ export default async function DashboardPage() {
     }),
     overdue,
     doNotCall: f.client?.doNotCall ?? false,
+    // Programmé par l'assistant SMS : lui seul écrit un suivi sans auteur
+    // (`createdById` null). Les trois autres chemins portent l'utilisateur qui
+    // l'a créé. Les deux familles vivent dans la MÊME liste — la marque est ce
+    // qui permet de les y distinguer.
+    aiScheduled: f.createdById === null,
   });
 
   const todayKey = formatInTimeZone(now, APP_TZ, "yyyy-MM-dd");
@@ -244,6 +275,10 @@ export default async function DashboardPage() {
     });
   }
   const upcomingFollowupCount = upcomingGroups.reduce((n, g) => n + g.items.length, 0);
+  // Ce que le plafond de chargement a laissé de côté. Le tri par échéance le
+  // rend inoffensif — c'est le plus lointain qui saute — mais le taire ferait
+  // croire à une liste complète.
+  const upcomingTruncated = Math.max(0, pendingFollowupTotal - pendingFollowups.length);
 
   // Un numéro = une ligne (le plus récent d'abord, avec le nombre de tentatives).
   type MissedGroup = {
@@ -494,10 +529,15 @@ export default async function DashboardPage() {
                         {upcomingFollowupCount}
                       </Badge>
                       <span className="font-normal normal-case">
-                        {t("followups.upcomingRange", { days: UPCOMING_DAYS })}
+                        {t("followups.upcomingRange", { months: UPCOMING_MONTHS })}
                       </span>
                     </p>
                     <UpcomingFollowups groups={upcomingGroups} />
+                    {upcomingTruncated > 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        {t("followups.truncated", { count: upcomingTruncated })}
+                      </p>
+                    ) : null}
                   </div>
                 ) : null}
               </>
