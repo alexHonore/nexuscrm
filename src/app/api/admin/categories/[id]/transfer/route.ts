@@ -6,6 +6,7 @@ import { categories, clients } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
 import { categoryEntryPatch } from "@/lib/dispositions";
+import { notifyCategoryChanges } from "@/lib/campaigns-server/match";
 import { readJson } from "../../../_helpers";
 
 const schema = z.object({ targetId: z.number().int().nullable() });
@@ -58,6 +59,14 @@ export async function POST(req: Request, ctx: Ctx) {
       changes: { categoryId: { from: id, to: body.targetId } },
     },
   });
+
+  // Déplacer des fiches en masse EST un changement de catégorie : les campagnes
+  // que la catégorie d'arrivée périme doivent lâcher ces fiches, et celles
+  // qu'elle réclame les prendre. Sans cet appel, réorganiser le pipeline
+  // laissait des inscriptions accrochées à des campagnes qui ne visaient plus
+  // personne. Le travail part après la réponse — le transfert peut porter sur
+  // des milliers de fiches.
+  notifyCategoryChanges(moved.map((c) => ({ clientId: c.id, from: id, to: body.targetId })));
 
   return NextResponse.json({ moved: moved.length });
 }

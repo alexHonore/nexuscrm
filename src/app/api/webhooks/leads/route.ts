@@ -158,7 +158,7 @@ export async function POST(req: Request) {
   // compris sur un pooler en mode transaction (même motif que enroll.ts).
   const lockKey = `lead:${phoneMatchKey(phone) ?? phone}`;
   const phoneMatch = clientPhoneMatch(phone);
-  const { clientId, created, clientName, assignedToId } = await db.transaction(async (tx) => {
+  const { clientId, created, clientName, assignedToId, categoryChange } = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${lockKey}))`);
     const existing = await tx.query.clients.findFirst({
       where: phoneMatch.where,
@@ -188,6 +188,12 @@ export async function POST(req: Request) {
         created: false,
         clientName: existing.fullName,
         assignedToId: existing.assignedToId,
+        // Une fiche sans catégorie qui en reçoit une VIENT d'entrer quelque
+        // part : c'est un changement de catégorie comme un autre, et le
+        // déclencheur doit le voir. Seul ce cas peut bouger ici (ligne
+        // ci-dessus : la catégorie n'est posée que si elle était nulle).
+        categoryChange:
+          set.categoryId != null ? { from: null, to: set.categoryId as number } : null,
       };
     }
 
@@ -214,6 +220,9 @@ export async function POST(req: Request) {
       created: true,
       clientName: name,
       assignedToId: defaultAssignedToId,
+      // Une création n'est pas un CHANGEMENT de catégorie : c'est
+      // `lead_created` qui inscrit, plus bas.
+      categoryChange: null as { from: null; to: number } | null,
     };
   });
 
@@ -263,7 +272,17 @@ export async function POST(req: Request) {
   // l'entrée du lead — d'où le catch silencieux, le détail étant journalisé.
   runAfterResponse(async () => {
     try {
-      const { matchCampaigns } = await import("@/lib/campaigns-server/match");
+      const { applyCategoryChanges, matchCampaigns } = await import(
+        "@/lib/campaigns-server/match"
+      );
+      // Une fiche existante qui reçoit ENFIN une catégorie vient d'en changer :
+      // même traitement que partout ailleurs (libérer, puis inscrire), et
+      // AVANT `lead_created` — sinon une inscription périmée refuserait les
+      // deux. Dans le même travail d'après-réponse, donc dans l'ordre.
+      if (categoryChange) {
+        await applyCategoryChanges([{ clientId, ...categoryChange }]);
+      }
+
       const matches = await matchCampaigns(clientId);
       const enrolled = matches.filter((m) => m.enrolled);
       if (enrolled.length > 0) {

@@ -235,6 +235,174 @@ describe("déclencheur « changement de catégorie » depuis la disposition d'ap
   });
 });
 
+describe("changer de catégorie RAFRAÎCHIT la campagne de la fiche", () => {
+  /** Déplace la fiche par le chemin réel de l'en-tête (server action admin). */
+  async function moveCategory(clientId: string, categoryId: number | null) {
+    const { setClientCategoryAction } = await import("@/app/(app)/clients/actions");
+    const res = await setClientCategoryAction(clientId, categoryId);
+    expect(res).toEqual({ ok: true, id: clientId });
+    await flushAfterResponse();
+  }
+
+  it("la fiche qui quitte la catégorie visée est retirée de la campagne", async () => {
+    const cats = await seedSystemCategories();
+    const number = await makeSmsNumber();
+    const campaign = await makeCampaign(
+      { audience: { categoryIds: [cats.callback.id] }, trigger: { kind: "manual" } },
+      number.id,
+    );
+    const admin = await makeUser({ role: "admin" });
+    await login(admin);
+    const client = await makeReachableClient({ categoryId: cats.callback.id });
+
+    // Inscrite à la main, comme le ferait « Inscrire l'audience ».
+    const { enrollClients } = await import("@/lib/campaigns-server/enroll");
+    const [enrolled] = await enrollClients(campaign.id, [client.id]);
+    expect(enrolled.enrolled).toBe(true);
+
+    await moveCategory(client.id, cats.not_interested.id);
+
+    const [row] = await testDb
+      .select()
+      .from(campaignEnrollments)
+      .where(eq(campaignEnrollments.campaignId, campaign.id));
+    expect(row.status).toBe("excluded");
+    expect(row.endReason).toBe("left_audience");
+    expect(row.nextTouchAt).toBeNull();
+    expect(row.endedAt).not.toBeNull();
+
+    // Le barreau déjà en file ne doit pas partir après le retrait.
+    const jobs = await testDb.select().from(scheduledJobs).where(eq(scheduledJobs.type, "campaign_touch"));
+    expect(jobs.every((j) => j.status === "cancelled")).toBe(true);
+  });
+
+  it("LE BOGUE : l'ancienne campagne libère la place pour celle de la nouvelle catégorie", async () => {
+    // Symptôme signalé par l'exploitant : la fiche restait accrochée à
+    // l'ancienne campagne ET n'entrait jamais dans la nouvelle. La deuxième
+    // moitié est causée par la première — `excludeActiveInOtherCampaign` vaut
+    // `true` par défaut, donc l'inscription périmée refusait la suivante.
+    const cats = await seedSystemCategories();
+    const number = await makeSmsNumber();
+    const ancienne = await makeCampaign(
+      { name: "À rappeler", audience: { categoryIds: [cats.callback.id] }, trigger: { kind: "manual" } },
+      number.id,
+    );
+    const nouvelle = await makeCampaign(
+      {
+        name: "Rendez-vous",
+        trigger: { kind: "category_changed", toCategoryIds: [cats.booked.id] },
+      },
+      number.id,
+    );
+    const admin = await makeUser({ role: "admin" });
+    await login(admin);
+    const client = await makeReachableClient({ categoryId: cats.callback.id });
+
+    const { enrollClients } = await import("@/lib/campaigns-server/enroll");
+    await enrollClients(ancienne.id, [client.id]);
+
+    await moveCategory(client.id, cats.booked.id);
+
+    const rows = await testDb
+      .select()
+      .from(campaignEnrollments)
+      .where(eq(campaignEnrollments.clientId, client.id));
+    const byCampaign = new Map(rows.map((r) => [r.campaignId, r]));
+    expect(byCampaign.get(ancienne.id)!.status).toBe("excluded");
+    expect(byCampaign.get(ancienne.id)!.endReason).toBe("left_audience");
+    // Et la fiche est bien entrée dans la campagne de sa NOUVELLE catégorie.
+    expect(byCampaign.get(nouvelle.id)).toBeDefined();
+    expect(["pending", "active"]).toContain(byCampaign.get(nouvelle.id)!.status);
+  });
+
+  it("une campagne sans restriction de catégorie garde sa fiche", async () => {
+    // Le faux positif à ne pas commettre : « toutes les catégories » veut dire
+    // que la campagne suit la personne, quoi qu'il arrive à son classement.
+    const cats = await seedSystemCategories();
+    const number = await makeSmsNumber();
+    const campaign = await makeCampaign({ trigger: { kind: "manual" } }, number.id);
+    const admin = await makeUser({ role: "admin" });
+    await login(admin);
+    const client = await makeReachableClient({ categoryId: cats.callback.id });
+
+    const { enrollClients } = await import("@/lib/campaigns-server/enroll");
+    await enrollClients(campaign.id, [client.id]);
+
+    await moveCategory(client.id, cats.not_interested.id);
+
+    const [row] = await testDb
+      .select()
+      .from(campaignEnrollments)
+      .where(eq(campaignEnrollments.campaignId, campaign.id));
+    expect(row.status).toBe("pending");
+    expect(row.endReason).toBeNull();
+  });
+
+  it("retirer complètement la catégorie retire aussi de la campagne", async () => {
+    // `to === null` était jeté avant d'atteindre le moteur : le seul geste qui
+    // sort une fiche de TOUTES les catégories ne libérait rien.
+    const cats = await seedSystemCategories();
+    const number = await makeSmsNumber();
+    const campaign = await makeCampaign(
+      { audience: { categoryIds: [cats.callback.id] }, trigger: { kind: "manual" } },
+      number.id,
+    );
+    const admin = await makeUser({ role: "admin" });
+    await login(admin);
+    const client = await makeReachableClient({ categoryId: cats.callback.id });
+
+    const { enrollClients } = await import("@/lib/campaigns-server/enroll");
+    await enrollClients(campaign.id, [client.id]);
+
+    await moveCategory(client.id, null);
+
+    const [row] = await testDb
+      .select()
+      .from(campaignEnrollments)
+      .where(eq(campaignEnrollments.campaignId, campaign.id));
+    expect(row.status).toBe("excluded");
+    expect(row.endReason).toBe("left_audience");
+  });
+
+  it("le transfert en masse d'une catégorie rafraîchit aussi les campagnes", async () => {
+    // Réorganiser le pipeline déplace des fiches sans passer par l'en-tête :
+    // ce chemin n'avertissait personne.
+    const cats = await seedSystemCategories();
+    const number = await makeSmsNumber();
+    const campaign = await makeCampaign(
+      { audience: { categoryIds: [cats.callback.id] }, trigger: { kind: "manual" } },
+      number.id,
+    );
+    const admin = await makeUser({ role: "admin" });
+    await login(admin);
+    const client = await makeReachableClient({ categoryId: cats.callback.id });
+
+    const { enrollClients } = await import("@/lib/campaigns-server/enroll");
+    await enrollClients(campaign.id, [client.id]);
+
+    const { POST: transferCategory } = await import(
+      "@/app/api/admin/categories/[id]/transfer/route"
+    );
+    const res = await transferCategory(
+      new NextRequest(`http://localhost/api/admin/categories/${cats.callback.id}/transfer`, {
+        method: "POST",
+        body: JSON.stringify({ targetId: cats.not_interested.id }),
+        headers: { "content-type": "application/json" },
+      }),
+      ctx(String(cats.callback.id)),
+    );
+    expect(res.status).toBe(200);
+    await flushAfterResponse();
+
+    const [row] = await testDb
+      .select()
+      .from(campaignEnrollments)
+      .where(eq(campaignEnrollments.campaignId, campaign.id));
+    expect(row.status).toBe("excluded");
+    expect(row.endReason).toBe("left_audience");
+  });
+});
+
 describe("PATCH /api/campaigns/:id — ce qu'il faut pour qu'une campagne active serve", () => {
   it("un barreau « l'assistant rédige » exige un assistant ACTIF", async () => {
     const admin = await makeUser({ role: "admin" });

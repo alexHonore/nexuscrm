@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   campaignEnrollments,
@@ -50,8 +50,15 @@ export type EnrollmentActionResult =
  * Les envois déjà en file (`csend:`) ne sont pas touchés — leur barreau est
  * tracé « envoyé » et le message part dans la minute ; annuler mentirait.
  * Même logique de clé que `closeCampaignEnrollments`.
+ *
+ * Exporté parce que la clôture AUTOMATIQUE d'une inscription périmée
+ * (`releaseCategoryMismatches`, dans `match.ts`) doit annuler exactement le
+ * même travail que le retrait manuel. Deux copies de cette requête finiraient
+ * par diverger, et la copie oubliée laisserait partir un barreau d'une campagne
+ * dont le client vient d'être retiré.
  */
-async function cancelPendingWork(enrollmentId: string): Promise<void> {
+export async function cancelPendingWork(enrollmentIds: string[]): Promise<void> {
+  if (enrollmentIds.length === 0) return;
   await db
     .update(scheduledJobs)
     .set({ status: "cancelled" })
@@ -59,14 +66,17 @@ async function cancelPendingWork(enrollmentId: string): Promise<void> {
       and(
         eq(scheduledJobs.status, "pending"),
         sql`(${scheduledJobs.dedupeKey} like 'ctouch:%' or ${scheduledJobs.dedupeKey} like 'outreach:%')`,
-        sql`split_part(${scheduledJobs.dedupeKey}, ':', 2) = ${enrollmentId}`,
+        sql`split_part(${scheduledJobs.dedupeKey}, ':', 2) in ${enrollmentIds}`,
       ),
     );
   await db
     .update(campaignTouches)
     .set({ status: "cancelled" })
     .where(
-      and(eq(campaignTouches.enrollmentId, enrollmentId), eq(campaignTouches.status, "queued")),
+      and(
+        inArray(campaignTouches.enrollmentId, enrollmentIds),
+        eq(campaignTouches.status, "queued"),
+      ),
     );
 }
 
@@ -100,7 +110,7 @@ export async function pauseEnrollment(
     .update(campaignEnrollments)
     .set({ nextTouchAt: null, endReason: PAUSED_REASON, updatedAt: now })
     .where(eq(campaignEnrollments.id, enrollmentId));
-  await cancelPendingWork(enrollmentId);
+  await cancelPendingWork([enrollmentId]);
   return { ok: true, clientId: e.clientId };
 }
 
@@ -159,7 +169,7 @@ export async function removeEnrollment(
       updatedAt: now,
     })
     .where(eq(campaignEnrollments.id, enrollmentId));
-  await cancelPendingWork(enrollmentId);
+  await cancelPendingWork([enrollmentId]);
   return { ok: true, clientId: e.clientId };
 }
 

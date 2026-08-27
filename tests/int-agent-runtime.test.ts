@@ -125,6 +125,7 @@ vi.mock("@/lib/booking/internal", () => ({
 }));
 
 const { runTurn } = await import("@/lib/agent/runtime");
+const { flushAfterResponse } = await import("@/lib/after-response");
 const { seedGuardrailDefaults } = await import("@/lib/guardrails/store");
 const { compileAssistant } = await import("@/lib/assistants/service");
 
@@ -488,6 +489,42 @@ describe("runTurn", () => {
     const entry = logs.find((l) => l.action === "client.category");
     expect(entry?.userId).toBeNull();
     expect((entry?.detail as { via: string }).via).toBe("assistant_close");
+  });
+
+  it("un refus ferme RESTE un refus ferme, même si le classement automatique retire la fiche de la campagne", async () => {
+    // La course : clore un fil range la fiche (« Pas intéressé »), ce qui la
+    // sort de l'audience de la campagne et déclenche la libération — dans le
+    // même tour, avant le commit. Si la libération gagne, l'inscription se lit
+    // « sortie d'audience » et le refus ferme disparaît du taux d'arrêts : la
+    // campagne semble ne froisser personne.
+    const cats = await seedSystemCategories();
+    const { conversation, client, campaign, enrollment } = await outreachScene();
+    // La campagne ne vise QUE la catégorie de départ — sans cette restriction,
+    // `targetsCategory` répond toujours vrai et la course n'existe pas.
+    await testDb
+      .update(campaigns)
+      .set({ audience: { categoryIds: [cats.callback.id] } })
+      .where(eq(campaigns.id, campaign.id));
+    await testDb
+      .update(clients)
+      .set({ categoryId: cats.callback.id })
+      .where(eq(clients.id, client.id));
+
+    llm.classifierJson = '{"refusal":"hard"}';
+    llm.generatorText = "Merci de votre réponse, bonne continuation!";
+    await inbound(conversation.id, "non merci, plus intéressé");
+    expect((await runTurn(conversation.id)).outcome).toBe("sent");
+    await flushAfterResponse();
+
+    // La fiche a bien été rangée, donc la libération avait de quoi mordre…
+    const [row] = await testDb.select().from(clients).where(eq(clients.id, client.id));
+    expect(row.categoryId).toBe(cats.not_interested.id);
+    // …mais c'est le verdict de la CONVERSATION qui est écrit.
+    const enr = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrollment.id),
+    });
+    expect(enr!.status).toBe("stopped");
+    expect(enr!.endReason).toBe("hard_refusal");
   });
 
   it("close_conversation « disqualified » range la fiche dans Non qualifié", async () => {

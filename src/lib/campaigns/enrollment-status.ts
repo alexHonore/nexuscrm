@@ -15,6 +15,20 @@
 export const PAUSED_REASON = "paused_by_admin";
 /** Motif de retrait manuel — inscription close par l'administrateur. */
 export const REMOVED_REASON = "removed_by_admin";
+/**
+ * Motif de retrait AUTOMATIQUE : la campagne ne vise plus la catégorie du
+ * client, qui vient d'en changer.
+ *
+ * Le statut qui l'accompagne est `excluded`, comme le retrait manuel — et pour
+ * la même raison. Ce n'est pas `stopped` : un arrêt compte comme la
+ * contrepartie des réponses dans le bilan (désabonnement, refus ferme), et un
+ * classement de pipeline n'est pas un refus de la personne. Ce n'est pas non
+ * plus `completed` : l'échelle n'a rien terminé du tout, et la fiche client
+ * afficherait « Terminée » pour une campagne qu'on vient de lui retirer.
+ * « Écartée » est le mot juste, et c'est déjà celui du geste équivalent fait à
+ * la main (`removeEnrollment`).
+ */
+export const LEFT_AUDIENCE_REASON = "left_audience";
 
 const IN_FLIGHT = new Set(["pending", "active"]);
 

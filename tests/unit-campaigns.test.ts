@@ -9,7 +9,13 @@ import { describe, expect, it } from "vitest";
 import { campaignConfigSchema, type CampaignConfig } from "@/lib/campaigns/schema";
 import { hashKey, pickVariant, variantBody } from "@/lib/campaigns/variants";
 import { bodyForStep, ladderExhausted, nextTouchAt, planLadder } from "@/lib/campaigns/ladder";
-import { canEnroll, canSendTouch, type EnrollFacts, type TouchFacts } from "@/lib/campaigns/eligibility";
+import {
+  canEnroll,
+  canSendTouch,
+  targetsCategory,
+  type EnrollFacts,
+  type TouchFacts,
+} from "@/lib/campaigns/eligibility";
 
 const NOW = new Date("2026-08-21T15:00:00.000Z");
 
@@ -50,6 +56,7 @@ function touchFacts(overrides: Partial<TouchFacts> = {}): TouchFacts {
     doNotCall: false,
     excludeDoNotCall: true,
     aiEnabled: true,
+    stillTargeted: true,
     ladderLength: 2,
     step: 0,
     alreadySent: false,
@@ -415,6 +422,39 @@ describe("éligibilité d'un barreau", () => {
     });
   });
 
+  it("une fiche sortie de l'audience ne reçoit plus le barreau suivant", () => {
+    // Le filet de sécurité : le changement de catégorie libère l'inscription
+    // sur-le-champ, mais `clients.category_id` porte `on delete set null` —
+    // la base peut vider une catégorie sans qu'aucun code ne tourne. Ce
+    // garde-fou rattrape aussi les inscriptions déjà périmées.
+    expect(canSendTouch(touchFacts({ stillTargeted: false }))).toEqual({
+      allowed: false,
+      refusal: "left_audience",
+    });
+  });
+
+  it("une réponse l'emporte sur la sortie d'audience", () => {
+    // Les deux sont vrais : c'est la RÉPONSE qui doit être écrite, sinon la
+    // conversion disparaît du bilan de la variante qui l'a obtenue.
+    expect(canSendTouch(touchFacts({ stillTargeted: false, repliedSince: true }))).toEqual({
+      allowed: false,
+      refusal: "replied",
+    });
+  });
+
+  it("la sortie d'audience l'emporte sur un « pas maintenant »", () => {
+    // Sinon l'inscription serait repoussée au lendemain matin, indéfiniment,
+    // au lieu d'être close : une catégorie ne revient pas toute seule.
+    expect(canSendTouch(touchFacts({ stillTargeted: false, withinSendWindow: false }))).toEqual({
+      allowed: false,
+      refusal: "left_audience",
+    });
+    expect(canSendTouch(touchFacts({ stillTargeted: false, aiEnabled: false }))).toEqual({
+      allowed: false,
+      refusal: "left_audience",
+    });
+  });
+
   it("un « non » définitif passe AVANT un « pas maintenant »", () => {
     // Une personne désabonnée sous interrupteur d'arrêt doit être CLOSE, pas
     // repoussée au lendemain — sinon l'échelle repart à la levée de l'arrêt.
@@ -435,6 +475,67 @@ describe("éligibilité à l'inscription — conversation en cours", () => {
       allowed: false,
       refusal: "live_conversation",
     });
+  });
+});
+
+describe("la campagne vise-t-elle encore cette catégorie?", () => {
+  it("sans restriction de catégorie, la campagne suit la fiche partout", () => {
+    // Le cas le plus courant, et le plus important à ne PAS casser : une
+    // campagne qui ne nomme aucune catégorie ne doit jamais lâcher personne
+    // parce que quelqu'un a reclassé une fiche.
+    const c = config();
+    expect(c.audience.categoryIds).toEqual([]);
+    expect(targetsCategory(c, 7)).toBe(true);
+    expect(targetsCategory(c, null)).toBe(true);
+  });
+
+  it("une audience restreinte lâche la fiche qui sort de ses catégories", () => {
+    const c = config({ audience: { categoryIds: [3, 4] } });
+    expect(targetsCategory(c, 3)).toBe(true);
+    expect(targetsCategory(c, 4)).toBe(true);
+    expect(targetsCategory(c, 5)).toBe(false);
+  });
+
+  it("une fiche SANS catégorie n'est dans aucune liste choisie", () => {
+    // « Sans catégorie » n'est pas une catégorie : elle ne peut pas satisfaire
+    // « le contact est dans l'une de ces catégories ».
+    expect(targetsCategory(config({ audience: { categoryIds: [3] } }), null)).toBe(false);
+  });
+
+  it("les catégories d'ARRIVÉE du déclencheur comptent aussi", () => {
+    // Une campagne « quand un contact devient Chaud » n'a souvent aucune
+    // restriction d'audience : toute sa cible tient dans le déclencheur. Ne
+    // regarder que l'audience laisserait exactement ces campagnes-là accrochées
+    // à des fiches qui ont depuis changé d'étape — le bogue signalé.
+    const c = config({ trigger: { kind: "category_changed", toCategoryIds: [9] } });
+    expect(c.audience.categoryIds).toEqual([]);
+    expect(targetsCategory(c, 9)).toBe(true);
+    expect(targetsCategory(c, 10)).toBe(false);
+  });
+
+  it("un déclencheur d'arrivée VIDE ne restreint rien", () => {
+    const c = config({ trigger: { kind: "category_changed", toCategoryIds: [] } });
+    expect(targetsCategory(c, 10)).toBe(true);
+  });
+
+  it("les deux conditions se cumulent", () => {
+    const c = config({
+      audience: { categoryIds: [1, 2] },
+      trigger: { kind: "category_changed", toCategoryIds: [2, 3] },
+    });
+    expect(targetsCategory(c, 2)).toBe(true); // dans les deux
+    expect(targetsCategory(c, 1)).toBe(false); // audience seule
+    expect(targetsCategory(c, 3)).toBe(false); // déclencheur seul
+  });
+
+  it("le déclencheur d'un AUTRE type ne restreint jamais la catégorie", () => {
+    for (const trigger of [
+      { kind: "manual" },
+      { kind: "lead_created", sourceIds: [1] },
+      { kind: "scheduled", everyHours: 24 },
+    ]) {
+      expect(targetsCategory(config({ trigger }), 42)).toBe(true);
+    }
   });
 });
 

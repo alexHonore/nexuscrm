@@ -110,6 +110,17 @@ const END_REASONS = new Set([
   // avec ce motif. « paused_by_admin » n'y figure PAS — une pause a
   // `ended_at` null et n'atteint jamais la colonne « Terminé ».
   "removed_by_admin",
+  // Retrait AUTOMATIQUE : la fiche a changé de catégorie et la campagne ne la
+  // vise plus (releaseCategoryMismatches).
+  "left_audience",
+  // Verdicts de l'assistant (`agent/runtime.ts`). Ils n'avaient jamais
+  // d'étiquette : ils s'affichaient en anglais brut dans cette colonne, et
+  // DISPARAISSAIENT sur la fiche client, dont le garde `tc.has` masque toute
+  // clé absente — l'inscription se terminait alors sans dire pourquoi.
+  "hard_refusal",
+  "goal_reached",
+  "disqualified",
+  "not_interested",
 ]);
 
 /** Cases à cocher d'une liste d'identifiants — le motif se répète 4 fois. */

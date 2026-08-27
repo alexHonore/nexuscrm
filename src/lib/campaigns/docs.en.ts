@@ -39,8 +39,8 @@ export const CAMPAIGN_FIELD_TEXT_EN: Record<string, CampaignFieldText> = {
   },
   "trigger.toCategoryIds": {
     label: "Arrival categories",
-    what: "For \"category change\": enroll when a contact ENTERS one of these categories. Empty = any of them.",
-    why: "\"To call back\" → \"Hot\" is a moment; the SMS has to go out at that moment, not at the next sweep.",
+    what: "For \"category change\": enroll when a contact ENTERS one of these categories — and drop them from the campaign if they LEAVE. Empty = any of them.",
+    why: "\"To call back\" → \"Hot\" is a moment; the SMS has to go out at that moment, not at the next sweep. And the day the contact moves to \"Booked\", the follow-up has no reason to continue: it stops instead of writing on.",
   },
   "trigger.everyHours": {
     label: "Sweep frequency",
@@ -49,8 +49,8 @@ export const CAMPAIGN_FIELD_TEXT_EN: Record<string, CampaignFieldText> = {
   },
   "audience.categoryIds": {
     label: "Target categories",
-    what: "Contacts have to be in one of these categories. Empty = all.",
-    why: "The category is your pipeline: it is the most natural filter for saying \"the people at this stage\".",
+    what: "Contacts have to be in one of these categories. Empty = all. A contact who moves to a category that is not on this list is dropped from the campaign.",
+    why: "The category is your pipeline: it is the most natural filter for saying \"the people at this stage\". And the condition still holds AFTER enrollment — leaving the stage means leaving the campaign, otherwise the follow-up would trail a contact the campaign no longer targets.",
   },
   "audience.sourceIds": {
     label: "Target sources",

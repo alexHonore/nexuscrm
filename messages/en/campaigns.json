@@ -147,7 +147,7 @@
       "kind": "Trigger type",
       "manualHint": "You pick the audience and enroll yourself.",
       "leadHint": "A lead arriving through the webhook is enrolled automatically.",
-      "categoryHint": "The client enters one of the chosen categories.",
+      "categoryHint": "The client enters one of the chosen categories — and leaves the campaign if they move out of them.",
       "scheduledHint": "The audience is swept at a regular interval.",
       "sources": "Sources",
       "categories": "Target categories",
@@ -253,7 +253,12 @@
         "live_conversation": "Conversation already in progress",
         "client_deleted": "Client deleted",
         "campaign_archived": "Campaign archived",
-        "removed_by_admin": "Removed by admin"
+        "removed_by_admin": "Removed by admin",
+        "left_audience": "Category changed — outside this campaign",
+        "hard_refusal": "Hard refusal",
+        "goal_reached": "Goal reached",
+        "disqualified": "Not qualified",
+        "not_interested": "Not interested"
       },
       "pause": "Pause",
       "resume": "Resume",

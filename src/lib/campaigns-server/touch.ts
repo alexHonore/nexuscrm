@@ -16,6 +16,7 @@ import { campaignRowToConfig } from "@/lib/campaigns/schema";
 import {
   canSendTouch,
   LIVE_CONVERSATION_WINDOW_MS,
+  targetsCategory,
   type TouchRefusal,
 } from "@/lib/campaigns/eligibility";
 import { bodyForStep, ladderExhausted, nextTouchAt } from "@/lib/campaigns/ladder";
@@ -172,6 +173,9 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
     liveConversation,
     hasSender: smsNumber !== undefined,
     withinSendWindow: isWithinSendWindow(now, quietHours),
+    // La fiche a pu changer de catégorie depuis l'inscription. `clients` est
+    // déjà chargé : la question ne coûte pas une requête de plus.
+    stillTargeted: targetsCategory(config, client.categoryId),
   });
 
   if (!decision.allowed) {
@@ -370,6 +374,12 @@ async function handleRefusal(
     case "live_conversation":
       // Rien n'est parti : « écartée », pas « arrêtée » — l'échelle n'a jamais
       // commencé, et les statistiques ne doivent pas y voir un refus exprimé.
+      return finish(enrollment.id, "excluded", refusal, result);
+    case "left_audience":
+      // DÉFINITIF, pas un report : une catégorie ne revient pas toute seule.
+      // Repousser re-présenterait l'inscription à chaque cycle, pour toujours.
+      // Même statut et même motif que la libération immédiate — un barreau
+      // rattrapé ici doit se lire comme celui qui a été libéré à temps.
       return finish(enrollment.id, "excluded", refusal, result);
     case "suppressed":
     case "do_not_call":

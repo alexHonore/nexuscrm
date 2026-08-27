@@ -147,7 +147,7 @@
       "kind": "Type de déclencheur",
       "manualHint": "Vous choisissez l'audience et inscrivez vous-même.",
       "leadHint": "Un lead qui arrive par le webhook est inscrit automatiquement.",
-      "categoryHint": "Le client entre dans l'une des catégories choisies.",
+      "categoryHint": "Le client entre dans l'une des catégories choisies — et sort de la campagne s'il les quitte.",
       "scheduledHint": "L'audience est balayée à intervalle régulier.",
       "sources": "Sources",
       "categories": "Catégories d'arrivée",
@@ -253,7 +253,12 @@
         "live_conversation": "Conversation déjà en cours",
         "client_deleted": "Fiche supprimée",
         "campaign_archived": "Campagne archivée",
-        "removed_by_admin": "Retiré par l’administrateur"
+        "removed_by_admin": "Retiré par l’administrateur",
+        "left_audience": "Catégorie changée — hors de cette campagne",
+        "hard_refusal": "Refus ferme",
+        "goal_reached": "Objectif atteint",
+        "disqualified": "Non qualifié",
+        "not_interested": "Pas intéressé"
       },
       "pause": "Mettre en pause",
       "resume": "Reprendre",

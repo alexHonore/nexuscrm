@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, isNull, notExists, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, notExists, or, sql } from "drizzle-orm";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { db } from "@/db";
 import { categories, clients, comments, followups, sources, users } from "@/db/schema";
@@ -17,6 +17,7 @@ import { assistantRowToConfig, type AssistantConfig } from "@/lib/assistants/sch
 import { logAudit } from "@/lib/audit";
 import { categoryEntryPatch } from "@/lib/dispositions";
 import { notifyCategoryChanged } from "@/lib/campaigns-server/match";
+import { LEFT_AUDIENCE_REASON } from "@/lib/campaigns/enrollment-status";
 import { resolveClassification } from "@/lib/classification-server";
 import { resolvedRulesFor } from "@/lib/assistants/service";
 import { campaignRowToConfig } from "@/lib/campaigns/schema";
@@ -931,7 +932,17 @@ export async function runTurn(
           .where(
             and(
               eq(campaignEnrollments.conversationId, conversationId),
-              inArray(campaignEnrollments.status, ["pending", "active", "replied"]),
+              or(
+                inArray(campaignEnrollments.status, ["pending", "active", "replied"]),
+                // Le retrait automatique pour changement de catégorie a pu
+                // passer juste avant nous : `notifyCategoryChanged` part plus
+                // haut dans ce tour, AVANT le commit, et son travail démarre
+                // aussitôt. Le sort décidé PAR LA CONVERSATION prime — un refus
+                // ferme doit rester un refus ferme au bilan, pas une sortie
+                // d'audience. Ciblé sur ce seul motif : un retrait manuel, une
+                // fiche supprimée ou un fil déjà vivant gardent le leur.
+                eq(campaignEnrollments.endReason, LEFT_AUDIENCE_REASON),
+              )!,
             ),
           );
       }

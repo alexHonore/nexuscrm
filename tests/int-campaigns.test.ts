@@ -10,6 +10,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import {
   closeDb,
+  makeCategory,
   makeClient,
   makeConversation,
   makeSmsNumber,
@@ -233,6 +234,33 @@ describe("échelle de relances", () => {
     expect(row!.conversationId).not.toBeNull();
     // 48 h après l'ENVOI réel, pas après l'inscription.
     expect(row!.nextTouchAt!.toISOString()).toBe("2026-08-23T15:00:00.000Z");
+  });
+
+  it("§ un barreau ne part PAS à une fiche sortie de l'audience — il la clôt", async () => {
+    // Le filet de sécurité, sous le déclencheur : même si personne n'a prévenu
+    // le moteur (catégorie vidée par la base via `on delete set null`, chemin
+    // oublié, inscription périmée d'avant le correctif), le barreau ne part pas.
+    const visee = await makeCategory({ nameFr: "À rappeler", nameEn: "Callback" });
+    const autre = await makeCategory({ nameFr: "Rendez-vous", nameEn: "Booked" });
+    const campaign = await makeCampaign({ audience: { categoryIds: [visee.id] } });
+    const client = await makeReachableClient({ categoryId: visee.id });
+    const [enrolled] = await enrollClients(campaign.id, [client.id], { now: NOW });
+
+    // La fiche change de catégorie SANS passer par le déclencheur.
+    await testDb.update(clients).set({ categoryId: autre.id }).where(eq(clients.id, client.id));
+
+    const result = await runTouch(enrolled.enrollmentId!, NOW);
+    expect(result).toMatchObject({ sent: false, refusal: "left_audience" });
+    // Aucun SMS mis en file.
+    expect(await testDb.select().from(scheduledJobs).where(eq(scheduledJobs.type, "send_sms"))).toHaveLength(0);
+
+    const row = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+    // Close, et non repoussée : une catégorie ne revient pas toute seule.
+    expect(row!.status).toBe("excluded");
+    expect(row!.endReason).toBe("left_audience");
+    expect(row!.nextTouchAt).toBeNull();
   });
 
   it("§ un barreau ne part qu'UNE fois, même rejoué", async () => {

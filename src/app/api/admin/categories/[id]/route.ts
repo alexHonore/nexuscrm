@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { categories, clients } from "@/db/schema";
 import { diffFields, logAudit } from "@/lib/audit";
 import { apiAdmin } from "@/lib/auth/guards";
+import { notifyCategoryChanges } from "@/lib/campaigns-server/match";
 import { AbortDelete, abortDeleteResponse, readJson, readReassignTarget } from "../../_helpers";
 
 const patchSchema = z.object({
@@ -66,13 +67,15 @@ export async function DELETE(req: Request, ctx: Ctx) {
   // Se déplacer vers soi-même n'a pas de sens : la ligne disparaît juste après.
   if (reassignTo === id) return NextResponse.json({ error: "invalid_target" }, { status: 400 });
 
-  let moved: number;
+  // Les IDS et pas seulement le compte : les campagnes des fiches déplacées
+  // doivent être réévaluées une fois la transaction validée.
+  let movedIds: { id: string }[];
   try {
     // Tout dans une seule transaction : destination vérifiée, fiches déplacées
     // puis comptées, catégorie supprimée. Une fiche rattachée pendant
     // l'opération est donc soit déplacée avec les autres, soit à l'origine
     // d'un refus — jamais orpheline.
-    moved = await db.transaction(async (tx) => {
+    movedIds = await db.transaction(async (tx) => {
       if (reassignTo !== null) {
         const dest = await tx.query.categories.findFirst({ where: eq(categories.id, reassignTo) });
         if (!dest) throw new AbortDelete("invalid_target");
@@ -86,11 +89,12 @@ export async function DELETE(req: Request, ctx: Ctx) {
         throw new AbortDelete("reassign_required", rows.length);
       }
       await tx.delete(categories).where(eq(categories.id, id));
-      return rows.length;
+      return rows;
     });
   } catch (err) {
     return abortDeleteResponse(err);
   }
+  const moved = movedIds.length;
 
   const changes = diffFields(target, null, ["nameFr", "nameEn", "color"]);
   await logAudit({
@@ -100,6 +104,13 @@ export async function DELETE(req: Request, ctx: Ctx) {
     entityId: String(id),
     detail: { nameFr: target.nameFr, reassignTo, movedClients: moved, ...(changes ? { changes } : {}) },
   });
+
+  // APRÈS le commit, jamais dedans : la transaction peut encore être annulée
+  // (`AbortDelete`), et on aurait alors retiré des fiches de leurs campagnes
+  // pour un déplacement qui n'a pas eu lieu. Réassigner vers « sans catégorie »
+  // (`reassignTo === null`) compte aussi : les campagnes qui visaient l'ancienne
+  // catégorie ne visent plus ces fiches.
+  notifyCategoryChanges(movedIds.map((c) => ({ clientId: c.id, from: id, to: reassignTo })));
 
   return NextResponse.json({ ok: true, moved });
 }

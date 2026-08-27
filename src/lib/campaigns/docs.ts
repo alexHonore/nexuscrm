@@ -64,8 +64,8 @@ export const CAMPAIGN_FIELD_DOCS: CampaignFieldDoc[] = [
   {
     path: "trigger.toCategoryIds",
     labelFr: "Catégories d'arrivée",
-    whatFr: "Pour « changement de catégorie » : inscrire quand un contact ENTRE dans l'une de ces catégories. Vide = n'importe laquelle.",
-    whyFr: "« À rappeler » → « Chaud » est un moment ; le SMS doit partir à ce moment-là, pas au prochain balayage.",
+    whatFr: "Pour « changement de catégorie » : inscrire quand un contact ENTRE dans l'une de ces catégories — et le retirer de la campagne s'il en SORT. Vide = n'importe laquelle.",
+    whyFr: "« À rappeler » → « Chaud » est un moment ; le SMS doit partir à ce moment-là, pas au prochain balayage. Et le jour où le contact passe « Rendez-vous », la relance n'a plus lieu d'être : elle s'arrête au lieu de continuer à écrire.",
     binding: "category",
   },
   {
@@ -77,8 +77,8 @@ export const CAMPAIGN_FIELD_DOCS: CampaignFieldDoc[] = [
   {
     path: "audience.categoryIds",
     labelFr: "Catégories visées",
-    whatFr: "Les contacts doivent être dans l'une de ces catégories. Vide = toutes.",
-    whyFr: "La catégorie est votre pipeline : c'est le filtre le plus naturel pour dire « les gens à cette étape ».",
+    whatFr: "Les contacts doivent être dans l'une de ces catégories. Vide = toutes. Un contact qui change pour une catégorie absente de cette liste est retiré de la campagne.",
+    whyFr: "La catégorie est votre pipeline : c'est le filtre le plus naturel pour dire « les gens à cette étape ». Et la condition vaut aussi APRÈS l'inscription — quitter l'étape, c'est quitter la campagne, sinon la relance suivrait un contact que la campagne ne vise plus.",
     binding: "category",
   },
   {
