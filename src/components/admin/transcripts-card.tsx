@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isInteractiveModel } from "@/lib/llm/labs";
 import {
   Select,
   SelectContent,
@@ -71,7 +72,9 @@ export function TranscriptsCard({
     setLoadingModels(true);
     try {
       const res = await api<{ models: CatalogModel[] }>("/api/llm/models?provider=openrouter");
-      setModels(res.models.filter((m) => m.supportsAudio));
+      // Audio en entrée ET interactif : les variantes :batch/:free du
+      // catalogue répondent en différé — inutilisables pour un job qui attend.
+      setModels(res.models.filter((m) => m.supportsAudio && isInteractiveModel(m.id)));
     } catch {
       toast.error(t("settings.transcripts.modelsLoadError"));
     } finally {
