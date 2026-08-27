@@ -584,10 +584,17 @@ export default async function DashboardPage() {
                   clientName: row.clientName,
                   clientPhone: row.clientPhone,
                   attentionReason: row.attentionReason,
-                  lastAt: (row.lastInboundAt ?? row.lastOutboundAt)?.toISOString() ?? null,
+                  // Mise en forme ICI : une locale `date-fns` est un objet de
+                  // fonctions, et rien de tel ne traverse la frontière
+                  // serveur → client. Même règle que `dueLabel` des suivis.
+                  lastAtLabel: (() => {
+                    const at = row.lastInboundAt ?? row.lastOutboundAt;
+                    return at
+                      ? formatInTimeZone(at, APP_TZ, "d MMM HH:mm", { locale: dfnsLocale })
+                      : null;
+                  })(),
                 }))}
                 hidden={attentionCount - attentionRows.length}
-                dfnsLocale={dfnsLocale}
               />
             )}
           </CardContent>

@@ -163,7 +163,7 @@ function renderAttention(rows: AttentionRowData[], hidden = 0): string {
         dashboard: dashboardFr,
         conversations: conversationsFr,
       } as unknown as IntlMessages,
-      children: createElement(AttentionList, { rows, hidden, dfnsLocale: fr }),
+      children: createElement(AttentionList, { rows, hidden }),
     }),
   );
 }
@@ -174,7 +174,7 @@ const attentionRow = (over: Partial<AttentionRowData> = {}): AttentionRowData =>
   clientName: "Marie Tremblay",
   clientPhone: "+14185551234",
   attentionReason: "handoff",
-  lastAt: "2026-08-21T15:00:00.000Z",
+  lastAtLabel: "21 août 11:00",
   ...over,
 });
 

@@ -1,12 +1,9 @@
 "use client";
 
-import { formatInTimeZone } from "date-fns-tz";
-import type { Locale } from "date-fns";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { ATTENTION_LOOK, CONVERSATION_STATE_LOOK, LookIcon, lookTint } from "@/components/look";
 import { Badge } from "@/components/ui/badge";
-import { APP_TZ } from "@/components/clients/timezone";
 import { formatPhone } from "@/lib/phone";
 
 /**
@@ -27,19 +24,24 @@ export type AttentionRowData = {
   clientName: string | null;
   clientPhone: string;
   attentionReason: string | null;
-  /** Dernier mouvement du fil, ISO. */
-  lastAt: string | null;
+  /**
+   * Dernier mouvement du fil, DÉJÀ mis en forme par la page.
+   *
+   * Une chaîne, pas une date + une locale : une locale `date-fns` est un objet
+   * de FONCTIONS, et rien de tel ne traverse la frontière serveur → client.
+   * Le reste du tableau de bord fait pareil (`dueLabel` des suivis) — c'est la
+   * raison pour laquelle ces composants ne reçoivent jamais de locale.
+   */
+  lastAtLabel: string | null;
 };
 
 export function AttentionList({
   rows,
   hidden,
-  dfnsLocale,
 }: {
   rows: AttentionRowData[];
   /** Fils au-delà de ceux affichés — la carte n'en montre qu'une poignée. */
   hidden: number;
-  dfnsLocale: Locale;
 }) {
   const t = useTranslations("dashboard");
   const tc = useTranslations("conversations");
@@ -71,11 +73,9 @@ export function AttentionList({
                   </Badge>
                 ) : null}
               </div>
-              {row.lastAt ? (
+              {row.lastAtLabel ? (
                 <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                  {formatInTimeZone(new Date(row.lastAt), APP_TZ, "d MMM HH:mm", {
-                    locale: dfnsLocale,
-                  })}
+                  {row.lastAtLabel}
                 </span>
               ) : null}
             </Link>
