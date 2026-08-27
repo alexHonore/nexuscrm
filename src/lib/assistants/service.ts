@@ -24,6 +24,7 @@ import {
   classifierChain,
   customQualificationFields,
   modelChain,
+  retryPolicyFor,
   type AssistantConfig,
 } from "./schema";
 import { simulatedSlotsText } from "@/lib/agent/tool-simulation";
@@ -269,6 +270,7 @@ export async function runAssistantSuite(
   // inactivable, pour un incident que la production aurait absorbé.
   const generatorRungs = modelChain(config.model);
   const classifierRungs = classifierChain(config.model);
+  const retry = retryPolicyFor(config.model);
   // La clé du modèle principal reste vérifiée d'emblée : sans elle, la suite
   // n'a rien à dire d'utile et l'écran doit répondre « fournisseur non
   // configuré », pas quatorze fixtures rouges.
@@ -331,6 +333,7 @@ export async function runAssistantSuite(
               maxTokens: config.model.maxTokens,
               temperature: config.model.temperature,
               routing: config.model.routing as unknown as Record<string, unknown>,
+              retry,
               ...(config.model.reasoningEffort === "none"
                 ? {}
                 : { reasoningEffort: config.model.reasoningEffort }),
@@ -363,6 +366,7 @@ export async function runAssistantSuite(
               messages: [{ role: "user", content: user }],
               maxTokens: 300,
               temperature: 0,
+              retry,
             },
             { resolve: getLlmProvider },
             { deadline },

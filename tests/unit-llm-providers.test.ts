@@ -928,6 +928,44 @@ describe("reprise d'un refus passager", () => {
     await expect(provider.generate(INPUT)).rejects.toMatchObject({ status: 429 });
     expect(flaky.seen()).toBe(3);
   });
+
+  it("la politique de L'APPEL l'emporte sur celle du fournisseur", async () => {
+    // C'est le réglage de l'assistant qui décide, pas la clé qui a construit
+    // le fournisseur : sans ça, « 1 tentative » réglé à l'écran n'aurait
+    // aucun effet.
+    const flaky = flakyFetch(429, 5, ANSWER);
+    const provider = createOpenRouterProvider({
+      apiKey: "k",
+      retry: { attempts: 4 },
+      fetchFn: flaky.fetchFn,
+      sleepFn: async () => {},
+    });
+
+    await expect(provider.generate({ ...INPUT, retry: { attempts: 1 } })).rejects.toMatchObject({
+      status: 429,
+    });
+    expect(flaky.seen()).toBe(1);
+  });
+
+  it("l'attente CUMULÉE est plafonnée, quoi qu'on règle", async () => {
+    // Le garde-fou que l'administrateur ne peut pas desserrer : « 5 tentatives,
+    // 10 s d'écart » ferait patienter un tour d'agent bien au-delà du budget
+    // du cycle de répartition. Ici : 8 s puis 24 s écrêté à 10 s = 18 s, la
+    // troisième reprise dépasserait 20 s et n'a donc pas lieu.
+    const waits: number[] = [];
+    const flaky = flakyFetch(429, 99, ANSWER);
+    const provider = createOpenRouterProvider({
+      apiKey: "k",
+      retry: { attempts: 5, baseDelayMs: 8_000 },
+      fetchFn: flaky.fetchFn,
+      sleepFn: async (ms) => void waits.push(ms),
+    });
+
+    await expect(provider.generate(INPUT)).rejects.toMatchObject({ status: 429 });
+    expect(waits).toHaveLength(2);
+    expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(20_000);
+    expect(flaky.seen()).toBe(3);
+  });
 });
 
 // ── Chaîne de replis ─────────────────────────────────────────────────────────

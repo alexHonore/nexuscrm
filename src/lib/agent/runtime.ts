@@ -18,6 +18,7 @@ import {
   classifierChain,
   customQualificationFields,
   modelChain,
+  retryPolicyFor,
   type AssistantConfig,
   type ModelRef,
 } from "@/lib/assistants/schema";
@@ -845,6 +846,8 @@ export async function runTurn(
   // Les deux chaînes du tour : le modèle visé d'abord, ses replis ensuite.
   const generatorRungs = modelChain(config.model);
   const classifierRungs = classifierChain(config.model);
+  /** Reprise sur place réglée par l'assistant — avant tout changement de modèle. */
+  const retry = retryPolicyFor(config.model);
   /** Un cran servable au moins — sinon le tour n'a aucun modèle à appeler. */
   const anyKey = (rungs: { provider: ProviderId }[]) =>
     rungs.some((rung) => {
@@ -906,6 +909,7 @@ export async function runTurn(
         // Mêmes exigences de confidentialité que le générateur : le classifieur
         // et les juges lisent les mêmes messages du client.
         routing: config.model.routing as unknown as Record<string, unknown>,
+        retry,
       },
       { resolve: getLlmProvider },
     );
@@ -1404,7 +1408,9 @@ export async function runTurn(
   const generateWithFallback = async (
     input: Omit<GenerateInput, "model">,
   ): Promise<LLMResult> => {
-    const outcome = await generateWithChain(generatorRungs, input, { resolve: getLlmProvider });
+    const outcome = await generateWithChain(generatorRungs, { ...input, retry }, {
+      resolve: getLlmProvider,
+    });
     if (outcome.rung > 0) chainUse.fallbackRung = outcome.used;
     tallyUsage(outcome.result);
     return outcome.result;

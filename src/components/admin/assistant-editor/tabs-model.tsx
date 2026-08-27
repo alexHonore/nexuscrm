@@ -17,6 +17,9 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { EDITOR_TAB_LOOK } from "@/components/look";
 import { DEFAULT_MODEL_FALLBACK, PROVIDER_IDS, type ProviderId } from "@/lib/assistants/schema";
+// Les plafonds viennent du TRANSPORT lui-même : l'écran et le moteur ne
+// peuvent pas diverger sur le moment où l'on cesse d'attendre.
+import { DEFAULT_RETRY_POLICY } from "@/lib/llm/http";
 import type { ModelDescriptor } from "@/lib/llm/types";
 import { ModelPicker } from "../model-picker";
 import { api } from "../api";
@@ -184,6 +187,51 @@ export function ModelTab({ config, update }: TabProps) {
         </Fields>
       </Panel>
 
+      {/* L'ordre des cartes suit l'ordre des ÉVÉNEMENTS : le modèle, puis la
+          reprise sur place, puis le changement de modèle. */}
+      <Panel
+        look={look}
+        title={t("editor.model.sectionRetry")}
+        description={t("editor.model.sectionRetryHint")}
+      >
+        <Fields>
+          <div className="space-y-1.5">
+            <FieldLabel path="model.retry.attempts" htmlFor="f-retry-attempts" />
+            <Input
+              id="f-retry-attempts"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={5}
+              value={config.model.retry.attempts}
+              onChange={(e) =>
+                update((d) => void (d.model.retry.attempts = Number(e.target.value)))
+              }
+              className="min-h-11 md:min-h-9"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <FieldLabel path="model.retry.delaySec" htmlFor="f-retry-delay" />
+            <Input
+              id="f-retry-delay"
+              type="number"
+              inputMode="decimal"
+              step="0.1"
+              min={0.2}
+              max={10}
+              value={config.model.retry.delaySec}
+              onChange={(e) =>
+                update((d) => void (d.model.retry.delaySec = Number(e.target.value)))
+              }
+              className="min-h-11 md:min-h-9"
+            />
+          </div>
+          {/* Ce que le réglage donne VRAIMENT, en clair : « 3 » et « 0,8 » ne
+              disent pas au bout de combien de temps on abandonne. */}
+          <RetrySummary retry={config.model.retry} />
+        </Fields>
+      </Panel>
+
       {/* Les replis sont une CHAÎNE : le premier qui répond gagne. Trois crans
           parce qu'un incident ne s'arrête pas au premier remplaçant — un 429
           chez le routeur un jour où le direct est saturé laissait l'assistant
@@ -301,6 +349,49 @@ export function ModelTab({ config, update }: TabProps) {
       </Panel>
     </div>
   );
+}
+
+/**
+ * Ce que le réglage donne VRAIMENT, en clair.
+ *
+ * « 3 » et « 0,8 » ne disent pas au bout de combien de temps on abandonne. Le
+ * calcul reprend celui du transport — plafonds compris — et non une jolie
+ * formule : au-delà d'un certain réglage, les dernières tentatives n'ont tout
+ * simplement PAS lieu, et un écran qui promettrait cinq tentatives mentirait.
+ */
+function RetrySummary({ retry }: { retry: { attempts: number; delaySec: number } }) {
+  const t = useTranslations("assistants");
+  const { retries, totalSec } = plannedRetries(retry);
+
+  return (
+    <p className="text-xs text-muted-foreground md:col-span-2">
+      {retries === 0
+        ? t("editor.model.retryNone")
+        : t("editor.model.retrySummary", {
+            retries,
+            first: Math.min(retry.delaySec, DEFAULT_RETRY_POLICY.maxDelayMs / 1000),
+            total: totalSec,
+          })}
+    </p>
+  );
+}
+
+/** Les reprises qui auront LIEU, et l'attente cumulée — mêmes bornes que `http.ts`. */
+function plannedRetries(retry: { attempts: number; delaySec: number }): {
+  retries: number;
+  totalSec: number;
+} {
+  const maxOne = DEFAULT_RETRY_POLICY.maxDelayMs / 1000;
+  const maxTotal = DEFAULT_RETRY_POLICY.maxTotalDelayMs / 1000;
+  let waited = 0;
+  let retries = 0;
+  for (let attempt = 1; attempt < retry.attempts; attempt += 1) {
+    const delay = Math.min(maxOne, retry.delaySec * Math.pow(3, attempt - 1));
+    if (waited + delay > maxTotal) break;
+    waited += delay;
+    retries += 1;
+  }
+  return { retries, totalSec: Math.round(waited * 10) / 10 };
 }
 
 function ProviderSelect({

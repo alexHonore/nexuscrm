@@ -83,7 +83,9 @@ export function createOpenRouterProvider(options: OpenRouterOptions): LLMProvide
         provider: "openrouter",
         fetchFn,
         timeoutMs,
-        retry: options.retry,
+        // La politique de l'APPEL prime : elle vient de la configuration de
+        // l'assistant, pas de la clé qui a construit ce fournisseur.
+        retry: input.retry ?? options.retry,
         sleepFn: options.sleepFn,
         // Le routeur taille le budget de réflexion EN PROPORTION de max_tokens
         // (chez Anthropic, « high » en prend ~80 %) : sans marge, un plafond de

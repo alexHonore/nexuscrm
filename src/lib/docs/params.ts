@@ -923,6 +923,42 @@ const model: ParamDoc[] = [
     example: "google/gemini-2.5-flash",
   }),
   doc({
+    path: "model.retry.attempts",
+    section: "model",
+    labelFr: "Tentatives",
+    type: "int",
+    required: true,
+    defaultValue: 3,
+    whatFr:
+      "Combien de fois un appel est tenté quand l'amont refuse pour cause d'encombrement (429) ou de panne passagère (5xx), AVANT de changer de modèle.",
+    whyFr:
+      "« openai/gpt-5.6-luna is temporarily rate-limited upstream. Please retry shortly » : l'amont demande lui-même une reprise. Un refus d'encombrement n'a rien produit — le rejouer ne coûte rien de plus, et une seconde d'attente vaut mieux qu'une conversation escaladée ou une fixture rouge.",
+    effectFr:
+      "1 = aucune reprise, on passe directement au repli. La reprise s'applique au générateur comme au classifieur, en production, dans le bac à sable et dans la suite.",
+    pitfallsFr:
+      "Monter à 5 avec un écart long fait patienter chaque tour d'agent : le cycle de répartition a quatre minutes pour TOUTES les conversations. L'attente cumulée d'un appel reste plafonnée (20 s), donc au-delà d'un certain réglage les dernières tentatives n'ont simplement pas lieu.",
+    related: ["model.retry.delaySec", "model.fallbacks"],
+    example: 3,
+  }),
+  doc({
+    path: "model.retry.delaySec",
+    section: "model",
+    labelFr: "Écart avant la reprise (s)",
+    type: "int",
+    required: true,
+    defaultValue: 0.8,
+    whatFr:
+      "L'attente avant la PREMIÈRE reprise, en secondes. Les suivantes triplent (0,8 s puis 2,4 s, etc.), avec un bruit de ±25 %.",
+    whyFr:
+      "Reprendre à la milliseconde près ne fait que consommer un deuxième refus, et relancer douze conversations exactement en même temps recrée l'embouteillage qu'on fuit.",
+    effectFr:
+      "Quand l'amont renvoie un en-tête « Retry-After », c'est LUI qui gagne : il sait quand il sera de nouveau disponible. Une attente est plafonnée à 10 s, et l'attente cumulée d'un appel à 20 s.",
+    pitfallsFr:
+      "Un écart long sur un modèle souvent saturé retarde chaque réponse SMS sans rien garantir : au-delà de deux ou trois secondes, mieux vaut un repli chez un autre fournisseur.",
+    related: ["model.retry.attempts", "model.fallbacks"],
+    example: 0.8,
+  }),
+  doc({
     path: "model.fallbacks",
     section: "model",
     labelFr: "Chaîne de replis",

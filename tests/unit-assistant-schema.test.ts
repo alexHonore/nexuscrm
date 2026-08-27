@@ -18,6 +18,7 @@ import {
   goalConfigSchema,
   goalStepSchema,
   modelChain,
+  retryPolicyFor,
   withModelFallbackChain,
   DEFAULT_MODEL_FALLBACK,
 } from "@/lib/assistants/schema";
@@ -204,5 +205,45 @@ describe("model.fallbacks — la chaîne de replis", () => {
       { provider: "openrouter", model: "google/gemini-2.5-flash" },
       { provider: "anthropic", model: "claude-sonnet-5" },
     ]);
+  });
+});
+
+describe("model.retry — la reprise réglée par l'assistant", () => {
+  const parse = (model: unknown) =>
+    assistantConfigSchema.parse({
+      name: "X",
+      identity: {},
+      goal: { primary: { type: "phone_call", durationMin: 10 }, fallbacks: [] },
+      approach: {},
+      model,
+    }).model;
+
+  it("par défaut : trois tentatives, la première reprise après 0,8 s", () => {
+    expect(parse({}).retry).toEqual({ attempts: 3, delaySec: 0.8 });
+    expect(retryPolicyFor(parse({}))).toEqual({ attempts: 3, baseDelayMs: 800 });
+  });
+
+  it("les bornes sont ÉTROITES : au-delà, la configuration est refusée", () => {
+    expect(() => parse({ retry: { attempts: 6, delaySec: 1 } })).toThrow();
+    expect(() => parse({ retry: { attempts: 0, delaySec: 1 } })).toThrow();
+    expect(() => parse({ retry: { attempts: 3, delaySec: 60 } })).toThrow();
+    expect(() => parse({ retry: { attempts: 3, delaySec: 0 } })).toThrow();
+  });
+
+  it("« une seule tentative » est un réglage valable : aucune reprise", () => {
+    expect(retryPolicyFor(parse({ retry: { attempts: 1, delaySec: 0.8 } })).attempts).toBe(1);
+  });
+
+  it("secondes à l'écran, millisecondes dans le transport", () => {
+    expect(retryPolicyFor(parse({ retry: { attempts: 2, delaySec: 2.5 } }))).toEqual({
+      attempts: 2,
+      baseDelayMs: 2500,
+    });
+  });
+
+  it("une fiche écrite avant le réglage reçoit les défauts, sans devenir illisible", () => {
+    // Toutes les rangées en base sont dans ce cas : `model` n'a pas de bloc
+    // `retry`. Refuser la lecture rendrait chaque assistant inouvrable.
+    expect(parse({ provider: "openrouter", model: "openai/gpt-5.6-luna" }).retry.attempts).toBe(3);
   });
 });

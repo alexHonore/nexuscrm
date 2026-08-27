@@ -8,6 +8,7 @@ import {
   classifierChain,
   customQualificationFields,
   modelChain,
+  retryPolicyFor,
 } from "@/lib/assistants/schema";
 import { resolvedRulesFor } from "@/lib/assistants/service";
 import { blockingFailures, evaluateOutputRules } from "@/lib/guardrails/filter";
@@ -233,6 +234,7 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
   // rattraper comme le vrai moteur, sinon il ment sur ce qui va se passer.
   const generatorRungs = modelChain(config.model);
   const classifierRungs = classifierChain(config.model);
+  const retry = retryPolicyFor(config.model);
   const classifierCall = async (p: { system: string; user: string }) => {
     const { result } = await generateWithChain(
       classifierRungs,
@@ -241,6 +243,7 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
         messages: [{ role: "user", content: p.user }],
         maxTokens: 300,
         temperature: 0,
+        retry,
       },
       { resolve: getLlmProvider },
     );
@@ -459,6 +462,7 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
             maxTokens: config.model.maxTokens,
             temperature: config.model.temperature,
             routing: config.model.routing as unknown as Record<string, unknown>,
+            retry,
             ...(config.model.reasoningEffort === "none"
               ? {}
               : { reasoningEffort: config.model.reasoningEffort }),

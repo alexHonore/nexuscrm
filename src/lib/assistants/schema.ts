@@ -390,6 +390,23 @@ export const modelConfigSchema = z.object({
    * aucun repli : le modèle principal en panne, le message ne part pas.
    */
   fallbacks: z.array(modelRefSchema).max(3).default([DEFAULT_MODEL_FALLBACK]),
+  /**
+   * Reprise AVANT de changer de modèle.
+   *
+   * Un « llm_upstream_429 … Please retry shortly » ne mérite pas un changement
+   * de modèle : l'amont demande d'attendre, on attend. Les bornes sont
+   * étroites À DESSEIN — l'attente cumulée d'un appel est plafonnée dans le
+   * transport (`maxTotalDelayMs`), et une attente longue sur quatre crans de
+   * chaîne mangerait le budget du cycle de répartition pendant que les autres
+   * conversations patientent. `attempts: 1` = aucune reprise.
+   */
+  retry: z
+    .object({
+      attempts: z.number().int().min(1).max(5).default(3),
+      /** Écart avant la PREMIÈRE reprise ; les suivantes triplent. */
+      delaySec: z.number().min(0.2).max(10).default(0.8),
+    })
+    .default({ attempts: 3, delaySec: 0.8 }),
   /** OpenRouter uniquement — ignoré par les fournisseurs directs. Défauts non
    * négociables pour ces données (noms, numéros, projets de Québécois) :
    * deny + ZDR + pas de reroutage silencieux (§18.3). */
@@ -429,6 +446,17 @@ export function modelChain(model: ModelConfig): ModelRef[] {
 /** Idem pour le classifieur : ses replis sont ceux du générateur. */
 export function classifierChain(model: ModelConfig): ModelRef[] {
   return [model.classifier, ...model.fallbacks];
+}
+
+/**
+ * Réglage d'assistant → politique du transport. Secondes à l'écran, millisecondes
+ * dans le transport : la conversion se fait ICI, une seule fois.
+ *
+ * Le plafond cumulé n'est PAS repris : il appartient au transport, qui refuse
+ * de le laisser régler (voir `DEFAULT_RETRY_POLICY`).
+ */
+export function retryPolicyFor(model: ModelConfig): { attempts: number; baseDelayMs: number } {
+  return { attempts: model.retry.attempts, baseDelayMs: Math.round(model.retry.delaySec * 1000) };
 }
 
 // ── Prompt (modes, surcouches, L7) ───────────────────────────────────────────

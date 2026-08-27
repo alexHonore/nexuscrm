@@ -100,7 +100,9 @@ export function createGoogleProvider(options: GoogleOptions): LLMProvider {
         provider: "google",
         fetchFn,
         timeoutMs,
-        retry: options.retry,
+        // La politique de l'APPEL prime : elle vient de la configuration de
+        // l'assistant, pas de la clé qui a construit ce fournisseur.
+        retry: input.retry ?? options.retry,
         sleepFn: options.sleepFn,
       });
 

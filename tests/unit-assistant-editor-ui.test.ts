@@ -442,6 +442,37 @@ describe("onglets rendus isolément", () => {
     expect(html).not.toContain("MISSING_MESSAGE");
   });
 
+  it("Modèle : la reprise dit ce que le réglage donne vraiment", () => {
+    // « 3 » et « 0,8 » ne disent pas au bout de combien de temps on abandonne.
+    const html = renderTab(createElement(ModelTab, tabProps));
+    expect(html).toContain("Aide — Tentatives");
+    expect(html).toContain("2 reprises");
+    expect(html).toContain("0,8");
+    // 0,8 s puis 2,4 s = 3,2 s d'attente au total.
+    expect(html).toContain("3,2");
+    expect(html).not.toContain("MISSING_MESSAGE");
+  });
+
+  it("Modèle : « une seule tentative » se lit comme AUCUNE reprise", () => {
+    const once = {
+      ...tabProps,
+      config: { ...CONFIG, model: { ...CONFIG.model, retry: { attempts: 1, delaySec: 0.8 } } },
+    };
+    expect(renderTab(createElement(ModelTab, once))).toContain("Aucune reprise");
+  });
+
+  it("Modèle : le plafond d'attente cumulée écrête ce que l'écran promet", () => {
+    // 5 tentatives × 8 s ne donnent pas quatre reprises : le transport
+    // s'arrête à 20 s cumulées, donc deux reprises (8 s + 10 s écrêtés).
+    const greedy = {
+      ...tabProps,
+      config: { ...CONFIG, model: { ...CONFIG.model, retry: { attempts: 5, delaySec: 8 } } },
+    };
+    const html = renderTab(createElement(ModelTab, greedy));
+    expect(html).toContain("2 reprises");
+    expect(html).not.toContain("4 reprises");
+  });
+
   it("Modèle : une chaîne vide le DIT au lieu d'un cadre muet", () => {
     const none = {
       ...tabProps,

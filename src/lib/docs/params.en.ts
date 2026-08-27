@@ -548,6 +548,20 @@ export const PARAM_DOCS_EN: Record<string, ParamDocText> = {
     effect: "Called once per inbound message, and once more for each \"llm_judge\" rule.",
     pitfalls: "An invalid id makes the judges fail, and they fail closed: NO message goes out any more and the conversation is flagged \"guardrail unavailable\". That is exactly what happens with a \"-latest\" alias that has been withdrawn.",
   },
+  "model.retry.attempts": {
+    label: "Attempts",
+    what: "How many times a call is tried when the upstream refuses for congestion (429) or a passing outage (5xx), BEFORE switching model.",
+    why: "\"openai/gpt-5.6-luna is temporarily rate-limited upstream. Please retry shortly\": the upstream itself asks for a retry. A congestion refusal produced nothing — replaying it costs nothing more, and a second of waiting beats an escalated conversation or a red fixture.",
+    effect: "1 = no retry, straight to the fallback. The retry covers the generator and the classifier, in production, in the sandbox and in the suite.",
+    pitfalls: "Going to 5 with a long gap makes every agent turn wait: the dispatch cycle has four minutes for ALL conversations. The cumulative wait per call stays capped (20 s), so past a certain setting the last attempts simply never happen.",
+  },
+  "model.retry.delaySec": {
+    label: "Gap before the retry (s)",
+    what: "The wait before the FIRST retry, in seconds. The next ones triple (0.8 s then 2.4 s, and so on), with ±25% jitter.",
+    why: "Retrying to the millisecond only buys a second refusal, and relaunching twelve conversations at the exact same instant recreates the traffic jam you are escaping.",
+    effect: "When the upstream sends a \"Retry-After\" header, IT wins: it knows when it will be available again. A single wait is capped at 10 s, and the cumulative wait per call at 20 s.",
+    pitfalls: "A long gap on a frequently saturated model delays every SMS reply without guaranteeing anything: past two or three seconds, a fallback at another provider is the better answer.",
+  },
   "model.fallbacks": {
     label: "Fallback chain",
     what: "The providers and models called, IN ORDER, if the main one fails in a retryable way. Up to three rungs.",

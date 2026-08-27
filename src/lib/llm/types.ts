@@ -97,6 +97,24 @@ export interface LLMMessage {
 export const REASONING_EFFORTS = ["low", "medium", "high"] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
+/**
+ * Reprise sur LE MÊME modèle après un refus passager (429, 5xx).
+ *
+ * Le contrat vit ici plutôt que dans le transport parce qu'il voyage avec
+ * l'APPEL : c'est la configuration de l'assistant qui le décide, pas la clé
+ * qui a servi à construire le fournisseur. Valeurs par défaut et mise en
+ * œuvre : `http.ts`.
+ */
+export interface RetryPolicy {
+  /** Tentatives TOTALES, reprises comprises. 1 = aucune reprise. */
+  attempts: number;
+  baseDelayMs: number;
+  /** Plafond d'UNE attente, `Retry-After` de l'amont compris. */
+  maxDelayMs: number;
+  /** Plafond de l'attente CUMULÉE d'un appel — non réglable, voir `http.ts`. */
+  maxTotalDelayMs: number;
+}
+
 export interface GenerateInput {
   system: string;
   messages: LLMMessage[];
@@ -112,6 +130,14 @@ export interface GenerateInput {
   temperature: number;
   /** OpenRouter `provider` routing object; ignored by direct providers. */
   routing?: Record<string, unknown>;
+  /**
+   * Reprise d'un refus passager, POUR CET APPEL — voir `RetryPolicy`.
+   *
+   * Elle voyage avec l'appel et non avec le fournisseur : le fournisseur est
+   * construit à partir de l'environnement (une clé), la politique vient de la
+   * configuration de l'assistant. Absente = les défauts du transport.
+   */
+  retry?: Partial<RetryPolicy>;
 }
 
 export interface LLMProvider {

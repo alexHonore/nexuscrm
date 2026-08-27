@@ -1,4 +1,7 @@
-import { LLMProviderError, type ProviderId } from "./types";
+import { LLMProviderError, type ProviderId, type RetryPolicy } from "./types";
+
+/** Le contrat vit dans `types.ts` (il voyage avec l'appel) ; il se lit d'ici. */
+export type { RetryPolicy } from "./types";
 
 /**
  * Transport partagé des fournisseurs LLM : délai plafonné, erreurs normalisées.
@@ -27,18 +30,19 @@ export const DEFAULT_LLM_TIMEOUT_MS = 60_000;
  * et le 402 (le compte est à sec : attendre n'y changera rien). Ces deux-là
  * sont l'affaire du repli, qui change de modèle — voir `route.ts`.
  */
-export interface RetryPolicy {
-  /** Tentatives TOTALES, reprises comprises. 1 = aucune reprise. */
-  attempts: number;
-  baseDelayMs: number;
-  /** Plafond d'attente, `Retry-After` de l'amont compris. */
-  maxDelayMs: number;
-}
-
+/**
+ * `maxTotalDelayMs` est le vrai garde-fou : les deux premiers réglages sont
+ * ouverts à l'administrateur, celui-là non. « 5 tentatives, 10 s d'écart » sur
+ * quatre crans de chaîne ferait patienter un tour d'agent plusieurs minutes et
+ * mangerait le budget du cycle de répartition (240 s) pendant que les autres
+ * conversations attendent. Passé ce plafond on remonte l'erreur : c'est au
+ * repli de prendre la suite, pas à l'attente de s'allonger.
+ */
 export const DEFAULT_RETRY_POLICY: RetryPolicy = {
   attempts: 3,
   baseDelayMs: 800,
   maxDelayMs: 10_000,
+  maxTotalDelayMs: 20_000,
 };
 
 export interface HttpCallInput {
@@ -84,6 +88,7 @@ export async function callJson(
 ): Promise<{ json: unknown; latencyMs: number }> {
   const policy: RetryPolicy = { ...DEFAULT_RETRY_POLICY, ...input.retry };
   const wait = input.sleepFn ?? sleep;
+  let waited = 0;
 
   for (let attempt = 1; ; attempt += 1) {
     try {
@@ -92,7 +97,12 @@ export async function callJson(
       const congested =
         err instanceof LLMProviderError && err.retryable && isCongestion(err.status);
       if (!congested || attempt >= policy.attempts) throw err;
-      await wait(delayFor(attempt, policy, (err as LLMProviderError).retryAfterMs));
+      const delay = delayFor(attempt, policy, (err as LLMProviderError).retryAfterMs);
+      // Le plafond cumulé se vérifie AVANT d'attendre : dépasser puis remonter
+      // ferait perdre le temps sans jamais s'en servir.
+      if (waited + delay > policy.maxTotalDelayMs) throw err;
+      waited += delay;
+      await wait(delay);
     }
   }
 }

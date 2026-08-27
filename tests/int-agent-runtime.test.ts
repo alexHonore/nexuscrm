@@ -57,7 +57,7 @@ const llm = vi.hoisted(() => ({
   generatorError: null as string | null,
   classifierJson: '{"refusal":"none","qualification":{}}',
   judgeJson: '{"passed":true,"reason":"conforme"}',
-  calls: [] as { model: string; system: string; messages?: unknown[] }[],
+  calls: [] as { model: string; system: string; messages?: unknown[]; retry?: unknown }[],
   /** Hook exécuté au premier appel générateur — sert à injecter une course. */
   onGenerate: null as null | (() => Promise<void>),
   /** Le fournisseur a coupé la réponse (max_tokens) — testé sur le tour. */
@@ -72,8 +72,18 @@ vi.mock("@/lib/llm-server", () => ({
     return {
     id,
     listModels: async () => [],
-    generate: async (input: { system: string; model: string; messages?: unknown[] }): Promise<LLMResult> => {
-      llm.calls.push({ model: input.model, system: input.system, messages: input.messages });
+    generate: async (input: {
+      system: string;
+      model: string;
+      messages?: unknown[];
+      retry?: unknown;
+    }): Promise<LLMResult> => {
+      llm.calls.push({
+        model: input.model,
+        system: input.system,
+        messages: input.messages,
+        retry: input.retry,
+      });
       // Le classifieur et le juge partagent le modèle « classifier » du test.
       if (input.model.includes("classifier")) {
         const isJudge = input.system.includes("évaluateur");
@@ -1226,6 +1236,24 @@ describe("statut, outils et pannes (revue)", () => {
     expect(result.outcome).toBe("sent");
     expect(llm.calls.some((c) => c.model === "fallback-model")).toBe(true);
     expect(await eventsOf(conversation.id)).toContain("fallback_used");
+  });
+
+  it("le réglage de reprise de l'assistant atteint le transport, générateur ET classifieur", async () => {
+    // Le réglage est dans la fiche ; le fournisseur, lui, est construit à
+    // partir d'une clé d'environnement. S'il ne voyage pas avec l'APPEL,
+    // « 2 tentatives, 1,5 s » réglé à l'écran n'a strictement aucun effet.
+    const { conversation, assistant } = await scene();
+    await testDb
+      .update(assistants)
+      .set({ model: { ...(assistant.model as object), retry: { attempts: 2, delaySec: 1.5 } } })
+      .where(eq(assistants.id, assistant.id));
+    await inbound(conversation.id, "Allo?");
+
+    expect((await runTurn(conversation.id)).outcome).toBe("sent");
+
+    const expected = { attempts: 2, baseDelayMs: 1500 };
+    expect(llm.calls.find((c) => c.model === "generator-model")?.retry).toEqual(expected);
+    expect(llm.calls.find((c) => c.model === "classifier-model")?.retry).toEqual(expected);
   });
 
   it("descend TOUTE la chaîne : le troisième cran répond quand les deux premiers tombent", async () => {
