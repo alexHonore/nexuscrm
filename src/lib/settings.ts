@@ -40,6 +40,19 @@ export const bookingSettingsSchema = z
     meetDurationMin: z.number().int().min(5).max(480).default(30),
     inPersonDurationMin: z.number().int().min(5).max(480).default(60),
     bufferMin: z.number().int().min(0).max(480).default(15),
+    /**
+     * Préavis MINIMAL avant un rendez-vous (minutes) : aucun créneau plus
+     * proche que ça n'est offert ni réservable — ni à l'écran, ni par l'agent
+     * SMS (`book()` le revérifie et rend `too_soon`). Borne haute 7 jours.
+     *
+     * Défaut 180 (3 h) et non 45 comme l'ancienne constante `MIN_LEAD_MIN` :
+     * l'agent a proposé le 2026-08-27 une rencontre le jour même à 17 h 30
+     * alors qu'il était 15 h 07 — 2 h 23 d'avis, jugé trop court par le
+     * courtier. Ce défaut est ce que voit une installation qui n'a jamais
+     * enregistré la clé (le cas de la production), d'où le choix d'une valeur
+     * sûre plutôt que de l'ancienne.
+     */
+    minNoticeMin: z.number().int().min(0).max(10_080).default(180),
     timezone: z.string().refine(isKnownTimeZone, "unknown_timezone").default("America/Toronto"),
     inPersonDefaultLocation: z.string().default(""),
     /**

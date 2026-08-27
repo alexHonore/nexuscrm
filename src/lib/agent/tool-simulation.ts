@@ -34,7 +34,7 @@ import {
   type BookingSlot,
   type SlotPreference,
 } from "@/lib/booking/provider";
-import { missingFieldsError, parseToolArgs } from "./tools";
+import { bookingFailureError, missingFieldsError, parseToolArgs } from "./tools";
 import { formatClientComments, formatClientContext } from "./client-context";
 
 /** Fuseau des libellés — celui de l'app (voir AGENTS.md). */
@@ -152,6 +152,12 @@ export interface ToolSimulationContext {
   requiredFields: readonly string[];
   /** Qualification accumulée (fil + tour courant). */
   qualification: Record<string, unknown>;
+  /**
+   * Champs requis LIBRES de la chaîne d'objectifs (hors les huit clés
+   * connues) — mêmes règles qu'en production : la définition offerte au
+   * modèle les nomme, le validateur doit donc les accepter.
+   */
+  customQualificationFields?: string[];
   /** Horloge injectable — les tests fixent les créneaux. */
   now?: Date;
   /** Jours réservables configurés, pour que l'essai suive les réglages. */
@@ -180,7 +186,7 @@ export function simulateToolCall(
   ctx: ToolSimulationContext,
 ): SimulatedToolOutcome {
   const base = { name, bookingFailed: false, terminated: null };
-  const parsed = parseToolArgs(name, ctx.args);
+  const parsed = parseToolArgs(name, ctx.args, ctx.customQualificationFields ?? []);
   if (!parsed.ok) {
     return { ...base, ok: false, content: `${name} : ${parsed.error}` };
   }
@@ -241,7 +247,7 @@ export function simulateToolCall(
           ...base,
           ok: true,
           bookingFailed: true,
-          content: "book_meeting : ÉCHEC (invalid_slot) — ne confirme RIEN, propose autre chose.",
+          content: bookingFailureError("invalid_slot"),
         };
       }
       const offered = simulatedSlots(ctx.now, { days: ctx.bookableDays }).some(
@@ -252,7 +258,7 @@ export function simulateToolCall(
           ...base,
           ok: true,
           bookingFailed: true,
-          content: "book_meeting : ÉCHEC (slot_taken) — ne confirme RIEN, propose autre chose.",
+          content: bookingFailureError("slot_taken"),
         };
       }
       return { ...base, ok: true, content: `book_meeting : confirmé pour ${args.slotIso}` };

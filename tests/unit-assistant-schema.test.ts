@@ -13,6 +13,8 @@ import {
   TYPE_MANDATED_FIELDS,
   assistantConfigInputSchema,
   assistantConfigSchema,
+  customQualificationFields,
+  goalConfigSchema,
   goalStepSchema,
 } from "@/lib/assistants/schema";
 
@@ -97,5 +99,35 @@ describe("assistantConfigInputSchema — ce qui ARRIVE", () => {
     // Une fiche déjà en base avec un prompt libre vide doit rester OUVRABLE :
     // le refus vaut pour ce qui arrive, pas pour ce qui est déjà là.
     expect(assistantConfigSchema.safeParse({ ...base, promptMode: "raw" }).success).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// customQualificationFields — champs requis LIBRES de la chaîne d'objectifs
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("customQualificationFields", () => {
+  it("extrait les champs hors vocabulaire, dédoublonnés, sur TOUS les crans", () => {
+    const goal = goalConfigSchema.parse({
+      primary: {
+        type: "video_meeting",
+        requiredFields: ["timing", "budget", "type de propriété recherché"],
+      },
+      fallbacks: [
+        { type: "phone_call", requiredFields: ["budget", "type de propriété recherché", "nombre de chambres"] },
+      ],
+    });
+    expect(customQualificationFields(goal)).toEqual([
+      "type de propriété recherché",
+      "nombre de chambres",
+    ]);
+  });
+
+  it("chaîne 100 % canonique → aucun champ libre", () => {
+    const goal = goalConfigSchema.parse({
+      primary: { type: "video_meeting", requiredFields: ["timing", "budget", "email"] },
+      fallbacks: [],
+    });
+    expect(customQualificationFields(goal)).toEqual([]);
   });
 });

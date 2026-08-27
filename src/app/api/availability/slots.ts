@@ -9,8 +9,6 @@ import { getSetting, type BookingSettings } from "@/lib/settings";
 
 /** Grid step between two candidate starts. */
 export const SLOT_STEP_MIN = 30;
-/** Minimum lead time before a slot can be booked. */
-export const MIN_LEAD_MIN = 45;
 
 export type AppointmentType = "meet" | "inperson";
 
@@ -128,8 +126,9 @@ export async function computeAvailability(
     .where(and(...conditions));
   busy = busy.concat(local.map((a) => ({ start: a.startsAt, end: a.endsAt })));
 
-  // 3) Walk the 30-min grid.
-  const minStart = addMinutes(new Date(), MIN_LEAD_MIN);
+  // 3) Walk the 30-min grid. Le préavis vient des réglages (admin) : un
+  // créneau plus proche que `minNoticeMin` n'est jamais offert ni réservable.
+  const minStart = addMinutes(new Date(), settings.minNoticeMin);
   const slots: string[] = [];
   for (
     let start = windowStart;

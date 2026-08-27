@@ -173,6 +173,10 @@ beforeEach(async () => {
   googleMock.cancelEvent.mockResolvedValue(undefined);
 
   await resetDb();
+  // Préavis ÉPINGLÉ à 45 min : SLOT et SLOT_B sont ancrés dessus (NOW + 2 h et
+  // NOW + 5 h). Le défaut du schéma est 3 h, et il vaut pour CE chemin aussi —
+  // la réservation manuelle et l'agent SMS lisent le même réglage.
+  await setSetting("booking", { minNoticeMin: 45 });
   const cats = await seedSystemCategories();
   const admin = await makeUser({ name: "Admin Nexus", role: "admin", email: "admin@nexus.test" });
   const caller = await makeUser({ name: "Téléphoniste Un", role: "caller", email: "c1@nexus.test" });
@@ -893,6 +897,9 @@ describe("réglages de réservation (jours, heures, durées, lieu)", () => {
       meetDurationMin: 45,
       inPersonDurationMin: 60,
       bufferMin: 0,
+      // Ce bloc réécrit TOUT le réglage : sans ce rappel, le préavis
+      // retomberait au défaut du schéma (3 h) et viderait la fenêtre 09:00→12:00.
+      minNoticeMin: 45,
       timezone: "America/Toronto",
       inPersonDefaultLocation: "123 rue Principale, Québec",
     });
@@ -940,7 +947,7 @@ describe("réglages de réservation (jours, heures, durées, lieu)", () => {
   });
 
   it("transmet le courriel du courtier configuré à l'évènement Google", async () => {
-    await setSetting("booking", { brokerEmail: "courtier@exemple.ca" });
+    await setSetting("booking", { brokerEmail: "courtier@exemple.ca", minNoticeMin: 45 });
     await createAppointment(input());
     expect(googleMock.createBookingEvent.mock.calls[0][0].brokerEmail).toBe(
       "courtier@exemple.ca",
@@ -948,7 +955,7 @@ describe("réglages de réservation (jours, heures, durées, lieu)", () => {
   });
 
   it("courriel du courtier vidé → aucun courtier invité (null)", async () => {
-    await setSetting("booking", { brokerEmail: "" });
+    await setSetting("booking", { brokerEmail: "", minNoticeMin: 45 });
     await createAppointment(input());
     expect(googleMock.createBookingEvent.mock.calls[0][0].brokerEmail).toBeNull();
   });

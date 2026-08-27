@@ -202,7 +202,7 @@ describe("la suite offre les outils de l'assistant au modèle", () => {
       join(process.cwd(), "src", "lib", "assistants", "service.ts"),
       "utf8",
     );
-    expect(source).toContain("tools: toolDefsFor(config.tools)");
+    expect(source).toContain("tools: toolDefsFor(config.tools");
   });
 
   it("toolDefsFor rend bien les outils attendus par les fixtures semées", () => {

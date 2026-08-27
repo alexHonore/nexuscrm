@@ -94,6 +94,8 @@ export interface FixtureToolContext {
   appointmentType: "meet" | "inperson" | null;
   /** Champs de qualification exigés avant de réserver. */
   requiredFields: readonly string[];
+  /** Champs requis LIBRES (hors les huit clés connues) — voir tool-simulation. */
+  customQualificationFields?: string[];
 }
 
 export async function runFixture(
@@ -145,6 +147,7 @@ export async function runFixture(
             args: call.arguments ?? {},
             appointmentType: toolContext.appointmentType,
             requiredFields: toolContext.requiredFields,
+            customQualificationFields: toolContext.customQualificationFields,
             qualification: {},
           }).content,
         });

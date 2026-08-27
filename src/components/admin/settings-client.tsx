@@ -228,6 +228,7 @@ export type BookingFormValues = {
   meetDurationMin: number;
   inPersonDurationMin: number;
   bufferMin: number;
+  minNoticeMin: number;
   inPersonDefaultLocation: string;
   brokerEmail: string;
 };
@@ -276,15 +277,18 @@ export function BookingCard({ initial }: { initial: BookingFormValues }) {
     label: string,
     value: number,
     onChange: (v: number) => void,
+    // Le préavis a ses propres bornes (0 permis, plusieurs heures possibles) —
+    // les durées gardent les leurs.
+    bounds: { min: number; max: number; step: number } = { min: 5, max: 480, step: 5 },
   ) => (
     <div className="space-y-1.5">
       <Label htmlFor={id}>{label}</Label>
       <Input
         id={id}
         type="number"
-        min={5}
-        max={480}
-        step={5}
+        min={bounds.min}
+        max={bounds.max}
+        step={bounds.step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value) || 0)}
       />
@@ -364,7 +368,15 @@ export function BookingCard({ initial }: { initial: BookingFormValues }) {
           {numberInput("booking-buffer", t("settings.booking.buffer"), form.bufferMin, (v) =>
             setForm({ ...form, bufferMin: v }),
           )}
+          {numberInput(
+            "booking-min-notice",
+            t("settings.booking.minNotice"),
+            form.minNoticeMin,
+            (v) => setForm({ ...form, minNoticeMin: v }),
+            { min: 0, max: 10_080, step: 15 },
+          )}
         </div>
+        <p className="text-xs text-muted-foreground">{t("settings.booking.minNoticeHint")}</p>
 
         <div className="max-w-md space-y-1.5">
           <Label htmlFor="booking-location">{t("settings.booking.location")}</Label>

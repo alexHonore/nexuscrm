@@ -13,7 +13,11 @@ import {
   messages,
   scheduledJobs,
 } from "@/db/schema-sms";
-import { assistantRowToConfig, type AssistantConfig } from "@/lib/assistants/schema";
+import {
+  assistantRowToConfig,
+  customQualificationFields,
+  type AssistantConfig,
+} from "@/lib/assistants/schema";
 import { logAudit } from "@/lib/audit";
 import { categoryEntryPatch } from "@/lib/dispositions";
 import { notifyCategoryChanged } from "@/lib/campaigns-server/match";
@@ -41,7 +45,7 @@ import { applyRefusal, requiredFieldsFor, rungNeedsSlots, type Rung } from "./go
 import { renderTemplate } from "./render";
 import { CLOSING_INSTRUCTIONS, CLOSING_TOOL_NAMES, DEFAULT_TURN_INSTRUCTIONS } from "./templates";
 import { outreachInstructionText } from "./opening";
-import { missingFieldsError, parseToolArgs, toolDefsFor } from "./tools";
+import { bookingFailureError, missingFieldsError, parseToolArgs, toolDefsFor } from "./tools";
 
 /**
  * Boucle d'un tour d'agent (§12), en TROIS temps.
@@ -307,6 +311,13 @@ interface ToolRunResult {
   terminated: "stop" | "handoff" | null;
   /** Vrai si une réservation a ÉCHOUÉ — le brouillon ne peut alors rien confirmer. */
   bookingFailed: boolean;
+  /**
+   * POURQUOI la réservation a échoué (code d'erreur ou champs manquants) —
+   * consigné dans l'évènement d'escalade : sans lui, « Réservation
+   * impossible » est indiagnosticable après coup (la trace ne conserve pas
+   * les résultats d'outils).
+   */
+  bookingErrorDetail: string | null;
   /** Une réservation a RÉUSSI : l'inscription de campagne devient « booked ». */
   booked: boolean;
   /** close_conversation : le fil se ferme avec ce résultat après l'envoi. */
@@ -338,12 +349,19 @@ async function executeTools(input: {
    * il ne classe pas, et l'outil refuse tout.
    */
   allowedCategories: Map<string, { id: number; label: string }>;
+  /**
+   * Champs requis LIBRES de la chaîne d'objectifs (hors les huit clés
+   * connues) — le validateur d'`update_qualification` doit les accepter,
+   * puisque la définition offerte au modèle les nomme.
+   */
+  customQualificationFields: string[];
   effects: ToolEffect[];
   sideEffectsDone: Set<string>;
 }): Promise<ToolRunResult> {
   const perCall: { id: string; name: string; content: string }[] = [];
   let terminated: "stop" | "handoff" | null = null;
   let bookingFailed = false;
+  let bookingErrorDetail: string | null = null;
   let booked = false;
   let closedOutcome: ToolRunResult["closedOutcome"] = null;
   let transferTo: string | null = null;
@@ -352,7 +370,7 @@ async function executeTools(input: {
     /** Consigne le résultat de CET appel, rattaché à son identifiant. */
     const record = (content: string) =>
       perCall.push({ id: call.id, name: call.name, content });
-    const parsed = parseToolArgs(call.name, call.arguments);
+    const parsed = parseToolArgs(call.name, call.arguments, input.customQualificationFields);
     if (!parsed.ok) {
       input.effects.push({ name: call.name, ok: false, detail: parsed.error });
       record(`${call.name} : ${parsed.error}`);
@@ -383,7 +401,6 @@ async function executeTools(input: {
             ? db.query.sources.findFirst({ where: eq(sources.id, client.sourceId) })
             : Promise.resolve(null),
         ]);
-        input.effects.push({ name, ok: true });
         record(
           formatClientContext({
             fullName: client.fullName,
@@ -413,7 +430,6 @@ async function executeTools(input: {
           .where(eq(comments.clientId, input.clientId))
           .orderBy(desc(comments.createdAt))
           .limit(CLIENT_COMMENTS_MAX + 1);
-        input.effects.push({ name, ok: true });
         record(formatClientComments(rows));
         break;
       }
@@ -446,6 +462,10 @@ async function executeTools(input: {
           );
         } catch {
           record("get_slots : agenda injoignable — ne propose aucune heure.");
+          // `ok: false` + détail : sans eux, l'évènement affichait un
+          // get_slots « réussi » alors que l'agenda était injoignable.
+          input.effects.push({ name, ok: false, detail: "calendar_unreachable" });
+          continue;
         }
         break;
       }
@@ -456,15 +476,23 @@ async function executeTools(input: {
           const value = input.qualification[field];
           return typeof value !== "string" || value.trim() === "";
         });
+        // Chaque échec pousse son effet `ok: false` AVEC son détail, puis
+        // `continue` (pour sauter le push générique de fin de boucle) : le
+        // journal d'évènements affichait un book_meeting « réussi » pour
+        // chaque réservation refusée, et le POURQUOI n'était écrit nulle part.
         if (missing.length > 0) {
           record(missingFieldsError(missing));
           bookingFailed = true;
-          break;
+          bookingErrorDetail ??= `missing_fields: ${missing.join(", ")}`;
+          input.effects.push({ name, ok: false, detail: bookingErrorDetail });
+          continue;
         }
         if (!input.rung.goal.appointmentType) {
           record("book_meeting : ce cran ne réserve pas de rencontre");
           bookingFailed = true;
-          break;
+          bookingErrorDetail ??= "no_appointment_type";
+          input.effects.push({ name, ok: false, detail: "no_appointment_type" });
+          continue;
         }
         const bookedResult = await getInternalBookingProvider().book({
           clientId: input.clientId,
@@ -478,10 +506,11 @@ async function executeTools(input: {
           booked = true;
           record(`book_meeting : confirmé pour ${args.slotIso}`);
         } else {
-          record(
-            `book_meeting : ÉCHEC (${bookedResult.error}) — ne confirme RIEN, propose autre chose.`,
-          );
+          record(bookingFailureError(bookedResult.error));
           bookingFailed = true;
+          bookingErrorDetail ??= bookedResult.error;
+          input.effects.push({ name, ok: false, detail: bookedResult.error });
+          continue;
         }
         break;
       }
@@ -671,6 +700,7 @@ async function executeTools(input: {
     results: perCall,
     terminated,
     bookingFailed,
+    bookingErrorDetail,
     booked,
     closedOutcome,
     transferTo,
@@ -1305,9 +1335,10 @@ export async function runTurn(
   // Sur un tour de clôture, seuls les outils de rangement gardent un sens —
   // offrir book_meeting à quelqu'un qui vient de refuser serait la relance
   // qu'on interdit, et `stop` supprimerait le numéro sans adieu.
+  const customFields = customQualificationFields(config.goal);
   const tools = closingHard
-    ? toolDefsFor(config.tools).filter((t) => CLOSING_TOOL_NAMES.includes(t.name))
-    : toolDefsFor(config.tools);
+    ? toolDefsFor(config.tools, customFields).filter((t) => CLOSING_TOOL_NAMES.includes(t.name))
+    : toolDefsFor(config.tools, customFields);
   const effects: ToolEffect[] = [];
   const sideEffectsDone = new Set<string>();
 
@@ -1318,6 +1349,7 @@ export async function runTurn(
   let llmError: string | null = null;
   let terminatedByTool: "stop" | "handoff" | null = null;
   let bookingFailed = false;
+  let bookingFailedDetail: string | null = null;
   let bookedNow = false;
   let closedOutcome: ToolRunResult["closedOutcome"] = null;
   let transferTo: string | null = null;
@@ -1433,10 +1465,14 @@ export async function runTurn(
         allowedCategories: config.tools.includes("set_category")
           ? (await resolveClassification()).allowed
           : new Map(),
+        customQualificationFields: customFields,
         effects,
         sideEffectsDone,
       });
-      if (ran.bookingFailed) bookingFailed = true;
+      if (ran.bookingFailed) {
+        bookingFailed = true;
+        bookingFailedDetail ??= ran.bookingErrorDetail;
+      }
       if (ran.booked) bookedNow = true;
       if (ran.closedOutcome) closedOutcome = ran.closedOutcome;
       if (ran.transferTo) transferTo = ran.transferTo;
@@ -1702,7 +1738,13 @@ export async function runTurn(
   // n'existe pas. On n'envoie rien et on passe la main — mieux vaut un humain
   // qui rappelle qu'un client convaincu d'avoir un rendez-vous fantôme.
   if (bookingFailed) {
-    events.push({ type: "escalation", payload: { reason: "booking_failed" } });
+    events.push({
+      type: "escalation",
+      payload: {
+        reason: "booking_failed",
+        ...(bookingFailedDetail ? { detail: bookingFailedDetail } : {}),
+      },
+    });
     return commit({
       outcome: "handoff",
       reason: "booking_failed",

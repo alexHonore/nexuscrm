@@ -35,8 +35,18 @@ describe("fidélité du bac à sable", () => {
     // montrerait un assistant incapable de réserver alors qu'il en est capable.
     // Et sur un tour de clôture (refus ferme), le MÊME sous-ensemble que la
     // production : classer, consigner, clore — jamais réserver.
-    expect(source).toContain("toolDefsFor(config.tools).filter((t) => CLOSING_TOOL_NAMES.includes(t.name))");
-    expect(source).toContain(": toolDefsFor(config.tools)");
+    expect(source).toContain(
+      "toolDefsFor(config.tools, customFields).filter((t) => CLOSING_TOOL_NAMES.includes(t.name))",
+    );
+    expect(source).toContain(": toolDefsFor(config.tools, customFields)");
+    // Les champs requis LIBRES de la chaîne d'objectifs doivent être offerts
+    // des DEUX côtés : sans eux, `update_qualification` ne peut pas enregistrer
+    // la clé, et `book_meeting` refuse pour toujours (cas prod 2026-08-27).
+    // Un bac à sable qui les offrirait sans la production (ou l'inverse)
+    // mentirait exactement sur le geste que l'aperçu sert à vérifier.
+    for (const text of [source, runtime]) {
+      expect(text).toContain("customQualificationFields(config.goal)");
+    }
     const start = source.indexOf("generator.generate({");
     const call = source.slice(start, source.indexOf("});", start));
     expect(call).toMatch(/^\s*tools,\s*$/m);

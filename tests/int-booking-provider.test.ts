@@ -95,6 +95,9 @@ beforeEach(async () => {
   });
 
   await resetDb();
+  // Préavis ÉPINGLÉ à 45 min : SLOT et SLOT_B sont ancrés sur ce délai (2 h et
+  // 5 h après NOW). Le défaut du schéma est 3 h — il a son propre test plus bas.
+  await setSetting("booking", { minNoticeMin: 45 });
   const cats = await seedSystemCategories();
   const admin = await makeUser({ name: "Admin Nexus", role: "admin", email: "admin@nexus.test" });
   const client = await makeClient({
@@ -339,6 +342,35 @@ describe("BookingProvider interne — book", () => {
       .from(appointments)
       .where(eq(appointments.status, "scheduled"));
     expect(rows).toHaveLength(1);
+  });
+
+  it("un créneau sous le préavis minimal renvoie too_soon, PAS slot_taken", async () => {
+    // Le cas du 2026-08-27 : 17 h 30 le jour même proposé à 15 h 07. Avec un
+    // préavis de 3 h, la réservation doit être refusée — et le motif doit
+    // être « trop proche », pas « pris » : le modèle dirait à la personne que
+    // son heure vient d'être prise alors que l'agenda est vide.
+    await setSetting("booking", { minNoticeMin: 180 });
+    const result = await booking.book({
+      clientId: ids.client,
+      conversationId: ids.conversationId,
+      type: "meet",
+      slotIso: SLOT, // NOW + 2 h — sous le préavis de 3 h
+    });
+    expect(result).toEqual({ ok: false, error: "too_soon" });
+    // Rien n'a été écrit : ni rendez-vous, ni évènement Google.
+    expect(await testDb.select().from(appointments)).toHaveLength(0);
+    expect(googleMock.createBookingEvent).not.toHaveBeenCalled();
+  });
+
+  it("le même créneau passe dès qu'il dépasse le préavis", async () => {
+    await setSetting("booking", { minNoticeMin: 180 });
+    const result = await booking.book({
+      clientId: ids.client,
+      conversationId: ids.conversationId,
+      type: "meet",
+      slotIso: SLOT_B, // NOW + 5 h — au-delà du préavis de 3 h
+    });
+    expect(result.ok).toBe(true);
   });
 
   it("créneau ISO invalide : invalid_slot, rien n'est écrit", async () => {

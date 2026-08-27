@@ -76,6 +76,54 @@ describe("toolDefsFor", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Champs requis LIBRES — le bogue « Réservation impossible » du 2026-08-27
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("champs de qualification LIBRES (requiredFields hors vocabulaire)", () => {
+  const CUSTOM = ["type de propriété recherché", "nombre de chambres"];
+
+  it("toolDefsFor : la définition offerte au modèle NOMME les champs libres", () => {
+    const def = toolDefsFor(["update_qualification"], CUSTOM)[0];
+    const props = (def.parameters as { properties: { fields: { properties: Record<string, unknown> } } })
+      .properties.fields.properties;
+    for (const field of [...QUALIFICATION_FIELDS, ...CUSTOM]) {
+      expect(props).toHaveProperty([field]);
+    }
+    // La description aussi : c'est elle que le modèle lit vraiment.
+    expect(def.description).toContain("type de propriété recherché");
+  });
+
+  it("toolDefsFor sans champs libres : définition canonique inchangée", () => {
+    const def = toolDefsFor(["update_qualification"])[0];
+    expect(def).toBe(TOOL_DEFS.update_qualification);
+  });
+
+  it("parseToolArgs accepte un champ libre déclaré", () => {
+    const result = parseToolArgs(
+      "update_qualification",
+      { fields: { "type de propriété recherché": "duplex" } },
+      CUSTOM,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect((result.args as { fields: Record<string, string> }).fields["type de propriété recherché"]).toBe(
+        "duplex",
+      );
+    }
+  });
+
+  it("parseToolArgs rejette toujours un champ NON déclaré, même avec des champs libres", () => {
+    const result = parseToolArgs("update_qualification", { fields: { invented: "x" } }, CUSTOM);
+    expect(result.ok).toBe(false);
+  });
+
+  it("les huit clés canoniques restent acceptées avec des champs libres", () => {
+    const result = parseToolArgs("update_qualification", { fields: { budget: "450000" } }, CUSTOM);
+    expect(result.ok).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // parseToolArgs — cas valides par outil
 // ═══════════════════════════════════════════════════════════════════════════
 

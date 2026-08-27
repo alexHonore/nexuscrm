@@ -417,6 +417,8 @@
       "meetDuration": "Video call length (min)",
       "inPersonDuration": "In-person length (min)",
       "buffer": "Buffer between appointments (min)",
+      "minNotice": "Minimum notice (min)",
+      "minNoticeHint": "No appointment can be offered or booked closer than this delay — on screen and by the SMS assistant alike. E.g. 180 = nothing with less than 3 h notice.",
       "location": "Default location (in person)",
       "locationPlaceholder": "E.g.: Québec City office, 123 Laurier Blvd",
       "brokerEmail": "Broker e-mail (invited to every appointment)",

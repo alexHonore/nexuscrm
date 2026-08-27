@@ -110,6 +110,14 @@ vi.mock("@/lib/llm-server", () => ({
   getModelCatalog: async () => [],
 }));
 
+/** Agenda simulé, pilotable par test : `booking.bookResult` décide du sort. */
+const booking = vi.hoisted(() => ({
+  bookResult: { ok: false, error: "not_bookable" } as
+    | { ok: false; error: string }
+    | { ok: true; appointmentId: string; startsAtIso: string },
+  bookCalls: [] as { slotIso: string }[],
+}));
+
 /** L'agenda est simulé : aucun appel Google, aucune écriture de rendez-vous. */
 vi.mock("@/lib/booking/internal", () => ({
   getInternalBookingProvider: () => ({
@@ -120,7 +128,10 @@ vi.mock("@/lib/booking/internal", () => ({
       ],
       googleConnected: true,
     }),
-    book: async () => ({ ok: false as const, error: "not_bookable" as const }),
+    book: async (input: { slotIso: string }) => {
+      booking.bookCalls.push({ slotIso: input.slotIso });
+      return booking.bookResult;
+    },
   }),
 }));
 
@@ -131,7 +142,9 @@ const { compileAssistant } = await import("@/lib/assistants/service");
 
 // ── Montage d'une conversation prête à parler ────────────────────────────────
 
-async function scene(overrides: { aiEnabled?: boolean; goalRung?: string } = {}) {
+async function scene(
+  overrides: { aiEnabled?: boolean; goalRung?: string; primaryRequiredFields?: string[] } = {},
+) {
   await seedGuardrailDefaults();
   // Un administrateur actif : destinataire des alertes et des rappels quand la
   // fiche n'a pas d'assigné — comme en production.
@@ -150,7 +163,7 @@ async function scene(overrides: { aiEnabled?: boolean; goalRung?: string } = {})
         type: "video_meeting",
         durationMin: 30,
         appointmentType: "meet",
-        requiredFields: ["project_type"],
+        requiredFields: overrides.primaryRequiredFields ?? ["project_type"],
       },
       fallbacks: [
         { type: "phone_call", durationMin: 15, requiredFields: [] },
@@ -228,6 +241,8 @@ describe("runTurn", () => {
     llm.classifierJson = '{"refusal":"none","qualification":{}}';
     llm.judgeJson = '{"passed":true,"reason":"conforme"}';
     llm.calls = [];
+    booking.bookResult = { ok: false, error: "not_bookable" };
+    booking.bookCalls = [];
   });
   afterEach(() => vi.clearAllMocks());
 
@@ -721,6 +736,74 @@ it("une réservation ÉCHOUÉE n'envoie AUCUNE confirmation au client", async ()
     expect(conv.attentionReason).toBe("booking_failed");
   });
 
+  it("l'escalade booking_failed consigne le POURQUOI dans l'évènement", async () => {
+    // Le cas prod du 2026-08-27 : « Réservation impossible » sans aucune trace
+    // du motif. L'évènement d'escalade doit maintenant nommer la cause.
+    const { conversation } = await scene();
+    llm.generatorToolCalls = [
+      { id: "t1", name: "book_meeting", arguments: { slotIso: "2026-08-27T18:00:00.000Z" } },
+    ];
+    await inbound(conversation.id, "oui jeudi 14h ça marche");
+
+    const result = await runTurn(conversation.id);
+    expect(result.reason).toBe("booking_failed");
+
+    const rows = await testDb
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.conversationId, conversation.id));
+    const escalation = rows.find((e) => e.type === "escalation");
+    // project_type manque : le détail nomme le champ, pas juste « échec ».
+    expect((escalation?.payload as { detail?: string }).detail).toBe(
+      "missing_fields: project_type",
+    );
+    // Et l'évènement tool_call du book_meeting dit ok: false, plus jamais true.
+    const toolEvent = rows.find(
+      (e) => e.type === "tool_call" && (e.payload as { name?: string }).name === "book_meeting",
+    );
+    expect((toolEvent?.payload as { ok?: boolean }).ok).toBe(false);
+  });
+
+  it("un champ requis LIBRE se recueille et se réserve dans le MÊME tour", async () => {
+    // Le bogue racine du 2026-08-27 : le cran exigeait « type de propriété
+    // recherché » (chaîne libre du courtier), mais update_qualification ne
+    // pouvait littéralement pas enregistrer cette clé — book_meeting refusait
+    // pour toujours. Le tour complet doit maintenant réussir.
+    const { conversation } = await scene({
+      primaryRequiredFields: ["project_type", "type de propriété recherché"],
+    });
+    booking.bookResult = {
+      ok: true,
+      appointmentId: "apt-1",
+      startsAtIso: "2026-08-27T18:00:00.000Z",
+    };
+    llm.generatorToolCalls = [
+      {
+        id: "t1",
+        name: "update_qualification",
+        arguments: {
+          fields: { project_type: "acheter un duplex", "type de propriété recherché": "duplex" },
+        },
+      },
+      { id: "t2", name: "book_meeting", arguments: { slotIso: "2026-08-27T18:00:00.000Z" } },
+    ];
+    await inbound(conversation.id, "un duplex, et jeudi 14h ça me va");
+
+    const result = await runTurn(conversation.id);
+    expect(result.outcome).toBe("sent");
+    expect(booking.bookCalls).toEqual([{ slotIso: "2026-08-27T18:00:00.000Z" }]);
+
+    // La clé libre est persistée avec les autres sur la conversation.
+    const [conv] = await testDb
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, conversation.id));
+    expect((conv.qualification as Record<string, string>)["type de propriété recherché"]).toBe(
+      "duplex",
+    );
+    expect(await eventsOf(conversation.id)).not.toContain("escalation");
+  });
+
   it("un STOP NOYÉ dans une rafale reste un STOP", async () => {
     const { conversation, client } = await scene();
     // Le detecteur de mots-cles exige le message ENTIER ; concatenes, ces deux
@@ -870,6 +953,8 @@ describe("tour proactif (barreau sans texte)", () => {
     llm.classifierJson = '{"refusal":"none","qualification":{}}';
     llm.judgeJson = '{"passed":true,"reason":"conforme"}';
     llm.calls = [];
+    booking.bookResult = { ok: false, error: "not_bookable" };
+    booking.bookCalls = [];
   });
   afterEach(() => vi.clearAllMocks());
 
@@ -986,6 +1071,8 @@ describe("statut, outils et pannes (revue)", () => {
     llm.classifierJson = '{"refusal":"none","qualification":{}}';
     llm.judgeJson = '{"passed":true,"reason":"conforme"}';
     llm.calls = [];
+    booking.bookResult = { ok: false, error: "not_bookable" };
+    booking.bookCalls = [];
   });
   afterEach(() => vi.clearAllMocks());
 
@@ -1251,6 +1338,8 @@ describe("câblage inter-domaines (revue)", () => {
     llm.classifierJson = '{"refusal":"none","qualification":{}}';
     llm.judgeJson = '{"passed":true,"reason":"conforme"}';
     llm.calls = [];
+    booking.bookResult = { ok: false, error: "not_bookable" };
+    booking.bookCalls = [];
   });
   afterEach(() => vi.clearAllMocks());
 
@@ -1333,6 +1422,8 @@ describe("set_category — l'assistant range la fiche", () => {
     llm.classifierJson = '{"refusal":"none","qualification":{}}';
     llm.judgeJson = '{"passed":true,"reason":"conforme"}';
     llm.calls = [];
+    booking.bookResult = { ok: false, error: "not_bookable" };
+    booking.bookCalls = [];
   });
   afterEach(() => vi.clearAllMocks());
 
@@ -1513,6 +1604,8 @@ describe("réponses en file et sortants jamais reçus (revue)", () => {
     llm.classifierJson = '{"refusal":"none","qualification":{}}';
     llm.judgeJson = '{"passed":true,"reason":"conforme"}';
     llm.calls = [];
+    booking.bookResult = { ok: false, error: "not_bookable" };
+    booking.bookCalls = [];
   });
   afterEach(() => vi.clearAllMocks());
 

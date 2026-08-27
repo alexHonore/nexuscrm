@@ -99,6 +99,12 @@ export type BookResult =
       ok: false;
       /**
        * slot_taken   : le créneau (valide) n'est plus libre à la revalidation ;
+       * too_soon     : le créneau tombe sous le préavis minimal des réglages
+       *                (`minNoticeMin`). DISTINCT de `slot_taken` : le modèle
+       *                doit dire « c'est trop court, voici plus tard », pas
+       *                « quelqu'un vient de le prendre » — et un fil qui
+       *                traîne quelques heures fait tomber une offre encore
+       *                libre sous le préavis sans que personne ne la prenne ;
        * google_error : l'agenda Google est injoignable, ou vient de se
        *                déconnecter, au moment de la revalidation — on ne
        *                réserve jamais à l'aveugle ;
@@ -106,7 +112,7 @@ export type BookResult =
        * not_bookable : rien à réserver (client introuvable, ou aucun
        *                utilisateur du CRM à qui rattacher le rendez-vous).
        */
-      error: "slot_taken" | "google_error" | "invalid_slot" | "not_bookable";
+      error: "slot_taken" | "too_soon" | "google_error" | "invalid_slot" | "not_bookable";
     };
 
 /** Contrat que doit remplir tout moteur de réservation branché à l'agent SMS. */

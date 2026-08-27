@@ -72,6 +72,7 @@ export default async function AdminSettingsPage() {
           meetDurationMin: booking.meetDurationMin,
           inPersonDurationMin: booking.inPersonDurationMin,
           bufferMin: booking.bufferMin,
+          minNoticeMin: booking.minNoticeMin,
           inPersonDefaultLocation: booking.inPersonDefaultLocation,
           brokerEmail: booking.brokerEmail,
         }}

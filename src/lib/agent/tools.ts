@@ -43,18 +43,29 @@ const bookMeetingArgsSchema = z.object({
   email: z.string().optional(),
 });
 
-const updateQualificationArgsSchema = z.object({
-  /**
-   * Map PARTIELLE champ → valeur extraite (0 à 8 champs, une extraction à la
-   * fois en pratique). `z.record` avec des clés enum exige les 8 clés en zod
-   * v4 (vérifié) ; `z.partialRecord` est la forme qui accepte réellement un
-   * sous-ensemble, et rejette toujours une clé hors vocabulaire.
-   *
-   * Les valeurs sont conservées sur la conversation et réinjectées dans le
-   * prompt système à chaque tour : une ligne, bornées (`contact-data.ts`).
-   */
-  fields: z.partialRecord(z.enum(QUALIFICATION_FIELDS), z.string().transform((v) => contactValue(v))),
-});
+/**
+ * Map PARTIELLE champ → valeur extraite (une extraction à la fois en
+ * pratique). `z.record` avec des clés enum exige toutes les clés en zod v4
+ * (vérifié) ; `z.partialRecord` est la forme qui accepte réellement un
+ * sous-ensemble, et rejette toujours une clé hors vocabulaire.
+ *
+ * Le vocabulaire n'est PAS que les huit clés connues : un cran d'objectif a
+ * le droit d'exiger un champ LIBRE (« nombre de chambres » — voir
+ * `goalStepSchema.requiredFields`), et l'outil doit pouvoir l'enregistrer,
+ * sinon `book_meeting` refuse pour toujours. D'où la fabrique : chaque
+ * assistant valide sur QUALIFICATION_FIELDS ∪ ses champs libres.
+ *
+ * Les valeurs sont conservées sur la conversation et réinjectées dans le
+ * prompt système à chaque tour : une ligne, bornées (`contact-data.ts`).
+ */
+function updateQualificationArgsSchemaFor(extraFields: readonly string[]) {
+  const keys = [...new Set([...QUALIFICATION_FIELDS, ...extraFields])] as [string, ...string[]];
+  return z.object({
+    fields: z.partialRecord(z.enum(keys), z.string().transform((v) => contactValue(v))),
+  });
+}
+
+const updateQualificationArgsSchema = updateQualificationArgsSchemaFor([]);
 
 const scheduleFollowupArgsSchema = z.object({
   /**
@@ -381,9 +392,42 @@ export const TOOL_DEFS: Record<AssistantTool, ToolDef> = {
  * stocké en config. Les noms inconnus (config corrompue ou legacy) sont
  * silencieusement ignorés.
  */
-export function toolDefsFor(enabled: string[]): ToolDef[] {
+export function toolDefsFor(enabled: string[], extraQualificationFields: string[] = []): ToolDef[] {
   const enabledSet = new Set(enabled);
-  return ASSISTANT_TOOLS.filter((name) => enabledSet.has(name)).map((name) => TOOL_DEFS[name]);
+  return ASSISTANT_TOOLS.filter((name) => enabledSet.has(name)).map((name) =>
+    name === "update_qualification" && extraQualificationFields.length > 0
+      ? updateQualificationDefFor(extraQualificationFields)
+      : TOOL_DEFS[name],
+  );
+}
+
+/**
+ * Définition d'`update_qualification` élargie aux champs LIBRES de la chaîne
+ * d'objectifs de CET assistant : le JSON Schema (`additionalProperties:
+ * false`) doit nommer chaque clé pour que le modèle puisse l'envoyer, et la
+ * description doit la lister pour qu'il sache qu'elle existe.
+ */
+function updateQualificationDefFor(extraFields: string[]): ToolDef {
+  const base = TOOL_DEFS.update_qualification;
+  const allFields = [...new Set([...QUALIFICATION_FIELDS, ...extraFields])];
+  return {
+    ...base,
+    description: `Enregistre immédiatement toute information de qualification mentionnée par la personne — même partielle, même un seul champ à la fois. Appelle cet outil DÈS qu'une info pertinente apparaît dans la conversation, pas seulement à la fin. Champs valides : ${allFields.join(", ")}.`,
+    parameters: {
+      type: "object",
+      properties: {
+        fields: {
+          type: "object",
+          description:
+            "Map partielle champ → valeur extraite, telle qu'exprimée par la personne (n'invente rien, n'infère rien).",
+          properties: Object.fromEntries(allFields.map((field) => [field, { type: "string" }])),
+          additionalProperties: false,
+        },
+      },
+      required: ["fields"],
+      additionalProperties: false,
+    },
+  };
 }
 
 // ── Validation des arguments envoyés par le modèle ──────────────────────────
@@ -400,12 +444,22 @@ export type ParsedToolArgs = { ok: true; name: AssistantTool; args: unknown } | 
  * arguments farfelus). Un nom inconnu ou un échec zod renvoie une erreur
  * structurée plutôt qu'une exception.
  */
-export function parseToolArgs(name: string, args: unknown): ParsedToolArgs {
+export function parseToolArgs(
+  name: string,
+  args: unknown,
+  extraQualificationFields: string[] = [],
+): ParsedToolArgs {
   if (!isAssistantTool(name)) {
     return { ok: false, error: `unknown_tool: ${name}` };
   }
 
-  const result = TOOL_ARG_SCHEMAS[name].safeParse(args);
+  // Le validateur doit accepter exactement ce que la définition offre : les
+  // champs libres déclarés au modèle seraient sinon refusés ici.
+  const schema =
+    name === "update_qualification" && extraQualificationFields.length > 0
+      ? updateQualificationArgsSchemaFor(extraQualificationFields)
+      : TOOL_ARG_SCHEMAS[name];
+  const result = schema.safeParse(args);
   if (!result.success) {
     const issue = result.error.issues[0];
     const path = issue.path.join(".") || "(racine)";
@@ -425,4 +479,28 @@ export function parseToolArgs(name: string, args: unknown): ParsedToolArgs {
  */
 export function missingFieldsError(missing: string[]): string {
   return `Impossible de réserver : il manque encore ces informations : ${missing.join(", ")}. Demande-les avant de réserver.`;
+}
+
+/**
+ * Ce que le modèle lit quand `book_meeting` échoue. Le CODE seul ne suffit
+ * pas : « slot_taken » et « too_soon » appellent deux phrases opposées, et le
+ * message générique (« propose autre chose ») laissait le modèle annoncer un
+ * créneau pris alors qu'il était seulement trop proche. Chaque cause dit donc
+ * quoi faire ensuite, et aucune n'autorise à confirmer.
+ */
+export function bookingFailureError(error: string): string {
+  const guidance: Record<string, string> = {
+    too_soon:
+      "cette heure est trop proche pour être réservée (préavis minimal du courtier). Rappelle get_slots et propose une heure PLUS TARD — ne dis jamais qu'elle vient d'être prise.",
+    slot_taken:
+      "ce créneau vient d'être pris. Rappelle get_slots et propose les nouvelles heures libres.",
+    google_error:
+      "l'agenda est injoignable — n'annonce AUCUNE heure et propose de faire confirmer par un humain.",
+    invalid_slot:
+      "l'heure envoyée n'est pas exploitable. Reprends une heure EXACTEMENT telle que get_slots l'a rendue.",
+    not_bookable:
+      "la réservation est impossible sur cette fiche. N'annonce rien et passe la main à un humain.",
+  };
+  const what = guidance[error] ?? "la réservation a échoué. N'annonce aucune heure.";
+  return `book_meeting : ÉCHEC (${error}) — ne confirme RIEN : ${what}`;
 }

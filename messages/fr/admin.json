@@ -417,6 +417,8 @@
       "meetDuration": "Durée visio (min)",
       "inPersonDuration": "Durée en personne (min)",
       "buffer": "Tampon entre rendez-vous (min)",
+      "minNotice": "Préavis minimal (min)",
+      "minNoticeHint": "Aucun rendez-vous ne peut être proposé ni réservé plus tôt que ce délai — à l'écran comme par l'assistant SMS. Ex. : 180 = rien à moins de 3 h d'avis.",
       "location": "Lieu par défaut (en personne)",
       "locationPlaceholder": "Ex. : bureau de Québec, 123 boul. Laurier",
       "brokerEmail": "Courriel du courtier (invité à chaque rendez-vous)",

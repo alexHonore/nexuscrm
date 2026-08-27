@@ -180,6 +180,16 @@ async function book(input: BookInput): Promise<BookResult> {
   const duration = durationFor(settings, input.type);
   const endsAt = addMinutes(startsAt, duration);
 
+  // ── Préavis minimal, vérifié AVANT la revalidation de disponibilité.
+  // `computeAvailability` écarte déjà ces créneaux, mais son refus est muet :
+  // le créneau manquant de la liste ressortait en « slot_taken », et le modèle
+  // annonçait à la personne que l'heure venait d'être prise alors qu'elle
+  // était simplement trop proche. Le cas arrive tout seul : une heure offerte
+  // le matin est confirmée l'après-midi, et l'offre a vieilli sous le préavis.
+  if (startsAt.getTime() < Date.now() + settings.minNoticeMin * 60_000) {
+    return { ok: false, error: "too_soon" };
+  }
+
   // ── Revalidation : le créneau offert peut dater de plusieurs échanges SMS
   // — il doit être ENCORE libre maintenant. Un Google qui vient de se
   // déconnecter ENTRE l'offre et la confirmation est traité comme une panne

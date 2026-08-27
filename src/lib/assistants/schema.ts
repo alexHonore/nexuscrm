@@ -243,6 +243,27 @@ export const goalConfigSchema = z.object({
 });
 export type GoalConfig = z.infer<typeof goalConfigSchema>;
 
+/**
+ * Champs requis LIBRES de la chaîne d'objectifs — ceux qui ne sont pas dans
+ * `QUALIFICATION_FIELDS` (« type de propriété recherché », « nombre de
+ * chambres »…). Ils sont permis par `goalStepSchema` et rendus dans le prompt,
+ * mais l'outil `update_qualification` n'acceptait QUE les huit clés connues :
+ * un cran exigeant un champ libre rendait `book_meeting` impossible pour
+ * toujours (le modèle ne pouvait littéralement pas enregistrer la clé).
+ * L'union sur TOUS les crans, pas le cran courant : la qualification est
+ * partagée, et une rétrogradation ne doit pas faire perdre une clé déjà utile.
+ */
+export function customQualificationFields(goal: GoalConfig): string[] {
+  const known = new Set<string>(QUALIFICATION_FIELDS);
+  const out: string[] = [];
+  for (const step of [goal.primary, ...goal.fallbacks]) {
+    for (const field of step.requiredFields) {
+      if (!known.has(field) && !out.includes(field)) out.push(field);
+    }
+  }
+  return out;
+}
+
 // ── Approche (L3) ────────────────────────────────────────────────────────────
 
 export const approachSchema = z.object({

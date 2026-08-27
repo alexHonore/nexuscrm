@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { formatInTimeZone } from "date-fns-tz";
 import { db } from "@/db";
 import { assistants } from "@/db/schema-sms";
-import { assistantRowToConfig } from "@/lib/assistants/schema";
+import { assistantRowToConfig, customQualificationFields } from "@/lib/assistants/schema";
 import { resolvedRulesFor } from "@/lib/assistants/service";
 import { blockingFailures, evaluateOutputRules } from "@/lib/guardrails/filter";
 import { judgeWithLlm } from "@/lib/guardrails/judge";
@@ -402,9 +402,10 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
   const messageArray: LLMMessage[] = [...history, { role: "user", content: userTurn }];
   // Mêmes outils qu'en production sur un tour de clôture : classer, consigner,
   // clore — jamais réserver, jamais `stop` (un refus n'est pas un désabonnement).
+  const customFields = customQualificationFields(config.goal);
   const tools = closingHard
-    ? toolDefsFor(config.tools).filter((t) => CLOSING_TOOL_NAMES.includes(t.name))
-    : toolDefsFor(config.tools);
+    ? toolDefsFor(config.tools, customFields).filter((t) => CLOSING_TOOL_NAMES.includes(t.name))
+    : toolDefsFor(config.tools, customFields);
   const toolCalls: SandboxToolCall[] = [];
   const sideEffectsDone = new Set<string>();
 
@@ -474,6 +475,7 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
           appointmentType: rung.goal.appointmentType,
           requiredFields: requiredFieldsFor(rung),
           qualification,
+          customQualificationFields: customFields,
           bookableDays,
         });
         simulated.push({ id: call.id, name: call.name, content: outcome.content });

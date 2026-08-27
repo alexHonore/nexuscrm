@@ -18,7 +18,7 @@ import {
 import { runFixture, runnableFixtures, suitePassed } from "@/lib/guardrails/runner";
 import { objectionItemSchema, type FixtureData, type FixtureResult } from "@/lib/guardrails/types";
 import { getLlmProvider } from "@/lib/llm-server";
-import { assistantRowToConfig, type AssistantConfig } from "./schema";
+import { assistantRowToConfig, customQualificationFields, type AssistantConfig } from "./schema";
 import { simulatedSlotsText } from "@/lib/agent/tool-simulation";
 
 /**
@@ -322,7 +322,7 @@ export async function runAssistantSuite(
             // `mustNotCallTool` réussit toujours — deux fixtures « STOP »
             // bloquantes restaient rouges pour de bon, rendant impossible
             // l'activation de tout assistant exigeant une suite verte.
-            tools: toolDefsFor(config.tools),
+            tools: toolDefsFor(config.tools, customQualificationFields(config.goal)),
           });
           // Outils SIMULÉS : on note les appels, aucun handler ne tourne.
           return {
@@ -350,6 +350,7 @@ export async function runAssistantSuite(
       {
         appointmentType: stepForFixture(config, fixture).appointmentType,
         requiredFields: stepForFixture(config, fixture).requiredFields,
+        customQualificationFields: customQualificationFields(config.goal),
       },
     );
     results.push(result);

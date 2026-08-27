@@ -50,7 +50,6 @@ import { GET } from "@/app/api/availability/route";
 import {
   computeAvailability,
   durationFor,
-  MIN_LEAD_MIN,
   SLOT_STEP_MIN,
 } from "@/app/api/availability/slots";
 import { bookingSettingsSchema, setSetting, type BookingSettings } from "@/lib/settings";
@@ -398,13 +397,37 @@ describe("jours réservables", () => {
 describe("délai minimum avant réservation", () => {
   beforeEach(async () => {
     await loginAs();
-    await setBooking({ startHour: "09:00", endHour: "12:00", bufferMin: 0 });
+    // Préavis ÉPINGLÉ à 45 min : les bornes exercées plus bas sont celles de
+    // ce délai précis. Le défaut du schéma (180) a son propre test.
+    await setBooking({ startHour: "09:00", endHour: "12:00", bufferMin: 0, minNoticeMin: 45 });
   });
 
-  it("écarte les créneaux à moins de MIN_LEAD_MIN de maintenant", async () => {
-    expect(MIN_LEAD_MIN).toBe(45);
+  it("le préavis PAR DÉFAUT est de 3 h", () => {
+    // Une installation qui n'a jamais enregistré la clé (la production) reçoit
+    // ce défaut : il doit exclure le cas du 2026-08-27 (2 h 23 d'avis).
+    expect(bookingSettingsSchema.parse({}).minNoticeMin).toBe(180);
+    expect(180).toBeGreaterThan(2 * 60 + 23);
+  });
+
+  it("écarte les créneaux à moins du préavis réglé (45 min ici) de maintenant", async () => {
     now("2026-08-10T13:20:00Z"); // 09:20 à Toronto → premier créneau utile 10:05+
     expect(labels(await slotsOf("2026-08-10"))).toEqual(["10:30", "11:00", "11:30"]);
+  });
+
+  it("respecte un préavis RÉGLÉ plus long que le défaut", async () => {
+    // Le cas réel du 2026-08-27 : 14:37 à Toronto, l'agent réservait 17:30 le
+    // jour même. Avec un préavis de 3 h, ce créneau ne doit plus être offert.
+    await setBooking({ startHour: "09:00", endHour: "18:00", bufferMin: 0, minNoticeMin: 180 });
+    now("2026-08-10T18:37:00Z"); // 14:37 à Toronto → limite 17:37 → premier créneau 18:00… hors fenêtre
+    expect(labels(await slotsOf("2026-08-10"))).toEqual([]);
+    await setBooking({ startHour: "09:00", endHour: "21:00", bufferMin: 0, minNoticeMin: 180 });
+    expect(labels(await slotsOf("2026-08-10"))[0]).toBe("18:00");
+  });
+
+  it("préavis zéro : seul le passé est écarté", async () => {
+    await setBooking({ startHour: "09:00", endHour: "12:00", bufferMin: 0, minNoticeMin: 0 });
+    now("2026-08-10T13:55:00Z"); // 09:55 à Toronto → 10:00 gardé
+    expect(labels(await slotsOf("2026-08-10"))[0]).toBe("10:00");
   });
 
   it("garde le créneau situé juste au-delà de la limite", async () => {
@@ -428,7 +451,7 @@ describe("délai minimum avant réservation", () => {
     now("2026-08-10T14:07:00Z");
     const slots = await slotsOf("2026-08-10");
     for (const s of slots) {
-      expect(new Date(s).getTime()).toBeGreaterThanOrEqual(Date.now() + MIN_LEAD_MIN * 60_000);
+      expect(new Date(s).getTime()).toBeGreaterThanOrEqual(Date.now() + 45 * 60_000);
     }
   });
 });

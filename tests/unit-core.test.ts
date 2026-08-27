@@ -612,10 +612,19 @@ describe("settings — bookingSettingsSchema", () => {
       meetDurationMin: 30,
       inPersonDurationMin: 60,
       bufferMin: 15,
+      minNoticeMin: 180,
       timezone: "America/Toronto",
       inPersonDefaultLocation: "",
       brokerEmail: "info@alexhonore.com",
     });
+  });
+
+  it("borne le préavis minimal : entier, 0 permis, 7 jours au plus", () => {
+    expect(bookingSettingsSchema.parse({ minNoticeMin: 0 }).minNoticeMin).toBe(0);
+    expect(bookingSettingsSchema.parse({ minNoticeMin: 10_080 }).minNoticeMin).toBe(10_080);
+    expect(bookingSettingsSchema.safeParse({ minNoticeMin: -1 }).success).toBe(false);
+    expect(bookingSettingsSchema.safeParse({ minNoticeMin: 10_081 }).success).toBe(false);
+    expect(bookingSettingsSchema.safeParse({ minNoticeMin: 30.5 }).success).toBe(false);
   });
 
   it("refuse un courriel de courtier invalide, accepte la chaîne vide", () => {
