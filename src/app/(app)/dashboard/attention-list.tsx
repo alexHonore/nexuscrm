@@ -1,9 +1,16 @@
 "use client";
 
+import { CheckIcon } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { useTransition } from "react";
+import { toast } from "sonner";
+import { markConversationHandledAction } from "@/app/(app)/conversations/actions";
 import { ATTENTION_LOOK, CONVERSATION_STATE_LOOK, LookIcon, lookTint } from "@/components/look";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { emitDataChange } from "@/lib/live";
 import { formatPhone } from "@/lib/phone";
 
 /**
@@ -45,6 +52,28 @@ export function AttentionList({
 }) {
   const t = useTranslations("dashboard");
   const tc = useTranslations("conversations");
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+
+  /**
+   * « C'est réglé » — sans passer par l'écran des conversations.
+   *
+   * Le MÊME geste et le même mot que dans la boîte de réception
+   * (`markConversationHandledAction`, « Marquer traité ») : le fil sort de la
+   * liste des deux côtés, et rien ne peut diverger entre les deux écrans.
+   */
+  const markHandled = (conversationId: string) =>
+    startTransition(async () => {
+      const result = await markConversationHandledAction(conversationId);
+      if (!result.ok) {
+        toast.error(t("error"));
+        return;
+      }
+      toast.success(tc("inbox.handled"));
+      // Le même signal que la boîte : les autres vues ouvertes se rafraîchissent.
+      emitDataChange("sms");
+      router.refresh();
+    });
 
   return (
     <ul className="space-y-2">
@@ -53,32 +82,48 @@ export function AttentionList({
         const reasonKey = `inbox.reason.${reason}`;
         const look = ATTENTION_LOOK[reason] ?? CONVERSATION_STATE_LOOK.attention;
         return (
-          <li key={row.id}>
+          // Le lien couvre la ligne SANS l'envelopper : un bouton dans un lien
+          // navigue à chaque clic. Même montage que la boîte de réception —
+          // lien en calque, actions au-dessus.
+          <li
+            key={row.id}
+            className="relative flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50"
+          >
             <Link
               href={row.clientId ? `/clients/${row.clientId}` : "/conversations"}
-              className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50"
-            >
-              <LookIcon look={look} className="shrink-0" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">
-                  {row.clientName ?? formatPhone(row.clientPhone)}
-                </p>
+              className="absolute inset-0 rounded-lg"
+              aria-label={`${tc("inbox.open")} — ${row.clientName ?? formatPhone(row.clientPhone)}`}
+            />
+            <LookIcon look={look} className="shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">
+                {row.clientName ?? formatPhone(row.clientPhone)}
+              </p>
+              {/* Motif et date sur la MÊME ligne, sous le nom : la droite est
+                  rendue au geste, qui reste atteignable au pouce sur un
+                  téléphone. */}
+              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
                 {reason !== "" ? (
-                  <Badge
-                    variant="outline"
-                    className="mt-0.5 gap-1 font-normal"
-                    style={lookTint(look)}
-                  >
+                  <Badge variant="outline" className="gap-1 font-normal" style={lookTint(look)}>
                     {tc.has(reasonKey as never) ? tc(reasonKey as never) : reason}
                   </Badge>
                 ) : null}
-              </div>
-              {row.lastAtLabel ? (
-                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                  {row.lastAtLabel}
-                </span>
-              ) : null}
-            </Link>
+                {row.lastAtLabel ? (
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {row.lastAtLabel}
+                  </span>
+                ) : null}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="relative z-10 min-h-11 shrink-0 md:min-h-8"
+              disabled={pending}
+              onClick={() => markHandled(row.id)}
+            >
+              <CheckIcon aria-hidden /> {tc("inbox.markHandled")}
+            </Button>
           </li>
         );
       })}

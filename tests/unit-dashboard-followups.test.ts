@@ -35,6 +35,12 @@ import type { AttentionRowData } from "@/app/(app)/dashboard/attention-list";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("@/app/(app)/clients/actions", () => ({ completeFollowupAction: vi.fn() }));
+// Vitest n'implémente pas la frontière « use server » : sans ce mock, il
+// importerait POUR DE VRAI le module d'actions, qui traîne des dépendances
+// « server-only ».
+vi.mock("@/app/(app)/conversations/actions", () => ({
+  markConversationHandledAction: vi.fn(async () => ({ ok: true, id: "c1" })),
+}));
 vi.mock("@/components/telephony/telephony-context", () => ({
   useTelephony: () => ({ dial: vi.fn(), ready: true }),
 }));
@@ -236,6 +242,15 @@ describe("tableau de bord — les fils rendus par l'assistant SMS", () => {
     expect(html).toContain('href="/conversations"');
     // Faute de nom, le numéro — jamais une ligne vide.
     expect(html).toContain("418");
+  });
+
+  it("§ chaque ligne offre « Marquer traité », hors du lien de la ligne", () => {
+    const html = renderAttention([attentionRow()]);
+    expect(html).toContain("Marquer traité");
+    // Le lien couvre la ligne en CALQUE : imbriquer un bouton dans un lien le
+    // ferait naviguer à chaque clic au lieu de traiter le fil.
+    expect(html).toContain('class="absolute inset-0 rounded-lg"');
+    expect(html).not.toMatch(/<a[^>]*>(?:(?!<\/a>)[\s\S])*<button/);
   });
 
   it("ce qui n'est pas montré est compté ET atteignable", () => {
