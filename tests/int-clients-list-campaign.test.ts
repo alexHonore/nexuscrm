@@ -103,3 +103,60 @@ describe("GET /api/clients/list — excludeCampaignId", () => {
     expect(junk.total).toBe(1);
   });
 });
+
+describe("GET /api/clients/list — campaignId", () => {
+  it("§ montre les fiches d'une campagne, tout statut d'inscription confondu", async () => {
+    // La question posée est l'APPARTENANCE, pas l'activité : une inscription
+    // terminée ou arrêtée a bel et bien fait partie de la campagne.
+    const campaign = await makeCampaign();
+    const other = await makeCampaign();
+    const active = await makeClient({ fullName: "Alice Active" });
+    const done = await makeClient({ fullName: "Bruno Terminé" });
+    const elsewhere = await makeClient({ fullName: "Carole Ailleurs" });
+    await makeClient({ fullName: "David Sans Campagne" });
+
+    await testDb.insert(campaignEnrollments).values([
+      { campaignId: campaign.id, clientId: active.id, status: "active" },
+      { campaignId: campaign.id, clientId: done.id, status: "completed" },
+      { campaignId: other.id, clientId: elsewhere.id, status: "active" },
+    ]);
+
+    const res = await list({ campaignId: campaign.id });
+    expect(res.total).toBe(2);
+    expect(res.items.map((i) => i.id).sort()).toEqual([active.id, done.id].sort());
+  });
+
+  it("§ « aucune campagne » ne rend QUE les fiches jamais inscrites", async () => {
+    const campaign = await makeCampaign();
+    const enrolled = await makeClient({ fullName: "Alice Inscrite" });
+    const never = await makeClient({ fullName: "David Sans Campagne" });
+    await testDb
+      .insert(campaignEnrollments)
+      .values({ campaignId: campaign.id, clientId: enrolled.id, status: "excluded" });
+
+    const res = await list({ campaignId: "none" });
+    expect(res.items.map((i) => i.id)).toEqual([never.id]);
+  });
+
+  it("plusieurs campagnes se cumulent, et « aucune » se cumule avec elles", async () => {
+    const a = await makeCampaign();
+    const b = await makeCampaign();
+    const inA = await makeClient({ fullName: "Alice A" });
+    const inB = await makeClient({ fullName: "Bruno B" });
+    const none = await makeClient({ fullName: "Carole Sans" });
+    await testDb.insert(campaignEnrollments).values([
+      { campaignId: a.id, clientId: inA.id, status: "active" },
+      { campaignId: b.id, clientId: inB.id, status: "active" },
+    ]);
+
+    expect((await list({ campaignId: `${a.id},${b.id}` })).total).toBe(2);
+    // Une fiche dans A ET « sans campagne » : l'union, pas l'intersection.
+    const union = await list({ campaignId: `${a.id},none` });
+    expect(union.items.map((i) => i.id).sort()).toEqual([inA.id, none.id].sort());
+  });
+
+  it("un identifiant qui n'est pas un uuid ne filtre rien plutôt que de tout vider", async () => {
+    await makeClient({ fullName: "Alice" });
+    expect((await list({ campaignId: "pas-un-uuid" })).total).toBe(1);
+  });
+});

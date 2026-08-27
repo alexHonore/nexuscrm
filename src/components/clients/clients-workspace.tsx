@@ -197,6 +197,7 @@ export function ClientsWorkspace({
   categories,
   sources,
   users,
+  campaigns,
   totalClients,
   noCategoryCount,
   children,
@@ -205,6 +206,8 @@ export function ClientsWorkspace({
   categories: PanelCategory[];
   sources: FilterOption[];
   users: FilterOption[];
+  /** Campagnes SMS — pour filtrer « qui est dans telle campagne ». */
+  campaigns: FilterOption[];
   totalClients: number;
   noCategoryCount: number;
   children: React.ReactNode;
@@ -263,6 +266,7 @@ export function ClientsWorkspace({
   const [assignedToIds, setAssignedToIds] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
   const [languages, setLanguages] = useState<string[]>([]);
+  const [campaignIds, setCampaignIds] = useState<string[]>([]);
   // Filtres de dates (mode + bornes yyyy-mm-dd) : création / modification.
   const [createdFilter, setCreatedFilter] = useState<DateFilter>(NO_DATE_FILTER);
   const [updatedFilter, setUpdatedFilter] = useState<DateFilter>(NO_DATE_FILTER);
@@ -294,6 +298,7 @@ export function ClientsWorkspace({
     setAppliedQ(v.q.trim());
     setCategoryIds(v.categoryIds);
     setSourceIds(v.sourceIds);
+    setCampaignIds(v.campaignIds);
     setAssignedToIds(v.assignedToIds);
     setStatuses(v.statuses);
     setLanguages(v.languages);
@@ -333,6 +338,7 @@ export function ClientsWorkspace({
     if (assignedToIds.length > 0) p.set("assignedToId", assignedToIds.join(","));
     if (statuses.length > 0) p.set("filter", statuses.join(","));
     if (languages.length > 0) p.set("language", languages.join(","));
+    if (campaignIds.length > 0) p.set("campaignId", campaignIds.join(","));
     // Fenêtres nommées résolues par le serveur à chaque requête ; bornes
     // avant/après strictes ; plage personnalisée inclusive.
     for (const [prefix, f] of [
@@ -370,6 +376,7 @@ export function ClientsWorkspace({
     assignedToIds,
     statuses,
     languages,
+    campaignIds,
     createdFilter,
     updatedFilter,
     sortKey,
@@ -397,6 +404,7 @@ export function ClientsWorkspace({
       assignedToIds,
       statuses,
       languages,
+      campaignIds,
       createdMode: createdFilter.mode,
       createdFrom: createdFilter.from,
       createdTo: createdFilter.to,
@@ -619,6 +627,12 @@ export function ClientsWorkspace({
     { value: "fr", label: t("languages.fr") },
     { value: "en", label: t("languages.en") },
   ];
+  // « Aucune campagne » d'abord : c'est la question la plus souvent posée —
+  // qui n'a encore jamais été travaillé par une campagne.
+  const campaignFilterOptions: FilterOption[] = [
+    { value: "none", label: t("list.filters.noCampaign") },
+    ...campaigns,
+  ];
   const sortOptions: FilterOption[] = SORT_KEYS.map((key) => ({
     value: key,
     label: t(`sort.${key}`),
@@ -628,6 +642,7 @@ export function ClientsWorkspace({
     assignedToIds.length +
     statuses.length +
     languages.length +
+    campaignIds.length +
     (hasDateFilter(createdFilter) ? 1 : 0) +
     (hasDateFilter(updatedFilter) ? 1 : 0);
   const hasAnyCriteria = activeFilterCount > 0 || categoryIds.length > 0 || appliedQ !== "";
@@ -637,6 +652,7 @@ export function ClientsWorkspace({
     setAssignedToIds([]);
     setStatuses([]);
     setLanguages([]);
+    setCampaignIds([]);
     setCreatedFilter(NO_DATE_FILTER);
     setUpdatedFilter(NO_DATE_FILTER);
   };
@@ -658,6 +674,7 @@ export function ClientsWorkspace({
     assignedToIds,
     statuses,
     languages,
+    campaignIds,
     createdMode: createdFilter.mode,
     createdFrom: createdFilter.from,
     createdTo: createdFilter.to,
@@ -1073,6 +1090,14 @@ export function ClientsWorkspace({
                     languages,
                     (v) => toggleValue(setLanguages, v),
                   )}
+                  {campaignFilterOptions.length > 1
+                    ? filterChipGroup(
+                        t("list.filters.campaign"),
+                        campaignFilterOptions,
+                        campaignIds,
+                        (v) => toggleValue(setCampaignIds, v),
+                      )
+                    : null}
                   {dateFilterGroup(t("list.filters.createdAt"), createdFilter, setCreatedFilter)}
                   {dateFilterGroup(t("list.filters.updatedAt"), updatedFilter, setUpdatedFilter)}
                   {activeFilterCount > 0 ? (

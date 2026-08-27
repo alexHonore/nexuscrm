@@ -48,6 +48,8 @@ export type SavedViewState = {
   assignedToIds: string[];
   statuses: string[];
   languages: string[];
+  /** Campagnes affiliées ; « none » = jamais inscrit nulle part. */
+  campaignIds: string[];
   /** Filtres de dates : mode + bornes yyyy-mm-dd ("" = pas de borne). */
   createdMode: DateFilterMode;
   createdFrom: string;
@@ -121,6 +123,9 @@ export function normalizeSavedView(view: SavedView): SavedViewState {
     assignedToIds: stringList(raw.assignedToIds, raw.assignedToId),
     statuses: stringList(raw.statuses, raw.status),
     languages: stringList(raw.languages, raw.language).filter((l) => l === "fr" || l === "en"),
+    // Absent des vues d'avant ce filtre : la liste vide veut dire « toutes »,
+    // donc une vue d'hier continue de montrer exactement ce qu'elle montrait.
+    campaignIds: stringList(raw.campaignIds, undefined),
     createdMode: dateMode(raw.createdMode, dateBound(raw.createdFrom), dateBound(raw.createdTo)),
     createdFrom: dateBound(raw.createdFrom),
     createdTo: dateBound(raw.createdTo),

@@ -7,6 +7,8 @@
     "filters": {
       "category": "Category",
       "source": "Source",
+      "campaign": "Campaign",
+      "noCampaign": "No campaign",
       "noSource": "No source",
       "assignedTo": "Assigned to",
       "status": "Follow-ups",

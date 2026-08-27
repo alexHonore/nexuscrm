@@ -2,6 +2,7 @@ import { asc, eq, sql } from "drizzle-orm";
 import { getLocale } from "next-intl/server";
 import { db } from "@/db";
 import { categories, clients, sources, users } from "@/db/schema";
+import { campaigns } from "@/db/schema-sms";
 import { requireUser } from "@/lib/auth/guards";
 import type { FilterOption } from "@/components/clients/clients-filters";
 import { ClientsWorkspace, type PanelCategory } from "@/components/clients/clients-workspace";
@@ -15,7 +16,7 @@ export default async function ClientsLayout({ children }: { children: React.Reac
   const user = await requireUser();
   const locale = await getLocale();
 
-  const [allCategories, allSources, activeUsers, counts, total] = await Promise.all([
+  const [allCategories, allSources, activeUsers, counts, total, allCampaigns] = await Promise.all([
     db.query.categories.findMany({ orderBy: [asc(categories.sortOrder), asc(categories.id)] }),
     db.query.sources.findMany({ orderBy: [asc(sources.name)] }),
     db.query.users.findMany({ where: eq(users.isActive, true), orderBy: [asc(users.name)] }),
@@ -24,6 +25,10 @@ export default async function ClientsLayout({ children }: { children: React.Reac
       .from(clients)
       .groupBy(clients.categoryId),
     db.$count(clients),
+    // Les campagnes ARCHIVÉES restent proposées : « qui était dans la
+    // réactivation du printemps » est une question qu'on se pose justement
+    // une fois la campagne finie.
+    db.select({ id: campaigns.id, name: campaigns.name }).from(campaigns).orderBy(asc(campaigns.name)),
   ]);
 
   const countByCategory = new Map(counts.map((c) => [c.categoryId, c.count]));
@@ -40,6 +45,7 @@ export default async function ClientsLayout({ children }: { children: React.Reac
     color: s.color,
   }));
   const userOptions: FilterOption[] = activeUsers.map((u) => ({ value: u.id, label: u.name }));
+  const campaignOptions: FilterOption[] = allCampaigns.map((c) => ({ value: c.id, label: c.name }));
 
   return (
     <ClientsWorkspace
@@ -47,6 +53,7 @@ export default async function ClientsLayout({ children }: { children: React.Reac
       categories={panelCategories}
       sources={sourceOptions}
       users={userOptions}
+      campaigns={campaignOptions}
       totalClients={total}
       noCategoryCount={countByCategory.get(null) ?? 0}
     >

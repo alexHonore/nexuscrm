@@ -243,6 +243,23 @@ export async function GET(req: NextRequest) {
   const langs = tokens(languageParam).filter((l) => l === "fr" || l === "en");
   if (langs.length > 0) conditions.push(inArray(clients.language, langs));
 
+  // Filtre par CAMPAGNE affiliée : « qui est dans telle campagne », et
+  // « qui n'est dans aucune ». N'importe quel statut d'inscription compte —
+  // terminée, arrêtée, écartée : la question posée est l'appartenance, pas
+  // l'activité. Sans ça, une fiche sortie d'une campagne disparaîtrait du
+  // filtre alors qu'elle en a bel et bien fait partie.
+  const campaignTokens = tokens(sp.get("campaignId") ?? "");
+  const campaignIds = campaignTokens.filter((v) => UUID_RE.test(v));
+  pushOr(
+    campaignIds.length > 0
+      ? sql`exists (select 1 from campaign_enrollments
+          where client_id = ${clients.id} and campaign_id in ${campaignIds})`
+      : undefined,
+    campaignTokens.includes(NONE)
+      ? sql`not exists (select 1 from campaign_enrollments where client_id = ${clients.id})`
+      : undefined,
+  );
+
   // « Ajouter des clients » d'une campagne : écarte ceux qui y sont DÉJÀ
   // inscrits — n'importe quel statut, car l'index unique (campagne, client)
   // rend toute ré-inscription impossible ; les proposer ne ferait que gonfler
