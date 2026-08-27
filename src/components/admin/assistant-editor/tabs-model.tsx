@@ -38,12 +38,23 @@ export function ModelTab({ config, update }: TabProps) {
   const look = EDITOR_TAB_LOOK.model;
   const [catalog, setCatalog] = useState<Record<string, ModelDescriptor[]>>({});
   const [loading, setLoading] = useState<string | null>(null);
+  /**
+   * Les fournisseurs dont la CLÉ existe — null tant qu'on ne le sait pas.
+   *
+   * Un repli chez un fournisseur sans clé n'est pas un repli : il est sauté à
+   * l'exécution. Le dire ici évite de croire l'assistant protégé par trois
+   * crans dont deux n'existent pas.
+   */
+  const [configured, setConfigured] = useState<ProviderId[] | null>(null);
 
   const load = useCallback(async (provider: string) => {
     setLoading(provider);
     try {
-      const res = await api<{ models: ModelDescriptor[] }>(`/api/llm/models?provider=${provider}`);
+      const res = await api<{ models: ModelDescriptor[]; configured?: ProviderId[] }>(
+        `/api/llm/models?provider=${provider}`,
+      );
       setCatalog((c) => ({ ...c, [provider]: res.models }));
+      if (res.configured) setConfigured(res.configured);
     } catch {
       setCatalog((c) => ({ ...c, [provider]: [] }));
     } finally {
@@ -110,6 +121,7 @@ export function ModelTab({ config, update }: TabProps) {
               update((d) => void (d.model.provider = v));
               void load(v);
             }}
+            configured={configured}
           />
 
           <div className="grid grid-cols-2 gap-4">
@@ -158,6 +170,7 @@ export function ModelTab({ config, update }: TabProps) {
               update((d) => void (d.model.classifier.provider = v));
               void load(v);
             }}
+            configured={configured}
           />
           <ModelSelect
             path="model.classifier.model"
@@ -222,6 +235,7 @@ export function ModelTab({ config, update }: TabProps) {
                     update((d) => void (d.model.fallbacks[i].provider = v));
                     void load(v);
                   }}
+                  configured={configured}
                 />
                 {/* Le catalogue du fournisseur de repli aide à ne pas recopier
                     l'identifiant du routeur chez un direct — l'erreur qui fait
@@ -293,11 +307,17 @@ function ProviderSelect({
   path,
   value,
   onChange,
+  configured,
 }: {
   path: string;
   value: ProviderId;
   onChange: (v: ProviderId) => void;
+  /** Fournisseurs dont la clé existe ; null = on ne sait pas encore. */
+  configured?: ProviderId[] | null;
 }) {
+  const t = useTranslations("assistants");
+  const missing = (p: ProviderId) => configured !== null && configured !== undefined && !configured.includes(p);
+
   return (
     <div className="space-y-1.5">
       <FieldLabel path={path} />
@@ -312,11 +332,23 @@ function ProviderSelect({
         <SelectContent>
           {PROVIDER_IDS.map((p) => (
             <SelectItem key={p} value={p}>
-              {p}
+              <span className="flex w-full items-center justify-between gap-2">
+                <span>{p}</span>
+                {/* Le libellé DOUBLE l'information : une couleur seule ne dirait
+                    pas qu'il manque une clé. */}
+                {missing(p) ? (
+                  <Badge variant="outline" className="shrink-0 text-[10px]">
+                    {t("editor.model.noKey")}
+                  </Badge>
+                ) : null}
+              </span>
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
+      {missing(value) ? (
+        <p className="text-xs text-muted-foreground">{t("editor.model.noKeyHint", { provider: value })}</p>
+      ) : null}
     </div>
   );
 }

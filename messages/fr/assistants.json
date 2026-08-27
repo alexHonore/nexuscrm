@@ -349,7 +349,9 @@
       "noFallback": "Aucun repli : si le modèle principal ne répond pas, le message n'est pas envoyé.",
       "addFallback": "Ajouter un repli",
       "removeFallback": "Retirer",
-      "fallbackAt": "Repli {n}"
+      "fallbackAt": "Repli {n}",
+      "noKey": "Clé absente",
+      "noKeyHint": "Aucune clé n'est configurée pour {provider} : ce cran sera sauté à l'exécution."
     },
     "prompt": {
       "modeComposed": "Composé depuis les onglets",

@@ -349,7 +349,9 @@
       "noFallback": "No fallback: if the main model does not answer, the message is not sent.",
       "addFallback": "Add a fallback",
       "removeFallback": "Remove",
-      "fallbackAt": "Fallback {n}"
+      "fallbackAt": "Fallback {n}",
+      "noKey": "No key",
+      "noKeyHint": "No key is configured for {provider}: this rung will be skipped at run time."
     },
     "prompt": {
       "modeComposed": "Composed from the tabs",
