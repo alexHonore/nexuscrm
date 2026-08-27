@@ -61,7 +61,7 @@ import { analyzeSms } from "@/lib/sms/segments";
 import { cn } from "@/lib/utils";
 import { api } from "../api";
 import { TRIGGER_LOOK, TriggerIcon } from "../trigger-look";
-import type { CampaignTabProps } from "./types";
+import type { CampaignTabProps, EnrollmentRow } from "./types";
 
 const NONE = "__none__";
 
@@ -987,11 +987,28 @@ export function EnrollmentsTab({
   dirty: boolean;
 }) {
   const t = useTranslations("campaigns");
-  // Sélection pour les actions en lot — uniquement des inscriptions EN VOL
-  // (les inscriptions closes ne s'actionnent pas).
+  // Sélection pour les actions en lot. Est cochable TOUT ce qui s'actionne :
+  // les inscriptions en vol (pause / reprise / retrait) ET les terminées que
+  // l'échelle dépasse (relance). Ne rendre la case que pour les premières
+  // laissait une campagne entièrement TERMINÉE sans rien à cocher — ni ligne
+  // par ligne, ni « tout cocher », qui restait désactivé. C'est exactement la
+  // campagne sur laquelle on veut agir en lot.
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const ladderLength = data.config.ladder.length;
+  const isReopenable = (row: EnrollmentRow) => enrollmentReopenable(row, { ladderLength }).allowed;
+
   const inFlightIds = data.enrollments.filter((e) => enrollmentInFlight(e.status)).map((e) => e.id);
-  const allSelected = inFlightIds.length > 0 && inFlightIds.every((id) => selected.has(id));
+  const reopenableIds = data.enrollments.filter(isReopenable).map((e) => e.id);
+  const selectableIds = [...inFlightIds, ...reopenableIds];
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+
+  // Une sélection peut mélanger les deux familles : chaque action ne porte que
+  // sur les lignes qu'elle sait traiter, et les boutons n'apparaissent que
+  // s'il y en a. Envoyer tout à tout le monde ferait compter en « échecs » des
+  // lignes sur lesquelles l'action n'avait simplement aucun sens.
+  const selectedInFlight = inFlightIds.filter((id) => selected.has(id));
+  const selectedReopenable = reopenableIds.filter((id) => selected.has(id));
+
   const toggleOne = (id: string, on: boolean) =>
     setSelected((s) => {
       const next = new Set(s);
@@ -999,11 +1016,10 @@ export function EnrollmentsTab({
       else next.delete(id);
       return next;
     });
-  const toggleAll = (on: boolean) => setSelected(on ? new Set(inFlightIds) : new Set());
+  const toggleAll = (on: boolean) => setSelected(on ? new Set(selectableIds) : new Set());
   const runBulk = (action: "pause" | "resume" | "remove") => {
-    const ids = [...selected];
-    if (ids.length === 0) return;
-    onBulk(ids, action);
+    if (selectedInFlight.length === 0) return;
+    onBulk(selectedInFlight, action);
     setSelected(new Set());
   };
 
@@ -1045,34 +1061,56 @@ export function EnrollmentsTab({
             {t("editor.enrollments.selected", { count: selected.size })}
           </span>
           <div className="ml-auto flex flex-wrap gap-1.5">
-            <Button
-              variant="outline"
-              size="sm"
-              className="min-h-11 md:min-h-8"
-              disabled={bulkBusy}
-              onClick={() => runBulk("pause")}
-            >
-              {bulkBusy ? <Loader2 className="animate-spin" /> : <Pause />}
-              {t("editor.enrollments.pause")}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="min-h-11 md:min-h-8"
-              disabled={bulkBusy}
-              onClick={() => runBulk("resume")}
-            >
-              <Play /> {t("editor.enrollments.resume")}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="min-h-11 text-destructive md:min-h-8"
-              disabled={bulkBusy}
-              onClick={() => runBulk("remove")}
-            >
-              <Trash2 /> {t("editor.enrollments.remove")}
-            </Button>
+            {/* Chaque famille ne montre SES boutons que si la sélection en
+                contient : proposer « Mettre en pause » sur dix lignes closes
+                ferait dix échecs et zéro action. */}
+            {selectedInFlight.length > 0 ? (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="min-h-11 md:min-h-8"
+                  disabled={bulkBusy}
+                  onClick={() => runBulk("pause")}
+                >
+                  {bulkBusy ? <Loader2 className="animate-spin" /> : <Pause />}
+                  {t("editor.enrollments.pause")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="min-h-11 md:min-h-8"
+                  disabled={bulkBusy}
+                  onClick={() => runBulk("resume")}
+                >
+                  <Play /> {t("editor.enrollments.resume")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="min-h-11 text-destructive md:min-h-8"
+                  disabled={bulkBusy}
+                  onClick={() => runBulk("remove")}
+                >
+                  <Trash2 /> {t("editor.enrollments.remove")}
+                </Button>
+              </>
+            ) : null}
+            {selectedReopenable.length > 0 ? (
+              // Même dialogue que la relance de toute la campagne — aperçu,
+              // motifs de refus, confirmation — mais borné à la sélection.
+              <ReopenDialog
+                campaignId={data.id}
+                count={selectedReopenable.length}
+                enrollmentIds={selectedReopenable}
+                dirty={dirty}
+                size="sm"
+                onDone={() => {
+                  setSelected(new Set());
+                  onAdded();
+                }}
+              />
+            ) : null}
             <Button
               variant="ghost"
               size="sm"
@@ -1098,9 +1136,9 @@ export function EnrollmentsTab({
                 <TableHead className="w-8">
                   {/* Tout cocher — seulement les inscriptions EN VOL. */}
                   <Checkbox
-                    aria-label={t("editor.enrollments.selected", { count: inFlightIds.length })}
+                    aria-label={t("editor.enrollments.selected", { count: selectableIds.length })}
                     checked={allSelected}
-                    disabled={inFlightIds.length === 0}
+                    disabled={selectableIds.length === 0}
                     onCheckedChange={(on) => toggleAll(Boolean(on))}
                   />
                 </TableHead>
@@ -1125,17 +1163,17 @@ export function EnrollmentsTab({
                 const inFlight = enrollmentInFlight(row.status);
                 // L'échelle ENREGISTRÉE fait foi, pas le brouillon : le bouton
                 // ne doit pas promettre un barreau que le serveur ne connaît
-                // pas encore.
-                const reopenable = enrollmentReopenable(row, {
-                  ladderLength: data.config.ladder.length,
-                }).allowed;
+                // pas encore. MÊME lecture que la sélection, sinon une ligne
+                // se coche sans offrir d'action, ou l'inverse.
+                const reopenable = isReopenable(row);
                 const acting = actingId === row.id;
                 const anyActing = actingId !== null;
                 return (
                   <TableRow key={row.id}>
                     <TableCell>
-                      {/* Cochable seulement si l'inscription peut être actionnée. */}
-                      {inFlight ? (
+                      {/* Cochable dès que la ligne peut être actionnée — en vol
+                          OU terminée avec des barreaux en trop. */}
+                      {inFlight || reopenable ? (
                         <Checkbox
                           aria-label={row.clientName}
                           checked={selected.has(row.id)}

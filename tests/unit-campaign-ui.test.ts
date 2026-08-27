@@ -339,6 +339,54 @@ describe("onglets rendus isolément", () => {
     expect(html).not.toContain("Mettre en pause");
   });
 
+  it("§ Inscriptions : une campagne entièrement TERMINÉE se coche quand même", () => {
+    // Le bogue rapporté : les cases n'existaient que pour les inscriptions EN
+    // VOL, et « tout cocher » était désactivé sans elles. Sur une campagne dont
+    // toutes les inscriptions sont terminées — exactement celle qu'on veut
+    // relancer en lot — il n'y avait rien à cocher, ni ligne par ligne, ni tout.
+    const done = (id: string, clientId: string) => ({
+      id,
+      clientId,
+      clientName: "Luc Gagnon",
+      variant: "direct",
+      status: "completed",
+      step: 1,
+      nextTouchAt: null,
+      endedAt: "2026-06-18T14:00:00.000Z",
+      endReason: "ladder_exhausted",
+    });
+    const data: CampaignEditorData = {
+      ...DATA,
+      reopenableCount: 2,
+      enrollments: [
+        done("77777777-7777-4777-8777-777777777777", "88888888-8888-4888-8888-888888888888"),
+        done("99999999-9999-4999-8999-999999999999", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"),
+      ],
+    };
+    const html = wrap(
+      createElement(EnrollmentsTab, {
+        ...tabProps,
+        data,
+        onEnroll: () => {},
+        enrolling: false,
+        onAction: () => {},
+        actingId: null,
+        onBulk: () => {},
+        bulkBusy: false,
+        onAdded: () => {},
+        dirty: false,
+      }),
+    );
+    // Une case par ligne, PLUS celle d'en-tête — et aucune n'est grisée.
+    // `aria-disabled`, pas « disabled » : le mot apparaît de toute façon dans
+    // les classes Tailwind de la case (`disabled:opacity-50`).
+    const boxes = html.match(/data-slot="checkbox"/g) ?? [];
+    expect(boxes.length).toBe(3);
+    expect(html).not.toContain('aria-disabled="true"');
+    // Et le geste qui va avec est bien offert, ligne par ligne.
+    expect((html.match(/Relancer</g) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+
   it("Inscriptions : un arrêt ne propose jamais « Relancer »", () => {
     // DATA porte une inscription « arrêtée » (désabonnement) : un refus exprimé
     // ne se repêche pas, et le bouton ne doit même pas exister.

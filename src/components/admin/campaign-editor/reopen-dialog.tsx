@@ -71,6 +71,7 @@ type ReopenResponse = {
 export function ReopenDialog({
   campaignId,
   count,
+  enrollmentIds,
   dirty,
   onDone,
   size = "default",
@@ -78,6 +79,12 @@ export function ReopenDialog({
   campaignId: string;
   /** Candidats connus au chargement — sert à libeller le bouton. */
   count: number;
+  /**
+   * Restreint le geste à ces inscriptions — la sélection cochée dans le
+   * tableau. Absent = toutes les inscriptions terminées de la campagne, y
+   * compris celles que l'écran n'affiche pas.
+   */
+  enrollmentIds?: string[];
   /** L'échelle a des modifications non enregistrées. */
   dirty: boolean;
   onDone: () => void;
@@ -100,7 +107,7 @@ export function ReopenDialog({
   const call = async (dryRun: boolean) =>
     api<ReopenResponse>(`/api/campaigns/${campaignId}/reopen`, {
       method: "POST",
-      body: JSON.stringify({ dryRun }),
+      body: JSON.stringify(enrollmentIds ? { dryRun, enrollmentIds } : { dryRun }),
     });
 
   const openDialog = async () => {
@@ -159,7 +166,9 @@ export function ReopenDialog({
         onClick={() => void openDialog()}
       >
         <RotateCcw />
-        {t("editor.enrollments.reopenAll", { count })}
+        {enrollmentIds
+          ? t("editor.enrollments.reopen")
+          : t("editor.enrollments.reopenAll", { count })}
       </Button>
 
       <AlertDialog open={open} onOpenChange={(next) => !next && !busy && setOpen(false)}>
