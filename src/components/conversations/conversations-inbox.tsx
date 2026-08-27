@@ -119,6 +119,14 @@ export type EngineHealth = {
  */
 type Tab = "attention" | "waiting" | "queue" | "refused" | "all";
 const TABS: Tab[] = ["attention", "waiting", "queue", "refused", "all"];
+/**
+ * Ce qu'un téléphoniste voit. La file d'envoi et la bande d'état disent la
+ * santé du MOTEUR — ce qui attend, ce qui a échoué, combien de numéros se sont
+ * désabonnés : la conduite de l'entreprise, pas son travail. Le serveur ne les
+ * lui envoie déjà pas (voir la page) ; cette liste évite en plus un onglet qui
+ * s'ouvrirait sur le vide.
+ */
+const CALLER_TABS: Tab[] = ["attention", "waiting", "refused", "all"];
 
 /** Quels états chaque vue montre. `all` les montre tous, en sections ; `queue` a sa propre matière. */
 const TAB_STATES: Record<Exclude<Tab, "all" | "queue">, ConversationState[]> = {
@@ -169,7 +177,8 @@ export function ConversationsInbox({
   /** La file d'envoi — les textos à venir (voir `QueueItem`). */
   queue?: QueueItem[];
   currentUserId: string;
-  health: EngineHealth;
+  /** `null` pour un téléphoniste : la donnée ne lui est pas envoyée. */
+  health: EngineHealth | null;
   /** Le rejeu après panne est un geste d'administrateur (l'API le refuse aux autres). */
   isAdmin?: boolean;
   initialTab?: Tab;
@@ -377,11 +386,11 @@ export function ConversationsInbox({
 
   return (
     <div className="space-y-4">
-      <HealthStrip health={health} />
+      {health ? <HealthStrip health={health} /> : null}
 
       <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
         <div className="flex w-max items-center gap-2">
-          {TABS.map((key) => (
+          {(isAdmin ? TABS : CALLER_TABS).map((key) => (
             <Button
               key={key}
               variant={tab === key ? "default" : "outline"}

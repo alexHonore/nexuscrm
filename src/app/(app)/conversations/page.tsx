@@ -134,7 +134,14 @@ export default async function ConversationsPage() {
   // train de composer, et les barreaux de campagne planifiés — parfois à des
   // jours d'ici (campaign_enrollments.next_touch_at, la vraie source des
   // relances futures : le job n'existe qu'au moment dû).
-  const [sendJobs, turnJobs, upcomingTouches] = await Promise.all([
+  // Réservé à l'ADMIN, et pas seulement à l'écran : la file d'envoi et la
+  // bande d'état exposent la santé du moteur — ce qui attend, ce qui a échoué,
+  // combien de numéros se sont désabonnés. C'est la conduite de l'entreprise,
+  // pas le travail d'un téléphoniste. On ne les CALCULE donc pas pour lui : une
+  // donnée qu'on n'envoie pas ne peut pas fuir par le HTML.
+  const isAdmin = user.role === "admin";
+  const [sendJobs, turnJobs, upcomingTouches] = isAdmin
+    ? await Promise.all([
     db
       .select({ id: scheduledJobs.id, runAt: scheduledJobs.runAt, payload: scheduledJobs.payload })
       .from(scheduledJobs)
@@ -167,7 +174,8 @@ export default async function ConversationsPage() {
       )
       .orderBy(asc(campaignEnrollments.nextTouchAt))
       .limit(100),
-  ]);
+      ])
+    : [[], [], []];
 
   // Les jobs ne portent qu'un conversationId : résoudre le client une fois.
   const jobConversationIds = [
@@ -242,7 +250,8 @@ export default async function ConversationsPage() {
   ].sort((a, b) => Date.parse(a.when) - Date.parse(b.when));
 
   // ── Bande d'état ─────────────────────────────────────────────────────────
-  const [sendingAllowed, queueCounts, suppressedCount] = await Promise.all([
+  const [sendingAllowed, queueCounts, suppressedCount] = isAdmin
+    ? await Promise.all([
     // On réutilise la PORTE d'envoi plutôt que de relire la rangée ici : elle
     // échoue fermé sur un réglage illisible, et réécrire cette règle à côté la
     // condamnerait à diverger — l'écran dirait « actif » pendant que le moteur
@@ -255,7 +264,8 @@ export default async function ConversationsPage() {
       })
       .from(scheduledJobs),
     db.select({ n: sql<number>`count(*)::int` }).from(suppressions),
-  ]);
+      ])
+    : [false, [], []];
 
   const items: InboxRow[] = rows.map((r) => ({
     id: r.id,
@@ -286,15 +296,19 @@ export default async function ConversationsPage() {
         rows={items}
         queue={queue}
         currentUserId={user.id}
-        isAdmin={user.role === "admin"}
-        health={{
-          killSwitch: !sendingAllowed,
-          mode: resolveSmsMode(process.env),
-          sendWindowOpen: isWithinSendWindow(new Date(), DEFAULT_QUIET_HOURS),
-          queued: queueCounts[0]?.pending ?? 0,
-          failed: queueCounts[0]?.failed ?? 0,
-          suppressed: suppressedCount[0]?.n ?? 0,
-        }}
+        isAdmin={isAdmin}
+        health={
+          isAdmin
+            ? {
+                killSwitch: !sendingAllowed,
+                mode: resolveSmsMode(process.env),
+                sendWindowOpen: isWithinSendWindow(new Date(), DEFAULT_QUIET_HOURS),
+                queued: queueCounts[0]?.pending ?? 0,
+                failed: queueCounts[0]?.failed ?? 0,
+                suppressed: suppressedCount[0]?.n ?? 0,
+              }
+            : null
+        }
       />
     </div>
   );

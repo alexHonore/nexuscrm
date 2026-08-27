@@ -360,6 +360,43 @@ describe("boîte de réception", () => {
     expect(html).toContain("IA en pause");
   });
 
+  it("§ un téléphoniste ne voit ni la santé du moteur ni la file d'envoi", () => {
+    // La bande d'état et la file disent ce qui attend, ce qui a échoué et
+    // combien de numéros se sont désabonnés : la conduite de l'entreprise, pas
+    // le travail d'un téléphoniste. Le serveur ne les lui envoie pas
+    // (`health: null`) — l'écran ne doit pas non plus lui offrir l'onglet.
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: ROWS,
+        currentUserId: "me",
+        health: null,
+        isAdmin: false,
+        queue: [],
+      }),
+    );
+    expect(html).not.toContain("File d'envoi".replace(/'/g, "&#x27;"));
+    expect(html).not.toContain("désabonnés");
+    expect(html).not.toContain("en file");
+    expect(html).not.toContain("en échec");
+    // Son travail à lui, en revanche, est intact.
+    expect(html).toContain("Marie Tremblay");
+    expect(html).toContain("À traiter");
+  });
+
+  it("l'administrateur, lui, garde la bande d'état et la file", () => {
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        rows: ROWS,
+        currentUserId: "me",
+        health: HEALTH,
+        isAdmin: true,
+        queue: [],
+      }),
+    );
+    expect(html).toContain("File d'envoi".replace(/'/g, "&#x27;"));
+    expect(html).toContain("désabonnés");
+  });
+
   it("l'interrupteur coupé est une ALERTE, pas une pastille", () => {
     const html = wrap(
       createElement(ConversationsInbox, {
