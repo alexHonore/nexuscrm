@@ -15,6 +15,10 @@ import { apiPerm } from "@/lib/permissions/server";
  * choisir les liaisons ; `commit` écrit. Sans ce détour, un fichier venu d'une
  * autre base rattacherait des rendez-vous à des identifiants qui, ici,
  * désignent quelqu'un d'autre.
+ *
+ * Un seul garde pour les deux modes, celui d'ÉCRITURE : la prévisualisation
+ * n'est pas une lecture du CRM, c'est le premier temps d'un import. Qui ne peut
+ * pas valider n'a aucune raison d'en préparer les liaisons.
  */
 
 /**
@@ -52,7 +56,7 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const actor = await apiPerm("admin.assistants");
+  const actor = await apiPerm("admin.assistantsEdit");
   if (actor instanceof NextResponse) return actor;
 
   let raw: unknown;

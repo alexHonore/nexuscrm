@@ -211,6 +211,7 @@ export function repairConfig(input: z.infer<typeof rawSchema>): PermissionsConfi
   //    jamais lues (`grantsFor` lui rend tout), les matérialiser n'écrirait que
   //    du bruit à tenir d'accord avec le reste.
   const seedBucket = roleBucket(defaultRoleId);
+  const builtinById = new Map(builtins.map((r) => [r.id, r]));
   const materialised = roles.map((role) => {
     if (role.superAdmin) return role;
     const seed = role.relations[seedBucket];
@@ -222,6 +223,31 @@ export function repairConfig(input: z.infer<typeof rawSchema>): PermissionsConfi
       const bucket = roleBucket(other.id);
       if (bucket in relations) continue;
       relations[bucket] = seed ? { ...seed } : noGrants();
+    }
+
+    /**
+     * Une case AJOUTÉE au catalogue après coup.
+     *
+     * Une configuration enregistrée hier ne connaît pas la case d'aujourd'hui.
+     * La lire comme fermée serait techniquement prudent et pratiquement faux :
+     * l'exploitant n'a rien fermé, et il verrait disparaître un bouton sans
+     * avoir touché à rien — le genre de panne qu'on cherche pendant une heure.
+     *
+     * Pour les rôles LIVRÉS, une case inconnue reprend donc ce que le rôle
+     * livré en dit : la nouveauté arrive réglée comme si elle avait toujours
+     * été là. Pour un rôle sur mesure, personne ne peut deviner l'intention —
+     * elle reste fermée, et l'écran la montre fermée.
+     */
+    const shipped = builtinById.get(role.id);
+    if (shipped) {
+      for (const [bucket, cases] of Object.entries(relations)) {
+        const reference = shipped.relations[bucket];
+        if (!reference) continue;
+        for (const key of GRANT_KEYS) {
+          if (key in cases) continue;
+          if (reference[key] === true) relations[bucket] = { ...relations[bucket], [key]: true };
+        }
+      }
     }
     return { ...role, relations };
   });

@@ -1095,5 +1095,10 @@
   "language": {
     "fr-CA": "Français québécois",
     "en-CA": "Anglais canadien"
+  },
+  "readOnly": {
+    "title": "Lecture seule",
+    "hint": "Vous pouvez lire cet assistant — sa configuration, son prompt et ses essais — mais pas le modifier. Le droit « Modifier les assistants » se donne dans Rôles et droits.",
+    "badge": "Lecture"
   }
 }

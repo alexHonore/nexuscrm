@@ -42,6 +42,7 @@ import { cn } from "@/lib/utils";
 import { copyToClipboard } from "../api";
 import { EmptyRow, Panel, TabHead, ToggleRow, useTabHead } from "./layout";
 import { FieldLabel } from "./param-help";
+import { useCanEdit } from "./read-only";
 import type { TabProps } from "./types";
 
 /**
@@ -86,6 +87,9 @@ export function GuardrailsTab({ config, update, data }: TabProps) {
   const t = useTranslations("assistants");
   const head = useTabHead("guardrails");
   const look = EDITOR_TAB_LOOK.guardrails;
+  // Les règles listées plus bas ne s'éditent PAS ici de toute façon : seul
+  // l'interrupteur « exiger une suite verte » appartient à cet assistant.
+  const canEdit = useCanEdit();
 
   return (
     <div className="space-y-4">
@@ -98,6 +102,7 @@ export function GuardrailsTab({ config, update, data }: TabProps) {
           <Switch
             checked={config.requireSuitePass}
             aria-label={t("editor.tabs.guardrails")}
+            disabled={!canEdit}
             onCheckedChange={(next) => update((d) => void (d.requireSuitePass = next))}
           />
         }
@@ -165,6 +170,7 @@ export function PromptTab({ config, update, data }: TabProps) {
   const t = useTranslations("assistants");
   const head = useTabHead("prompt");
   const look = EDITOR_TAB_LOOK.prompt;
+  const canEdit = useCanEdit();
   const raw = config.promptMode === "raw";
 
   return (
@@ -183,6 +189,7 @@ export function PromptTab({ config, update, data }: TabProps) {
             onValueChange={(v) =>
               update((d) => void (d.promptMode = String(v) as "composed" | "raw"))
             }
+            disabled={!canEdit}
           >
             {/* Les deux modes décident QUI écrit le prompt — l'app ou la main. */}
             <SelectTrigger className="min-h-11 w-full md:min-h-9 md:w-72">
@@ -215,6 +222,7 @@ export function PromptTab({ config, update, data }: TabProps) {
                 rows={16}
                 className="font-mono text-xs"
                 value={config.systemPromptOverride ?? ""}
+                disabled={!canEdit}
                 onChange={(e) =>
                   update((d) => void (d.systemPromptOverride = e.target.value || null))
                 }
@@ -237,6 +245,7 @@ export function PromptTab({ config, update, data }: TabProps) {
             <Switch
               checked={config.includeRuntimeLayer}
               aria-label={t("editor.prompt.runtimeLayer")}
+              disabled={!canEdit}
               onCheckedChange={(next) => update((d) => void (d.includeRuntimeLayer = next))}
             />
           }
@@ -250,6 +259,7 @@ export function PromptTab({ config, update, data }: TabProps) {
             rows={6}
             className="font-mono text-xs"
             value={config.turnInstructions ?? ""}
+            disabled={!canEdit}
             onChange={(e) => update((d) => void (d.turnInstructions = e.target.value || null))}
           />
         </div>
@@ -278,6 +288,7 @@ function LayerRow({
   update: TabProps["update"];
 }) {
   const t = useTranslations("assistants");
+  const canEdit = useCanEdit();
   const override = config.layerOverrides[layer];
 
   return (
@@ -303,6 +314,7 @@ function LayerRow({
             variant="ghost"
             size="sm"
             className="min-h-11 md:min-h-9"
+            disabled={!canEdit}
             onClick={() =>
               update((d) => {
                 delete d.layerOverrides[layer];
@@ -316,6 +328,7 @@ function LayerRow({
             variant="ghost"
             size="sm"
             className="min-h-11 md:min-h-9"
+            disabled={!canEdit}
             onClick={() =>
               update((d) => void (d.layerOverrides[layer] = { mode: "append", text: "" }))
             }
@@ -343,6 +356,7 @@ function LayerRow({
                   }),
               )
             }
+            disabled={!canEdit}
           >
             <SelectTrigger className="min-h-11 w-full md:min-h-9 md:w-56">
               <SelectValue />
@@ -356,6 +370,7 @@ function LayerRow({
             rows={4}
             className="font-mono text-xs"
             value={override.text}
+            disabled={!canEdit}
             onChange={(e) =>
               update(
                 (d) => void (d.layerOverrides[layer] = { ...override, text: e.target.value }),
@@ -378,6 +393,10 @@ export function TestTab({
   const t = useTranslations("assistants");
   const head = useTabHead("test");
   const look = EDITOR_TAB_LOOK.test;
+  // Le verdict de la dernière suite se LIT sans le droit d'écrire — c'est même
+  // ce qu'un superviseur vient voir. La relancer, en revanche, appelle le
+  // modèle et réécrit le drapeau de la fiche : le bouton disparaît.
+  const canEdit = useCanEdit();
   const run = data.lastRun;
   // Un vert affiché n'en est un que si le drapeau de la fiche le confirme :
   // une sauvegarde ou une recompilation l'efface sans toucher à l'exécution
@@ -391,10 +410,12 @@ export function TestTab({
         title={head.title}
         hint={head.hint}
         actions={
-          <Button onClick={onRunSuite} disabled={running} className="min-h-11 md:min-h-9">
-            {running ? <Loader2 className="animate-spin" /> : <PlayIcon />}
-            {running ? t("editor.runningSuite") : t("editor.test.run")}
-          </Button>
+          canEdit ? (
+            <Button onClick={onRunSuite} disabled={running} className="min-h-11 md:min-h-9">
+              {running ? <Loader2 className="animate-spin" /> : <PlayIcon />}
+              {running ? t("editor.runningSuite") : t("editor.test.run")}
+            </Button>
+          ) : null
         }
       />
 
@@ -476,6 +497,10 @@ export function JsonTab({ config, update, data }: TabProps) {
   const t = useTranslations("assistants");
   const head = useTabHead("json");
   const look = EDITOR_TAB_LOOK.json;
+  // Copier et télécharger restent ouverts : ce sont deux façons de LIRE la
+  // même configuration. Seul « Appliquer » écrit — et le brouillon se fige
+  // avec lui, sinon on taperait dans une zone dont rien ne ressort.
+  const canEdit = useCanEdit();
   const [draft, setDraft] = useState(() => JSON.stringify(config, null, 2));
   const [error, setError] = useState<string | null>(null);
 
@@ -519,20 +544,28 @@ export function JsonTab({ config, update, data }: TabProps) {
             >
               <DownloadIcon /> {t("editor.json.download")}
             </Button>
-            <Button size="sm" className="min-h-11 md:min-h-9" onClick={apply}>
-              {t("editor.json.apply")}
-            </Button>
+            {canEdit ? (
+              <Button size="sm" className="min-h-11 md:min-h-9" onClick={apply}>
+                {t("editor.json.apply")}
+              </Button>
+            ) : null}
           </>
         }
       />
 
       <Panel look={look} contentClassName="space-y-3">
         <Label htmlFor="f-json">{t("editor.json.title")}</Label>
+        {/* `readOnly` et non `disabled` : c'est le seul endroit où la
+            configuration ENTIÈRE se lit d'un bloc, et un contrôle désactivé
+            passe à demi-opacité sans même laisser sélectionner son texte. Ici
+            le champ n'est pas un réglage à protéger, c'est un vidage à lire —
+            il reste net, sélectionnable, et « Appliquer » a disparu. */}
         <Textarea
           id="f-json"
           rows={22}
           className="font-mono text-xs"
           value={draft}
+          readOnly={!canEdit}
           onChange={(e) => setDraft(e.target.value)}
           aria-invalid={error !== null || undefined}
         />

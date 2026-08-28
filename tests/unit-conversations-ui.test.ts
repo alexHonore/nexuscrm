@@ -126,6 +126,7 @@ const THREAD: SmsThreadData = {
 const WORKER: InboxAbilities = {
   engine: false,
   control: true,
+  assistant: true,
   reply: true,
   classify: true,
   replay: false,
@@ -134,6 +135,7 @@ const WORKER: InboxAbilities = {
 const ALL: InboxAbilities = {
   engine: true,
   control: true,
+  assistant: true,
   reply: true,
   classify: true,
   replay: true,
@@ -939,8 +941,30 @@ describe("envois en file, envois non partis, assistant du fil", () => {
   });
 
   it("le fil montre à quel assistant il est confié, et propose de changer", () => {
-    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD, canReply: true, canControl: true }));
+    const html = wrap(
+      createElement(SmsThreadCard, {
+        clientId: "x",
+        thread: THREAD,
+        canReply: true,
+        canControl: true,
+        canAssignAssistant: true,
+      }),
+    );
     expect(html).toContain("Assistant");
     expect(html).toContain("Aucun (un humain répond)");
+  });
+
+  it("sans le droit de brancher un assistant, le sélecteur n'est pas offert", () => {
+    // Choisir QUI parle au nom de l'entreprise est un droit à part
+    // (`conversations.assistant`) : reprendre le fil ne l'emporte pas avec lui.
+    const html = wrap(
+      createElement(SmsThreadCard, {
+        clientId: "x",
+        thread: THREAD,
+        canReply: true,
+        canControl: true,
+      }),
+    );
+    expect(html).not.toContain("Aucun (un humain répond)");
   });
 });

@@ -13,6 +13,10 @@ import { apiPerm } from "@/lib/permissions/server";
  * L'identifiant ne se change PAS : c'est lui que `assistants.objection_packs`
  * référence. Le renommer romprait chaque assistant qui l'utilise, en silence —
  * le paquet disparaîtrait simplement de leur prompt au prochain compilage.
+ *
+ * Les deux gestes exigent `admin.assistantsEdit` et non le droit de lire : un
+ * paquet est PARTAGÉ, une phrase corrigée ici change ce que disent tous les
+ * assistants qui s'en servent, et la modification les marque à recompiler.
  */
 const patchSchema = z.object({
   label: z.string().trim().min(1).max(120).optional(),
@@ -29,7 +33,7 @@ async function assistantsUsing(packId: string) {
 }
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const actor = await apiPerm("admin.assistants");
+  const actor = await apiPerm("admin.assistantsEdit");
   if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
@@ -82,7 +86,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 }
 
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const actor = await apiPerm("admin.assistants");
+  const actor = await apiPerm("admin.assistantsEdit");
   if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;

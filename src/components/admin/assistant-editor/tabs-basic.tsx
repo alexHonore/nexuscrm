@@ -56,6 +56,7 @@ import {
   useTabHead,
 } from "./layout";
 import { FieldLabel, useParamDoc } from "./param-help";
+import { useCanEdit } from "./read-only";
 import { ObjectionPacksEditor } from "./objection-packs";
 import type { TabProps } from "./types";
 
@@ -79,6 +80,7 @@ function ScaleField({
   labels?: Record<number, string>;
 }) {
   const doc = useParamDoc(path);
+  const canEdit = useCanEdit();
   const options = doc?.allowed?.length
     ? doc.allowed.map((a) => ({ value: Number(a.value), label: a.label }))
     : [1, 2, 3, 4, 5].map((n) => ({ value: n, label: labels?.[n] ?? String(n) }));
@@ -98,6 +100,7 @@ function ScaleField({
         items={options.map((o) => ({ value: String(o.value), label: o.label }))}
         value={String(value)}
         onValueChange={(v) => onChange(Number(v))}
+        disabled={!canEdit}
       >
         <SelectTrigger className="min-h-11 w-full md:min-h-9">
           <SelectValue />
@@ -140,6 +143,7 @@ function EnumField({
   onChange: (v: string) => void;
 }) {
   const doc = useParamDoc(path);
+  const canEdit = useCanEdit();
   const options = (doc?.allowed ?? []).filter((a) => a.value !== null);
   return (
     <div className="space-y-1.5">
@@ -148,6 +152,7 @@ function EnumField({
         items={options.map((o) => ({ value: String(o.value), label: o.label }))}
         value={value}
         onValueChange={(v) => onChange(String(v))}
+        disabled={!canEdit}
       >
         <SelectTrigger className="min-h-11 w-full md:min-h-9">
           <SelectValue />
@@ -184,6 +189,7 @@ function NullableNumberField({
   onChange: (v: number | null) => void;
 }) {
   const doc = useParamDoc(path);
+  const canEdit = useCanEdit();
   const options = doc?.allowed ?? [];
   return (
     <div className="space-y-1.5">
@@ -192,6 +198,7 @@ function NullableNumberField({
         items={options.map((o) => ({ value: String(o.value), label: o.label }))}
         value={String(value)}
         onValueChange={(v) => onChange(String(v) === "null" ? null : Number(v))}
+        disabled={!canEdit}
       >
         <SelectTrigger className="min-h-11 w-full md:min-h-9">
           <SelectValue />
@@ -222,6 +229,7 @@ function NumberField({
   max?: number;
 }) {
   const id = `f-${path}`;
+  const canEdit = useCanEdit();
   return (
     <div className="space-y-1.5">
       <FieldLabel path={path} htmlFor={id} />
@@ -234,6 +242,7 @@ function NumberField({
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         className="min-h-11 md:min-h-9"
+        disabled={!canEdit}
       />
     </div>
   );
@@ -297,6 +306,9 @@ export function IdentityTab({ config, update, data }: TabProps) {
   const t = useTranslations("assistants");
   const head = useTabHead("identity");
   const look = EDITOR_TAB_LOOK.identity;
+  // Sans le droit d'écrire, tout se lit et rien ne se change : la prop
+  // `disabled` du contrôle, la même que pour l'état occupé de l'en-tête.
+  const canEdit = useCanEdit();
 
   return (
     <div className="space-y-4">
@@ -315,6 +327,7 @@ export function IdentityTab({ config, update, data }: TabProps) {
               value={config.name}
               onChange={(e) => update((d) => void (d.name = e.target.value))}
               className="min-h-11 md:min-h-9"
+              disabled={!canEdit}
             />
           </WideField>
           <WideField>
@@ -324,6 +337,7 @@ export function IdentityTab({ config, update, data }: TabProps) {
               rows={2}
               value={config.description ?? ""}
               onChange={(e) => update((d) => void (d.description = e.target.value || null))}
+              disabled={!canEdit}
             />
           </WideField>
         </Fields>
@@ -359,6 +373,7 @@ export function IdentityTab({ config, update, data }: TabProps) {
                   d.secondaryLanguage = v === NONE ? null : (String(v) as AssistantLanguage);
                 })
               }
+              disabled={!canEdit}
             >
               <SelectTrigger className="min-h-11 w-full md:min-h-9">
                 <SelectValue />
@@ -396,6 +411,7 @@ export function IdentityTab({ config, update, data }: TabProps) {
               value={config.identity.orgName}
               onChange={(e) => update((d) => void (d.identity.orgName = e.target.value))}
               className="min-h-11 md:min-h-9"
+              disabled={!canEdit}
             />
           </div>
 
@@ -423,6 +439,7 @@ export function IdentityTab({ config, update, data }: TabProps) {
                     if (picked) d.identity.brokerName = picked.name;
                   })
                 }
+                disabled={!canEdit}
               >
                 <SelectTrigger className="min-h-11 w-full md:min-h-9">
                   <SelectValue />
@@ -439,7 +456,7 @@ export function IdentityTab({ config, update, data }: TabProps) {
               <Input
                 id="f-broker"
                 value={config.identity.brokerName}
-                disabled={config.identity.brokerUserId !== null}
+                disabled={!canEdit || config.identity.brokerUserId !== null}
                 onChange={(e) => update((d) => void (d.identity.brokerName = e.target.value))}
                 className="min-h-11 md:min-h-9"
               />
@@ -482,6 +499,7 @@ export function IdentityTab({ config, update, data }: TabProps) {
                   update((d) => void (d.identity.signatureText = e.target.value || null))
                 }
                 className="min-h-11 md:min-h-9"
+                disabled={!canEdit}
               />
             </div>
           ) : (
@@ -527,6 +545,7 @@ function CustomRequirements({
   onChange: (next: string[]) => void;
 }) {
   const t = useTranslations("assistants");
+  const canEdit = useCanEdit();
   const [draft, setDraft] = useState("");
 
   const add = () => {
@@ -553,6 +572,7 @@ function CustomRequirements({
                 size="icon"
                 className="size-7 shrink-0 text-destructive"
                 aria-label={t("editor.goal.removeRequirement", { name: value })}
+                disabled={!canEdit}
                 onClick={() => onChange(values.filter((v) => v !== value))}
               >
                 <Trash2 />
@@ -567,6 +587,7 @@ function CustomRequirements({
           maxLength={80}
           placeholder={t("editor.goal.customRequirementPlaceholder")}
           value={draft}
+          disabled={!canEdit}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -578,7 +599,7 @@ function CustomRequirements({
         <Button
           variant="outline"
           className="min-h-11 shrink-0 md:min-h-9"
-          disabled={draft.trim() === ""}
+          disabled={!canEdit || draft.trim() === ""}
           onClick={add}
         >
           <Plus /> {t("editor.goal.addRequirement")}
@@ -600,6 +621,7 @@ function GoalStepFields({
   data: TabProps["data"];
 }) {
   const t = useTranslations("assistants");
+  const canEdit = useCanEdit();
   // Un objectif qui ne réserve rien n'a pas de rendez-vous à typer : afficher
   // « type » ET « type de rendez-vous » côte à côte sur « Obtenir le courriel »
   // était la source de confusion — deux champs presque homonymes dont l'un ne
@@ -638,6 +660,7 @@ function GoalStepFields({
               s.requiredFields = withMandatedFields(next, s.requiredFields);
             })
           }
+          disabled={!canEdit}
         >
           <SelectTrigger className="min-h-11 w-full md:min-h-9">
             <SelectValue>
@@ -710,6 +733,7 @@ function GoalStepFields({
                 )
               }
               className="min-h-11 bg-background md:min-h-9"
+              disabled={!canEdit}
             />
           </div>
 
@@ -724,6 +748,7 @@ function GoalStepFields({
               value={step.slotOfferCount}
               onChange={(e) => onChange((s) => void (s.slotOfferCount = Number(e.target.value)))}
               className="min-h-11 bg-background md:min-h-9"
+              disabled={!canEdit}
             />
           </div>
 
@@ -738,6 +763,7 @@ function GoalStepFields({
               onValueChange={(v) =>
                 onChange((s) => void (s.withUserId = v === NONE ? null : String(v)))
               }
+              disabled={!canEdit}
             >
               <SelectTrigger className="min-h-11 w-full bg-background md:min-h-9">
                 <SelectValue />
@@ -765,6 +791,7 @@ function GoalStepFields({
             onValueChange={(v) =>
               onChange((s) => void (s.withUserId = v === NONE ? null : String(v)))
             }
+            disabled={!canEdit}
           >
             <SelectTrigger className="min-h-11 w-full md:min-h-9">
               <SelectValue />
@@ -806,7 +833,7 @@ function GoalStepFields({
               >
                 <Checkbox
                   checked={checked}
-                  disabled={mandated}
+                  disabled={mandated || !canEdit}
                   onCheckedChange={(next) =>
                     onChange((s) => {
                       s.requiredFields = next
@@ -853,6 +880,7 @@ function GoalStepFields({
           placeholder={t("editor.goal.instructionPlaceholder")}
           value={step.instruction ?? ""}
           onChange={(e) => onChange((s) => void (s.instruction = e.target.value || null))}
+          disabled={!canEdit}
         />
       </div>
 
@@ -863,6 +891,7 @@ function GoalStepFields({
           rows={2}
           value={step.confirmationTemplate ?? ""}
           onChange={(e) => onChange((s) => void (s.confirmationTemplate = e.target.value || null))}
+          disabled={!canEdit}
         />
       </div>
     </Fields>
@@ -903,6 +932,7 @@ export function GoalTab({ config, update, data }: TabProps) {
   const t = useTranslations("assistants");
   const head = useTabHead("goal");
   const look = EDITOR_TAB_LOOK.goal;
+  const canEdit = useCanEdit();
 
   const addFallback = () =>
     update((d) => {
@@ -951,7 +981,7 @@ export function GoalTab({ config, update, data }: TabProps) {
             size="sm"
             className="min-h-11 md:min-h-9"
             onClick={addFallback}
-            disabled={config.goal.fallbacks.length >= 3}
+            disabled={!canEdit || config.goal.fallbacks.length >= 3}
           >
             <Plus /> {t("editor.goal.addFallback")}
           </Button>
@@ -973,6 +1003,7 @@ export function GoalTab({ config, update, data }: TabProps) {
                   variant="ghost"
                   size="sm"
                   className="ml-auto min-h-11 shrink-0 text-destructive md:min-h-9"
+                  disabled={!canEdit}
                   onClick={() => update((d) => void d.goal.fallbacks.splice(i, 1))}
                 >
                   <Trash2 /> {t("editor.goal.removeFallback")}
@@ -1217,6 +1248,7 @@ function HoursRow({
   toLabel: string;
 }) {
   const invalid = value[0] >= value[1];
+  const canEdit = useCanEdit();
   const setHour = (idx: 0 | 1, raw: string) => {
     const n = Number.parseInt(raw, 10);
     if (Number.isNaN(n)) return;
@@ -1235,6 +1267,7 @@ function HoursRow({
           className="h-9 w-20"
           value={value[0]}
           aria-invalid={invalid || undefined}
+          disabled={!canEdit}
           onChange={(e) => setHour(0, e.target.value)}
         />
       </div>
@@ -1247,6 +1280,7 @@ function HoursRow({
           className="h-9 w-20"
           value={value[1]}
           aria-invalid={invalid || undefined}
+          disabled={!canEdit}
           onChange={(e) => setHour(1, e.target.value)}
         />
       </div>
@@ -1269,6 +1303,7 @@ export function KnowledgeTab({ config, update }: TabProps) {
   const t = useTranslations("assistants");
   const head = useTabHead("knowledge");
   const look = EDITOR_TAB_LOOK.knowledge;
+  const canEdit = useCanEdit();
   const claims = config.knowledge.claims;
 
   /** Déplace une entrée d'un cran — l'ordre est une donnée, pas une présentation. */
@@ -1328,6 +1363,7 @@ export function KnowledgeTab({ config, update }: TabProps) {
                 maxLength={600}
                 aria-label={t("editor.knowledge.entry", { index: i + 1 })}
                 placeholder={t("editor.knowledge.placeholder")}
+                disabled={!canEdit}
                 onChange={(e) => update((d) => void (d.knowledge.claims[i] = e.target.value))}
               />
               <div className="flex shrink-0 flex-col">
@@ -1335,7 +1371,7 @@ export function KnowledgeTab({ config, update }: TabProps) {
                   variant="ghost"
                   size="icon"
                   className="size-11 md:size-8"
-                  disabled={i === 0}
+                  disabled={!canEdit || i === 0}
                   aria-label={t("editor.knowledge.moveUp", { index: i + 1 })}
                   onClick={() => move(i, i - 1)}
                 >
@@ -1345,7 +1381,7 @@ export function KnowledgeTab({ config, update }: TabProps) {
                   variant="ghost"
                   size="icon"
                   className="size-11 md:size-8"
-                  disabled={i === claims.length - 1}
+                  disabled={!canEdit || i === claims.length - 1}
                   aria-label={t("editor.knowledge.moveDown", { index: i + 1 })}
                   onClick={() => move(i, i + 1)}
                 >
@@ -1357,6 +1393,7 @@ export function KnowledgeTab({ config, update }: TabProps) {
                 size="icon"
                 className="size-11 shrink-0 text-destructive md:size-9"
                 aria-label={t("editor.knowledge.remove", { index: i + 1 })}
+                disabled={!canEdit}
                 onClick={() => update((d) => void d.knowledge.claims.splice(i, 1))}
               >
                 <Trash2 />
@@ -1368,7 +1405,7 @@ export function KnowledgeTab({ config, update }: TabProps) {
         <Button
           variant="outline"
           className="min-h-11 md:min-h-9"
-          disabled={claims.length >= 50}
+          disabled={!canEdit || claims.length >= 50}
           onClick={() => update((d) => void d.knowledge.claims.push(""))}
         >
           <Plus /> {t("editor.knowledge.add")}
@@ -1439,6 +1476,7 @@ export function ToolsTab({ config, update }: TabProps) {
   const t = useTranslations("assistants");
   const head = useTabHead("tools");
   const look = EDITOR_TAB_LOOK.tools;
+  const canEdit = useCanEdit();
 
   return (
     <div className="space-y-4">
@@ -1482,7 +1520,7 @@ export function ToolsTab({ config, update }: TabProps) {
               >
                 <Switch
                   checked={checked || required}
-                  disabled={required}
+                  disabled={required || !canEdit}
                   aria-label={t(`tool.${tool}`)}
                   onCheckedChange={(next) =>
                     update((d) => {

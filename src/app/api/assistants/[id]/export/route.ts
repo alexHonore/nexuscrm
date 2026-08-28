@@ -10,6 +10,10 @@ import { apiPerm } from "@/lib/permissions/server";
  *
  * Annoté par défaut (`?annotate=0` pour le fichier nu). Un export est une
  * sortie de données : il est journalisé comme telle.
+ *
+ * LECTURE (`admin.assistants`) : le fichier ne contient rien de plus que la
+ * fiche déjà lisible à l'écran, et l'export ne change rien ici. C'est le
+ * réimport (POST /api/assistants/import) qui écrit, et lui exige l'autre droit.
  */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const actor = await apiPerm("admin.assistants");

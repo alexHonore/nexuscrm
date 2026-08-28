@@ -1095,5 +1095,10 @@
   "language": {
     "fr-CA": "Québec French",
     "en-CA": "Canadian English"
+  },
+  "readOnly": {
+    "title": "Read only",
+    "hint": "You can read this assistant — its configuration, its prompt and its runs — but not change it. The « Edit the assistants » right is granted under Roles & rights.",
+    "badge": "Read"
   }
 }

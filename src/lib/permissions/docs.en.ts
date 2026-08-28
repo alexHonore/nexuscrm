@@ -121,9 +121,16 @@ export const PERMISSION_TEXT_EN: Record<string, DocOverlay> = {
   },
   "conversations.control": {
     label: "Steer a conversation",
-    what: "Opens \"Take control\" and \"Hand back to AI\", switching the assistant on a thread, assigning the thread, marking it handled, and cancelling a send still in the queue.",
+    what: "Opens \"Take control\" and \"Hand back to AI\", assigning the thread, marking it handled, and cancelling a send still in the queue. CHOOSING which assistant holds the thread is a separate right.",
     why: "It is the SMS engine's emergency gesture: it stops the assistant on ONE conversation that is going wrong, without cutting it off for everybody.",
     pitfalls: "Cancelling is only possible while the message has not been handed to the carrier. Past that point the screen says so and refuses: a text message that left cannot be called back.",
+  },
+
+  "conversations.assistant": {
+    label: "Put an assistant on a client",
+    what: "Opens the \"Assistant\" picker on the client record and in the inbox: hand this thread to an assistant, switch it, or take it off. Without the right the picker is not rendered, and the action is refused server-side.",
+    why: "Taking a thread back is a caller's decision; putting a robot on a client is a commercial one. You may want the first without the second — hence two rights rather than one.",
+    pitfalls: "The right is the ceiling, the bucket's \"Assistant\" case decides record by record: granted everywhere, it still leaves a caller without the case on a colleague's records. Removing the right does NOT unplug the assistants already in place — threads under way carry on.",
   },
 
   // ── Administration ─────────────────────────────────────────────────────────
@@ -164,11 +171,18 @@ export const PERMISSION_TEXT_EN: Record<string, DocOverlay> = {
     pitfalls: "One single gesture stops the entire team: disconnecting Google removes booking for everybody, switching telephony provider kills the web phone.",
   },
   "admin.assistants": {
-    label: "AI assistants",
-    what: "Opens /admin/assistants: write an assistant, compile it, try it in the sandbox, activate and deactivate it.",
-    why: "A live assistant writes on its own, to real people, under the company's number. Activating it is a send, not a save.",
-    pitfalls: "The assistant's language is ITS setting, not the screen's: changing the interface language changes nothing in what it writes. And reactivating it restarts the campaigns that lean on it.",
+    label: "See the assistants",
+    what: "Opens /admin/assistants READ-ONLY: the list, an assistant's configuration, its compiled prompt, its runs and its version history. Nothing saves with this right alone.",
+    why: "What the robot tells clients is team information: knowing what it promises keeps you from contradicting it on the phone. Changing it is another job — see \"Edit the assistants\".",
+    pitfalls: "The assistant's language is ITS setting, not the screen's: changing the interface language changes nothing in what it writes.",
   },
+  "admin.assistantsEdit": {
+    label: "Edit the assistants",
+    what: "Create an assistant, edit it, activate or deactivate it, import one, and run the sandbox. Without this right the assistants screen opens READ-ONLY: the configuration and the compiled prompt are readable, the save and activate buttons stay shut.",
+    why: "A supervisor has good reason to read what the robot is meant to say to their clients, and none to rewrite it on a Tuesday evening. Reading breaks nothing; writing changes what the company says to hundreds of people.",
+    pitfalls: "Every sandbox run calls a model and costs money: that is why it sits here and not under \"See the assistants\". Objection packs are SHARED between assistants — editing one changes every assistant that uses it.",
+  },
+
   "admin.campaigns": {
     label: "Campaigns",
     what: "Opens /admin/campaigns: the audience, the follow-up ladder, the enrollments and the trigger for sends.",
@@ -271,6 +285,12 @@ export const GRANT_TEXT_EN: Record<string, DocOverlay> = {
     what: "Opens taking, returning to the pool and reassigning this record. This is the box the assignment rules then refine.",
     why: "It says WHERE a role may touch assignment; the rules say WHAT it may do with it. The two are read together.",
     pitfalls: "Capped by the \"Touch assignment\" right, and never sufficient on its own: on a record already taken, you still need \"Take a record from its holder\", or the lock to have expired.",
+  },
+  assistant: {
+    label: "Put an assistant on",
+    what: "Hand this record's thread to an assistant, switch it, or take it off. Capped by the \"Put an assistant on a client\" right.",
+    why: "This is the case that decides whether a caller may put a robot on a colleague's client, or only on their own.",
+    pitfalls: "Closing the case does NOT stop an assistant already in place: it prevents switching. To cut the robot off a thread, use \"Take control\" (Steer a conversation).",
   },
   delete: {
     label: "Delete the record",

@@ -397,6 +397,9 @@ export default async function ConversationsPage() {
         abilities={{
           engine: canEngine,
           control: actor.can("conversations.control"),
+          // Brancher un robot sur un fil est son propre droit : un rôle peut
+          // reprendre la main partout sans choisir QUI parle à sa place.
+          assistant: actor.can("conversations.assistant"),
           reply: actor.can("conversations.reply"),
           classify: actor.can("clients.category"),
           // Le rejeu après panne passe par une route d'API gardée par

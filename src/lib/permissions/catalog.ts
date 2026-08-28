@@ -56,6 +56,15 @@ export const PERMISSION_KEYS = [
   "conversations.reply",
   /** Reprendre / rendre un fil à l'assistant, l'assigner, l'archiver. */
   "conversations.control",
+  /**
+   * CONFIER un fil à un assistant, en changer, le retirer.
+   *
+   * Séparé de `conversations.control` parce que ce n'est pas le même geste :
+   * reprendre la main sur un fil est une décision de téléphoniste, brancher un
+   * robot sur un client est une décision commerciale. On peut vouloir la
+   * première sans la seconde.
+   */
+  "conversations.assistant",
 
   // ── Administration ────────────────────────────────────────────────────────
   "admin.analytics",
@@ -65,7 +74,17 @@ export const PERMISSION_KEYS = [
   /** Gérer les rôles et cette matrice même. Voir `LOCKED_TO_ADMIN`. */
   "admin.roles",
   "admin.settings",
+  /** VOIR les assistants : la liste, la fiche, le prompt compilé, les essais. */
   "admin.assistants",
+  /**
+   * Les MODIFIER : créer, éditer, activer, désactiver, importer, faire tourner
+   * le bac à sable (qui coûte de l'argent à chaque essai).
+   *
+   * Deux droits et non un : un superviseur a de bonnes raisons de lire ce que
+   * le robot est censé dire à ses clients, et aucune de le réécrire un mardi
+   * soir. Lire ne casse rien ; écrire change ce que l'entreprise dit.
+   */
+  "admin.assistantsEdit",
   "admin.campaigns",
   "admin.guardrails",
   "admin.deliverability",
@@ -123,6 +142,8 @@ export const GRANT_KEYS = [
   "followup",
   /** Prendre / rendre / réassigner CETTE fiche (les règles affinent). */
   "assign",
+  /** Brancher un assistant sur le fil de CETTE fiche, ou l'en retirer. */
+  "assistant",
   "delete",
 ] as const;
 
@@ -147,6 +168,7 @@ export const GRANT_CEILING: Record<GrantKey, PermissionKey | null> = {
   book: "clients.book",
   followup: "clients.followup",
   assign: "clients.assign",
+  assistant: "conversations.assistant",
   delete: "clients.delete",
 };
 

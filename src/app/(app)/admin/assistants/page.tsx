@@ -10,7 +10,12 @@ import { listAssistantsWithCounts } from "@/lib/assistants/list";
 import { requirePerm } from "@/lib/permissions/server";
 
 export default async function AdminAssistantsPage() {
-  await requirePerm("admin.assistants");
+  const actor = await requirePerm("admin.assistants");
+  // VOIR n'est pas MODIFIER : le droit de lecture ouvre cet écran, celui
+  // d'écriture décide seul des gestes qu'on y propose. Le calcul se fait ici,
+  // au serveur, parce que c'est lui qui connaît le rôle — l'écran n'en reçoit
+  // que la réponse.
+  const canEdit = actor.can("admin.assistantsEdit");
   const t = await getTranslations("assistants");
 
   const { rows, archivedCount } = await listAssistantsWithCounts();
@@ -32,7 +37,7 @@ export default async function AdminAssistantsPage() {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-4 md:p-6">
       <PageHeader icon={<Bot />} title={t("list.title")} subtitle={t("list.subtitle")} />
-      <AssistantsListClient items={items} archivedCount={archivedCount} />
+      <AssistantsListClient items={items} archivedCount={archivedCount} canEdit={canEdit} />
     </div>
   );
 }

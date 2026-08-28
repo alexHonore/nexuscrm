@@ -25,6 +25,7 @@ import { ModelPicker } from "../model-picker";
 import { api } from "../api";
 import { EmptyRow, Fields, Panel, TabHead, ToggleRow, WideField, useTabHead } from "./layout";
 import { FieldLabel } from "./param-help";
+import { ReadOnlyFence, useCanEdit } from "./read-only";
 import type { TabProps } from "./types";
 
 /**
@@ -39,6 +40,7 @@ export function ModelTab({ config, update }: TabProps) {
   const t = useTranslations("assistants");
   const head = useTabHead("model");
   const look = EDITOR_TAB_LOOK.model;
+  const canEdit = useCanEdit();
   const [catalog, setCatalog] = useState<Record<string, ModelDescriptor[]>>({});
   const [loading, setLoading] = useState<string | null>(null);
   /**
@@ -94,20 +96,24 @@ export function ModelTab({ config, update }: TabProps) {
           <WideField>
             {/* Entonnoir : laboratoire, puis modèle, puis effort. Une liste
                 plate de 350 identifiants demande de savoir d'avance ce qu'on
-                cherche. */}
-            <ModelPicker
-              models={catalog[config.model.provider] ?? []}
-              loading={loading === config.model.provider}
-              value={config.model.model}
-              effort={config.model.reasoningEffort}
-              onReload={() => void load(config.model.provider)}
-              onChange={({ model, effort }) =>
-                update((d) => {
-                  d.model.model = model;
-                  d.model.reasoningEffort = effort;
-                })
-              }
-            />
+                cherche. Il garde en tête la SÉLECTION COURANTE, toujours
+                visible : en lecture seule, l'enclos éteint les étapes et
+                laisse lire le modèle choisi, son identifiant et son effort. */}
+            <ReadOnlyFence>
+              <ModelPicker
+                models={catalog[config.model.provider] ?? []}
+                loading={loading === config.model.provider}
+                value={config.model.model}
+                effort={config.model.reasoningEffort}
+                onReload={() => void load(config.model.provider)}
+                onChange={({ model, effort }) =>
+                  update((d) => {
+                    d.model.model = model;
+                    d.model.reasoningEffort = effort;
+                  })
+                }
+              />
+            </ReadOnlyFence>
           </WideField>
 
           {chosen && !chosen.supportsTools && needsTools ? (
@@ -140,6 +146,7 @@ export function ModelTab({ config, update }: TabProps) {
                 value={config.model.temperature}
                 onChange={(e) => update((d) => void (d.model.temperature = Number(e.target.value)))}
                 className="min-h-11 md:min-h-9"
+                disabled={!canEdit}
               />
             </div>
 
@@ -154,6 +161,7 @@ export function ModelTab({ config, update }: TabProps) {
                 value={config.model.maxTokens}
                 onChange={(e) => update((d) => void (d.model.maxTokens = Number(e.target.value)))}
                 className="min-h-11 md:min-h-9"
+                disabled={!canEdit}
               />
             </div>
           </div>
@@ -208,6 +216,7 @@ export function ModelTab({ config, update }: TabProps) {
                 update((d) => void (d.model.retry.attempts = Number(e.target.value)))
               }
               className="min-h-11 md:min-h-9"
+              disabled={!canEdit}
             />
           </div>
           <div className="space-y-1.5">
@@ -224,6 +233,7 @@ export function ModelTab({ config, update }: TabProps) {
                 update((d) => void (d.model.retry.delaySec = Number(e.target.value)))
               }
               className="min-h-11 md:min-h-9"
+              disabled={!canEdit}
             />
           </div>
           {/* Ce que le réglage donne VRAIMENT, en clair : « 3 » et « 0,8 » ne
@@ -250,7 +260,7 @@ export function ModelTab({ config, update }: TabProps) {
                 d.model.fallbacks.push({ ...DEFAULT_MODEL_FALLBACK });
               })
             }
-            disabled={config.model.fallbacks.length >= 3}
+            disabled={!canEdit || config.model.fallbacks.length >= 3}
           >
             <Plus /> {t("editor.model.addFallback")}
           </Button>
@@ -270,6 +280,7 @@ export function ModelTab({ config, update }: TabProps) {
                   variant="ghost"
                   size="sm"
                   className="ml-auto min-h-11 shrink-0 text-destructive md:min-h-9"
+                  disabled={!canEdit}
                   onClick={() => update((d) => void d.model.fallbacks.splice(i, 1))}
                 >
                   <Trash2 /> {t("editor.model.removeFallback")}
@@ -314,6 +325,7 @@ export function ModelTab({ config, update }: TabProps) {
             <Switch
               checked={config.model.routing.dataCollection === "deny"}
               aria-label="deny"
+              disabled={!canEdit}
               onCheckedChange={(next) =>
                 update((d) => void (d.model.routing.dataCollection = next ? "deny" : "allow"))
               }
@@ -327,6 +339,7 @@ export function ModelTab({ config, update }: TabProps) {
             <Switch
               checked={config.model.routing.zdr}
               aria-label="zdr"
+              disabled={!canEdit}
               onCheckedChange={(next) => update((d) => void (d.model.routing.zdr = next))}
             />
           }
@@ -338,6 +351,7 @@ export function ModelTab({ config, update }: TabProps) {
             <Switch
               checked={config.model.routing.allowFallbacks}
               aria-label="allowFallbacks"
+              disabled={!canEdit}
               onCheckedChange={(next) =>
                 update((d) => void (d.model.routing.allowFallbacks = next))
               }
@@ -407,6 +421,7 @@ function ProviderSelect({
   configured?: ProviderId[] | null;
 }) {
   const t = useTranslations("assistants");
+  const canEdit = useCanEdit();
   const missing = (p: ProviderId) => configured !== null && configured !== undefined && !configured.includes(p);
 
   return (
@@ -416,6 +431,7 @@ function ProviderSelect({
         items={PROVIDER_IDS.map((p) => ({ value: p, label: p }))}
         value={value}
         onValueChange={(v) => onChange(String(v) as ProviderId)}
+        disabled={!canEdit}
       >
         <SelectTrigger className="min-h-11 w-full md:min-h-9">
           <SelectValue />
@@ -461,6 +477,9 @@ function ModelSelect({
   onReload: () => void;
 }) {
   const t = useTranslations("assistants");
+  // Recharger le catalogue reste ouvert : c'est une LECTURE, et c'est elle qui
+  // fait apparaître « pas de clé » sous le champ.
+  const canEdit = useCanEdit();
   const known = models?.some((m) => m.id === value) ?? false;
 
   return (
@@ -484,6 +503,7 @@ function ModelSelect({
           items={models.map((m) => ({ value: m.id, label: m.label }))}
           value={known ? value : ""}
           onValueChange={(v) => onChange(String(v))}
+          disabled={!canEdit}
         >
           <SelectTrigger className="min-h-11 w-full md:min-h-9">
             <SelectValue />
@@ -514,6 +534,7 @@ function ModelSelect({
         onChange={(e) => onChange(e.target.value)}
         className="min-h-11 font-mono text-xs md:min-h-9"
         aria-invalid={models && models.length > 0 && !known ? true : undefined}
+        disabled={!canEdit}
       />
     </div>
   );

@@ -165,6 +165,20 @@ export type InboxAbilities = {
   engine: boolean;
   /** Reprendre, rendre à l'IA, réessayer, marquer traité, s'attribuer un fil. */
   control: boolean;
+  /**
+   * CHOISIR l'assistant qui tient un fil — l'y brancher, en changer, l'en
+   * retirer (`conversations.assistant`).
+   *
+   * Distinct de `control` : rendre un fil à l'assistant DÉJÀ branché est le
+   * geste du téléphoniste, décider LEQUEL parle au nom de l'entreprise ne
+   * l'est pas.
+   *
+   * Optionnel — seul de la liste — parce qu'il arrive après elle : un
+   * producteur écrit avant ce droit continue de compiler, et il compile du
+   * bon côté. Non dit vaut FAUX (le sélecteur disparaît), jamais vrai : la
+   * seule direction dans laquelle un oubli soit sans danger.
+   */
+  assistant?: boolean;
   /** Écrire — et donc RETENIR un envoi encore en file (`conversations.reply`). */
   reply: boolean;
   /** Ranger la fiche sans quitter la boîte (`clients.category`). */
@@ -176,6 +190,7 @@ export type InboxAbilities = {
 const NO_ABILITIES: InboxAbilities = {
   engine: false,
   control: false,
+  assistant: false,
   reply: false,
   classify: false,
   replay: false,

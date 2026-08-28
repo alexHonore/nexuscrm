@@ -16,7 +16,14 @@ async function loadRow(id: string) {
   return db.query.assistants.findFirst({ where: eq(assistants.id, id) });
 }
 
-/** GET /api/assistants/:id — configuration complète + état de compilation. */
+/**
+ * GET /api/assistants/:id — configuration complète + état de compilation.
+ *
+ * Trois verbes ici, deux gardes : LIRE la fiche et son prompt compilé demande
+ * `admin.assistants`, l'ENREGISTRER ou l'archiver demande
+ * `admin.assistantsEdit`. Lire ne casse rien ; écrire change ce que
+ * l'entreprise dit à des centaines de personnes.
+ */
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const actor = await apiPerm("admin.assistants");
   if (actor instanceof NextResponse) return actor;
@@ -53,7 +60,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
  *    assistant actif, cette distinction n'est pas cosmétique.
  */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const actor = await apiPerm("admin.assistants");
+  const actor = await apiPerm("admin.assistantsEdit");
   if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
@@ -151,7 +158,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
  * non plus : 409 `in_use`, avec le nombre de campagnes à re-pointer d'abord.
  */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const actor = await apiPerm("admin.assistants");
+  const actor = await apiPerm("admin.assistantsEdit");
   if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;

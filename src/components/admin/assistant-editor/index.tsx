@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   CheckCircle2,
   Loader2,
+  LockIcon,
   MoreHorizontal,
   Play,
   Power,
@@ -40,6 +41,7 @@ import type { AssistantConfig } from "@/lib/assistants/schema";
 import { cn } from "@/lib/utils";
 import { ApiError, api } from "../api";
 import { ParamDocsProvider, type ParamDocView } from "./param-help";
+import { CanEditProvider, ReadOnlyNotice } from "./read-only";
 import {
   ApproachTab,
   GoalTab,
@@ -89,11 +91,19 @@ export function AssistantEditor({
   data,
   docs,
   initialTab,
+  canEdit,
 }: {
   data: AssistantEditorData;
   docs: Record<string, ParamDocView>;
   /** Onglet ouvert au chargement — permet un lien direct « Tester ». */
   initialTab?: string;
+  /**
+   * `admin.assistantsEdit`. Faux : les douze onglets, le prompt compilé et la
+   * dernière suite restent LISIBLES — c'est justement ce que `admin.assistants`
+   * accorde — mais chaque contrôle part désactivé et aucun geste d'écriture
+   * n'est offert. Le booléen descend aux champs par `CanEditProvider`.
+   */
+  canEdit: boolean;
 }) {
   const t = useTranslations("assistants");
   const router = useRouter();
@@ -120,15 +130,24 @@ export function AssistantEditor({
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty]);
 
-  const update = useCallback((mutate: (draft: AssistantConfig) => void) => {
-    setConfig((current) => {
-      const draft = structuredClone(current);
-      mutate(draft);
-      return draft;
-    });
-  }, []);
+  const update = useCallback(
+    (mutate: (draft: AssistantConfig) => void) => {
+      // Ceinture et bretelles : en lecture seule les contrôles sont déjà
+      // désactivés, mais un brouillon modifié qu'on ne pourrait pas
+      // enregistrer serait pire qu'un champ inerte — il ferait croire à un
+      // travail en cours.
+      if (!canEdit) return;
+      setConfig((current) => {
+        const draft = structuredClone(current);
+        mutate(draft);
+        return draft;
+      });
+    },
+    [canEdit],
+  );
 
   const save = async () => {
+    if (!canEdit) return;
     setBusy("save");
     try {
       const res = await api<{ saved: boolean; changes: ChangeSummary }>(
@@ -147,6 +166,7 @@ export function AssistantEditor({
   };
 
   const compile = async () => {
+    if (!canEdit) return;
     setBusy("compile");
     try {
       const res = await api<{ version: number }>(`/api/assistants/${data.id}/compile`, {
@@ -169,6 +189,7 @@ export function AssistantEditor({
   };
 
   const runSuite = async () => {
+    if (!canEdit) return;
     setBusy("suite");
     try {
       await api(`/api/assistants/${data.id}/suite`, { method: "POST" });
@@ -181,6 +202,7 @@ export function AssistantEditor({
   };
 
   const activate = async () => {
+    if (!canEdit) return;
     setBusy("activate");
     try {
       await api(`/api/assistants/${data.id}/activate`, { method: "POST" });
@@ -206,6 +228,7 @@ export function AssistantEditor({
 
   /** Remettre en brouillon : l'assistant se tait sur tous ses fils sans être archivé. */
   const deactivate = async () => {
+    if (!canEdit) return;
     setBusy("activate");
     try {
       await api(`/api/assistants/${data.id}/deactivate`, { method: "POST" });
@@ -245,190 +268,216 @@ export function AssistantEditor({
 
   return (
     <ParamDocsProvider docs={docs}>
-      <div className="space-y-5">
-        {/* ── En-tête ──────────────────────────────────────────────────────
-            L'écran ne disait NULLE PART quel assistant on éditait : le nom
-            n'existait que dans le champ « Nom » du premier onglet, et l'état
-            (actif? à jour? vert?) nulle part. Il est ici, avec les gestes, et
-            il reste à l'écran quand on descend dans un onglet long. */}
-        <header className="z-20 -mx-4 border-b bg-background/90 px-4 pb-3 backdrop-blur md:sticky md:top-0 md:-mx-6 md:px-6 md:pt-4">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="-ml-2 mb-1 h-8 text-muted-foreground"
-            render={<Link href="/admin/assistants" />}
-          >
-            <ArrowLeft /> {t("editor.back")}
-          </Button>
+      {/* Le droit d'écrire descend comme l'aide des paramètres : par contexte.
+          Douze onglets et trois étages de composants internes ne se traversent
+          pas à la main sans qu'un champ soit oublié en route. */}
+      <CanEditProvider canEdit={canEdit}>
+        <div className="space-y-5">
+          {/* ── En-tête ──────────────────────────────────────────────────────
+              L'écran ne disait NULLE PART quel assistant on éditait : le nom
+              n'existait que dans le champ « Nom » du premier onglet, et l'état
+              (actif? à jour? vert?) nulle part. Il est ici, avec les gestes, et
+              il reste à l'écran quand on descend dans un onglet long. */}
+          <header className="z-20 -mx-4 border-b bg-background/90 px-4 pb-3 backdrop-blur md:sticky md:top-0 md:-mx-6 md:px-6 md:pt-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="-ml-2 mb-1 h-8 text-muted-foreground"
+              render={<Link href="/admin/assistants" />}
+            >
+              <ArrowLeft /> {t("editor.back")}
+            </Button>
 
-          <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-            <div className="flex min-w-0 flex-1 items-start gap-3">
-              <LookIcon look={ASSISTANT_STATUS_LOOK[data.status] ?? ASSISTANT_STATUS_LOOK.draft} size="lg" />
-              <div className="min-w-0 flex-1">
-                <h1 className="font-heading text-xl font-semibold tracking-tight break-words">
-                  {config.name || t("editor.untitled")}
-                </h1>
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                  <StateChip look={ASSISTANT_STATUS_LOOK[data.status] ?? ASSISTANT_STATUS_LOOK.draft}>
-                    {t(`list.status.${data.status}` as never)}
-                  </StateChip>
-                  <CompileChip data={data} />
-                  <SuiteChip data={data} />
-                  <Badge variant="ghost" className="font-mono text-[11px] text-muted-foreground">
-                    {t("editor.version", { n: data.version })}
-                  </Badge>
-                  {dirty ? <Badge variant="secondary">{t("editor.unsaved")}</Badge> : null}
+            <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+              <div className="flex min-w-0 flex-1 items-start gap-3">
+                <LookIcon look={ASSISTANT_STATUS_LOOK[data.status] ?? ASSISTANT_STATUS_LOOK.draft} size="lg" />
+                <div className="min-w-0 flex-1">
+                  <h1 className="font-heading text-xl font-semibold tracking-tight break-words">
+                    {config.name || t("editor.untitled")}
+                  </h1>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <StateChip look={ASSISTANT_STATUS_LOOK[data.status] ?? ASSISTANT_STATUS_LOOK.draft}>
+                      {t(`list.status.${data.status}` as never)}
+                    </StateChip>
+                    <CompileChip data={data} />
+                    <SuiteChip data={data} />
+                    <Badge variant="ghost" className="font-mono text-[11px] text-muted-foreground">
+                      {t("editor.version", { n: data.version })}
+                    </Badge>
+                    {dirty ? <Badge variant="secondary">{t("editor.unsaved")}</Badge> : null}
+                    {/* La quatrième lecture de l'en-tête : ce que JE peux faire
+                        de cet assistant. Le cadenas double le mot, il ne le
+                        remplace pas, et ne porte aucune couleur — l'état, la
+                        compilation et la suite gardent les leurs. */}
+                    {!canEdit ? (
+                      <Badge variant="outline" className="gap-1 pl-1 font-normal">
+                        <LockIcon aria-hidden className="size-3" />
+                        {t("readOnly.badge")}
+                      </Badge>
+                    ) : null}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Les gestes, par ordre d'engagement. Sous `md` ils prennent
-                leur propre rangée — serrés à côté du nom, ils réduisaient la
-                colonne de gauche à une pastille par ligne — et seul le geste
-                courant reste un bouton, les autres passent au menu. */}
-            <div className="flex w-full shrink-0 items-center justify-end gap-2 md:w-auto">
-              <Button
-                onClick={() => void save()}
-                disabled={busy !== null || !dirty}
-                className="min-h-11 md:min-h-9"
-              >
-                {busy === "save" ? <Loader2 className="animate-spin" /> : <Save />}
-                {busy === "save" ? t("editor.saving") : t("editor.save")}
-              </Button>
-              <div className="hidden items-center gap-2 md:flex">
-                <Button
-                  variant="outline"
-                  onClick={() => void compile()}
-                  disabled={busy !== null || dirty}
-                  className="min-h-11 md:min-h-9"
-                >
-                  {busy === "compile" ? <Loader2 className="animate-spin" /> : <Play />}
-                  {busy === "compile" ? t("editor.compiling") : t("editor.compile")}
-                </Button>
-                {lifecycle}
-              </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
+              {/* Les gestes, par ordre d'engagement. Sous `md` ils prennent
+                  leur propre rangée — serrés à côté du nom, ils réduisaient la
+                  colonne de gauche à une pastille par ligne — et seul le geste
+                  courant reste un bouton, les autres passent au menu.
+
+                  Enregistrer, compiler, activer : les trois ÉCRIVENT. Sans le
+                  droit, la rangée entière disparaît plutôt que de rester grise —
+                  le bandeau sous l'en-tête dit pourquoi, une fois. */}
+              {canEdit ? (
+                <div className="flex w-full shrink-0 items-center justify-end gap-2 md:w-auto">
+                  <Button
+                    onClick={() => void save()}
+                    disabled={busy !== null || !dirty}
+                    className="min-h-11 md:min-h-9"
+                  >
+                    {busy === "save" ? <Loader2 className="animate-spin" /> : <Save />}
+                    {busy === "save" ? t("editor.saving") : t("editor.save")}
+                  </Button>
+                  <div className="hidden items-center gap-2 md:flex">
                     <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-11 shrink-0 md:hidden"
-                      aria-label={t("editor.more")}
-                    />
-                  }
-                >
-                  <MoreHorizontal />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuGroup>
-                    <DropdownMenuItem
-                      className="h-11"
-                      disabled={busy !== null || dirty}
+                      variant="outline"
                       onClick={() => void compile()}
+                      disabled={busy !== null || dirty}
+                      className="min-h-11 md:min-h-9"
                     >
-                      <Play /> {t("editor.compile")}
-                    </DropdownMenuItem>
-                    {data.status === "active" ? (
-                      <DropdownMenuItem
-                        className="h-11"
-                        disabled={busy !== null}
-                        onClick={() => void deactivate()}
-                      >
-                        <Power /> {t("list.actions.deactivate")}
-                      </DropdownMenuItem>
-                    ) : data.status !== "archived" ? (
-                      <DropdownMenuItem
-                        className="h-11"
-                        disabled={busy !== null || dirty || data.needsRecompile}
-                        onClick={() => void activate()}
-                      >
-                        <Zap /> {t("editor.activate")}
-                      </DropdownMenuItem>
-                    ) : null}
-                  </DropdownMenuGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
-        </header>
-
-        {data.needsRecompile && data.compiledPrompt ? (
-          <Alert>
-            <AlertTriangle />
-            <AlertTitle>{t("editor.stale.title")}</AlertTitle>
-            <AlertDescription>
-              {data.status === "active" ? t("editor.stale.bodyActive") : t("editor.stale.body")}
-            </AlertDescription>
-          </Alert>
-        ) : null}
-
-        {lastChanges && lastChanges.changed.length > 0 ? (
-          <Alert>
-            <CheckCircle2 />
-            <AlertDescription>
-              <span className="block">
-                {t("editor.effects.immediate", { count: lastChanges.immediate.length })}
-              </span>
-              {lastChanges.pending.length > 0 ? (
-                <span className="block">
-                  {t("editor.effects.pending", { count: lastChanges.pending.length })}
-                </span>
+                      {busy === "compile" ? <Loader2 className="animate-spin" /> : <Play />}
+                      {busy === "compile" ? t("editor.compiling") : t("editor.compile")}
+                    </Button>
+                    {lifecycle}
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-11 shrink-0 md:hidden"
+                          aria-label={t("editor.more")}
+                        />
+                      }
+                    >
+                      <MoreHorizontal />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem
+                          className="h-11"
+                          disabled={busy !== null || dirty}
+                          onClick={() => void compile()}
+                        >
+                          <Play /> {t("editor.compile")}
+                        </DropdownMenuItem>
+                        {data.status === "active" ? (
+                          <DropdownMenuItem
+                            className="h-11"
+                            disabled={busy !== null}
+                            onClick={() => void deactivate()}
+                          >
+                            <Power /> {t("list.actions.deactivate")}
+                          </DropdownMenuItem>
+                        ) : data.status !== "archived" ? (
+                          <DropdownMenuItem
+                            className="h-11"
+                            disabled={busy !== null || dirty || data.needsRecompile}
+                            onClick={() => void activate()}
+                          >
+                            <Zap /> {t("editor.activate")}
+                          </DropdownMenuItem>
+                        ) : null}
+                      </DropdownMenuGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               ) : null}
-            </AlertDescription>
-          </Alert>
-        ) : null}
+            </div>
+          </header>
 
-        <Tabs
-          orientation="vertical"
-          value={tab}
-          onValueChange={(v) => setTab(String(v))}
-          className="gap-4 max-md:flex-col! md:gap-6"
-        >
-          <TabRail value={tab} />
+          {/* Ce qu'on peut faire de cet écran, dit AVANT les onglets : découvrir
+              au douzième champ qu'on ne pouvait rien enregistrer est le pire
+              ordre. */}
+          {!canEdit ? <ReadOnlyNotice /> : null}
 
-          <div className="min-w-0 flex-1">
-            <TabsContent value="identity">
-              <IdentityTab {...tabProps} />
-            </TabsContent>
-            <TabsContent value="goal">
-              <GoalTab {...tabProps} />
-            </TabsContent>
-            <TabsContent value="approach">
-              <ApproachTab {...tabProps} />
-            </TabsContent>
-            <TabsContent value="knowledge">
-              <KnowledgeTab {...tabProps} />
-            </TabsContent>
-            <TabsContent value="objections">
-              <ObjectionsTab {...tabProps} />
-            </TabsContent>
-            <TabsContent value="tools">
-              <ToolsTab {...tabProps} />
-            </TabsContent>
-            <TabsContent value="guardrails">
-              <GuardrailsTab {...tabProps} />
-            </TabsContent>
-            <TabsContent value="model">
-              <ModelTab {...tabProps} />
-            </TabsContent>
-            <TabsContent value="prompt">
-              <PromptTab {...tabProps} />
-            </TabsContent>
-            <TabsContent value="sandbox">
-              <SandboxTab {...tabProps} />
-            </TabsContent>
-            <TabsContent value="test">
-              <TestTab {...tabProps} onRunSuite={() => void runSuite()} running={busy === "suite"} />
-            </TabsContent>
-            <TabsContent value="json">
-              {/* Remonté à chaque changement de configuration : l'onglet doit
-                  montrer ce que les autres onglets viennent d'écrire. */}
-              <JsonTab key={JSON.stringify(config)} {...tabProps} />
-            </TabsContent>
-          </div>
-        </Tabs>
-      </div>
+          {data.needsRecompile && data.compiledPrompt ? (
+            <Alert>
+              <AlertTriangle />
+              <AlertTitle>{t("editor.stale.title")}</AlertTitle>
+              <AlertDescription>
+                {data.status === "active" ? t("editor.stale.bodyActive") : t("editor.stale.body")}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          {lastChanges && lastChanges.changed.length > 0 ? (
+            <Alert>
+              <CheckCircle2 />
+              <AlertDescription>
+                <span className="block">
+                  {t("editor.effects.immediate", { count: lastChanges.immediate.length })}
+                </span>
+                {lastChanges.pending.length > 0 ? (
+                  <span className="block">
+                    {t("editor.effects.pending", { count: lastChanges.pending.length })}
+                  </span>
+                ) : null}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          <Tabs
+            orientation="vertical"
+            value={tab}
+            onValueChange={(v) => setTab(String(v))}
+            className="gap-4 max-md:flex-col! md:gap-6"
+          >
+            <TabRail value={tab} />
+
+            <div className="min-w-0 flex-1">
+              <TabsContent value="identity">
+                <IdentityTab {...tabProps} />
+              </TabsContent>
+              <TabsContent value="goal">
+                <GoalTab {...tabProps} />
+              </TabsContent>
+              <TabsContent value="approach">
+                <ApproachTab {...tabProps} />
+              </TabsContent>
+              <TabsContent value="knowledge">
+                <KnowledgeTab {...tabProps} />
+              </TabsContent>
+              <TabsContent value="objections">
+                <ObjectionsTab {...tabProps} />
+              </TabsContent>
+              <TabsContent value="tools">
+                <ToolsTab {...tabProps} />
+              </TabsContent>
+              <TabsContent value="guardrails">
+                <GuardrailsTab {...tabProps} />
+              </TabsContent>
+              <TabsContent value="model">
+                <ModelTab {...tabProps} />
+              </TabsContent>
+              <TabsContent value="prompt">
+                <PromptTab {...tabProps} />
+              </TabsContent>
+              <TabsContent value="sandbox">
+                <SandboxTab {...tabProps} />
+              </TabsContent>
+              <TabsContent value="test">
+                <TestTab {...tabProps} onRunSuite={() => void runSuite()} running={busy === "suite"} />
+              </TabsContent>
+              <TabsContent value="json">
+                {/* Remonté à chaque changement de configuration : l'onglet doit
+                    montrer ce que les autres onglets viennent d'écrire. */}
+                <JsonTab key={JSON.stringify(config)} {...tabProps} />
+              </TabsContent>
+            </div>
+          </Tabs>
+        </div>
+      </CanEditProvider>
     </ParamDocsProvider>
   );
 }

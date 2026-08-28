@@ -226,11 +226,21 @@ export const PERMISSION_DOCS: Record<PermissionKey, DocEntry> = {
   "conversations.control": {
     labelFr: "Piloter une conversation",
     whatFr:
-      "Ouvre « Prendre le contrôle » et « Rendre la main à l'IA », le changement d'assistant sur un fil, l'assignation du fil, le marquage « traité » et l'annulation d'un envoi encore en file.",
+      "Ouvre « Prendre le contrôle » et « Rendre la main à l'IA », l'assignation du fil, le marquage « traité » et l'annulation d'un envoi encore en file. CHOISIR quel assistant tient le fil est un droit à part.",
     whyFr:
       "C'est le geste d'urgence du moteur SMS : il arrête l'assistant sur UNE conversation qui dérape, sans le couper pour tout le monde.",
     pitfallsFr:
       "Annuler n'est possible que tant que le message n'a pas été remis à l'opérateur. Passé ce point, l'écran le dit et refuse : un SMS parti ne se rappelle pas.",
+  },
+
+  "conversations.assistant": {
+    labelFr: "Brancher un assistant sur un client",
+    whatFr:
+      "Ouvre le sélecteur « Assistant » sur la fiche client et dans la boîte de réception : confier ce fil à un assistant, en changer, ou l'en retirer. Sans ce droit le sélecteur ne s'affiche pas, et l'action est refusée côté serveur.",
+    whyFr:
+      "Reprendre un fil est une décision de téléphoniste ; brancher un robot sur un client est une décision commerciale. On peut vouloir la première sans la seconde — d'où deux droits plutôt qu'un.",
+    pitfallsFr:
+      "Le droit est le plafond, la case « Assistant » du compartiment décide fiche par fiche : ouvert partout, il laisse quand même un téléphoniste sans la case sur les fiches d'un collègue. Retirer le droit ne débranche PAS les assistants déjà en place — les fils en cours continuent.",
   },
 
   // ── Administration ─────────────────────────────────────────────────────────
@@ -289,14 +299,24 @@ export const PERMISSION_DOCS: Record<PermissionKey, DocEntry> = {
       "Un seul geste arrête toute l'équipe : déconnecter Google supprime la prise de rendez-vous pour tout le monde, changer de fournisseur de téléphonie coupe le téléphone web.",
   },
   "admin.assistants": {
-    labelFr: "Assistants IA",
+    labelFr: "Voir les assistants",
     whatFr:
-      "Ouvre /admin/assistants : écrire un assistant, le compiler, l'essayer en bac à sable, l'activer et le désactiver.",
+      "Ouvre /admin/assistants en LECTURE : la liste, la configuration d'un assistant, son prompt compilé, ses essais et son historique de versions. Rien ne s'enregistre avec ce seul droit.",
     whyFr:
-      "Un assistant actif écrit tout seul, à des gens réels, sous le numéro de l'entreprise. L'activer est un envoi, pas un enregistrement.",
+      "Ce que le robot dit aux clients est une information d'équipe : savoir ce qu'il promet évite de le contredire au téléphone. La modifier est un autre métier — voir « Modifier les assistants ».",
     pitfallsFr:
-      "La langue de l'assistant est SON réglage, pas celle de l'écran : changer la langue de l'interface ne change rien à ce qu'il écrit. Et le réactiver relance les campagnes qui s'appuient sur lui.",
+      "La langue de l'assistant est SON réglage, pas celle de l'écran : changer la langue de l'interface ne change rien à ce qu'il écrit.",
   },
+  "admin.assistantsEdit": {
+    labelFr: "Modifier les assistants",
+    whatFr:
+      "Créer un assistant, l'éditer, l'activer ou le désactiver, l'importer, et lancer le bac à sable. Sans ce droit, l'écran des assistants s'ouvre en LECTURE : on lit la configuration et le prompt compilé, les boutons d'enregistrement et d'activation restent fermés.",
+    whyFr:
+      "Un superviseur a de bonnes raisons de lire ce que le robot est censé dire à ses clients, et aucune de le réécrire un mardi soir. Lire ne casse rien ; écrire change ce que l'entreprise dit à des centaines de personnes.",
+    pitfallsFr:
+      "Chaque essai du bac à sable appelle un modèle et coûte de l'argent : c'est pour ça qu'il est ici et non dans « Voir les assistants ». Les paquets d'objections sont PARTAGÉS entre assistants — les modifier change tous les assistants qui s'en servent.",
+  },
+
   "admin.campaigns": {
     labelFr: "Campagnes",
     whatFr:
@@ -445,6 +465,15 @@ export const GRANT_DOCS: Record<GrantKey, DocEntry> = {
       "Elle dit OÙ un rôle peut toucher à l'assignation ; les règles disent CE QU'il peut en faire. Les deux se lisent ensemble.",
     pitfallsFr:
       "Plafonnée par le droit « Toucher à l'assignation », et jamais suffisante seule : sur une fiche déjà prise, il faut encore « Retirer une fiche à son détenteur », ou attendre l'expiration du verrou.",
+  },
+  assistant: {
+    labelFr: "Brancher un assistant",
+    whatFr:
+      "Confier le fil de cette fiche à un assistant, en changer, ou l'en retirer. Plafonné par le droit « Brancher un assistant sur un client ».",
+    whyFr:
+      "C'est la case qui décide si un téléphoniste peut mettre un robot sur le client d'un collègue, ou seulement sur les siens.",
+    pitfallsFr:
+      "Fermer la case n'ARRÊTE pas l'assistant déjà en place : elle empêche d'en changer. Pour couper le robot sur un fil, c'est « Prendre le contrôle » (Piloter une conversation).",
   },
   delete: {
     labelFr: "Supprimer la fiche",

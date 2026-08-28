@@ -20,7 +20,10 @@ import { UTILITY_MODEL_BY_PROVIDER } from "@/lib/llm/defaults";
  * ou bien c'est une question — jamais une configuration à moitié plausible.
  *
  * Rien n'est écrit ici. La création n'a lieu qu'au POST /api/assistants, quand
- * l'utilisateur a relu le résumé.
+ * l'utilisateur a relu le résumé. Le droit exigé est quand même celui d'ÉCRIRE
+ * (`admin.assistantsEdit`) : c'est le premier geste de la création, et il
+ * appelle un modèle facturé à chaque tour. Qui ne peut pas enregistrer
+ * l'assistant n'a rien à gagner à en faire rédiger un.
  */
 const bodySchema = z.object({
   messages: z
@@ -51,7 +54,7 @@ function extractJson(raw: string): unknown {
 }
 
 export async function POST(req: Request) {
-  const actor = await apiPerm("admin.assistants");
+  const actor = await apiPerm("admin.assistantsEdit");
   if (actor instanceof NextResponse) return actor;
 
   let raw: unknown;

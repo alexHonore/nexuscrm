@@ -6,7 +6,14 @@ import { logAudit } from "@/lib/audit";
 import { assistantConfigInputSchema } from "@/lib/assistants/schema";
 import { apiPerm } from "@/lib/permissions/server";
 
-/** GET /api/assistants — liste, la plus récemment modifiée d'abord. */
+/**
+ * GET /api/assistants — liste, la plus récemment modifiée d'abord.
+ *
+ * Deux gardes dans ce fichier, et c'est voulu : LIRE la liste demande
+ * `admin.assistants`, la CRÉER demande `admin.assistantsEdit`. Un superviseur
+ * doit pouvoir savoir quels robots parlent à ses clients sans pouvoir en
+ * ajouter un.
+ */
 export async function GET() {
   const actor = await apiPerm("admin.assistants");
   if (actor instanceof NextResponse) return actor;
@@ -36,7 +43,7 @@ export async function GET() {
  * et la porte d'activation le refuserait de toute façon.
  */
 export async function POST(req: Request) {
-  const actor = await apiPerm("admin.assistants");
+  const actor = await apiPerm("admin.assistantsEdit");
   if (actor instanceof NextResponse) return actor;
 
   let raw: unknown;

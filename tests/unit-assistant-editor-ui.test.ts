@@ -124,7 +124,11 @@ function renderEditor(data: Partial<AssistantEditorData> = {}): string {
     createElement(NextIntlClientProvider, {
       locale: "fr",
       messages: { assistants: assistantsFr, common: commonFr } as unknown as IntlMessages,
-      children: createElement(AssistantEditor, { data: { ...DATA, ...data }, docs: DOCS }),
+      children: createElement(AssistantEditor, {
+        data: { ...DATA, ...data },
+        docs: DOCS,
+        canEdit: true,
+      }),
     }),
   );
 }
@@ -158,7 +162,7 @@ function renderList(items: Parameters<typeof AssistantsListClient>[0]["items"]):
     createElement(NextIntlClientProvider, {
       locale: "fr",
       messages: { assistants: assistantsFr, common: commonFr } as unknown as IntlMessages,
-      children: createElement(AssistantsListClient, { items, archivedCount: 0 }),
+      children: createElement(AssistantsListClient, { items, archivedCount: 0, canEdit: true }),
     }),
   );
 }

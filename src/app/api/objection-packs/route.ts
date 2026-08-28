@@ -41,7 +41,14 @@ export const packInputSchema = z.object({
   items: z.array(objectionItemSchema).max(40).default([]),
 });
 
-/** GET /api/objection-packs — tous les paquets, contenu compris. */
+/**
+ * GET /api/objection-packs — tous les paquets, contenu compris.
+ *
+ * Ressource PARTAGÉE entre assistants : elle suit donc leur découpage de
+ * droits. Lire les paquets appartient à `admin.assistants` (on ne peut pas
+ * comprendre un assistant sans voir les objections qu'on lui a écrites) ;
+ * en écrire un appartient à `admin.assistantsEdit`.
+ */
 export async function GET() {
   const actor = await apiPerm("admin.assistants");
   if (actor instanceof NextResponse) return actor;
@@ -52,7 +59,7 @@ export async function GET() {
 
 /** POST /api/objection-packs — crée un paquet. */
 export async function POST(req: Request) {
-  const actor = await apiPerm("admin.assistants");
+  const actor = await apiPerm("admin.assistantsEdit");
   if (actor instanceof NextResponse) return actor;
 
   let raw: unknown;

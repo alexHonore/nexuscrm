@@ -40,6 +40,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ASSISTANT_STATUS_LOOK, GOAL_LOOK, LookIcon, type Look } from "@/components/look";
 import type { GoalType } from "@/lib/assistants/schema";
 import { ApiError, api } from "./api";
+import { ReadOnlyNotice } from "./assistant-editor/read-only";
 import { AssistantImportDialog } from "./assistant-import-dialog";
 import { AssistantCreateDialog } from "./assistant-create";
 
@@ -70,9 +71,16 @@ export type AssistantListItem = {
 export function AssistantsListClient({
   items,
   archivedCount,
+  canEdit,
 }: {
   items: AssistantListItem[];
   archivedCount: number;
+  /**
+   * `admin.assistantsEdit` — créer, importer, dupliquer, activer, supprimer.
+   * Faux : l'écran reste entier, mais il ne propose plus un seul geste que la
+   * route refuserait de toute façon.
+   */
+  canEdit: boolean;
 }) {
   const t = useTranslations("assistants");
   const router = useRouter();
@@ -124,24 +132,31 @@ export function AssistantsListClient({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <AssistantImportDialog
-          trigger={
-            <Button variant="outline" className="min-h-11 md:min-h-9">
-              <Upload /> {t("list.import")}
-            </Button>
-          }
-        />
-        {/* Trois portes d'entrée plutôt qu'un brouillon vide jeté dans un
-            éditeur à onze onglets. */}
-        <AssistantCreateDialog
-          trigger={
-            <Button className="min-h-11 md:min-h-9">
-              <Plus /> {t("list.new")}
-            </Button>
-          }
-        />
-      </div>
+      {/* Sans le droit d'écrire, la barre entière disparaît — un « Nouvel
+          assistant » grisé ferait chercher ce qui le débloque. Le bandeau le
+          dit une fois, en toutes lettres, et nomme le droit qui manque. */}
+      {canEdit ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <AssistantImportDialog
+            trigger={
+              <Button variant="outline" className="min-h-11 md:min-h-9">
+                <Upload /> {t("list.import")}
+              </Button>
+            }
+          />
+          {/* Trois portes d'entrée plutôt qu'un brouillon vide jeté dans un
+              éditeur à onze onglets. */}
+          <AssistantCreateDialog
+            trigger={
+              <Button className="min-h-11 md:min-h-9">
+                <Plus /> {t("list.new")}
+              </Button>
+            }
+          />
+        </div>
+      ) : (
+        <ReadOnlyNotice />
+      )}
 
       {items.length === 0 ? (
         <EmptyState
@@ -195,15 +210,21 @@ export function AssistantsListClient({
                     passent sous le texte, alignés à droite, cibles intactes. */}
                 <div className="flex w-full shrink-0 items-center justify-end gap-3 md:w-auto">
                   {/* « Tester » est un BOUTON, pas une entrée de menu : c'est le
-                      geste qu'on fait le plus souvent en réglant un assistant. */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="min-h-11 shrink-0 md:min-h-8"
-                    render={<Link href={`/admin/assistants/${item.id}?tab=sandbox`} />}
-                  >
-                    <MessageSquare /> {t("list.actions.test")}
-                  </Button>
+                      geste qu'on fait le plus souvent en réglant un assistant.
+                      Le bac à sable appelle le modèle et coûte de l'argent à
+                      chaque essai : il suit le droit d'écrire, pas celui de
+                      lire. Le nom de l'assistant reste un lien — ouvrir la
+                      fiche pour la lire n'a jamais été un geste d'écriture. */}
+                  {canEdit ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 shrink-0 md:min-h-8"
+                      render={<Link href={`/admin/assistants/${item.id}?tab=sandbox`} />}
+                    >
+                      <MessageSquare /> {t("list.actions.test")}
+                    </Button>
+                  ) : null}
 
                   <DropdownMenu>
                     <DropdownMenuTrigger
@@ -216,28 +237,38 @@ export function AssistantsListClient({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuGroup>
-                        <DropdownMenuItem render={<Link href={`/admin/assistants/${item.id}`} />}>
-                          {t("list.actions.edit")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          render={<Link href={`/admin/assistants/${item.id}?tab=sandbox`} />}
-                        >
-                          <MessageSquare /> {t("list.actions.test")}
-                        </DropdownMenuItem>
+                        {canEdit ? (
+                          <>
+                            <DropdownMenuItem
+                              render={<Link href={`/admin/assistants/${item.id}`} />}
+                            >
+                              {t("list.actions.edit")}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              render={<Link href={`/admin/assistants/${item.id}?tab=sandbox`} />}
+                            >
+                              <MessageSquare /> {t("list.actions.test")}
+                            </DropdownMenuItem>
+                          </>
+                        ) : null}
+                        {/* L'export ne change rien : c'est la même fiche, en
+                            fichier. Il reste ouvert à qui a le droit de la lire. */}
                         <DropdownMenuItem
                           render={<a href={`/api/assistants/${item.id}/export`} download />}
                         >
                           <Download /> {t("list.actions.export")}
                         </DropdownMenuItem>
-                        {item.status === "active" ? (
+                        {canEdit && item.status === "active" ? (
                           <DropdownMenuItem onClick={() => setToDeactivate(item)}>
                             <PowerOff /> {t("list.actions.deactivate")}
                           </DropdownMenuItem>
                         ) : null}
-                        <DropdownMenuItem variant="destructive" onClick={() => setTarget(item)}>
-                          <Trash2 />{" "}
-                          {item.hasWritten ? t("list.actions.archive") : t("list.actions.delete")}
-                        </DropdownMenuItem>
+                        {canEdit ? (
+                          <DropdownMenuItem variant="destructive" onClick={() => setTarget(item)}>
+                            <Trash2 />{" "}
+                            {item.hasWritten ? t("list.actions.archive") : t("list.actions.delete")}
+                          </DropdownMenuItem>
+                        ) : null}
                       </DropdownMenuGroup>
                     </DropdownMenuContent>
                   </DropdownMenu>

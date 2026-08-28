@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { EDITOR_TAB_LOOK, LookIcon } from "@/components/look";
 import { cn } from "@/lib/utils";
 import { ApiError, api } from "../api";
+import { useCanEdit } from "./read-only";
 import type { AssistantEditorData } from "./types";
 
 type Pack = AssistantEditorData["packs"][number];
@@ -57,6 +58,7 @@ export function ObjectionPacksEditor({
 }) {
   const t = useTranslations("assistants");
   const router = useRouter();
+  const canEdit = useCanEdit();
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -80,7 +82,10 @@ export function ObjectionPacksEditor({
         />
       ))}
 
-      {creating ? (
+      {/* Un paquet est une ressource PARTAGÉE : en créer un touche tous les
+          assistants qui s'en serviront. Sans le droit d'écrire, la porte
+          n'existe pas — les paquets restent ouvrables et lisibles. */}
+      {!canEdit ? null : creating ? (
         <NewPackForm
           onCancel={() => setCreating(false)}
           onCreated={() => {
@@ -113,6 +118,7 @@ function PackCard({
   onSaved: () => void;
 }) {
   const t = useTranslations("assistants");
+  const canEdit = useCanEdit();
   const [label, setLabel] = useState(pack.label);
   const [items, setItems] = useState<Item[]>(pack.items);
   const [busy, setBusy] = useState(false);
@@ -120,6 +126,7 @@ function PackCard({
   const dirty = label !== pack.label || JSON.stringify(items) !== JSON.stringify(pack.items);
 
   const save = async () => {
+    if (!canEdit) return;
     setBusy(true);
     try {
       // Un paquet partagé : l'enregistrement est IMMÉDIAT et distinct du
@@ -142,6 +149,7 @@ function PackCard({
   };
 
   const remove = async () => {
+    if (!canEdit) return;
     setBusy(true);
     try {
       await api(`/api/objection-packs/${pack.id}`, { method: "DELETE" });
@@ -181,6 +189,7 @@ function PackCard({
         <Checkbox
           checked={checked}
           aria-label={t("editor.objections.use", { name: pack.label })}
+          disabled={!canEdit}
           onCheckedChange={(next) => onToggle(Boolean(next))}
         />
         <LookIcon look={LOOK} size="sm" />
@@ -215,6 +224,7 @@ function PackCard({
               className="min-h-11 md:min-h-9"
               value={label}
               maxLength={120}
+              disabled={!canEdit}
               onChange={(e) => setLabel(e.target.value)}
             />
           </div>
@@ -229,29 +239,36 @@ function PackCard({
             />
           ))}
 
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              className="min-h-11 md:min-h-9"
-              onClick={() => setItems([...items, emptyItem(items.length)])}
-            >
-              <Plus /> {t("editor.objections.addItem")}
-            </Button>
-            <span className="flex-1" />
-            <Button
-              variant="ghost"
-              className="min-h-11 text-destructive md:min-h-9"
-              disabled={busy}
-              onClick={remove}
-            >
-              <Trash2 /> {t("editor.objections.deletePack")}
-            </Button>
-            <Button className="min-h-11 md:min-h-9" disabled={busy || !dirty} onClick={save}>
-              {busy ? <Loader2 className="animate-spin" /> : <Save />}
-              {t("editor.objections.savePack")}
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground">{t("editor.objections.sharedHint")}</p>
+          {/* Les trois gestes écrivent dans une ressource partagée, et la note
+              qui les accompagne ne parle que d'eux : sans le droit, le paquet
+              ouvert se lit comme un document. */}
+          {canEdit ? (
+            <>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  className="min-h-11 md:min-h-9"
+                  onClick={() => setItems([...items, emptyItem(items.length)])}
+                >
+                  <Plus /> {t("editor.objections.addItem")}
+                </Button>
+                <span className="flex-1" />
+                <Button
+                  variant="ghost"
+                  className="min-h-11 text-destructive md:min-h-9"
+                  disabled={busy}
+                  onClick={remove}
+                >
+                  <Trash2 /> {t("editor.objections.deletePack")}
+                </Button>
+                <Button className="min-h-11 md:min-h-9" disabled={busy || !dirty} onClick={save}>
+                  {busy ? <Loader2 className="animate-spin" /> : <Save />}
+                  {t("editor.objections.savePack")}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">{t("editor.objections.sharedHint")}</p>
+            </>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -279,6 +296,7 @@ function ItemFields({
   onRemove: () => void;
 }) {
   const t = useTranslations("assistants");
+  const canEdit = useCanEdit();
   const set = (patch: Partial<Item>) => onChange({ ...item, ...patch });
 
   return (
@@ -292,6 +310,7 @@ function ItemFields({
           value={item.key}
           maxLength={60}
           aria-label={t("editor.objections.itemKey")}
+          disabled={!canEdit}
           onChange={(e) => set({ key: e.target.value })}
         />
         <Button
@@ -299,6 +318,7 @@ function ItemFields({
           size="icon"
           className="size-11 shrink-0 text-destructive md:size-8"
           aria-label={t("editor.objections.removeItem", { index: index + 1 })}
+          disabled={!canEdit}
           onClick={onRemove}
         >
           <Trash2 />
@@ -323,6 +343,7 @@ function ItemFields({
             maxLength={400}
             placeholder={t(`editor.objections.${key}Placeholder`)}
             value={item[field]}
+            disabled={!canEdit}
             onChange={(e) => set({ [field]: e.target.value } as Partial<Item>)}
           />
         </div>

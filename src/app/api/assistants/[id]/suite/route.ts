@@ -11,9 +11,13 @@ export const maxDuration = 300;
  * POST /api/assistants/:id/suite — rejoue toutes les fixtures activées contre
  * le prompt compilé, outils SIMULÉS (aucun rendez-vous créé, aucun SMS envoyé),
  * et consigne l'exécution dans `guardrail_runs`.
+ *
+ * Droit d'ÉCRITURE (`admin.assistantsEdit`) : ~14 appels modèle facturés, et le
+ * vert obtenu ouvre la porte d'activation (§11.4). LIRE les résultats d'une
+ * suite déjà passée n'a jamais coûté ça — c'est l'autre droit.
  */
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const actor = await apiPerm("admin.assistants");
+  const actor = await apiPerm("admin.assistantsEdit");
   if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;

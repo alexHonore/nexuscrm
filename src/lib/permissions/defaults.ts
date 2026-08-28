@@ -107,6 +107,10 @@ export function defaultRoles(): Role[] {
         "conversations.view",
         "conversations.reply",
         "conversations.control",
+        "conversations.assistant",
+        // Lire ce que le robot dit à SES clients relève de son métier ; le
+        // réécrire relève de celui du courtier.
+        "admin.assistants",
         "admin.analytics",
         "admin.calls",
       ),
@@ -151,6 +155,9 @@ export function defaultRoles(): Role[] {
         // Reprendre un fil est le métier même du téléphoniste : l'assistant
         // lui PASSE la main, et sans ce droit la passe tombe par terre.
         "conversations.control",
+        // Et la passe dans l'autre sens : rendre le fil au robot quand il n'a
+        // plus rien à y faire lui-même.
+        "conversations.assistant",
       ),
       relations: {
         own: grants(
@@ -165,6 +172,7 @@ export function defaultRoles(): Role[] {
           "book",
           "followup",
           "assign",
+          "assistant",
         ),
         unassigned: grants(
           "visible",
@@ -178,6 +186,7 @@ export function defaultRoles(): Role[] {
           "book",
           "followup",
           "assign",
+          "assistant",
         ),
         [`role:${ADMIN_ROLE_ID}`]: INVISIBLE,
         [`role:${SUPERVISOR_ROLE_ID}`]: TAKEN_BY_SOMEONE_ELSE,

@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { EDITOR_TAB_LOOK } from "@/components/look";
 import { ApiError, api } from "../api";
 import { TabHead, useTabHead } from "./layout";
+import { ReadOnlyNotice, useCanEdit } from "./read-only";
 import type { TabProps } from "./types";
 
 type Verdict = {
@@ -156,6 +157,16 @@ export function SandboxTab({ data }: TabProps) {
   const t = useTranslations("assistants");
   const head = useTabHead("sandbox");
   const router = useRouter();
+  /**
+   * Essayer n'est pas lire.
+   *
+   * Chaque tour appelle le modèle et coûte de l'argent ; la compilation depuis
+   * cet onglet réécrit le prompt de l'assistant. Le bac à sable suit donc
+   * `admin.assistantsEdit` et non le droit de voir : sans lui, l'écran se
+   * montre — le faux client, le déclencheur, le contexte de campagne — mais
+   * rien ne part.
+   */
+  const canEdit = useCanEdit();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [inbound, setInbound] = useState("");
   const [busy, setBusy] = useState(false);
@@ -191,6 +202,7 @@ export function SandboxTab({ data }: TabProps) {
    * était à un clic, mais dans un autre onglet — et rien ne le disait.
    */
   const compileNow = async () => {
+    if (!canEdit) return;
     setCompiling(true);
     setError(null);
     try {
@@ -208,7 +220,7 @@ export function SandboxTab({ data }: TabProps) {
    * `followUp` = le contact n'a pas répondu : on rejoue le barreau suivant.
    */
   const runTurn = async (text: string, options: { followUp?: boolean } = {}) => {
-    if (busy) return;
+    if (busy || !canEdit) return;
     setBusy(true);
     setError(null);
 
@@ -307,10 +319,16 @@ export function SandboxTab({ data }: TabProps) {
     <div className="space-y-4">
       <TabHead look={EDITOR_TAB_LOOK.sandbox} title={head.title} hint={head.hint} />
 
-      <Alert>
-        <AlertTriangleIcon />
-        <AlertDescription>{t("sandbox.disclaimer")}</AlertDescription>
-      </Alert>
+      {canEdit ? (
+        <Alert>
+          <AlertTriangleIcon />
+          <AlertDescription>{t("sandbox.disclaimer")}</AlertDescription>
+        </Alert>
+      ) : (
+        /* « Rien n'est envoyé » n'a plus rien à rassurer quand rien ne part :
+           à la place, l'onglet dit pourquoi il ne répondra pas. */
+        <ReadOnlyNotice />
+      )}
 
       {notCompiled ? (
         <Alert variant="destructive">
@@ -322,7 +340,7 @@ export function SandboxTab({ data }: TabProps) {
               variant="outline"
               className="min-h-11 md:min-h-8"
               onClick={() => void compileNow()}
-              disabled={compiling}
+              disabled={compiling || !canEdit}
             >
               {compiling ? <Loader2 className="animate-spin" /> : null}
               {compiling ? t("sandbox.compiling") : t("sandbox.compileNow")}
@@ -339,6 +357,7 @@ export function SandboxTab({ data }: TabProps) {
           <Input
             id="sb-name"
             className="min-h-11 md:min-h-9"
+            disabled={!canEdit}
             value={lead.firstName}
             onChange={(e) => setLead({ ...lead, firstName: e.target.value })}
           />
@@ -348,6 +367,7 @@ export function SandboxTab({ data }: TabProps) {
           <Input
             id="sb-city"
             className="min-h-11 md:min-h-9"
+            disabled={!canEdit}
             value={lead.city}
             onChange={(e) => setLead({ ...lead, city: e.target.value })}
           />
@@ -357,6 +377,7 @@ export function SandboxTab({ data }: TabProps) {
           <Input
             id="sb-project"
             className="min-h-11 md:min-h-9"
+            disabled={!canEdit}
             value={lead.projectType}
             onChange={(e) => setLead({ ...lead, projectType: e.target.value })}
           />
@@ -371,6 +392,7 @@ export function SandboxTab({ data }: TabProps) {
               items={TRIGGERS.map((k) => ({ value: k, label: t(`sandbox.trigger.${k}`) }))}
               value={trigger}
               onValueChange={(v) => setTrigger(String(v) as typeof trigger)}
+              disabled={!canEdit}
             >
               <SelectTrigger className="min-h-11 w-full md:min-h-9 md:w-80">
                 <SelectValue />
@@ -395,6 +417,7 @@ export function SandboxTab({ data }: TabProps) {
               <Input
                 id="sb-campaign-name"
                 className="min-h-11 md:min-h-9"
+                disabled={!canEdit}
                 value={campaign.name}
                 placeholder={t("sandbox.campaign.namePlaceholder")}
                 onChange={(e) => setCampaign({ ...campaign, name: e.target.value })}
@@ -405,6 +428,7 @@ export function SandboxTab({ data }: TabProps) {
               <Input
                 id="sb-campaign-desc"
                 className="min-h-11 md:min-h-9"
+                disabled={!canEdit}
                 value={campaign.description}
                 onChange={(e) => setCampaign({ ...campaign, description: e.target.value })}
               />
@@ -417,6 +441,7 @@ export function SandboxTab({ data }: TabProps) {
                 min={0}
                 max={10}
                 className="min-h-11 md:min-h-9"
+                disabled={!canEdit}
                 value={campaign.followUps}
                 onChange={(e) =>
                   setCampaign({
@@ -436,6 +461,7 @@ export function SandboxTab({ data }: TabProps) {
                 <Textarea
                   id="sb-opener"
                   rows={2}
+                  disabled={!canEdit}
                   value={opener}
                   placeholder={t("sandbox.opener.placeholder")}
                   onChange={(e) => setOpener(e.target.value)}
@@ -450,6 +476,7 @@ export function SandboxTab({ data }: TabProps) {
                     variant="outline"
                     size="sm"
                     className="min-h-11 md:min-h-8"
+                    disabled={!canEdit}
                     onClick={() => setInbound(t(`sandbox.suggestions.${key}`))}
                   >
                     {t(`sandbox.suggestions.${key}`)}
@@ -462,7 +489,7 @@ export function SandboxTab({ data }: TabProps) {
                message sans qu'on ait à inventer ce que le client aurait dit. */
             <Button
               className="min-h-11 md:min-h-9"
-              disabled={busy || notCompiled}
+              disabled={busy || notCompiled || !canEdit}
               onClick={() => void runTurn("")}
             >
               {busy ? <Loader2 className="animate-spin" /> : <PlayIcon />}
@@ -499,7 +526,7 @@ export function SandboxTab({ data }: TabProps) {
       <div className="space-y-1.5">
         <Textarea
           rows={2}
-          disabled={notCompiled}
+          disabled={notCompiled || !canEdit}
           placeholder={t("sandbox.placeholder")}
           value={inbound}
           onChange={(e) => setInbound(e.target.value)}
@@ -516,7 +543,7 @@ export function SandboxTab({ data }: TabProps) {
             size="sm"
             className="min-h-11 md:min-h-8"
             onClick={reset}
-            disabled={busy || turns.length === 0}
+            disabled={busy || turns.length === 0 || !canEdit}
           >
             <RotateCcw /> {t("sandbox.reset")}
           </Button>
@@ -530,7 +557,7 @@ export function SandboxTab({ data }: TabProps) {
                 className="min-h-11 md:min-h-8"
                 title={t("sandbox.followUpHint")}
                 onClick={() => void runTurn("", { followUp: true })}
-                disabled={busy || notCompiled}
+                disabled={busy || notCompiled || !canEdit}
               >
                 <BellRingIcon />
                 {t("sandbox.followUp", { step: nextFollowUp })}
@@ -540,7 +567,7 @@ export function SandboxTab({ data }: TabProps) {
               size="sm"
               className="min-h-11 md:min-h-8"
               onClick={() => void send()}
-              disabled={busy || notCompiled || inbound.trim() === ""}
+              disabled={busy || notCompiled || inbound.trim() === "" || !canEdit}
             >
               {busy ? <Loader2 className="animate-spin" /> : <SendIcon />}
               {busy ? t("sandbox.thinking") : t("sandbox.send")}

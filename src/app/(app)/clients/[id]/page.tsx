@@ -116,6 +116,12 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
   const canSeeThread = grants.history && actor.can("conversations.view");
   const canReply = grants.sms && actor.can("conversations.reply");
   const canControlThread = actor.can("conversations.control");
+  // Choisir QUI parle côté robot n'est pas reprendre la main : c'est son
+  // propre droit et sa propre case (le superviseur livré lit les assistants
+  // sans pouvoir en brancher un). L'ET est écrit en entier même si le plafond
+  // de la case porte déjà ce droit — la règle se lit ici, pas dans le
+  // catalogue.
+  const canAssignAssistant = grants.assistant && actor.can("conversations.assistant");
   const canManageCampaigns = actor.can("admin.campaigns");
 
   const [allCategories, allSources] = await Promise.all([
@@ -583,6 +589,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
                     thread={history.sms}
                     canReply={canReply}
                     canControl={canControlThread}
+                    canAssignAssistant={canAssignAssistant}
                   />
                 ) : null}
               </>

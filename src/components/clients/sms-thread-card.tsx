@@ -134,6 +134,7 @@ export function SmsThreadCard({
   thread,
   canReply = false,
   canControl = false,
+  canAssignAssistant = false,
 }: {
   clientId: string;
   thread: SmsThreadData;
@@ -146,8 +147,19 @@ export function SmsThreadCard({
    * envoie des messages HORS de l'application.
    */
   canReply?: boolean;
-  /** Reprendre / rendre le fil à l'assistant, le confier, le marquer traité. */
+  /** Reprendre / rendre le fil à l'assistant, le marquer traité. */
   canControl?: boolean;
+  /**
+   * CHOISIR l'assistant qui tient le fil, en changer, le retirer
+   * (`conversations.assistant` × case `assistant` de la fiche).
+   *
+   * Séparé de `canControl` parce que ce n'est pas le même métier : reprendre
+   * la main est une décision de téléphoniste, brancher un robot sur ce
+   * client-là engage ce que l'entreprise lui dira. Non dit = fermé, comme
+   * `canReply` et `canControl` — l'appelant qui oublie perd le sélecteur,
+   * jamais l'inverse.
+   */
+  canAssignAssistant?: boolean;
 }) {
   const t = useTranslations("conversations");
   const tCommon = useTranslations("common");
@@ -401,8 +413,10 @@ export function SmsThreadCard({
         {/* Qui parle côté IA — et le geste de confier ou retirer le fil. Sans
             lui, seul un barreau de campagne savait donner un fil à un
             assistant : un contact qui écrivait de lui-même n'avait jamais de
-            réponse IA. */}
-        {thread.conversationId && canControl ? (
+            réponse IA.
+            Ce sélecteur suit son droit à lui : on peut tenir la main sur un
+            fil (bouton ci-dessus) sans avoir celui d'y brancher un robot. */}
+        {thread.conversationId && canAssignAssistant ? (
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <BotIcon className="size-4 shrink-0 text-muted-foreground" />
             <span className="text-muted-foreground">{t("assistant.label")} :</span>

@@ -38,7 +38,8 @@ import { setClientCategoryAction } from "../clients/actions";
  * DEUX questions se posent à chaque geste, jamais une seule :
  *
  *   · le RÔLE l'autorise-t-il ? — `conversations.reply` pour écrire,
- *     `conversations.control` pour reprendre, rendre, assigner, archiver ;
+ *     `conversations.control` pour reprendre, rendre, assigner, archiver,
+ *     `conversations.assistant` pour CHOISIR l'assistant qui tient le fil ;
  *   · la FICHE derrière le fil s'ouvre-t-elle à lui ? — la même matrice que
  *     partout ailleurs (`guardClient`), parce qu'un fil parle d'une fiche.
  *
@@ -46,9 +47,11 @@ import { setClientCategoryAction } from "../clients/actions";
  * visibilité : commander l'assistant (couper, rendre, réessayer, archiver,
  * s'attribuer le fil) décide de ce que le robot ENVERRA à ce client-là — donc
  * la case `sms`, comme écrire soi-même. Voir une fiche prise par un collègue
- * pour ne pas la rappeler ne donne pas la parole sur elle. Classer, c'est la
- * case `category`. Les droits `conversations.control` / `conversations.reply`
- * restent le plafond au-dessus.
+ * pour ne pas la rappeler ne donne pas la parole sur elle. BRANCHER un robot
+ * sur ce client-là est encore autre chose : c'est la case `assistant`. Classer,
+ * c'est la case `category`. Les droits `conversations.control` /
+ * `conversations.reply` / `conversations.assistant` restent le plafond
+ * au-dessus, chacun sur son geste.
  *
  * Quand la fiche est invisible, la réponse est « introuvable » et jamais
  * « interdit » : un refus confirmerait l'existence de ce que le réglage cache.
@@ -254,8 +257,15 @@ export async function cancelQueuedSmsAction(jobId: string): Promise<SmsActionRes
  * campagne savait le faire : un contact qui écrivait de lui-même n'avait jamais
  * de réponse IA, et un humain ne pouvait pas « rendre » un fil à l'assistant.
  *
- * Décider QUI mène la conversation — la machine ou un humain — est le geste de
- * contrôle par excellence : `conversations.control`.
+ * Ce geste a son droit à lui, `conversations.assistant`, et pas celui des
+ * autres boutons du fil. Reprendre la main sur un fil est une décision de
+ * téléphoniste ; décider QUEL robot parle au nom de l'entreprise à ce
+ * client-là est une décision commerciale. On peut vouloir confier la première
+ * sans la seconde — c'est exactement ce que porte le rôle superviseur livré.
+ *
+ * Même partage côté fiche : la case `assistant`, et non `sms`. Pouvoir écrire
+ * soi-même à un client ne donne pas le droit de laisser une machine lui écrire
+ * à sa place, et le contraire est vrai aussi.
  */
 export async function assignAssistantAction(input: {
   conversationId: string;
@@ -263,10 +273,10 @@ export async function assignAssistantAction(input: {
 }): Promise<SmsActionResult> {
   const actor = await currentActor();
   if (!actor) return FORBIDDEN;
-  if (!actor.can("conversations.control")) return FORBIDDEN;
+  if (!actor.can("conversations.assistant")) return FORBIDDEN;
   if (!z.uuid().safeParse(input.conversationId).success) return INVALID;
   if (input.assistantId !== null && !z.uuid().safeParse(input.assistantId).success) return INVALID;
-  const seen = await threadFor(actor, input.conversationId, "sms");
+  const seen = await threadFor(actor, input.conversationId, "assistant");
   if (!seen) return NOT_FOUND;
   const { thread } = seen;
 

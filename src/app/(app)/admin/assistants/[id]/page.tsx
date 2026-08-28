@@ -22,7 +22,12 @@ export default async function AssistantEditorPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ tab?: string }>;
 }) {
-  await requirePerm("admin.assistants");
+  const actor = await requirePerm("admin.assistants");
+  // VOIR n'est pas MODIFIER : la fiche entière reste lisible — configuration,
+  // prompt compilé, essais — mais sans `admin.assistantsEdit` l'éditeur part
+  // en lecture seule. Le serveur tranche, l'écran obéit ; les routes
+  // d'écriture revérifient de leur côté.
+  const canEdit = actor.can("admin.assistantsEdit");
   const { id } = await params;
   const { tab } = await searchParams;
 
@@ -119,7 +124,7 @@ export default async function AssistantEditorPage({
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-4 md:p-6">
-      <AssistantEditor data={data} docs={docsByPath} initialTab={tab} />
+      <AssistantEditor data={data} docs={docsByPath} initialTab={tab} canEdit={canEdit} />
     </div>
   );
 }

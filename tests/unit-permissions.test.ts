@@ -403,9 +403,110 @@ describe("réparation de la configuration", () => {
     expect(role(cfg, "bidule").perms).toEqual({ "clients.edit": true });
   });
 
+  it("une case AJOUTÉE au catalogue arrive réglée comme le rôle livré", () => {
+    // Le cas réel : une configuration enregistrée AVANT que la case existe.
+    // La lire comme fermée serait prudent et faux — l'exploitant n'a rien
+    // fermé, et il verrait un bouton disparaître sans avoir touché à rien.
+    const stored = JSON.parse(JSON.stringify(defaultPermissionsConfig())) as PermissionsConfig;
+    for (const r of stored.roles) {
+      for (const bucket of Object.keys(r.relations)) {
+        delete (r.relations[bucket] as Record<string, boolean>).assistant;
+      }
+    }
+    const repaired = parse(stored);
+    const luc = role(repaired, CALLER_ROLE_ID);
+    expect(grantsFor(repaired, luc, "own").assistant).toBe(true);
+    expect(grantsFor(repaired, luc, `role:${CALLER_ROLE_ID}`).assistant).toBe(false);
+  });
+
+  it("un rôle SUR MESURE, lui, reçoit la case neuve fermée", () => {
+    // Personne ne peut deviner l'intention d'un rôle inventé : on ferme, et
+    // l'écran le montre fermé.
+    const cfg = parse({
+      roles: [
+        { id: "maison", nameFr: "Maison", nameEn: "House", relations: { own: { visible: true } } },
+      ],
+    });
+    expect(grantsFor(cfg, role(cfg, "maison"), "own").assistant).toBe(false);
+  });
+
   it("réparer une configuration déjà saine ne la change pas", () => {
     const once = parse(config());
     const twice = repairConfig(JSON.parse(JSON.stringify(once)));
     expect(twice).toEqual(once);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe("les assistants : lire, écrire, brancher", () => {
+  const cfg = config();
+
+  it("le superviseur LIT les assistants, il ne les réécrit pas", () => {
+    const chef = role(cfg, SUPERVISOR_ROLE_ID);
+    expect(can(chef, "admin.assistants")).toBe(true);
+    expect(can(chef, "admin.assistantsEdit")).toBe(false);
+  });
+
+  it("le téléphoniste n'ouvre pas l'écran des assistants", () => {
+    const luc = role(cfg, CALLER_ROLE_ID);
+    expect(can(luc, "admin.assistants")).toBe(false);
+    expect(can(luc, "admin.assistantsEdit")).toBe(false);
+  });
+
+  it("mais il branche un assistant sur SES fiches, et sur le bassin", () => {
+    const luc = role(cfg, CALLER_ROLE_ID);
+    expect(can(luc, "conversations.assistant")).toBe(true);
+    expect(grantsFor(cfg, luc, "own").assistant).toBe(true);
+    expect(grantsFor(cfg, luc, "unassigned").assistant).toBe(true);
+  });
+
+  it("jamais sur la fiche d'un collègue ni sur celle du patron", () => {
+    const luc = role(cfg, CALLER_ROLE_ID);
+    const marieRole = role(cfg, CALLER_ROLE_ID);
+    const patron = role(cfg, ADMIN_ROLE_ID);
+    expect(grantsFor(cfg, luc, bucketFor(LUC, fiche(MARIE), marieRole)).assistant).toBe(false);
+    expect(grantsFor(cfg, luc, bucketFor(LUC, fiche(PATRON), patron)).assistant).toBe(false);
+  });
+
+  it("l'observateur ne branche rien du tout", () => {
+    const stagiaire = role(cfg, OBSERVER_ROLE_ID);
+    expect(can(stagiaire, "conversations.assistant")).toBe(false);
+    expect(grantsFor(cfg, stagiaire, "own").assistant).toBe(false);
+  });
+
+  it("retirer le droit ferme la case, même ouverte dans la relation", () => {
+    const base = role(cfg, CALLER_ROLE_ID);
+    const sansRobot: Role = {
+      ...base,
+      perms: { ...base.perms, "conversations.assistant": false },
+    };
+    expect(grantsFor(cfg, sansRobot, "own").assistant).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe("les SMS : voir et écrire, séparément", () => {
+  const cfg = config();
+
+  it("le téléphoniste voit les conversations ET peut y répondre", () => {
+    const luc = role(cfg, CALLER_ROLE_ID);
+    expect(can(luc, "conversations.view")).toBe(true);
+    expect(can(luc, "conversations.reply")).toBe(true);
+    expect(can(luc, "clients.sms")).toBe(true);
+  });
+
+  it("l'observateur voit et n'écrit pas", () => {
+    const stagiaire = role(cfg, OBSERVER_ROLE_ID);
+    expect(can(stagiaire, "conversations.view")).toBe(true);
+    expect(can(stagiaire, "conversations.reply")).toBe(false);
+    expect(can(stagiaire, "clients.sms")).toBe(false);
+    expect(grantsFor(cfg, stagiaire, "own").sms).toBe(false);
+  });
+
+  it("écrire à un client se ferme aussi fiche par fiche", () => {
+    const luc = role(cfg, CALLER_ROLE_ID);
+    const marieRole = role(cfg, CALLER_ROLE_ID);
+    expect(grantsFor(cfg, luc, "own").sms).toBe(true);
+    expect(grantsFor(cfg, luc, bucketFor(LUC, fiche(MARIE), marieRole)).sms).toBe(false);
   });
 });

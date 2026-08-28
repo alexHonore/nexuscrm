@@ -9,6 +9,11 @@ import { apiPerm } from "@/lib/permissions/server";
  * N'écrit rien, n'envoie rien, ne réserve rien : c'est un aperçu. Les appels
  * d'outils sont simulés, jamais exécutés — un essai qui bloquerait une vraie
  * plage d'agenda serait un piège.
+ *
+ * Il demande pourtant `admin.assistantsEdit` et non le simple droit de LIRE :
+ * chaque tour appelle un modèle et se paie. Ne rien enregistrer ne rend pas un
+ * geste gratuit, et une boucle d'essais est la façon la plus rapide de brûler
+ * le crédit de l'installation.
  */
 const bodySchema = z.object({
   history: z
@@ -68,7 +73,7 @@ function rateLimited(adminId: string, now = Date.now()): boolean {
 }
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const actor = await apiPerm("admin.assistants");
+  const actor = await apiPerm("admin.assistantsEdit");
   if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;

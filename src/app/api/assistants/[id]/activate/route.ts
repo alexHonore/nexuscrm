@@ -13,7 +13,7 @@ import { apiPerm } from "@/lib/permissions/server";
  * directe ne peut pas contourner la porte.
  */
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const actor = await apiPerm("admin.assistants");
+  const actor = await apiPerm("admin.assistantsEdit");
   if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
