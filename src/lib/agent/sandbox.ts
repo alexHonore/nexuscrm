@@ -19,7 +19,14 @@ import type { LLMMessage, LLMResult } from "@/lib/llm/types";
 import { generateWithChain } from "@/lib/llm/route";
 import { getLlmProvider } from "@/lib/llm-server";
 import { APP_TZ } from "@/components/clients/timezone";
+import {
+  applySegmentBudget,
+  charBudgetFor,
+  trimToSegments,
+  type SegmentBudgetOutcome,
+} from "@/lib/sms/budget";
 import { DEFAULT_QUIET_HOURS } from "@/lib/sms/quiet-hours";
+import { analyzeSms } from "@/lib/sms/segments";
 import { classifyInbound } from "./classify";
 import { contactValue, qualificationText } from "./contact-data";
 import { applyRefusal, requiredFieldsFor, rungNeedsSlots } from "./goal";
@@ -192,6 +199,23 @@ export interface SandboxTurnResult {
   droppedParagraphs: number;
   /** Le texte complet du modèle, avant la coupe — pour voir ce qui est tombé. */
   fullText: string;
+  /**
+   * Ce que le budget de segments a fait au brouillon, ou null s'il n'a rien
+   * fait. L'aperçu doit le DIRE : un message raccourci sans explication se lit
+   * comme un modèle qui écrit mal, et on va régler le ton au lieu du plafond.
+   */
+  segmentBudget: {
+    /** Le plafond en vigueur — null quand aucun n'est posé. */
+    max: number | null;
+    /** Segments facturés pour le brouillon écrit par le modèle. */
+    before: number;
+    /** Segments facturés pour ce qui partirait. */
+    after: number;
+    /** « typography », « ascii », « trim » — dans l'ordre d'application. */
+    applied: string[];
+    /** Le message dépasse ENCORE le plafond. */
+    overBudget: boolean;
+  } | null;
   usage: SandboxUsage | null;
   error: string | null;
 }
@@ -278,6 +302,7 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
     regenerations: 0,
     droppedParagraphs: 0,
     fullText: "",
+    segmentBudget: null,
     usage: tracker.usage,
   };
 
@@ -432,20 +457,27 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
   let llmError: string | null = null;
   let terminatedByTool: "stop" | "handoff" | null = null;
   let bookingFailed = false;
+  const budget = config.approach.segmentBudget;
+  let budgetOutcome: SegmentBudgetOutcome | null = null;
+  let budgetTrimmed = false;
 
   // MÊME boucle qu'en production : une régénération au plus sur un brouillon
   // bloqué, avec la même consigne de correction ; et dans chaque tentative, un
   // aller-retour d'outils au maximum. Sans l'aller-retour, un modèle qui
   // appelle un outil renvoie un texte VIDE là où la production répond.
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  const ATTEMPTS = 2;
+
+  for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
     const correction =
       attempt === 0
         ? ""
-        : `\n\nCONSIGNE DE CORRECTION : ta réponse précédente a été refusée par un garde-fou (${blockingFailures(
-            verdicts,
-          )
-            .map((v) => v.label)
-            .join(" · ")}). Réécris-la en respectant strictement cette règle.`;
+        : blockingFailures(verdicts).length > 0
+          ? `\n\nCONSIGNE DE CORRECTION : ta réponse précédente a été refusée par un garde-fou (${blockingFailures(
+              verdicts,
+            )
+              .map((v) => v.label)
+              .join(" · ")}). Réécris-la en respectant strictement cette règle.`
+          : `\n\nCONSIGNE DE CORRECTION : ta réponse précédente coûtait ${budgetOutcome?.after.segments ?? 0} segments SMS alors que le budget est de ${budget.maxSegments}. Récris le MÊME message en ${charBudgetFor(budget) ?? 0} caractères au maximum : garde la question et l'information utile, enlève les politesses, les redites et les détails.`;
 
     const turnMessages: LLMMessage[] = [...messageArray];
 
@@ -531,6 +563,24 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
     draft = paragraphs[0] ?? "";
     droppedParagraphs = Math.max(0, paragraphs.length - 1);
 
+    // Budget de segments — MÊME étape, MÊME place qu'en production : après la
+    // découpe, avant les garde-fous. Sans elle, l'aperçu montrerait un message
+    // plus long que celui qui part réellement, et un aperçu qui ment sur le
+    // texte envoyé est pire qu'aucun aperçu.
+    const shaped = applySegmentBudget(draft, budget);
+    budgetOutcome = shaped;
+    draft = shaped.body;
+    budgetTrimmed = false;
+    if (
+      shaped.overflow &&
+      budget.onOverflow === "trim" &&
+      budget.maxSegments !== null &&
+      attempt === ATTEMPTS - 1
+    ) {
+      draft = trimToSegments(draft, budget.maxSegments);
+      budgetTrimmed = draft !== shaped.body;
+    }
+
     verdicts = await evaluateAllRules(
       draft,
       rules,
@@ -542,7 +592,8 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
       },
       classifierCall,
     );
-    if (blockingFailures(verdicts).length === 0) break;
+    const rewriteForBudget = shaped.overflow && budget.onOverflow !== "send";
+    if (blockingFailures(verdicts).length === 0 && !rewriteForBudget) break;
     regenerations = attempt + 1;
   }
 
@@ -561,6 +612,18 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
     regenerations,
     droppedParagraphs,
     fullText,
+    segmentBudget:
+      budgetOutcome === null ||
+      (budgetOutcome.applied.length === 0 && !budgetTrimmed && !budgetOutcome.overflow)
+        ? null
+        : {
+            max: budget.maxSegments,
+            before: budgetOutcome.before.segments,
+            after: analyzeSms(draft).segments,
+            applied: [...budgetOutcome.applied, ...(budgetTrimmed ? ["trim"] : [])],
+            overBudget:
+              budget.maxSegments !== null && analyzeSms(draft).segments > budget.maxSegments,
+          },
     usage: tracker.usage,
   };
 

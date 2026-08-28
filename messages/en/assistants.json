@@ -455,7 +455,12 @@
       "hoursTo": "To (h)",
       "hoursNote": "0–23 for the start, 1–24 for the end. The end must be after the start.",
       "ceilingBelowTarget": "The ceiling is below the target: it will be raised to the target. A ceiling under the target means nothing.",
-      "hoursInvalid": "Each window must end after it starts."
+      "hoursInvalid": "Each window must end after it starts.",
+      "sectionCost": "Sending cost",
+      "sectionCostHint": "An SMS is billed per segment, not per message: 160 characters per segment while everything fits inside the GSM table, 70 as soon as one accent falls outside it. This is where you arbitrate between saving segments and letting the assistant write whole messages.",
+      "costNoCap": "No cap: a {chars}-character message costs up to {accented} segments in accented French, {plain} without accents.",
+      "costBudget": "Effective budget: {chars} characters per message, for {segments} billed segment(s).",
+      "costCharsWin": "The maximum length ({chars} characters) is already stricter than this cap ({capacity}): it is what decides, and the cap changes nothing."
     },
     "guardrailsSection": {
       "gate": "Activation gate"

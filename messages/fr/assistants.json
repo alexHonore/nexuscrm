@@ -455,7 +455,12 @@
       "hoursTo": "À (h)",
       "hoursNote": "0 à 23 pour le début, 1 à 24 pour la fin. La fin doit suivre le début.",
       "ceilingBelowTarget": "Le plafond est sous la cible : il sera relevé à la cible. Un plafond en dessous de la cible ne veut rien dire.",
-      "hoursInvalid": "Chaque fenêtre doit finir après son début."
+      "hoursInvalid": "Chaque fenêtre doit finir après son début.",
+      "sectionCost": "Le coût des envois",
+      "sectionCostHint": "Un SMS est facturé au segment, pas au message : 160 caractères par segment tant que tout tient dans la table GSM, 70 dès qu'un accent en sort. C'est ici qu'on arbitre entre économiser des segments et laisser l'assistant écrire des messages complets.",
+      "costNoCap": "Aucun plafond : un message de {chars} caractères coûte jusqu'à {accented} segments en français accentué, {plain} sans accents.",
+      "costBudget": "Budget effectif : {chars} caractères par message, pour {segments} segment(s) facturé(s).",
+      "costCharsWin": "La longueur maximale ({chars} caractères) est déjà plus stricte que ce plafond ({capacity}) : c'est elle qui décide, le plafond ne change rien."
     },
     "guardrailsSection": {
       "gate": "Porte d'activation"

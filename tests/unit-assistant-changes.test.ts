@@ -114,6 +114,25 @@ describe("diffConfig", () => {
     expect(d.needsRecompile).toBe(true);
   });
 
+  it("le budget de segments s'applique tout de suite ET attend la recompilation", () => {
+    // Les deux moitiés sont vraies en même temps, et il faut le dire. Le
+    // moteur relit le budget à chaque tour : l'économie de caractères et la
+    // coupe s'appliquent au message suivant. Mais le compilateur en tire la
+    // limite de longueur ANNONCÉE à l'assistant — tant qu'on n'a pas
+    // recompilé, il croit encore avoir 300 caractères.
+    const after = base();
+    after.approach.segmentBudget.maxSegments = 2;
+    after.approach.segmentBudget.economy = "typography";
+    const d = diffConfig(base(), after);
+    expect(d.changed).toEqual([
+      "approach.segmentBudget.economy",
+      "approach.segmentBudget.maxSegments",
+    ]);
+    expect(d.immediate).toEqual(d.changed);
+    expect(d.pending).toEqual(d.changed);
+    expect(d.needsRecompile).toBe(true);
+  });
+
   it("§ basculer stricte → souple attend la recompilation, et le DIT", () => {
     // Le mode ne vit que dans le prompt compilé. S'il tombait dans aucune des
     // deux listes, la fiche annoncerait « 0 réglage en attente » au-dessus

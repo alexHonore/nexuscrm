@@ -180,7 +180,14 @@ describe("fidélité du bac à sable", () => {
   });
 
   it("coupe au premier paragraphe et régénère UNE fois sur un refus, comme la production", () => {
-    expect(source).toContain("attempt < 2");
+    // Le nombre de tentatives est NOMMÉ des deux côtés : la coupe du budget de
+    // segments a besoin de savoir qu'elle est au dernier passage, et une borne
+    // écrite en dur dans un seul des deux fichiers les ferait diverger sans
+    // que rien ne le voie.
+    for (const text of [source, runtime]) {
+      expect(text).toContain("ATTEMPTS = 2");
+      expect(text).toContain("attempt < ATTEMPTS");
+    }
     expect(source).toContain("CONSIGNE DE CORRECTION");
     expect(source).toContain(".split(/\\n{2,}/)");
     expect(source).toContain("droppedParagraphs");
@@ -188,6 +195,32 @@ describe("fidélité du bac à sable", () => {
     const prodCorrection = /CONSIGNE DE CORRECTION : ta réponse précédente[^`]*`/.exec(runtime)?.[0];
     expect(prodCorrection).toBeTruthy();
     expect(source).toContain(prodCorrection as string);
+  });
+
+  it("applique le budget de segments au MÊME endroit que la production", () => {
+    // Un aperçu qui montre un message plus long que celui qui part est pire
+    // qu'aucun aperçu : l'admin règle le ton d'un texte qui n'existe pas. La
+    // mise au budget est donc la même fonction, appelée après la découpe en
+    // paragraphes et AVANT les garde-fous — qui doivent juger ce qui part.
+    for (const text of [source, runtime]) {
+      expect(text).toContain("applySegmentBudget(draft, budget)");
+      expect(text).toContain("trimToSegments(draft, budget.maxSegments)");
+      const shape = codeOnly(text);
+      const shaped = shape.indexOf("applySegmentBudget(draft, budget)");
+      // L'APPEL, pas la définition : `evaluateAllRules` est déclarée plus haut
+      // dans les deux fichiers, et comparer à sa déclaration ne dirait rien.
+      const judged = shape.indexOf("verdicts = await evaluateAllRules(");
+      expect(shaped).toBeGreaterThan(-1);
+      expect(judged).toBeGreaterThan(-1);
+      expect(shaped).toBeLessThan(judged);
+    }
+    // La coupe est le DERNIER recours : jamais tant qu'une réécriture reste
+    // possible, et jamais quand l'administrateur a choisi de laisser passer.
+    for (const text of [source, runtime]) {
+      expect(text).toContain("attempt === ATTEMPTS - 1");
+      expect(text).toContain('budget.onOverflow === "trim"');
+      expect(text).toContain('shaped.overflow && budget.onOverflow !== "send"');
+    }
   });
 
   it("utilise la MÊME consigne d'ouverture que la production", () => {

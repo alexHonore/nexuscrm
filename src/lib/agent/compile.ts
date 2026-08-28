@@ -24,6 +24,7 @@ import {
   type LayerId,
   type QualificationField,
 } from "@/lib/assistants/schema";
+import { charBudgetFor } from "@/lib/sms/budget";
 
 // ── Entrées ──────────────────────────────────────────────────────────────────
 
@@ -367,7 +368,29 @@ function buildApproachLayer(config: AssistantConfig): string {
       `À ${ceiling} questions, c'est fini : tu ne poses plus aucune question de qualification et tu proposes avec ce que tu as. Tu continues de répondre à ce qu'elle demande.`,
     );
   }
-  lines.push(`Jamais plus de ${approach.maxChars} caractères.`);
+  // UNE limite de longueur, jamais deux.
+  //
+  // `maxChars` compte des caractères, `segmentBudget` compte des segments
+  // facturés, et l'un ne se convertit dans l'autre qu'en connaissant
+  // l'encodage — 2 segments valent 134 caractères en français accentué et 306
+  // sans accents. Écrire les deux nombres dans la même consigne, c'est la
+  // contradiction déjà rencontrée avec la cible et le plafond de questions :
+  // le modèle écarte l'instruction entière. On tranche donc ICI, sur la plus
+  // stricte des deux, comme le `Math.max` du bloc de qualification.
+  //
+  // Sans plafond de segments — c'est-à-dire pour toutes les fiches qui n'ont
+  // jamais touché à ce réglage — la phrase est reproduite à l'IDENTIQUE : le
+  // prompt compilé dort sur la fiche sans empreinte, et un octet qui bouge ici
+  // désynchroniserait toute la flotte en silence.
+  const charBudget = charBudgetFor(approach.segmentBudget);
+  if (charBudget === null) {
+    lines.push(`Jamais plus de ${approach.maxChars} caractères.`);
+  } else {
+    const segments = approach.segmentBudget.maxSegments ?? 1;
+    lines.push(
+      `Jamais plus de ${Math.min(approach.maxChars, charBudget)} caractères : c'est ce qui tient dans ${segments} segment${segments > 1 ? "s" : ""} SMS, et chaque segment de plus est un envoi facturé de plus. Va droit au but plutôt que de couper une phrase en deux.`,
+    );
+  }
   lines.push(`Chaleur : ${styleLevelPhrase(approach.warmth)}.`);
   lines.push(`Proactivité : ${styleLevelPhrase(approach.proactivity)}.`);
   lines.push(

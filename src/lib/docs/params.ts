@@ -461,9 +461,92 @@ const approach: ParamDoc[] = [
     effectFr:
       "Consigne en L3, et une règle de garde-fou peut la faire respecter à l'envoi.",
     pitfallsFr:
-      "Un maximum élevé produit des messages à deux ou trois segments : coût multiplié et lecture pénible sur un téléphone.",
-    related: ["guardrails.max_chars", "goal.primary.slotOfferCount"],
+      "Un maximum élevé produit des messages à deux ou trois segments : coût multiplié et lecture pénible sur un téléphone. Une limite en caractères ne tient PAS un budget : 300 caractères valent deux segments sans accents et cinq avec.",
+    related: [
+      "guardrails.max_chars",
+      "goal.primary.slotOfferCount",
+      "approach.segmentBudget.maxSegments",
+    ],
     example: 300,
+  }),
+  doc({
+    path: "approach.segmentBudget.maxSegments",
+    section: "approach",
+    labelFr: "Plafond de segments",
+    type: "enum",
+    required: false,
+    defaultValue: null,
+    allowed: [
+      { value: null, labelFr: "Aucun plafond — la longueur seule décide" },
+      { value: 1, labelFr: "1 segment — 70 caractères accentués, 160 sans accents" },
+      { value: 2, labelFr: "2 segments — 134 caractères accentués, 306 sans accents" },
+      { value: 3, labelFr: "3 segments — 201 caractères accentués, 459 sans accents" },
+      { value: 4, labelFr: "4 segments — 268 caractères accentués, 612 sans accents" },
+    ],
+    whatFr:
+      "Le nombre de segments SMS qu'un message de cet assistant a le droit de coûter. Le segment est l'unité que le transporteur facture, pas le message.",
+    whyFr:
+      "Un SMS coûte 160 caractères par segment tant que tout tient dans la table GSM, et 70 dès qu'un seul caractère en sort — « ça », « peut-être », « français » suffisent. Un message français de 300 caractères est donc facturé cinq fois, pas une. C'est le cadran qui arbitre entre économiser des segments et laisser l'assistant écrire des messages complets.",
+    effectFr:
+      "Compilé en L3 : la consigne de longueur devient le nombre de caractères qui tient dans ce plafond, et la plus stricte des deux limites l'emporte. Relu à chaque tour par le moteur, qui mesure le brouillon avec le même calcul que l'expéditeur.",
+    pitfallsFr:
+      "Un plafond serré multiplie les réécritures : chacune est un appel de modèle facturé, et une économie de texto peut coûter plus cher en IA qu'elle ne rapporte. Un segment est très court pour une proposition de rendez-vous — deux est le premier réglage raisonnable.",
+    related: [
+      "approach.maxChars",
+      "approach.segmentBudget.onOverflow",
+      "approach.segmentBudget.economy",
+    ],
+    example: 2,
+  }),
+  doc({
+    path: "approach.segmentBudget.onOverflow",
+    section: "approach",
+    labelFr: "Quand le message dépasse",
+    type: "enum",
+    required: true,
+    defaultValue: "rewrite",
+    allowed: [
+      { value: "send", labelFr: "Laisser passer — le plafond n'est qu'une consigne" },
+      { value: "rewrite", labelFr: "Faire réécrire — une seule fois, puis laisser passer" },
+      { value: "trim", labelFr: "Faire réécrire, puis couper — la facture est garantie" },
+    ],
+    whatFr:
+      "Ce que le moteur fait d'un brouillon qui dépasse le plafond. Sans plafond, ce réglage ne s'applique jamais.",
+    whyFr:
+      "Il y a deux façons honnêtes de tenir un budget : demander un message plus court, ou en amputer un. La première coûte un appel de modèle, la seconde coûte une phrase. Le choix appartient à l'exploitant, pas au code.",
+    effectFr:
+      "« Laisser passer » journalise le dépassement et n'y touche pas. « Faire réécrire » réutilise la régénération unique des garde-fous, avec une consigne qui donne le nombre de caractères visé. « Couper » n'intervient qu'au dernier passage, sur une fin de phrase ou de mot, jamais au milieu d'un mot.",
+    pitfallsFr:
+      "« Couper » retire la fin du message — c'est-à-dire, presque toujours, la question. Un fil qui n'obtient plus de réponse après ce réglage vient de là. « Laisser passer » ne fait tenir aucun budget : c'est une mesure, pas un plafond.",
+    related: ["approach.segmentBudget.maxSegments", "approach.maxChars"],
+    example: "rewrite",
+  }),
+  doc({
+    path: "approach.segmentBudget.economy",
+    section: "approach",
+    labelFr: "Économie de caractères",
+    type: "enum",
+    required: true,
+    defaultValue: "off",
+    allowed: [
+      { value: "off", labelFr: "Aucune — le texte part tel que le modèle l'écrit" },
+      { value: "typography", labelFr: "Ponctuation droite — sans perte de sens" },
+      { value: "ascii", labelFr: "Sans accents — « ça » devient « ca »" },
+    ],
+    whatFr:
+      "Jusqu'où le moteur a le droit de retoucher les caractères avant l'envoi, pour faire tenir le même texte dans moins de segments.",
+    whyFr:
+      "C'est le levier le plus rentable et le seul qui ne retire rien au propos : une apostrophe courbe, un tiret cadratin ou des points de suspension font basculer tout le message de 160 à 70 caractères par segment. Les retirer ne change pas une phrase, mais peut diviser la facture par deux.",
+    effectFr:
+      "Appliqué au brouillon avant les garde-fous, pour qu'ils jugent le texte qui part vraiment. La retouche n'est CONSERVÉE que si elle fait réellement tomber un segment : un texte court qui tenait déjà garde ses accents.",
+    pitfallsFr:
+      "« Sans accents » abîme l'orthographe et se voit : pour un courtier, c'est une décision de marque, pas un réglage technique. Si le service Twilio a l'encodage intelligent activé, la ponctuation est déjà corrigée chez le transporteur — le réglage reste utile, il rend seulement le compte enregistré ici conforme à la facture.",
+    related: [
+      "approach.segmentBudget.maxSegments",
+      "approach.emoji",
+      "approach.segmentBudget.onOverflow",
+    ],
+    example: "typography",
   }),
   doc({
     path: "approach.proactivity",

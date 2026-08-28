@@ -45,6 +45,13 @@ const PROMPT_PREFIXES = [
   "approach.questionCeiling",
   "approach.persistence",
   "approach.maxChars",
+  // Le budget de segments est le SEUL réglage d'approche qui vit des deux
+  // côtés : le compilateur en tire la limite de longueur annoncée à
+  // l'assistant (donc en attente de recompilation), et le moteur le relit à
+  // chaque tour pour économiser les caractères, réclamer une réécriture ou
+  // couper (donc immédiat). Le dire une seule fois mentirait dans un sens ou
+  // dans l'autre — il figure aussi dans RUNTIME_LIVE_PREFIXES.
+  "approach.segmentBudget",
   // L2 : type d'objectif, durée, champs requis, chaîne de replis.
   "goal",
 ];
@@ -68,8 +75,11 @@ const RUNTIME_ONLY_PREFIXES = [
  * « goal » y figure AUSSI : le cran courant, les créneaux et les champs
  * requis viennent de la config à chaque tour. Mais L2 en parle : il est donc
  * à la fois immédiat (exécution) et en attente (texte du prompt).
+ * « approach.segmentBudget » est dans le même cas : l'économie de caractères
+ * et la coupe s'appliquent au message suivant, la limite ANNONCÉE à
+ * l'assistant attend la recompilation.
  */
-const RUNTIME_LIVE_PREFIXES = [...RUNTIME_ONLY_PREFIXES, "goal"];
+const RUNTIME_LIVE_PREFIXES = [...RUNTIME_ONLY_PREFIXES, "goal", "approach.segmentBudget"];
 
 export interface ChangeSummary {
   /** Chemins modifiés, à plat. */

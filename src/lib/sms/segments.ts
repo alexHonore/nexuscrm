@@ -32,6 +32,49 @@ const UCS2_SINGLE = 70;
 const UCS2_MULTI = 67;
 
 /**
+ * Ce caractère tient-il dans la table GSM 03.38 ?
+ *
+ * Exporté pour que le module de budget (`./budget`) puisse décider quoi
+ * remplacer sans se recopier une table : deux copies de GSM 03.38 finiraient
+ * par diverger, et l'une des deux annoncerait un encodage que l'autre ne
+ * produit pas.
+ */
+export function isGsm7Char(char: string): boolean {
+  return GSM_BASIC.has(char) || GSM_EXTENSION.has(char);
+}
+
+/**
+ * Combien d'unités tiennent dans `segments` segments de cet encodage.
+ *
+ * C'est la fonction réciproque d'`analyzeSms` : elle répond « un message de
+ * deux segments, c'est combien de caractères ? », question que pose autant le
+ * compilateur de prompt (pour l'écrire à l'assistant) que l'écran de réglage
+ * (pour l'annoncer à l'administrateur). Un seul segment est plus généreux que
+ * les suivants — l'en-tête UDH n'existe que sur un message découpé.
+ */
+export function capacityFor(encoding: SmsEncoding, segments: number): number {
+  const whole = Math.max(1, Math.floor(segments));
+  if (encoding === "GSM-7") return whole === 1 ? GSM7_SINGLE : GSM7_MULTI * whole;
+  return whole === 1 ? UCS2_SINGLE : UCS2_MULTI * whole;
+}
+
+/**
+ * Combien de segments coûterait un message de cette longueur.
+ *
+ * L'autre sens de `capacityFor`, pour les écrans qui n'ont pas de texte sous
+ * la main mais une limite en caractères : « 300 caractères, c'est combien de
+ * segments ? » — cinq en français accentué, deux sans accents. Dérivée de la
+ * capacité et non d'une division maison : une seule table GSM 03.38 dans ce
+ * dépôt, et le chiffre affiché est celui qui sera facturé.
+ */
+export function segmentsForChars(chars: number, encoding: SmsEncoding): number {
+  if (chars <= 0) return 0;
+  let segments = 1;
+  while (capacityFor(encoding, segments) < chars) segments += 1;
+  return segments;
+}
+
+/**
  * Substituts ASCII sûrs pour les caractères typographiques courants qui
  * feraient basculer le message en UCS-2. Les caractères sans équivalent fidèle
  * (lettres accentuées hors GSM, émojis…) n'apparaissent pas ici : les proposer

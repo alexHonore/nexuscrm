@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_SEGMENT_BUDGET, segmentBudgetSettingsSchema } from "@/lib/sms/budget";
 import { DEFAULT_QUIET_HOURS, quietHoursSettingsSchema } from "@/lib/sms/quiet-hours";
 
 /**
@@ -314,6 +315,29 @@ export const approachSchema = z.object({
   questionCeiling: z.number().int().min(1).max(12).default(5),
   /** Longueur maximale d'un SMS sortant (caractères). */
   maxChars: z.number().int().min(120).max(480).default(300),
+  /**
+   * Ce qu'un message a le droit de COÛTER, en segments facturés.
+   *
+   * `maxChars` dit une longueur ; la facture, elle, se compte en segments, et
+   * les deux ne se convertissent pas l'une dans l'autre sans connaître
+   * l'encodage : 300 caractères font deux segments en GSM-7 et cinq dès qu'un
+   * « ç » ou un « ê » traîne dedans. Une limite en caractères ne peut donc pas
+   * tenir un budget — d'où ce réglage, décrit au complet dans
+   * `src/lib/sms/budget.ts`.
+   *
+   * Le défaut ne peut pas être autre chose qu'un plafond ABSENT : `approach`
+   * est une colonne jsonb dont aucune fiche existante ne porte cette clé, et
+   * `assistantRowToConfig` la relit à chaque lecture. Un plafond par défaut
+   * raccourcirait TOUTE la flotte à sa prochaine recompilation, sans que
+   * personne ne l'ait demandé.
+   *
+   * Volontairement PAS croisé avec `maxChars` par un `.superRefine` : le
+   * schéma sert aussi à RELIRE ce qui est déjà en base, et un refus croisé
+   * rendrait illisible une fiche que plus personne ne pourrait alors corriger.
+   * Le compilateur tranche (il retient la plus stricte des deux limites) et
+   * l'éditeur le signale.
+   */
+  segmentBudget: segmentBudgetSettingsSchema.default(DEFAULT_SEGMENT_BUDGET),
   proactivity: z.number().int().min(1).max(5).default(3),
   warmth: z.number().int().min(1).max(5).default(3),
   emoji: z.enum(["none", "rare", "moderate", "lots"]).default("none"),

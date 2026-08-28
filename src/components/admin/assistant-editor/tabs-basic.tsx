@@ -43,6 +43,8 @@ import {
 } from "@/lib/assistants/schema";
 import { Label } from "@/components/ui/label";
 import { signatureFor } from "@/lib/agent/compile";
+import type { OverflowPolicy, TextEconomy } from "@/lib/sms/budget";
+import { capacityFor, segmentsForChars } from "@/lib/sms/segments";
 import { cn } from "@/lib/utils";
 import {
   EmptyRow,
@@ -162,6 +164,50 @@ function EnumField({
   );
 }
 
+/**
+ * Un choix dont « rien » est une valeur.
+ *
+ * `EnumField` écarte les valeurs nulles du registre, et c'est juste pour la
+ * plupart des paramètres : `null` y veut dire « non renseigné ». Le plafond de
+ * segments est l'exception — son absence EST un réglage, celui qui laisse la
+ * longueur seule décider. L'encodage passe par `String(value)`, exactement la
+ * clé sous laquelle le registre range ses libellés (« null », « 1 », « 2 »…) :
+ * une seconde convention ici ferait un menu aux libellés vides.
+ */
+function NullableNumberField({
+  path,
+  value,
+  onChange,
+}: {
+  path: string;
+  value: number | null;
+  onChange: (v: number | null) => void;
+}) {
+  const doc = useParamDoc(path);
+  const options = doc?.allowed ?? [];
+  return (
+    <div className="space-y-1.5">
+      <FieldLabel path={path} />
+      <Select
+        items={options.map((o) => ({ value: String(o.value), label: o.label }))}
+        value={String(value)}
+        onValueChange={(v) => onChange(String(v) === "null" ? null : Number(v))}
+      >
+        <SelectTrigger className="min-h-11 w-full md:min-h-9">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((o) => (
+            <SelectItem key={String(o.value)} value={String(o.value)}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 function NumberField({
   path,
   value,
@@ -196,6 +242,53 @@ function NumberField({
 /** Aperçu de la signature réellement ajoutée aux messages. */
 function signaturePreview(config: TabProps["config"]): string | null {
   return signatureFor(config.identity);
+}
+
+/**
+ * Ce que les deux limites donnent VRAIMENT, en caractères et en segments.
+ *
+ * Sans ce calcul, le réglage se pilote à l'aveugle : « 2 segments » ne dit
+ * rien tant qu'on n'a pas écrit que ça fait 134 caractères en français
+ * accentué et 306 sans accents. Et surtout, il révèle le cas où le plafond ne
+ * sert à rien — une longueur maximale déjà plus stricte que lui, auquel cas
+ * c'est elle qui décide et le plafond est décoratif.
+ *
+ * Les nombres viennent de `capacityFor`/`segmentsForChars` : la même table
+ * GSM 03.38 que l'expéditeur, jamais une division maison.
+ */
+function SegmentBudgetNote({ config }: { config: TabProps["config"] }) {
+  const t = useTranslations("assistants");
+  const { maxChars, segmentBudget } = config.approach;
+  const encoding = segmentBudget.economy === "ascii" ? "GSM-7" : "UCS-2";
+
+  if (segmentBudget.maxSegments === null) {
+    return (
+      <p className="mt-3 text-xs text-muted-foreground">
+        {t("editor.approach.costNoCap", {
+          chars: maxChars,
+          accented: segmentsForChars(maxChars, "UCS-2"),
+          plain: segmentsForChars(maxChars, "GSM-7"),
+        })}
+      </p>
+    );
+  }
+
+  const capacity = capacityFor(encoding, segmentBudget.maxSegments);
+  return (
+    <div className="mt-3 space-y-1">
+      <p className="text-xs text-muted-foreground">
+        {t("editor.approach.costBudget", {
+          chars: Math.min(maxChars, capacity),
+          segments: segmentBudget.maxSegments,
+        })}
+      </p>
+      {maxChars < capacity ? (
+        <p className="text-xs text-destructive">
+          {t("editor.approach.costCharsWin", { chars: maxChars, capacity })}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 // ── Identité ─────────────────────────────────────────────────────────────────
@@ -1020,6 +1113,52 @@ export function ApproachTab({ config, update }: TabProps) {
             {t("editor.approach.ceilingBelowTarget")}
           </p>
         ) : null}
+      </Panel>
+
+      {/* Le coût, à part du rythme et de la longueur.
+          Un plafond de SEGMENTS ne se lit pas comme une longueur : c'est la
+          facture du transporteur, pas le confort de lecture. Les mêler dans la
+          même carte laissait croire que « longueur maximale » tenait déjà le
+          budget — elle ne le tient pas, un accent suffit à la tripler. */}
+      <Panel
+        look={look}
+        title={t("editor.approach.sectionCost")}
+        description={t("editor.approach.sectionCostHint")}
+      >
+        <Fields>
+          <NullableNumberField
+            path="approach.segmentBudget.maxSegments"
+            value={config.approach.segmentBudget.maxSegments}
+            onChange={(v) => update((d) => void (d.approach.segmentBudget.maxSegments = v))}
+          />
+          <EnumField
+            path="approach.segmentBudget.economy"
+            value={config.approach.segmentBudget.economy}
+            onChange={(v) =>
+              update(
+                (d) =>
+                  void (d.approach.segmentBudget.economy = v as TextEconomy),
+              )
+            }
+          />
+          {/* La conduite en cas de dépassement n'existe QUE s'il y a un
+              plafond à dépasser. Un menu inerte ferait croire à un réglage
+              qui ne fait rien — le même piège que le plafond de questions en
+              mode stricte. */}
+          {config.approach.segmentBudget.maxSegments !== null ? (
+            <EnumField
+              path="approach.segmentBudget.onOverflow"
+              value={config.approach.segmentBudget.onOverflow}
+              onChange={(v) =>
+                update(
+                  (d) =>
+                    void (d.approach.segmentBudget.onOverflow = v as OverflowPolicy),
+                )
+              }
+            />
+          ) : null}
+        </Fields>
+        <SegmentBudgetNote config={config} />
       </Panel>
 
       {/* Heures de travail — propre à CET assistant. Le garde-fou contre un

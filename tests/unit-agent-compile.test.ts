@@ -543,6 +543,51 @@ describe("compileAssistantPrompt — objectif et approche, révision 2026-08-22"
     );
   });
 
+  it("§ L3 : sans plafond de segments, la phrase de longueur est celle d'avant", () => {
+    // Même protection de cache que ci-dessus, sur la ligne que le budget de
+    // segments vient partager. AUCUNE fiche existante ne porte ce réglage :
+    // leur prompt compilé doit rester identique à l'octet près, sinon toute la
+    // flotte se désynchronise pour un réglage que personne n'a touché.
+    const l3 = compileAssistantPrompt(buildConfig(), core, packs, rules).layers.find(
+      (l) => l.id === "L3",
+    )!.text;
+
+    expect(l3.split("\n")).toContain("Jamais plus de 300 caractères.");
+  });
+
+  it("§ L3 : un plafond de segments remplace la longueur par UN seul nombre", () => {
+    // Deux nombres qui se contredisent dans la même consigne la font écarter
+    // en entier — le piège déjà refermé pour la cible et le plafond de
+    // questions. Le compilateur tranche donc sur la plus stricte des deux
+    // limites : 2 segments valent 134 caractères en français accentué, moins
+    // que les 300 de `maxChars`.
+    const l3 = compileAssistantPrompt(
+      buildConfig({ approach: { segmentBudget: { maxSegments: 2, onOverflow: "rewrite", economy: "off" } } }),
+      core,
+      packs,
+      rules,
+    ).layers.find((l) => l.id === "L3")!.text;
+
+    expect(l3).not.toContain("Jamais plus de 300 caractères.");
+    expect(l3.split("\n")).toContain(
+      "Jamais plus de 134 caractères : c'est ce qui tient dans 2 segments SMS, et chaque segment de plus est un envoi facturé de plus. Va droit au but plutôt que de couper une phrase en deux.",
+    );
+  });
+
+  it("§ L3 : sans accents, le même plafond achète deux fois plus de caractères", () => {
+    // C'est tout l'arbitrage du réglage, et il doit se voir dans le prompt :
+    // le même budget de 2 segments vaut 134 caractères accentués ou 306 sans.
+    // Ici, `maxChars` (300) redevient la limite la plus stricte.
+    const l3 = compileAssistantPrompt(
+      buildConfig({ approach: { segmentBudget: { maxSegments: 2, onOverflow: "rewrite", economy: "ascii" } } }),
+      core,
+      packs,
+      rules,
+    ).layers.find((l) => l.id === "L3")!.text;
+
+    expect(l3).toContain("Jamais plus de 300 caractères : c'est ce qui tient dans 2 segments SMS");
+  });
+
   it("§ L3 : le mode SOUPLE remplace le mur par une cible et un plafond", () => {
     const l3 = compileAssistantPrompt(
       buildConfig({ approach: { qualificationMode: "flexible", questionBudget: 3, questionCeiling: 6 } }),

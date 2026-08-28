@@ -42,7 +42,14 @@ import type { LLMMessage } from "@/lib/llm/types";
 import type { GenerateInput, LLMResult, ProviderId, ToolCall } from "@/lib/llm/types";
 import { suppressPhone } from "@/lib/sms-server";
 import { notifyHumans } from "@/lib/sms-server/notify";
+import {
+  applySegmentBudget,
+  charBudgetFor,
+  trimToSegments,
+  type SegmentBudgetOutcome,
+} from "@/lib/sms/budget";
 import { detectOptOut } from "@/lib/sms/optout";
+import { analyzeSms } from "@/lib/sms/segments";
 import { classifyInbound, type Classification } from "./classify";
 import { contactValue, qualificationText } from "./contact-data";
 import { CLIENT_COMMENTS_MAX, formatClientComments, formatClientContext } from "./client-context";
@@ -1414,6 +1421,17 @@ export async function runTurn(
   /** Le cran qui a servi, s'il a fallu descendre la chaîne — null sinon. */
   const chainUse: { fallbackRung: ModelRef | null } = { fallbackRung: null };
   let extraParagraphs = 0;
+  /** Le plafond de coût de CET assistant — relu à chaque tour, jamais figé au prompt. */
+  const budget = config.approach.segmentBudget;
+  /**
+   * Ce que le budget a fait au brouillon de la DERNIÈRE tentative.
+   *
+   * Remis à jour à chaque passage : seul le brouillon qui part compte, et un
+   * dépassement corrigé par la réécriture ne doit pas rester dans le journal
+   * comme s'il avait été envoyé.
+   */
+  let budgetOutcome: SegmentBudgetOutcome | null = null;
+  let budgetTrimmed = false;
   const intents = [
     ...(classification.wantsHuman ? ["handoff"] : []),
     ...(classification.unintelligible ? ["unintelligible"] : []),
@@ -1443,15 +1461,25 @@ export async function runTurn(
   /** Refus successifs — journalises meme quand la regeneration finit par passer. */
   const blockedAttempts: string[][] = [];
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  // Deux tentatives : la première écrit, la seconde corrige. Nommé parce que la
+  // coupe du budget doit savoir qu'elle est au DERNIER passage — après elle,
+  // plus personne ne réécrira.
+  const ATTEMPTS = 2;
+
+  for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
+    // Un garde-fou refusé passe AVANT un dépassement de budget : c'est la
+    // faute la plus grave, et le budget se rattrape tout seul au passage
+    // suivant (économie, puis coupe si l'administrateur l'a demandée).
     const correction =
       attempt === 0
         ? ""
-        : `\n\nCONSIGNE DE CORRECTION : ta réponse précédente a été refusée par un garde-fou (${blockingFailures(
-            verdicts,
-          )
-            .map((v) => v.label)
-            .join(" · ")}). Réécris-la en respectant strictement cette règle.`;
+        : blockingFailures(verdicts).length > 0
+          ? `\n\nCONSIGNE DE CORRECTION : ta réponse précédente a été refusée par un garde-fou (${blockingFailures(
+              verdicts,
+            )
+              .map((v) => v.label)
+              .join(" · ")}). Réécris-la en respectant strictement cette règle.`
+          : `\n\nCONSIGNE DE CORRECTION : ta réponse précédente coûtait ${budgetOutcome?.after.segments ?? 0} segments SMS alors que le budget est de ${budget.maxSegments}. Récris le MÊME message en ${charBudgetFor(budget) ?? 0} caractères au maximum : garde la question et l'information utile, enlève les politesses, les redites et les détails.`;
 
     const turnMessages: LLMMessage[] = [...messageArray];
 
@@ -1546,6 +1574,30 @@ export async function runTurn(
     draft = paragraphs[0] ?? "";
     extraParagraphs = Math.max(0, paragraphs.length - 1);
 
+    // ── Budget de segments ────────────────────────────────────────────────
+    // ICI et nulle part ailleurs : après la découpe en paragraphes, AVANT les
+    // garde-fous. Les règles doivent juger le texte qui PART — sinon un tour
+    // refusé rapporterait un verdict sur un texte qui n'a jamais existé, et la
+    // longueur mesurée par « max_chars » ne serait pas celle du message
+    // facturé. Le bac à sable applique la même étape au même endroit.
+    const shaped = applySegmentBudget(draft, budget);
+    budgetOutcome = shaped;
+    draft = shaped.body;
+    budgetTrimmed = false;
+    // La coupe est le dernier recours et ne se décide qu'au dernier passage :
+    // tant qu'il reste une tentative, mieux vaut demander au modèle un message
+    // plus court qu'en amputer un. Elle a lieu AVANT les garde-fous pour la
+    // même raison que l'économie ci-dessus.
+    if (
+      shaped.overflow &&
+      budget.onOverflow === "trim" &&
+      budget.maxSegments !== null &&
+      attempt === ATTEMPTS - 1
+    ) {
+      draft = trimToSegments(draft, budget.maxSegments);
+      budgetTrimmed = draft !== shaped.body;
+    }
+
     verdicts = await evaluateAllRules(
       draft,
       rules,
@@ -1558,8 +1610,15 @@ export async function runTurn(
       },
       classifierCall,
     );
-    if (blockingFailures(verdicts).length === 0) break;
-    blockedAttempts.push(blockingFailures(verdicts).map((v) => v.label));
+    // Une réécriture se demande pour DEUX raisons : un garde-fou refusé, ou un
+    // budget dépassé quand l'administrateur a choisi de faire raccourcir. Avec
+    // « send », le dépassement se journalise et le message part quand même —
+    // c'est le bout « messages complets » du cadran.
+    const rewriteForBudget = shaped.overflow && budget.onOverflow !== "send";
+    if (blockingFailures(verdicts).length === 0 && !rewriteForBudget) break;
+    if (blockingFailures(verdicts).length > 0) {
+      blockedAttempts.push(blockingFailures(verdicts).map((v) => v.label));
+    }
     regenerations = attempt + 1;
   }
 
@@ -1604,6 +1663,25 @@ export async function runTurn(
   }
   if (extraParagraphs > 0) {
     events.push({ type: "extra_paragraphs_dropped", payload: { count: extraParagraphs } });
+  }
+  // Le budget de segments n'a le droit de toucher au texte qu'à découvert :
+  // combien coûtait le brouillon, combien coûte ce qui part, et ce qu'il a
+  // fallu lui faire. Un dépassement qui SUBSISTE se journalise aussi — sans
+  // quoi « send » serait un réglage silencieux, et personne ne saurait que le
+  // plafond ne tient pas.
+  if (budgetOutcome !== null && (budgetOutcome.applied.length > 0 || budgetTrimmed || budgetOutcome.overflow)) {
+    const shipped = analyzeSms(draft);
+    events.push({
+      type: "segment_budget",
+      payload: {
+        max: budget.maxSegments,
+        before: budgetOutcome.before.segments,
+        after: shipped.segments,
+        encoding: shipped.encoding,
+        applied: [...budgetOutcome.applied, ...(budgetTrimmed ? ["trim"] : [])],
+        overBudget: budget.maxSegments !== null && shipped.segments > budget.maxSegments,
+      },
+    });
   }
   if (classifyError) {
     events.push({ type: "llm_error", payload: { stage: "classifier", error: classifyError } });

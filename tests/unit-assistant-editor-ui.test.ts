@@ -362,6 +362,38 @@ describe("onglets rendus isolément", () => {
     expect(html).toContain("Aide — Persistance");
     expect(html).toContain("Aide — Budget de questions");
     expect(html).toContain("Aide — Longueur maximale");
+    expect(html).toContain("Aide — Plafond de segments");
+    expect(html).toContain("Aide — Économie de caractères");
+  });
+
+  it("Approche : le coût des envois DIT ce que les réglages achètent", () => {
+    // Un plafond en segments ne veut rien dire tant qu'on ne l'a pas traduit
+    // en caractères : « 2 segments » se règle à l'aveugle, « 134 caractères »
+    // se décide. Sans plafond, l'écran annonce ce que la longueur maximale
+    // coûte DÉJÀ — c'est ce chiffre-là qui donne envie d'y toucher.
+    const html = renderTab(createElement(ApproachTab, tabProps));
+    expect(html).toContain("Le coût des envois");
+    // L'apostrophe est échappée par le rendu : on vise le fragment qui porte
+    // les deux chiffres, c'est-à-dire ce qui donne envie de régler quelque chose.
+    expect(html).toContain("5 segments en français accentué, 2 sans accents");
+    // La conduite en cas de dépassement n'a aucun sens sans plafond : elle ne
+    // s'affiche pas tant qu'il n'y en a pas.
+    expect(html).not.toContain("Aide — Quand le message dépasse");
+    expect(html).not.toContain("MISSING_MESSAGE");
+    expect(html).not.toMatch(/editor\.approach\.cost/);
+  });
+
+  it("Approche : un plafond posé fait apparaître la conduite et le budget effectif", () => {
+    const config = {
+      ...tabProps.config,
+      approach: {
+        ...tabProps.config.approach,
+        segmentBudget: { maxSegments: 2, onOverflow: "rewrite" as const, economy: "off" as const },
+      },
+    };
+    const html = renderTab(createElement(ApproachTab, { ...tabProps, config }));
+    expect(html).toContain("Aide — Quand le message dépasse");
+    expect(html).toContain("134 caractères par message");
   });
 
   it("Approche : les heures de travail (fenêtre d'envoi) sont réglables par jour", () => {
