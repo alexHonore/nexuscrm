@@ -1,4 +1,5 @@
 import "server-only";
+import { listDays } from "@/components/analytics/period";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { collapseCdrLegs, collapseCrossAccountLegs } from "./cdr-sync";
@@ -48,11 +49,25 @@ export type UsageRow = {
   cost: number;
 };
 
+/**
+ * Un jour de téléphonie, borné à MINUIT HEURE DE TORONTO — le CDR de voip.ms
+ * est déjà rendu dans le fuseau du compte, réglé sur Toronto.
+ */
+export type UsageDay = {
+  date: string;
+  calls: number;
+  answered: number;
+  seconds: number;
+  cost: number;
+};
+
 export type UsageReport = {
   from: string;
   to: string;
   rows: UsageRow[];
   totals: { calls: number; answered: number; seconds: number; cost: number };
+  /** Jour par jour, trous remplis à 0 — la courbe de la période. */
+  daily: UsageDay[];
   balance: VoipMsBalance | null;
   /** Vrai si voip.ms n'a chiffré aucun appel — l'UI doit alors le dire plutôt qu'afficher 0 $. */
   costUnavailable: boolean;
@@ -96,7 +111,18 @@ const emptyRow = (): Omit<UsageRow, "userId" | "name" | "email" | "sipUsername" 
 export function aggregateUsage(
   cdrRows: VoipMsCdr[],
   people: UsagePerson[],
-): { rows: UsageRow[]; totals: UsageReport["totals"]; costUnavailable: boolean } {
+  /**
+   * Bornes de la période, pour remplir les journées creuses à 0. Sans elles, le
+   * jour par jour ne contient que les journées VUES dans le CDR — suffisant
+   * pour un test, trompeur pour un axe du temps.
+   */
+  range?: { from: string; to: string },
+): {
+  rows: UsageRow[];
+  totals: UsageReport["totals"];
+  daily: UsageDay[];
+  costUnavailable: boolean;
+} {
   const byAccount = new Map<string, UsagePerson>();
   const byDid = new Map<string, UsagePerson>();
   for (const p of people) {
@@ -156,11 +182,33 @@ export function aggregateUsage(
     collapseCdrLegs(cdrRows),
     new Set(byAccount.keys()),
   );
+  // Jour par jour : les horodatages du CDR arrivent déjà en heure LOCALE de
+  // Toronto (voir `getCdr`), donc les dix premiers caractères sont directement
+  // la journée Toronto — aucune reconversion à faire.
+  const days = new Map<string, UsageDay>();
+  const dayFor = (row: VoipMsCdr): UsageDay | null => {
+    const date = (row.date ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+    let bucket = days.get(date);
+    if (!bucket) {
+      bucket = { date, calls: 0, answered: 0, seconds: 0, cost: 0 };
+      days.set(date, bucket);
+    }
+    return bucket;
+  };
+
   for (const row of collapsed) {
     const bucket = rowFor(attribute(row));
     bucket.calls += 1;
     if (isAnswered(row)) bucket.answered += 1;
     bucket.seconds += secondsOf(row);
+
+    const day = dayFor(row);
+    if (day) {
+      day.calls += 1;
+      if (isAnswered(row)) day.answered += 1;
+      day.seconds += secondsOf(row);
+    }
   }
 
   // ── Coût : sur les lignes BRUTES ──
@@ -173,7 +221,13 @@ export function aggregateUsage(
   let sawCost = false;
   for (const row of cdrRows) {
     if (hasCdrCost(row)) sawCost = true;
-    rowFor(attribute(row)).cost += cdrCost(row);
+    const cost = cdrCost(row);
+    rowFor(attribute(row)).cost += cost;
+    // Même partage que les lignes : la DURÉE vient des pattes regroupées, le
+    // MONTANT des pattes brutes. Une journée dont seule la patte facturée est
+    // hors regroupement doit quand même porter sa dépense.
+    const day = dayFor(row);
+    if (day) day.cost += cost;
   }
 
   const list = [...rows.values()];
@@ -185,8 +239,13 @@ export function aggregateUsage(
     return a.name.localeCompare(b.name);
   });
 
-  // Une ligne « non rattaché » vide n'a rien à dire.
-  const cleaned = list.filter((r) => r.userId !== null || r.calls > 0);
+  // Une ligne « non rattaché » VIDE n'a rien à dire — mais une ligne qui porte
+  // un montant en a, même sans appel à son nom : le coût vient des pattes
+  // BRUTES et les appels des pattes regroupées, si bien qu'une patte facturée
+  // écartée du regroupement laisse une ligne « 0 appel, X $ ». L'écarter ferait
+  // mentir le total, qui doit toujours égaler la dépense réelle — et ferait
+  // diverger le graphique jour par jour du grand chiffre.
+  const cleaned = list.filter((r) => r.userId !== null || r.calls > 0 || r.cost !== 0);
 
   const totals = cleaned.reduce(
     (acc, r) => ({
@@ -198,7 +257,13 @@ export function aggregateUsage(
     { calls: 0, answered: 0, seconds: 0, cost: 0 },
   );
 
-  return { rows: cleaned, totals, costUnavailable: totals.calls > 0 && !sawCost };
+  const daily = range
+    ? listDays(range.from, range.to).map(
+        (date) => days.get(date) ?? { date, calls: 0, answered: 0, seconds: 0, cost: 0 },
+      )
+    : [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
+
+  return { rows: cleaned, totals, daily, costUnavailable: totals.calls > 0 && !sawCost };
 }
 
 /**
@@ -222,6 +287,9 @@ export async function getUsageReport(dateFrom: string, dateTo: string): Promise<
     getBalanceDetail().catch(() => null),
   ]);
 
-  const { rows, totals, costUnavailable } = aggregateUsage(cdrRows, people);
-  return { from: dateFrom, to: dateTo, rows, totals, balance, costUnavailable };
+  const { rows, totals, daily, costUnavailable } = aggregateUsage(cdrRows, people, {
+    from: dateFrom,
+    to: dateTo,
+  });
+  return { from: dateFrom, to: dateTo, rows, totals, daily, balance, costUnavailable };
 }

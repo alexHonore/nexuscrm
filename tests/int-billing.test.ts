@@ -142,6 +142,87 @@ describe("consommation et dépenses voip.ms", () => {
       expect(totals.cost).toBeCloseTo(0.035, 6);
     });
 
+    it("jour par jour : la journée TORONTO du CDR, et rien d'inventé", () => {
+      // Les horodatages du CDR arrivent déjà en heure locale de Toronto : les
+      // dix premiers caractères SONT la journée. Sans bornes, seules les
+      // journées vues apparaissent ; avec bornes, les creuses sont à 0.
+      const p = person();
+      const rows = [
+        cdr({ uniqueid: "a", date: "2026-08-10 09:15:00", seconds: "30", total: "0.0100" }),
+        cdr({ uniqueid: "b", date: "2026-08-12 22:40:00", seconds: "60", total: "0.0250" }),
+      ];
+
+      const sparse = aggregateUsage(rows, [p]).daily;
+      expect(sparse.map((d) => d.date)).toEqual(["2026-08-10", "2026-08-12"]);
+      expect(sparse[1]).toMatchObject({ calls: 1, answered: 1, seconds: 60 });
+      expect(sparse[1].cost).toBeCloseTo(0.025, 6);
+
+      const filled = aggregateUsage(rows, [p], { from: "2026-08-10", to: "2026-08-13" }).daily;
+      expect(filled.map((d) => d.date)).toEqual([
+        "2026-08-10",
+        "2026-08-11",
+        "2026-08-12",
+        "2026-08-13",
+      ]);
+      expect(filled[1]).toEqual({
+        date: "2026-08-11",
+        calls: 0,
+        answered: 0,
+        seconds: 0,
+        cost: 0,
+      });
+      // La somme des journées égale le total de la période : le graphique et
+      // la tuile de chiffre ne peuvent pas se contredire.
+      const { totals } = aggregateUsage(rows, [p]);
+      expect(filled.reduce((acc, d) => acc + d.cost, 0)).toBeCloseTo(totals.cost, 6);
+      expect(filled.reduce((acc, d) => acc + d.calls, 0)).toBe(totals.calls);
+    });
+
+    it("une patte facturée mais non rattachée reste DANS le total", () => {
+      // Le coût vient des pattes BRUTES, les appels des pattes regroupées : une
+      // patte facturée que le regroupement écarte laisse une ligne « 0 appel,
+      // X $ ». L'écarter ferait mentir le total, qui doit toujours égaler la
+      // dépense réelle — et ferait diverger le jour par jour du grand chiffre.
+      const p = person();
+      const { rows, totals, daily } = aggregateUsage(
+        [
+          // Deux pattes du MÊME appel : le regroupement garde celle du
+          // sous-compte (rattachée), l'autre — la seule facturée — arrive par
+          // le compte principal.
+          cdr({ uniqueid: "sub", account: "551013_alex", seconds: "45", total: "" }),
+          cdr({ uniqueid: "main", account: "551013", destination: "5145559999", seconds: "12", total: "0.0300" }),
+        ],
+        [p],
+        { from: "2026-08-10", to: "2026-08-10" },
+      );
+
+      const unattributed = rows.find((r) => r.userId === null);
+      expect(unattributed?.cost).toBeCloseTo(0.03, 6);
+      expect(totals.cost).toBeCloseTo(0.03, 6);
+      expect(daily[0].cost).toBeCloseTo(totals.cost, 6);
+    });
+
+    it("jour par jour : durée des pattes REGROUPÉES, montant des pattes BRUTES", () => {
+      // Le montant est déposé sur la patte que le regroupement ÉCARTE (la plus
+      // courte) : si le coût était pris sur les pattes regroupées, la journée
+      // afficherait 0 $. Et si la durée était prise sur les pattes brutes, elle
+      // afficherait 57 s au lieu de 45. Le test distingue donc les deux
+      // inversions, au lieu de passer dans les deux cas.
+      const p = person();
+      const { daily } = aggregateUsage(
+        [
+          cdr({ uniqueid: "leg1", seconds: "12", total: "0.0100" }),
+          cdr({ uniqueid: "leg2", seconds: "45", total: "" }),
+        ],
+        [p],
+        { from: "2026-08-10", to: "2026-08-10" },
+      );
+      expect(daily).toHaveLength(1);
+      expect(daily[0].calls).toBe(1); // un appel, pas deux
+      expect(daily[0].seconds).toBe(45); // la patte la plus longue
+      expect(daily[0].cost).toBeCloseTo(0.01, 6); // le montant, où qu'il soit
+    });
+
     it("ne compte QU'UNE FOIS un appel renvoyé en plusieurs pattes", () => {
       const p = person();
       // Même sous-compte, même destination, même seconde : deux pattes d'un

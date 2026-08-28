@@ -16,6 +16,8 @@ const CTX = vi.hoisted(() => ({
   jar: new Map<string, string>(),
   hdrs: new Headers(),
   twilioCost: null as null | { costUsd: number; priceUnit: string },
+  twilioBalance: null as null | { balanceUsd: number; currency: string; authKind: "apiKey" },
+  twilioDaily: null as null | Record<string, { date: string; costUsd: number; messages: number }[]>,
   openrouterAccount: null as null | { totalUsageUsd: number; totalCreditsUsd: number },
 }));
 vi.mock("server-only", () => ({}));
@@ -23,6 +25,14 @@ vi.mock("server-only", () => ({}));
 // Twilio indisponible → l'estimation par segments s'applique.
 vi.mock("@/lib/sms-server/twilio-usage", () => ({
   getTwilioSmsCost: async () => CTX.twilioCost,
+  // Solde du compte et journées facturées : même règle — `null` veut dire
+  // « Twilio n'a pas répondu », et le rapport doit rester complet sans eux.
+  getTwilioBalance: async () => CTX.twilioBalance,
+  // Une catégorie ABSENTE de la table du scénario vaut « Twilio n'a pas
+  // répondu » (null), pas « aucune journée facturée » ([]) : c'est justement la
+  // distinction que le rapport doit préserver.
+  getTwilioDailySmsUsage: async (_from: string, _to: string, category: string) =>
+    CTX.twilioDaily === null ? null : (CTX.twilioDaily[category] ?? null),
 }));
 // L'ancre du compte OpenRouter : mockée — on ne tape pas le réseau. null =
 // clé absente ou API injoignable, le rapport doit rester complet sans elle.
@@ -104,6 +114,8 @@ describe("getConsumption", () => {
     await resetDb();
     CTX.jar.clear();
     CTX.twilioCost = null;
+    CTX.twilioBalance = null;
+    CTX.twilioDaily = null;
     CTX.openrouterAccount = null;
   });
 
@@ -168,6 +180,92 @@ describe("getConsumption", () => {
     expect(r.ai.costUsd).toBe(0);
     expect(r.sms.outboundSegments).toBe(0);
     expect(r.sms.estimatedCostUsd).toBe(0);
+  });
+
+  // ══ Jour par jour ═════════════════════════════════════════════════════════
+
+  it("jour par jour : une ligne PAR JOUR de la période, trous remplis à 0", async () => {
+    // Les journées creuses doivent exister : sans elles, l'axe du temps saute
+    // des jours et le graphique ment sur la forme de la dépense.
+    await scene();
+    const r = await getConsumption(FROM, TO);
+    expect(r.ai.daily).toHaveLength(31);
+    expect(r.transcripts.daily).toHaveLength(31);
+    expect(r.sms.dailyVolume).toHaveLength(31);
+    expect(r.ai.daily[0]).toEqual({ date: "2026-08-01", costUsd: 0 });
+    expect(r.ai.daily.at(-1)?.date).toBe("2026-08-31");
+
+    // La somme des journées égale le total de la période — sinon le graphique
+    // et le grand chiffre raconteraient deux histoires.
+    const sum = r.ai.daily.reduce((acc, d) => acc + d.costUsd, 0);
+    expect(sum).toBeCloseTo(r.ai.costUsd, 6);
+
+    // Le 15 août (heure de Toronto) porte les trois traces de la scène.
+    const day = r.ai.daily.find((d) => d.date === "2026-08-15");
+    expect(day?.costUsd).toBeCloseTo(0.035, 6);
+
+    // Volume SMS : segments comptés le bon jour, jamais convertis en argent.
+    const smsDay = r.sms.dailyVolume.find((d) => d.date === "2026-08-15");
+    expect(smsDay).toMatchObject({ outboundSegments: 3, inboundSegments: 1, outboundMessages: 2 });
+  });
+
+  it("Twilio muet : dépense quotidienne et solde à NULL, jamais des zéros", async () => {
+    // « Indisponible » et « rien dépensé » sont deux nouvelles opposées sur une
+    // page d'argent : le rapport doit permettre de les distinguer.
+    CTX.twilioDaily = null;
+    CTX.twilioBalance = null;
+    await scene();
+    const r = await getConsumption(FROM, TO);
+    expect(r.sms.dailyCost).toBeNull();
+    expect(r.sms.carrierFeesUsd).toBeNull();
+    expect(r.sms.balance).toBeNull();
+    // Le volume, lui, vient de NOTRE base : il reste connu.
+    expect(r.sms.dailyVolume).toHaveLength(31);
+  });
+
+  it("Twilio répond : frais de transporteur À PART, et journées GMT additionnées", async () => {
+    // La catégorie `sms` n'inclut PAS les frais de transporteur : les fondre
+    // dans le coût des messages changerait en silence un chiffre déjà lu.
+    CTX.twilioCost = { costUsd: 1.23, priceUnit: "usd" };
+    CTX.twilioDaily = {
+      sms: [{ date: "2026-08-15", costUsd: 1.23, messages: 3 }],
+      "sms-messages-carrierfees": [{ date: "2026-08-15", costUsd: 0.09, messages: 0 }],
+    };
+    CTX.twilioBalance = { balanceUsd: 12.29, currency: "USD", authKind: "apiKey" };
+    await scene();
+    const r = await getConsumption(FROM, TO);
+
+    expect(r.sms.costUsd).toBeCloseTo(1.23, 6); // les MESSAGES seuls
+    expect(r.sms.carrierFeesUsd).toBeCloseTo(0.09, 6); // les frais, à part
+    expect(r.sms.balance).toEqual({ balanceUsd: 12.29, currency: "USD" });
+
+    expect(r.sms.dailyCost).toHaveLength(31);
+    const day = r.sms.dailyCost?.find((d) => d.date === "2026-08-15");
+    // La journée porte messages + frais : c'est la dépense Twilio de ce jour.
+    expect(day?.costUsd).toBeCloseTo(1.32, 6);
+    const total = r.sms.dailyCost?.reduce((acc, d) => acc + d.costUsd, 0) ?? 0;
+    expect(total).toBeCloseTo(1.32, 6);
+  });
+
+  it("une seule catégorie Twilio répond : la série quotidienne est INCONNUE", async () => {
+    // Une série bâtie sur les seuls messages serait courte des frais sans le
+    // dire — et l'écran s'en sert aussi pour le montant de la période. Tant
+    // qu'il manque une catégorie, la réponse honnête est « on ne sait pas ».
+    CTX.twilioCost = { costUsd: 1.23, priceUnit: "usd" };
+    CTX.twilioDaily = { sms: [{ date: "2026-08-15", costUsd: 1.23, messages: 3 }] };
+    await scene();
+    const r = await getConsumption(FROM, TO);
+    expect(r.sms.dailyCost).toBeNull();
+    expect(r.sms.carrierFeesUsd).toBeNull();
+    // Le coût de la période, lui, reste connu : c'est le DÉTAIL qui manque.
+    expect(r.sms.costUsd).toBeCloseTo(1.23, 6);
+  });
+
+  it("solde Twilio NÉGATIF : conservé tel quel (c'est la panne, pas son approche)", async () => {
+    CTX.twilioBalance = { balanceUsd: -3.41, currency: "USD", authKind: "apiKey" };
+    await scene();
+    const r = await getConsumption(FROM, TO);
+    expect(r.sms.balance?.balanceUsd).toBeCloseTo(-3.41, 6);
   });
 });
 

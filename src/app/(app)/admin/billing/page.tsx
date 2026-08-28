@@ -1,5 +1,6 @@
 import { Wallet } from "lucide-react";
 import { getTranslations } from "next-intl/server";
+import { VizTheme } from "@/components/analytics/viz-theme";
 import { BillingClient } from "@/components/admin/billing-client";
 import { PageHeader } from "@/components/shell/page-header";
 import { requirePerm } from "@/lib/permissions/server";
@@ -18,13 +19,18 @@ export async function generateMetadata() {
  * est lent et faillible, donc il est fait par l'îlot client. La page s'affiche
  * tout de suite et l'admin voit le chargement — plutôt qu'un écran blanc de
  * plusieurs secondes à chaque changement de période.
+ *
+ * La classe `nx-viz` et `<VizTheme />` ne sont pas décoratives : sans elles,
+ * toutes les variables `--viz-*` des graphiques se résolvent dans le vide et la
+ * page se charge avec des barres invisibles.
  */
 export default async function BillingPage() {
   await requirePerm("admin.billing");
   const t = await getTranslations("admin");
 
   return (
-    <div className="space-y-5 p-4 md:p-6">
+    <div className="nx-viz space-y-5 p-4 md:p-6">
+      <VizTheme />
       <PageHeader icon={<Wallet />} title={t("billing.title")} subtitle={t("billing.subtitle")} />
       <BillingClient />
     </div>

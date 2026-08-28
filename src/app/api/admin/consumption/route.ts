@@ -14,6 +14,14 @@ import { getSetting, setSetting } from "@/lib/settings";
  * Réservé au droit `admin.billing`.
  */
 
+/**
+ * La base répond vite, mais le rapport interroge aussi Twilio (coût, deux
+ * catégories de journées, solde) et OpenRouter — en parallèle, avec leurs
+ * propres délais d'attente. Une borne explicite fait apparaître un message
+ * clair plutôt qu'une erreur de plateforme si un fournisseur traîne.
+ */
+export const maxDuration = 60;
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_RANGE_DAYS = 366;
 

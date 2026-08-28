@@ -34,6 +34,8 @@ function wrap(data: ConsumptionReport | null): string {
         error: data === null,
         money,
         nf,
+        moneyAxis: (n: number) => String(n),
+        dayLabel: (d: string) => d.slice(5),
         onRateSaved: () => {},
       }),
     }),
@@ -52,6 +54,10 @@ const DATA: ConsumptionReport = {
       { model: "claude-sonnet-5", turns: 2, tokensIn: 300, tokensOut: 130, costUsd: 0.03 },
       { model: "gpt-4o-mini", turns: 1, tokensIn: 40, tokensOut: 20, costUsd: 0.005 },
     ],
+    daily: [
+      { date: "2026-08-01", costUsd: 0.02 },
+      { date: "2026-08-02", costUsd: 0.015 },
+    ],
     account: { totalUsageUsd: 7.14, totalCreditsUsd: 15 },
   },
   sms: {
@@ -64,6 +70,25 @@ const DATA: ConsumptionReport = {
     realCostUsd: null,
     costSource: "estimate",
     costUsd: 0.0316,
+    carrierFeesUsd: null,
+    dailyVolume: [
+      {
+        date: "2026-08-01",
+        outboundMessages: 2,
+        outboundSegments: 3,
+        inboundMessages: 1,
+        inboundSegments: 1,
+      },
+      {
+        date: "2026-08-02",
+        outboundMessages: 0,
+        outboundSegments: 0,
+        inboundMessages: 0,
+        inboundSegments: 0,
+      },
+    ],
+    dailyCost: null,
+    balance: { balanceUsd: 12.29, currency: "USD" },
   },
   transcripts: {
     calls: 4,
@@ -82,6 +107,10 @@ const DATA: ConsumptionReport = {
         tokensOut: 610,
         costUsd: 0.048,
       },
+    ],
+    daily: [
+      { date: "2026-08-01", costUsd: 0.048 },
+      { date: "2026-08-02", costUsd: 0 },
     ],
   },
 };
@@ -115,9 +144,9 @@ describe("ConsumptionSections", () => {
   it("états vides : le dit sans planter, dans les trois sections", () => {
     const empty: ConsumptionReport = {
       ...DATA,
-      ai: { turns: 0, tokensIn: 0, tokensOut: 0, costUsd: 0, byModel: [], account: null },
-      sms: { outboundMessages: 0, outboundSegments: 0, inboundMessages: 0, inboundSegments: 0, segmentCostUsd: 0.0079, estimatedCostUsd: 0, realCostUsd: null, costSource: "estimate", costUsd: 0 },
-      transcripts: { calls: 0, audioSeconds: 0, tokensIn: 0, tokensOut: 0, costUsd: 0, failed: 0, skipped: 0, byModel: [] },
+      ai: { turns: 0, tokensIn: 0, tokensOut: 0, costUsd: 0, byModel: [], daily: [], account: null },
+      sms: { outboundMessages: 0, outboundSegments: 0, inboundMessages: 0, inboundSegments: 0, segmentCostUsd: 0.0079, estimatedCostUsd: 0, realCostUsd: null, costSource: "estimate", costUsd: 0, carrierFeesUsd: null, dailyVolume: [], dailyCost: null, balance: null },
+      transcripts: { calls: 0, audioSeconds: 0, tokensIn: 0, tokensOut: 0, costUsd: 0, failed: 0, skipped: 0, byModel: [], daily: [] },
     };
     const html = wrap(empty);
     expect(html).toContain("Aucun tour");
@@ -135,6 +164,51 @@ describe("ConsumptionSections", () => {
     expect(html).toContain("réel");
     expect(html).toContain("1.23"); // le coût facturé
     expect(html).toContain("facturé par Twilio");
+  });
+
+  it("frais de transporteur inconnus : « indisponible », jamais 0,00 $", () => {
+    // La catégorie `sms` de Twilio n'inclut PAS les frais de transporteur.
+    // Tant qu'on ne les a pas, la ligne le DIT — l'afficher à 0 $ reviendrait à
+    // affirmer qu'il n'y en a pas.
+    const html = wrap(DATA);
+    // L'assertion vise la LIGNE des frais, pas le mot « indisponible » posé
+    // ailleurs sur la page : sinon un message d'erreur voisin la satisferait.
+    expect(html).toMatch(/Frais de transporteur<\/span><span[^>]*italic[^>]*>indisponible</);
+    // Et quand on les a, c'est un montant.
+    const withFees: ConsumptionReport = {
+      ...DATA,
+      sms: { ...DATA.sms, carrierFeesUsd: 0.42 },
+    };
+    expect(wrap(withFees)).toContain("0.42");
+  });
+
+  it("un seul modèle : pas de graphique à une barre, le tableau suffit", () => {
+    // Une valeur seule est une TUILE de chiffre, pas un graphique : sous deux
+    // barres, le classement ne se dessine pas. Les notes d'appel n'ont qu'un
+    // modèle dans DATA ; en ajouter un second doit faire apparaître un
+    // graphique de plus, et un seul.
+    const count = (html: string) => (html.match(/recharts-responsive-container/g) ?? []).length;
+    const withTwo: ConsumptionReport = {
+      ...DATA,
+      transcripts: {
+        ...DATA.transcripts,
+        byModel: [
+          ...DATA.transcripts.byModel,
+          {
+            model: "openai/whisper-1",
+            calls: 1,
+            audioSeconds: 60,
+            tokensIn: 10,
+            tokensOut: 5,
+            costUsd: 0.004,
+          },
+        ],
+      },
+    };
+    expect(count(wrap(withTwo))).toBe(count(wrap(DATA)) + 1);
+    // Le tableau, lui, montre le modèle unique dans les deux cas : la valeur
+    // n'est jamais perdue avec le graphique.
+    expect(wrap(DATA)).toContain("google/gemini-2.5-flash");
   });
 
   it("échec de chargement : « indisponible », JAMAIS « zéro » (honnêteté)", () => {

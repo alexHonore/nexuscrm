@@ -18,6 +18,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { api } from "./api";
+import {
+  RankedBarChart,
+  SegmentsPerDayChart,
+  SOURCE_VAR,
+  ValueLegend,
+} from "./billing-charts";
 import { errorMessage } from "./errors";
 
 export type AiModelUsage = {
@@ -26,6 +32,17 @@ export type AiModelUsage = {
   tokensIn: number;
   tokensOut: number;
   costUsd: number;
+};
+
+/** Un point de la courbe quotidienne — jour TORONTO côté base, GMT côté Twilio. */
+export type DailyPoint = { date: string; costUsd: number };
+
+export type SmsDailyVolume = {
+  date: string;
+  outboundMessages: number;
+  outboundSegments: number;
+  inboundMessages: number;
+  inboundSegments: number;
 };
 
 export type ConsumptionReport = {
@@ -37,6 +54,7 @@ export type ConsumptionReport = {
     tokensOut: number;
     costUsd: number;
     byModel: AiModelUsage[];
+    daily: DailyPoint[];
     /** Dépense à vie et crédits du COMPTE OpenRouter — l'ancre, ou null. */
     account: { totalUsageUsd: number; totalCreditsUsd: number } | null;
   };
@@ -50,6 +68,12 @@ export type ConsumptionReport = {
     realCostUsd: number | null;
     costSource: "twilio" | "estimate";
     costUsd: number;
+    /** Frais de transporteur facturés à part par Twilio ; null = indisponible. */
+    carrierFeesUsd: number | null;
+    dailyVolume: SmsDailyVolume[];
+    dailyCost: { date: string; costUsd: number; messages: number }[] | null;
+    /** Solde du compte Twilio — affiché dans les réservoirs, en haut de page. */
+    balance: { balanceUsd: number; currency: string } | null;
   };
   /** Notes d'appel IA — coût RÉEL (usage.cost d'OpenRouter). */
   transcripts: {
@@ -61,6 +85,7 @@ export type ConsumptionReport = {
     failed: number;
     skipped: number;
     byModel: TranscriptModelUsage[];
+    daily: DailyPoint[];
   };
 };
 
@@ -72,6 +97,41 @@ export type TranscriptModelUsage = {
   tokensOut: number;
   costUsd: number;
 };
+
+/**
+ * L'étiquette d'un modèle SUR UN AXE.
+ *
+ * « google/gemini-2.5-flash » ne tient pas dans la gouttière d'un graphique
+ * horizontal : le texte déborde à gauche et se fait rogner en
+ * « ogle/gemini-2.5-flash ». Le vendeur est la partie la moins informative, et
+ * le tableau juste dessous porte l'identifiant complet — l'axe garde le nom.
+ */
+function modelTick(model: string): string {
+  const short = model.split("/").pop() || model;
+  return short.length > 22 ? `${short.slice(0, 21)}…` : short;
+}
+
+/**
+ * Les étiquettes d'une liste de modèles, GARANTIES DISTINCTES.
+ *
+ * L'axe d'un graphique horizontal regroupe par étiquette : deux modèles
+ * raccourcis au même texte fusionneraient en UNE barre, et le coût de l'un
+ * disparaîtrait. Dès qu'un raccourci se répète, tous ceux qui se cognent
+ * reprennent leur identifiant complet.
+ */
+function modelTicks(models: string[]): Map<string, string> {
+  const seen = new Map<string, number>();
+  for (const m of models) {
+    const short = modelTick(m);
+    seen.set(short, (seen.get(short) ?? 0) + 1);
+  }
+  return new Map(
+    models.map((m) => {
+      const short = modelTick(m);
+      return [m, (seen.get(short) ?? 0) > 1 ? m : short];
+    }),
+  );
+}
 
 /** Une tuile chiffre + libellé. */
 function Stat({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
@@ -97,7 +157,9 @@ export function ConsumptionSections({
   loading,
   error,
   money,
+  moneyAxis,
   nf,
+  dayLabel,
   onRateSaved,
 }: {
   data: ConsumptionReport | null;
@@ -105,7 +167,11 @@ export function ConsumptionSections({
   /** Le dernier chargement a échoué : « indisponible », jamais « zéro ». */
   error?: boolean;
   money: (n: number | null) => string;
+  /** Graduations d'un axe d'argent — précision adaptée à l'échelle. */
+  moneyAxis: (n: number) => string;
   nf: Intl.NumberFormat;
+  /** « 2026-08-12 » → « 12 août » — la même mise en forme que la pile du haut. */
+  dayLabel: (date: string) => string;
   /** Après enregistrement du taux SMS : recharger pour refléter la nouvelle estimation. */
   onRateSaved: () => void;
 }) {
@@ -192,6 +258,90 @@ export function ConsumptionSections({
                 : t("billing.smsSourceEstimate")}
             </p>
 
+            {/* Les frais de transporteur sont une catégorie Twilio DISTINCTE :
+                la ligne « SMS » ne les contient pas. On les montre à côté,
+                jamais fondus dedans — et « indisponible » n'est pas « 0 ». */}
+            <ValueLegend
+              className="flex flex-wrap gap-x-4 gap-y-1 rounded-md border bg-muted/30 px-3 py-2 text-xs"
+              items={[
+                {
+                  key: "messages",
+                  color: SOURCE_VAR.sms,
+                  label: t("billing.smsMessagesCost"),
+                  value: money(sms.costUsd),
+                },
+                {
+                  // Gris de RETRAIT : deux pastilles de la même teinte dans une
+                  // même liste annonceraient deux fois la même chose.
+                  key: "fees",
+                  color: "var(--viz-deemph)",
+                  label: t("billing.smsCarrierFees"),
+                  value: sms.carrierFeesUsd === null ? null : money(sms.carrierFeesUsd),
+                },
+              ]}
+            />
+
+            {/* Volume par journée — des SEGMENTS, l'unité facturée. Ce
+                graphique ne devient jamais un graphique d'argent. */}
+            <SegmentsPerDayChart
+              data={sms.dailyVolume.map((d) => ({
+                key: d.date,
+                label: dayLabel(d.date),
+                outbound: d.outboundSegments,
+                inbound: d.inboundSegments,
+              }))}
+              labels={{ outbound: t("billing.smsOut"), inbound: t("billing.smsIn") }}
+              nf={nf}
+            />
+
+            {/* Le JUMEAU TABULAIRE : aucune valeur du graphique n'est
+                accessible au seul survol. */}
+            <details>
+              <summary className="flex min-h-11 cursor-pointer list-none items-center text-xs text-muted-foreground underline-offset-2 hover:underline md:min-h-8">
+                {t("billing.showSegmentTable")}
+              </summary>
+              <div className="mt-2 overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="sticky left-0 z-10 bg-card">
+                        {t("billing.day")}
+                      </TableHead>
+                      <TableHead className="text-right">
+                        {`${t("billing.smsOut")} · ${t("billing.segments")}`}
+                      </TableHead>
+                      <TableHead className="text-right">
+                        {`${t("billing.smsIn")} · ${t("billing.segments")}`}
+                      </TableHead>
+                      <TableHead className="text-right">{t("billing.smsOut")}</TableHead>
+                      <TableHead className="text-right">{t("billing.smsIn")}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sms.dailyVolume.map((d) => (
+                      <TableRow key={d.date}>
+                        <TableCell className="sticky left-0 z-10 bg-card whitespace-nowrap">
+                          {dayLabel(d.date)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {nf.format(d.outboundSegments)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {nf.format(d.inboundSegments)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">
+                          {nf.format(d.outboundMessages)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">
+                          {nf.format(d.inboundMessages)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </details>
+
             {/* Taux d'estimation — réglable, car Twilio ne nous donne pas le prix. */}
             <div className="flex flex-wrap items-end gap-2 rounded-md border bg-muted/30 p-3">
               <div className="space-y-1">
@@ -272,6 +422,24 @@ export function ConsumptionSections({
               </div>
             ) : null}
 
+            {/* Quel modèle mange le budget — une seule série, donc une seule
+                teinte : colorier chaque barre selon sa valeur redirait ce que
+                sa longueur montre déjà. Masqué sous deux modèles. */}
+            <RankedBarChart
+              data={(() => {
+                const ticks = modelTicks(ai.byModel.map((m) => m.model));
+                return ai.byModel.map((m) => ({
+                  key: m.model,
+                  label: ticks.get(m.model) ?? m.model,
+                  value: m.costUsd,
+                }));
+              })()}
+              color={SOURCE_VAR.ai}
+              format={(n) => money(n)}
+              formatAxis={moneyAxis}
+              seriesName={t("billing.aiCost")}
+            />
+
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -344,6 +512,21 @@ export function ConsumptionSections({
                 })}
               </p>
             ) : null}
+
+            <RankedBarChart
+              data={(() => {
+                const ticks = modelTicks(transcripts.byModel.map((m) => m.model));
+                return transcripts.byModel.map((m) => ({
+                  key: m.model,
+                  label: ticks.get(m.model) ?? m.model,
+                  value: m.costUsd,
+                }));
+              })()}
+              color={SOURCE_VAR.notes}
+              format={(n) => money(n)}
+              formatAxis={moneyAxis}
+              seriesName={t("billing.aiCost")}
+            />
 
             <div className="overflow-x-auto">
               <Table>
