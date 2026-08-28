@@ -1,6 +1,9 @@
+import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
+import { db } from "@/db";
+import { calls } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
-import { apiPerm } from "@/lib/permissions/server";
+import { apiPerm, clientRef, grantsOnClient } from "@/lib/permissions/server";
 import {
   extractRecordingAudio,
   getCallRecordingFile,
@@ -58,6 +61,33 @@ export async function GET(req: NextRequest) {
   }
   const rawCallId = req.nextUrl.searchParams.get("callId");
   const callId = rawCallId && UUID_RE.test(rawCallId) ? rawCallId : undefined;
+
+  /**
+   * La référence vient de l'URL : sans cette vérification, le droit
+   * `clients.recordings` ouvrait TOUT le compte voip.ms, y compris l'appel
+   * d'une fiche que la matrice cache à ce regard. On exige donc que la
+   * référence corresponde à un appel RÉEL, et que la fiche derrière cet appel
+   * ouvre son historique — c'est la case qui gouverne déjà le fil d'appels sur
+   * la fiche. Un appel sans fiche (numéro inconnu, appel entrant non rattaché)
+   * reste écoutable : il n'y a pas de fiche à protéger derrière.
+   *
+   * Réponse indistincte en cas de refus : « introuvable », comme partout
+   * ailleurs — dire « interdit » confirmerait que l'enregistrement existe.
+   */
+  const call = await db.query.calls.findFirst({
+    where: callId ? eq(calls.id, callId) : eq(calls.recordingUrl, rawUrl),
+    columns: { id: true, clientId: true, recordingUrl: true },
+  });
+  if (!call || call.recordingUrl !== rawUrl) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+  if (call.clientId) {
+    const ref = await clientRef(call.clientId);
+    const grants = ref ? await grantsOnClient(actor, ref) : null;
+    if (!grants || !grants.visible || !grants.history) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
+  }
   const range = req.headers.get("range");
 
   // Chaque écoute est tracée, quelle que soit la forme de la référence.
