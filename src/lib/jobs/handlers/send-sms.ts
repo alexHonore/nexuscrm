@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
-import { conversations, messages, smsNumbers } from "@/db/schema-sms";
+import { campaignTouches, conversations, messages, smsNumbers } from "@/db/schema-sms";
 import { sendSmsPayloadSchema, type JobOutcome, type ScheduledJob } from "@/lib/jobs/types";
 import { TwilioSendError } from "@/lib/sms/provider";
 import { isWithinSendWindow, nextSendTime } from "@/lib/sms/quiet-hours";
@@ -103,6 +103,31 @@ export async function handleSendSms(
       encoding: analysis.encoding,
     })
     .returning({ id: messages.id });
+
+  // Le lien barreau → message, refermé ICI et nulle part ailleurs.
+  //
+  // `campaign_touches.message_id` est déclaré et lié par clé étrangère depuis
+  // toujours, mais aucun chemin de code ne l'écrivait : remonter d'un barreau
+  // au message réellement parti obligeait à reconstruire la clé
+  // `csend:<inscription>:<barreau>` du job, et la branche où c'est l'assistant
+  // qui rédige n'en a même pas.
+  //
+  // Écrit AVANT l'appel à Twilio, sur la rangée-intention : si l'envoi est
+  // ensuite refusé ou sauté, le barreau pointe sur la rangée qui EXPLIQUE
+  // pourquoi rien n'est arrivé — c'est précisément ce qu'on veut lire. Et si la
+  // rangée est effacée pour une reprise (5xx), la clé étrangère est
+  // `on delete set null` : le lien se défait proprement, il ne pend pas.
+  if (payload.outreach) {
+    await db
+      .update(campaignTouches)
+      .set({ messageId: intent.id })
+      .where(
+        and(
+          eq(campaignTouches.enrollmentId, payload.outreach.enrollmentId),
+          eq(campaignTouches.step, payload.outreach.step),
+        ),
+      );
+  }
 
   let result: SendResult;
   try {

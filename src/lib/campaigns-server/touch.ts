@@ -291,6 +291,10 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
             // La fenêtre d'envoi de CET assistant s'applique aussi au verrou
             // final (`handleSendSms`) — cohérent avec la décision ci-dessus.
             assistantId: campaignRow.assistantId,
+            // Le barreau voyage avec l'envoi : c'est `handleSendSms` qui crée
+            // la rangée `messages`, donc lui seul peut refermer le lien vers
+            // `campaign_touches.message_id`.
+            outreach: { enrollmentId: enrollment.id, step },
           },
           // Espace de noms DISTINCT de celui du job `campaign_touch`
           // (`ctouch:…`). Avec la même clé, le job de barreau encore VIVANT

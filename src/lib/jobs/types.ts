@@ -46,6 +46,20 @@ export const sendSmsPayloadSchema = z.object({
   assistantVersion: z.number().int().nullable().default(null),
   /** Modèle réellement servi (peut différer du modèle demandé : repli). */
   model: z.string().nullable().default(null),
+  /**
+   * Le barreau de campagne dont cet envoi vient, quand il en vient d'un.
+   *
+   * C'est ce qui permet de relier la trace `campaign_touches` à la rangée
+   * `messages` réellement produite — la colonne `message_id` était déclarée et
+   * liée par clé étrangère, mais AUCUN chemin de code ne l'écrivait. Sans elle,
+   * remonter d'un barreau au message envoyé demandait de reconstruire la clé
+   * `csend:<inscription>:<barreau>` du job, et la branche de l'assistant (qui
+   * n'en a pas) restait tout simplement introuvable.
+   */
+  outreach: z
+    .object({ enrollmentId: z.uuid(), step: z.number().int().min(0) })
+    .nullable()
+    .default(null),
 });
 export type SendSmsPayload = z.infer<typeof sendSmsPayloadSchema>;
 

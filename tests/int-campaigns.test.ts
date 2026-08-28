@@ -6,7 +6,7 @@
  * un client n'entre qu'une fois dans une campagne (index unique), et un barreau
  * ne part qu'une fois (index unique sur (inscription, barreau)).
  */
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import {
   closeDb,
@@ -51,6 +51,8 @@ const { markEnrollmentsBooked, markEnrollmentsReplied, markEnrollmentsStopped } 
 );
 const { closeCampaignEnrollments } = await import("@/lib/campaigns-server/lifecycle");
 const { flushAfterResponse } = await import("@/lib/after-response");
+const { runDispatchCycle } = await import("@/lib/jobs/dispatch");
+const { enqueueJob } = await import("@/lib/jobs/queue");
 const leadsWebhook = await import("@/app/api/webhooks/leads/route");
 
 const NOW = new Date("2026-08-21T15:00:00.000Z");
@@ -1144,3 +1146,108 @@ describe("fin de vie d'une campagne", () => {
 
 void and;
 void messages;
+
+/**
+ * Régression — la trace d'un barreau pointe sur le message qu'il a produit.
+ *
+ * `campaign_touches.message_id` était déclarée et liée par clé étrangère depuis
+ * l'origine, et AUCUN chemin de code ne l'écrivait. Conséquence pratique :
+ * remonter d'un barreau au message réellement parti obligeait à reconstruire la
+ * clé `csend:<inscription>:<barreau>` du job — une chaîne, pas une jointure — et
+ * la branche où c'est l'assistant qui rédige n'a même pas cette clé. Le lien
+ * était donc simplement introuvable pour la moitié du trafic.
+ *
+ * Le lien se referme dans `handleSendSms`, le seul endroit qui crée la rangée
+ * `messages` : les deux chemins (texte fixe et rédaction par l'assistant)
+ * passent par lui.
+ */
+describe("trace de barreau → message", () => {
+  /**
+   * Horloge FIGÉE dans la fenêtre d'envoi (14 h à Toronto, un vendredi).
+   *
+   * `handleSendSms` reporte tout envoi automatisé hors des heures de politesse,
+   * et il le fait AVANT d'écrire la rangée `messages` : lancée le soir, cette
+   * suite verrait le job repoussé au lendemain et conclurait à tort que le lien
+   * n'est pas écrit. Seul `Date` est simulé — les minuteries réelles de
+   * postgres.js doivent continuer de tourner.
+   */
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-21T18:00:00.000Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("le barreau à texte fixe se relie au message produit", async () => {
+    const campaign = await makeCampaign();
+    const client = await makeReachableClient();
+    const [enrolled] = await enrollClients(campaign.id, [client.id], { now: NOW });
+    await runTouch(enrolled.enrollmentId!, NOW);
+
+    // Le job d'envoi porte le barreau dont il vient.
+    const [job] = await testDb
+      .select()
+      .from(scheduledJobs)
+      .where(eq(scheduledJobs.type, "send_sms"));
+    expect((job.payload as { outreach: { step: number } | null }).outreach).toMatchObject({
+      enrollmentId: enrolled.enrollmentId,
+      step: 0,
+    });
+
+    // Le dispatcher exécute l'envoi (SMS_MODE absent ⇒ dry_run : rien ne part).
+    await runDispatchCycle();
+
+    const [touch] = await testDb
+      .select()
+      .from(campaignTouches)
+      .where(eq(campaignTouches.enrollmentId, enrolled.enrollmentId!));
+    expect(touch.messageId, "la trace doit pointer sur une rangée messages").not.toBeNull();
+
+    const message = await testDb.query.messages.findFirst({
+      where: eq(messages.id, touch.messageId!),
+    });
+    expect(message, "le message pointé existe vraiment").toBeDefined();
+    expect(message!.source).toBe("ladder");
+    expect(message!.body).toContain("Groupe Nexus");
+  });
+
+  it("un envoi hors campagne ne touche à aucune trace", async () => {
+    // La garde qui empêche le lien de s'appliquer trop largement : un message
+    // humain ou une réponse d'agent ne sont pas des barreaux.
+    const campaign = await makeCampaign();
+    const client = await makeReachableClient();
+    const [enrolled] = await enrollClients(campaign.id, [client.id], { now: NOW });
+    await runTouch(enrolled.enrollmentId!, NOW);
+    await runDispatchCycle();
+
+    const before = await testDb
+      .select()
+      .from(campaignTouches)
+      .where(eq(campaignTouches.enrollmentId, enrolled.enrollmentId!));
+
+    const conversation = await testDb.query.conversations.findFirst({
+      where: eq(conversations.clientId, client.id),
+    });
+    await enqueueJob({
+      type: "send_sms",
+      runAt: NOW,
+      payload: {
+        conversationId: conversation!.id,
+        to: client.phone!,
+        body: "Bonjour, c'est le courtier qui vous écrit à la main.",
+        source: "human",
+        automated: false,
+        aiGenerated: false,
+        sentById: null,
+      },
+    });
+    await runDispatchCycle();
+
+    const after = await testDb
+      .select()
+      .from(campaignTouches)
+      .where(eq(campaignTouches.enrollmentId, enrolled.enrollmentId!));
+    expect(after.map((t) => t.messageId)).toEqual(before.map((t) => t.messageId));
+  });
+});

@@ -204,7 +204,23 @@ const SIDE_EFFECT_TOOLS = new Set([
 // Exporté : le rejeu après panne (« replay-llm-errors ») borne les entrants à
 // rouvrir sur le dernier sortant REÇU — la même définition que le budget de
 // tours, sinon un envoi sauté compterait comme une réponse déjà donnée.
-export const UNDELIVERED_STATUSES = ["skipped", "failed", "undelivered", "canceled"] as const;
+export const UNDELIVERED_STATUSES = [
+  "skipped",
+  "failed",
+  "undelivered",
+  // DEUX orthographes, deux origines, le même fait : personne n'a rien reçu.
+  //  · `canceled` (un L) vient de Twilio — un message programmé annulé avant
+  //    son heure, consigné par `recordDeliveryOutcome`.
+  //  · `cancelled` (deux L) vient de NOUS — un téléphoniste qui annule un envoi
+  //    encore en file (`conversations/actions.ts`), et l'annulation n'est
+  //    acceptée que si le job est toujours `pending` : rien n'est donc parti.
+  // Tant que seule la graphie de Twilio était listée, un envoi annulé à la main
+  // comptait comme reçu : le modèle relisait « comme je vous le disais » un
+  // message que personne n'a lu, le budget de tours le comptait, et le rejeu
+  // après panne refusait de rouvrir l'entrant qui suivait.
+  "canceled",
+  "cancelled",
+] as const;
 const undelivered = (m: { direction: string; status: string | null }): boolean =>
   m.direction === "out" && (UNDELIVERED_STATUSES as readonly string[]).includes(m.status ?? "");
 
@@ -1056,6 +1072,15 @@ export async function runTurn(
               assistantVersion: assistantRow.version,
               model: input.send.model ?? null,
               ...(input.send.finalWord ? { finalWord: true } : {}),
+              // Le barreau, mais SEULEMENT si ce tour est bien l'ouverture
+              // proactive : quand le contact a écrit le premier, ce qui part
+              // est une réponse, pas le barreau — le relier à la trace ferait
+              // dire au bilan que l'échelle a parlé alors qu'elle a cédé la
+              // place.
+              outreach:
+                proactive && outreach
+                  ? { enrollmentId: outreach.enrollmentId, step: outreach.step }
+                  : null,
             },
           },
           tx,

@@ -102,6 +102,7 @@ function sendPayload(
     source: "opener",
     automated: true,
     finalWord: false,
+    outreach: null,
     aiGenerated: false,
     sentById: null,
     assistantId: null,
