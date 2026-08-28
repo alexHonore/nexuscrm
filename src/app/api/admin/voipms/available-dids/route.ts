@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { normalizePhone } from "@/lib/phone";
 import {
   getAccountBalance,
@@ -51,8 +51,8 @@ function toMarketDid(d: VoipMsAvailableDid) {
 }
 
 export async function GET(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   const url = new URL(req.url);
   const province = (url.searchParams.get("province") ?? "").trim().toUpperCase();

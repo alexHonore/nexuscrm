@@ -4,8 +4,15 @@ import { z } from "zod";
 import { db } from "@/db";
 import { categories, clients, sources, users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { isForeignKeyViolation } from "@/lib/db-errors";
+import { bucketFor, grantsFor } from "@/lib/permissions/access";
+import type { Grants } from "@/lib/permissions/catalog";
+import {
+  apiPerm,
+  loadDirectory,
+  ownedCount,
+  verifyAssignment,
+} from "@/lib/permissions/server";
 import { formatPhone, normalizePhone } from "@/lib/phone";
 import { readJson } from "../_helpers";
 
@@ -49,7 +56,12 @@ export type ImportIssue = {
   /** Valeur brute du téléphone, pour que l'admin reconnaisse sa ligne. */
   phone?: string;
   name?: string;
-  /** Fiche déjà en base (duplicate_in_db) — permet d'y renvoyer l'admin. */
+  /**
+   * Fiche déjà en base (duplicate_in_db) — permet d'y renvoyer l'utilisateur.
+   * ABSENT quand la fiche existante échappe au regard : un identifiant qui
+   * ouvrirait un « introuvable » ne sert à personne, et le donner
+   * confirmerait l'existence d'une fiche qu'on n'a pas le droit de connaître.
+   */
   existingId?: string;
 };
 
@@ -108,10 +120,17 @@ async function missingDefault(defaults: {
  * Lignes sans téléphone exploitable → invalid. Doublons par téléphone (E.164),
  * dans le fichier ou déjà en base → ignorés ou mis à jour selon le mode.
  * Chaque ligne écartée est renvoyée dans `issues` avec son motif.
+ *
+ * `clients.import` dit « il peut verser un fichier », pas « il peut réécrire
+ * n'importe quelle fiche » : en mode « update », une fiche déjà en base n'est
+ * modifiée que si son compartiment l'ouvre (visible ET modifiable), et le
+ * responsable par défaut passe par le même verdict d'assignation que partout
+ * ailleurs. Sinon l'import serait la porte dérobée de la modification et de la
+ * distribution des fiches.
  */
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("clients.import");
+  if (actor instanceof NextResponse) return actor;
 
   const body = await readJson(req, bodySchema);
   if (body instanceof NextResponse) return body;
@@ -156,10 +175,18 @@ export async function POST(req: Request) {
     prepared.push({ phone, row, index });
   }
 
-  // Doublons existants en base (une seule requête pour le lot).
+  // Doublons existants en base (une seule requête pour le lot). On rapatrie
+  // de quoi juger l'accès à chaque fiche : son détenteur (le compartiment) et
+  // ses dates (le verrou d'assignation).
   const existing = prepared.length
     ? await db
-        .select({ id: clients.id, phone: clients.phone })
+        .select({
+          id: clients.id,
+          phone: clients.phone,
+          assignedToId: clients.assignedToId,
+          lastContactedAt: clients.lastContactedAt,
+          updatedAt: clients.updatedAt,
+        })
         .from(clients)
         .where(
           inArray(
@@ -168,22 +195,83 @@ export async function POST(req: Request) {
           ),
         )
     : [];
-  const existingByPhone = new Map(existing.map((e) => [e.phone, e.id]));
+  const existingByPhone = new Map(existing.map((e) => [e.phone, e]));
+
+  // Le compartiment d'une fiche ne dépend que de son DÉTENTEUR : on le résout
+  // une fois par détenteur et non une fois par ligne — un lot de 500 doublons
+  // ne coûte donc pas 500 questions de plus à la matrice.
+  const { cfg, roleOf } = await loadDirectory();
+  const grantsCache = new Map<string, Grants>();
+  const grantsOfHolder = (assignedToId: string | null): Grants => {
+    const key = assignedToId ?? "";
+    const hit = grantsCache.get(key);
+    if (hit) return hit;
+    const holder = assignedToId ? (roleOf.get(assignedToId) ?? null) : null;
+    const g = grantsFor(cfg, actor.role, bucketFor(actor.user.id, { assignedToId }, holder));
+    grantsCache.set(key, g);
+    return g;
+  };
+
+  /**
+   * Le responsable par défaut, passé au crible AVANT le lot.
+   *
+   * Écrire `assigned_to_id` à la main ferait de l'import la porte dérobée du
+   * « distribuer » : un rôle qui n'a pas le droit de donner une fiche à
+   * quelqu'un d'autre se l'accorderait en versant un fichier. Toutes les
+   * insertions posent la MÊME question (une fiche neuve est au bassin), donc
+   * un seul verdict suffit ; refusé, la ligne entre quand même, sans
+   * responsable — un import à moitié écrit serait pire que pas d'assignation.
+   */
+  const wantedAssignee = body.defaults.assignedToId ?? null;
+  let assignOnInsert: string | null = null;
+  /**
+   * Le plafond se compte SUR LE LOT : le verdict le vérifie fiche par fiche
+   * avec le même compte de départ, donc 500 lignes d'un coup passeraient
+   * toutes sous un plafond que la première franchit déjà. Il ne concerne que
+   * ce qu'on prend POUR SOI — donner ne remplit pas l'appétit de l'autre.
+   */
+  let headroom = Number.POSITIVE_INFINITY;
+  /** Lignes écrites sans le responsable demandé — pour le journal d'audit. */
+  let assignRefused = 0;
+  if (wantedAssignee) {
+    const cap =
+      wantedAssignee === actor.user.id && !actor.role.superAdmin
+        ? actor.role.assignment.maxOwned
+        : 0;
+    if (cap > 0) headroom = Math.max(0, cap - (await ownedCount(actor.user.id)));
+    const verdict = await verifyAssignment(actor, { assignedToId: null }, wantedAssignee);
+    if (verdict.ok) assignOnInsert = wantedAssignee;
+  }
+
+  /** Consomme une place sous le plafond ; faux une fois qu'il est atteint. */
+  const takeSlot = (): boolean => {
+    if (headroom <= 0) return false;
+    headroom -= 1;
+    return true;
+  };
 
   const toInsert: (typeof clients.$inferInsert)[] = [];
   const toUpdate: { id: string; set: Partial<typeof clients.$inferInsert> }[] = [];
 
   for (const { phone, row, index } of prepared) {
-    const existingId = existingByPhone.get(phone);
-    if (existingId) {
-      if (body.mode === "skip") {
+    const match = existingByPhone.get(phone);
+    if (match) {
+      const grants = grantsOfHolder(match.assignedToId);
+      // Une fiche invisible, ou visible mais fermée à la modification, ne se
+      // réécrit pas : le mode « update » retombe alors sur le comportement du
+      // mode « skip », ligne comptée et motif rendu. Et l'identifiant ne part
+      // QUE si la fiche existe pour ce regard — sinon la réponse dirait quelle
+      // fiche se cache derrière ce numéro, et offrirait un lien vers un
+      // « introuvable ».
+      const rewritable = grants.visible && grants.edit;
+      if (body.mode === "skip" || !rewritable) {
         counts.skipped++;
         issues.push({
           index,
           reason: "duplicate_in_db",
           phone: row.phone,
           name: row.fullName,
-          existingId,
+          ...(grants.visible ? { existingId: match.id } : {}),
         });
         continue;
       }
@@ -202,10 +290,23 @@ export async function POST(req: Request) {
       if (row.budget) set.budget = row.budget;
       if (row.notes) set.notes = row.notes;
       if (body.defaults.sourceId != null) set.sourceId = body.defaults.sourceId;
-      if (body.defaults.assignedToId != null) set.assignedToId = body.defaults.assignedToId;
-      toUpdate.push({ id: existingId, set });
+      // Faire changer une fiche EXISTANTE de main est un geste d'assignation à
+      // part entière : son verdict dépend de son compartiment et de son verrou,
+      // donc il se pose fiche par fiche. Refusé, le reste de la ligne est tout
+      // de même appliqué — la fiche ne change simplement pas de responsable.
+      if (wantedAssignee && match.assignedToId !== wantedAssignee) {
+        const verdict = await verifyAssignment(actor, match, wantedAssignee);
+        if (verdict.ok && takeSlot()) set.assignedToId = wantedAssignee;
+        else assignRefused++;
+      }
+      toUpdate.push({ id: match.id, set });
       continue;
     }
+
+    // Fiche neuve : le verdict d'assignation est déjà rendu (même question
+    // pour toutes), il ne reste que le plafond à décompter.
+    const assignedToId = assignOnInsert && takeSlot() ? assignOnInsert : null;
+    if (wantedAssignee && assignedToId === null) assignRefused++;
 
     toInsert.push({
       fullName: row.fullName || formatPhone(phone),
@@ -221,9 +322,9 @@ export async function POST(req: Request) {
       language: "fr",
       categoryId,
       sourceId: body.defaults.sourceId ?? null,
-      assignedToId: body.defaults.assignedToId ?? null,
-      createdById: admin.id,
-      meta: { importedAt: new Date().toISOString(), importedBy: admin.id },
+      assignedToId,
+      createdById: actor.user.id,
+      meta: { importedAt: new Date().toISOString(), importedBy: actor.user.id },
     });
   }
 
@@ -249,10 +350,18 @@ export async function POST(req: Request) {
   counts.created += toInsert.length;
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "import.csv",
     entity: "clients",
-    detail: { ...counts, batch: body.batch ?? 0, mode: body.mode },
+    // `assignRefused` : lignes écrites sans le responsable demandé (droit,
+    // verrou ou plafond). Au journal et pas dans la réponse — c'est une
+    // question de configuration des rôles, pas une ligne à corriger.
+    detail: {
+      ...counts,
+      batch: body.batch ?? 0,
+      mode: body.mode,
+      ...(assignRefused > 0 ? { assignRefused } : {}),
+    },
   });
 
   // Remis dans l'ordre du fichier : les doublons en base sont détectés dans

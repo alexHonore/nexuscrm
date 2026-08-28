@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { diffFields, logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { getSetting, setSetting } from "@/lib/settings";
 import { readJson } from "../../_helpers";
 
@@ -9,8 +9,8 @@ const schema = z.object({ provider: z.enum(["voipms", "twilio"]) });
 
 /** Bascule du fournisseur de téléphonie — action sensible, auditée. */
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   const body = await readJson(req, schema);
   if (body instanceof NextResponse) return body;
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
 
   const changes = diffFields(current, body, ["provider"]);
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "settings.telephony",
     entity: "settings",
     detail: { provider: body.provider, ...(changes ? { changes } : {}) },

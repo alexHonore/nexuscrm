@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { applyEnrollmentAction } from "@/lib/campaigns-server/enrollment-admin";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * PATCH /api/campaigns/:id/enrollments/:enrollmentId
@@ -14,7 +14,7 @@ import { applyEnrollmentAction } from "@/lib/campaigns-server/enrollment-admin";
  *  - `reopen` : une inscription TERMINÉE repart au barreau où elle s'était
  *               arrêtée, parce que l'échelle a grandi depuis.
  *
- * Réservé à l'admin (les téléphonistes ne touchent jamais aux campagnes), et
+ * Réservé au droit `admin.campaigns` (un téléphoniste ne l'a pas), et
  * l'inscription doit appartenir à CETTE campagne — sinon 404, jamais un accès
  * croisé. Chaque geste est audité.
  */
@@ -27,8 +27,8 @@ export async function PATCH(
   req: Request,
   ctx: { params: Promise<{ id: string; enrollmentId: string }> },
 ) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.campaigns");
+  if (actor instanceof NextResponse) return actor;
 
   const { id, enrollmentId } = await ctx.params;
   if (!UUID.safeParse(id).success || !UUID.safeParse(enrollmentId).success) {
@@ -57,7 +57,7 @@ export async function PATCH(
   }
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: `campaign.enrollment.${parsed.data.action}`,
     entity: "campaign",
     entityId: id,

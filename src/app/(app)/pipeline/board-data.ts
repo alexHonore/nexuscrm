@@ -2,6 +2,9 @@ import "server-only";
 import { asc, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { categories, clients } from "@/db/schema";
+import { bucketFor, grantsFor } from "@/lib/permissions/access";
+import type { Grants } from "@/lib/permissions/catalog";
+import { type Actor, loadDirectory, visibilityCondition } from "@/lib/permissions/server";
 
 /** Nombre maximal de cartes chargées par colonne du tableau. */
 export const BOARD_CARD_LIMIT = 40;
@@ -11,7 +14,10 @@ export type BoardCategory = typeof categories.$inferSelect;
 export type BoardClientRow = {
   id: string;
   fullName: string;
-  phone: string;
+  /** null quand le compartiment de la fiche ferme les coordonnées. */
+  phone: string | null;
+  /** Le numéro est absent par DROIT, pas parce que la fiche n'en a pas. */
+  contactHidden: boolean;
   city: string | null;
   categoryId: number | null;
   nextFollowupAt: Date | null;
@@ -37,8 +43,30 @@ export type BoardData = {
  * 1. comptes totaux groupés par catégorie ;
  * 2. sélection fenêtrée row_number() OVER (PARTITION BY category_id
  *    ORDER BY updated_at DESC) ≤ BOARD_CARD_LIMIT.
+ *
+ * Tout part de la PORTÉE de celui qui regarde : elle entre dans la fenêtre
+ * comme dans les comptes. Un compte de colonne non filtré dirait exactement ce
+ * que la portée cache — « il y a 12 fiches ici, vous n'en voyez que 3 ».
  */
-export async function getBoardData(): Promise<BoardData> {
+export async function getBoardData(actor: Actor): Promise<BoardData> {
+  const [visible, { cfg, roleOf }] = await Promise.all([
+    visibilityCondition(actor),
+    loadDirectory(),
+  ]);
+
+  // Le compartiment ne dépend que du DÉTENTEUR : une résolution par détenteur
+  // suffit pour les ~40 cartes × N colonnes que la page affiche.
+  const grantsCache = new Map<string, Grants>();
+  const grantsOfHolder = (assignedToId: string | null): Grants => {
+    const key = assignedToId ?? "";
+    const hit = grantsCache.get(key);
+    if (hit) return hit;
+    const holder = assignedToId ? (roleOf.get(assignedToId) ?? null) : null;
+    const g = grantsFor(cfg, actor.role, bucketFor(actor.user.id, { assignedToId }, holder));
+    grantsCache.set(key, g);
+    return g;
+  };
+
   const ranked = db
     .select({
       id: clients.id,
@@ -46,6 +74,7 @@ export async function getBoardData(): Promise<BoardData> {
       phone: clients.phone,
       city: clients.city,
       categoryId: clients.categoryId,
+      assignedToId: clients.assignedToId,
       nextFollowupAt: clients.nextFollowupAt,
       doNotCall: clients.doNotCall,
       lastDisposition: clients.lastDisposition,
@@ -55,6 +84,10 @@ export async function getBoardData(): Promise<BoardData> {
       ),
     })
     .from(clients)
+    // Le filtre est DANS la fenêtre, pas après : sinon les 40 premières cartes
+    // seraient choisies parmi des fiches invisibles, et une colonne pleine
+    // reviendrait vide.
+    .where(visible)
     .as("ranked");
 
   const [allCategories, countRows, clientRows] = await Promise.all([
@@ -62,6 +95,7 @@ export async function getBoardData(): Promise<BoardData> {
     db
       .select({ categoryId: clients.categoryId, total: sql<number>`count(*)::int` })
       .from(clients)
+      .where(visible)
       .groupBy(clients.categoryId),
     db
       .select()
@@ -75,10 +109,12 @@ export async function getBoardData(): Promise<BoardData> {
 
   const clientsByCategory = new Map<number | null, BoardClientRow[]>();
   for (const row of clientRows) {
+    const contact = grantsOfHolder(row.assignedToId).contact;
     const client: BoardClientRow = {
       id: row.id,
       fullName: row.fullName,
-      phone: row.phone,
+      phone: contact ? row.phone : null,
+      contactHidden: !contact,
       city: row.city,
       categoryId: row.categoryId,
       nextFollowupAt: row.nextFollowupAt,

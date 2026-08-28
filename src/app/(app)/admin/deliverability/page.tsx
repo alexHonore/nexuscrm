@@ -13,11 +13,11 @@ import { LookIcon, VERDICT_LOOK, lookTint } from "@/components/look";
 import { PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { requireAdmin } from "@/lib/auth/guards";
 import { collectFacts } from "@/lib/deliverability-server";
 import { assess } from "@/lib/deliverability/assess";
 import { RANGE_DAYS, parseRangeDays } from "@/lib/deliverability/range";
 import { docLocale } from "@/lib/docs/types";
+import { requirePerm } from "@/lib/permissions/server";
 
 /**
  * « Est-ce que mes SMS arrivent, et sinon qu'est-ce que je corrige ? »
@@ -69,7 +69,7 @@ export default async function DeliverabilityPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireAdmin();
+  await requirePerm("admin.deliverability");
   const sp = await searchParams;
   const t = await getTranslations("admin");
   const locale = await getLocale();

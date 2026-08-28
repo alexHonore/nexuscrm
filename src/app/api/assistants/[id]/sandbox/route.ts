@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { apiAdmin } from "@/lib/auth/guards";
 import { simulateTurn } from "@/lib/agent/sandbox";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * POST /api/assistants/:id/sandbox — un tour d'essai.
@@ -68,8 +68,8 @@ function rateLimited(adminId: string, now = Date.now()): boolean {
 }
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -88,7 +88,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     return NextResponse.json({ error: "invalid_body", issues: parsed.error.issues }, { status: 400 });
   }
 
-  if (rateLimited(admin.id)) {
+  if (rateLimited(actor.user.id)) {
     return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 

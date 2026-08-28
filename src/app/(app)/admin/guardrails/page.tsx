@@ -10,11 +10,11 @@ import {
 import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/db";
 import { guardrailFixtures, guardrailRules, promptCores } from "@/db/schema-sms";
-import { requireAdmin } from "@/lib/auth/guards";
 import type { GuardrailKind, GuardrailSeverity } from "@/lib/guardrails/types";
+import { requirePerm } from "@/lib/permissions/server";
 
 export default async function AdminGuardrailsPage() {
-  await requireAdmin();
+  await requirePerm("admin.guardrails");
   const t = await getTranslations("assistants");
 
   const [ruleRows, fixtureRows, coreRows] = await Promise.all([

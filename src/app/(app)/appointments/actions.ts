@@ -10,6 +10,7 @@ import { db } from "@/db";
 import { appointments, categories, clients, comments, notifications, users } from "@/db/schema";
 import { diffFields, logAudit } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth/guards";
+import { clientRef, currentActor, grantsOnClient } from "@/lib/permissions/server";
 import {
   bookingEventTitle,
   cancelEvent,
@@ -21,7 +22,9 @@ import { formatPhone } from "@/lib/phone";
 import { getSetting } from "@/lib/settings";
 import { computeAvailability, durationFor } from "@/app/api/availability/slots";
 import enBooking from "../../../../messages/en/booking.json";
+import enClients from "../../../../messages/en/clients.json";
 import frBooking from "../../../../messages/fr/booking.json";
+import frClients from "../../../../messages/fr/clients.json";
 import { notifyCategoryChanged } from "@/lib/campaigns-server/match";
 
 // ── Qualification vocabulary (stored snapshot + CRM comment log) ─────────────
@@ -75,6 +78,14 @@ const FORM_LABELS = {
   situation: frBooking.qualification.situationOptions,
   type: { meet: frBooking.slot.meet, inperson: frBooking.slot.inperson },
 } as const;
+
+/**
+ * « Masqué » dans les deux langues — le MÊME mot que l'écran des fiches
+ * (`clients.access.masked`), lu à la source pour la même raison que
+ * `FORM_LABELS` : une notification est persistée et rendue dans la langue de
+ * son destinataire, hors de tout contexte de requête.
+ */
+const MASKED = { fr: frClients.access.masked, en: enClients.access.masked } as const;
 
 /** Lookup tolérant : un code inconnu (donnée héritée) est rendu tel quel. */
 function label<K extends string>(map: Record<K, string>, code: string): string {
@@ -231,8 +242,9 @@ async function notifyAdmins(entry: {
 }
 
 export async function createAppointment(input: CreateAppointmentInput): Promise<CreateAppointmentResult> {
-  const user = await getCurrentUser();
-  if (!user) return { ok: false, error: "unauthenticated" };
+  const actor = await currentActor();
+  if (!actor) return { ok: false, error: "unauthenticated" };
+  const user = actor.user;
 
   const parsed = createSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "invalid" };
@@ -243,6 +255,17 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
 
   const client = await db.query.clients.findFirst({ where: eq(clients.id, data.clientId) });
   if (!client) return { ok: false, error: "not_found" };
+
+  // Réserver ÉCRIT dans la fiche (rendez-vous, commentaire, qualification) :
+  // la case « réserver » de son compartiment est donc exigée. Une fiche hors
+  // de portée rend « introuvable » et non « interdit » — le formulaire de
+  // réservation ne doit pas devenir un révélateur de fiches cachées.
+  //
+  // Ne concerne QUE ce chemin humain : l'assistant SMS réserve par
+  // `src/lib/booking/internal.ts`, qui agit pour le système et n'a pas de
+  // regard à qui opposer une matrice.
+  const grants = await grantsOnClient(actor, client);
+  if (!grants.visible || !grants.book) return { ok: false, error: "not_found" };
 
   const settings = await getSetting("booking");
   const tz = settings.timezone || "America/Toronto";
@@ -460,8 +483,9 @@ export type CancelAppointmentResult =
   | { ok: false; error: "unauthenticated" | "not_found" | "forbidden" | "unknown" };
 
 export async function cancelAppointment(appointmentId: string): Promise<CancelAppointmentResult> {
-  const user = await getCurrentUser();
-  if (!user) return { ok: false, error: "unauthenticated" };
+  const actor = await currentActor();
+  if (!actor) return { ok: false, error: "unauthenticated" };
+  const user = actor.user;
   if (!z.uuid().safeParse(appointmentId).success) return { ok: false, error: "not_found" };
 
   const appt = await db.query.appointments.findFirst({
@@ -470,10 +494,25 @@ export async function cancelAppointment(appointmentId: string): Promise<CancelAp
   });
   if (!appt) return { ok: false, error: "not_found" };
 
-  // Owner (the caller who booked it) or admin only.
-  if (user.role !== "admin" && appt.userId !== user.id) {
-    return { ok: false, error: "forbidden" };
+  // Le sien, ou celui d'une fiche dont le compartiment ouvre la RÉSERVATION :
+  // annuler la rencontre d'un autre, c'est disposer de sa fiche. La même règle
+  // qu'avant pour le courtier — il a toutes les cases — mais dite par la
+  // matrice, donc vraie aussi pour un superviseur.
+  //
+  // Fiche invisible ⇒ « introuvable », jamais « interdit » : un refus
+  // confirmerait l'existence du rendez-vous que la fiche cache.
+  const own = appt.userId === user.id;
+  const ref = await clientRef(appt.clientId);
+  const grants = ref ? await grantsOnClient(actor, ref) : null;
+  if (!own) {
+    if (!grants?.visible) return { ok: false, error: "not_found" };
+    if (!grants.book) return { ok: false, error: "forbidden" };
   }
+  // Son PROPRE rendez-vous s'annule toujours — mais la fiche derrière a pu se
+  // fermer depuis (réassignée au patron). On la lit donc quand même, non pour
+  // refuser, mais pour savoir si son identité a le droit de ressortir : ce
+  // geste ne doit rien apprendre à celui qui le pose sur une fiche fermée.
+  const nameOpen = grants?.visible === true;
   if (appt.status === "cancelled") return { ok: true };
 
   // Best effort on the Google side — local cancellation always proceeds.
@@ -519,11 +558,19 @@ export async function cancelAppointment(appointmentId: string): Promise<CancelAp
     `Rendez-vous annulé — ${FORM_LABELS.type[appt.type]}, ${frenchWhen(appt.startsAt, tz)}`,
   );
 
+  // Le nom du client ne sort de la fiche que si celui qui annule y a droit :
+  // une annulation faite sur une fiche fermée se raconte par sa date et son
+  // heure, jamais par la personne qu'elle nomme. Le mot « Masqué » vient des
+  // messages de l'application (comme FORM_LABELS plus haut) : une notification
+  // est du texte PERSISTÉ, écrit dans la langue de son destinataire, hors de
+  // tout contexte de requête.
+  const whoFr = nameOpen ? appt.client.fullName : MASKED.fr;
+  const whoEn = nameOpen ? appt.client.fullName : MASKED.en;
   await notifyAdmins({
     actorId: user.id,
     type: "appointment",
-    fr: { title: "Rendez-vous annulé", body: `${appt.client.fullName} — ${whenFr}` },
-    en: { title: "Appointment cancelled", body: `${appt.client.fullName} — ${whenEn}` },
+    fr: { title: "Rendez-vous annulé", body: `${whoFr} — ${whenFr}` },
+    en: { title: "Appointment cancelled", body: `${whoEn} — ${whenEn}` },
     link: "/appointments",
   });
 

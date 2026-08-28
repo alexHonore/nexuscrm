@@ -22,8 +22,10 @@ import {
   Zap,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
+import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
+import { LookGlyph, lookTint, roleLook } from "@/components/look";
 import { PageHeader } from "@/components/shell/page-header";
 import {
   AlertDialog,
@@ -84,9 +86,126 @@ import { api, ApiError } from "./api";
 import { LoginCredentials, OneTimeSecret } from "./copy-button";
 import { errorMessage, type Tr } from "./errors";
 import { OrderDidDialog, type OrderDidResult } from "./order-did-dialog";
-import type { AdminUserDto, PhoneStatusDto } from "./types";
+import type { AdminUserDto, PhoneStatusDto, RoleOptionDto } from "./types";
 
 const TZ = "America/Toronto";
+
+// ── Rôles configurés ─────────────────────────────────────────────────────────
+
+/**
+ * Deux refus propres à la matrice des rôles. Ils ne sont pas dans `errors.ts`
+ * (qui sert tous les écrans d'administration) : ils n'existent que là où l'on
+ * change le rôle d'un compte.
+ */
+function userErrorMessage(t: Tr, err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.code === "unknown_role") return t("roles.errorNotFound");
+    // TODO i18n : « last_admin » n'a pas encore son texte. Celui de la
+    // rétrogradation de soi est le plus proche — il dit le bon danger (perdre
+    // l'administrateur) sur la mauvaise personne (soi plutôt que le dernier).
+    if (err.code === "last_admin") return t("users.errors.cannot_demote_self");
+  }
+  return errorMessage(t, err);
+}
+
+/** Le libellé d'un rôle dans la langue de l'INTERFACE. */
+function useRoleName() {
+  const locale = useLocale();
+  return (role: { nameFr: string; nameEn: string }) =>
+    locale === "en" ? role.nameEn : role.nameFr;
+}
+
+/**
+ * Le rôle d'une ligne, retrouvé dans la liste configurée.
+ *
+ * Un compte dont le rôle vient d'être supprimé de la matrice garde les noms
+ * sérialisés avec lui : mieux vaut une pastille périmée qu'une case vide en
+ * face d'un compte qui, lui, a bel et bien des droits.
+ */
+function roleOfUser(u: AdminUserDto, roles: RoleOptionDto[]): RoleOptionDto | null {
+  const known = roles.find((r) => r.id === u.roleId);
+  if (known) return known;
+  if (!u.roleId) return null;
+  return {
+    id: u.roleId,
+    nameFr: u.roleNameFr ?? u.roleId,
+    nameEn: u.roleNameEn ?? u.roleId,
+    look: u.roleLook ?? "observer",
+    superAdmin: u.role === "admin",
+  };
+}
+
+/** Pictogramme + teinte du rôle : la couleur DOUBLE le nom, ne le remplace pas. */
+function RoleBadge({ role, label }: { role: RoleOptionDto | null; label: string }) {
+  const look = roleLook(role?.look ?? "observer");
+  const tint = lookTint(look);
+  return (
+    <Badge
+      variant="outline"
+      className="gap-1 pl-1.5 font-medium"
+      style={{ borderColor: tint.borderColor, backgroundColor: tint.backgroundColor }}
+    >
+      <LookGlyph look={look} className="size-3.5" />
+      {label}
+    </Badge>
+  );
+}
+
+/**
+ * Le choix du rôle — la seule chose qui se décide ici. Ce que chaque rôle a le
+ * droit de faire se règle dans /admin/roles, et le lien y mène : sans lui, on
+ * choisit « Observateur » sans savoir ce que ça retire.
+ */
+function RoleField({
+  roles,
+  value,
+  onChange,
+  disabled,
+}: {
+  roles: RoleOptionDto[];
+  value: string;
+  onChange: (roleId: string) => void;
+  disabled?: boolean;
+}) {
+  const t = useTranslations("admin");
+  const roleName = useRoleName();
+  const selected = roles.find((r) => r.id === value) ?? null;
+
+  return (
+    <div className="space-y-1.5">
+      <Label>{t("users.role")}</Label>
+      <Select
+        items={roles.map((r) => ({ value: r.id, label: roleName(r) }))}
+        value={value}
+        onValueChange={(v) => onChange(String(v))}
+        disabled={disabled}
+      >
+        <SelectTrigger className="min-h-11 w-full md:min-h-8">
+          <LookGlyph look={roleLook(selected?.look ?? "observer")} className="size-3.5" />
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {roles.map((r) => (
+            <SelectItem key={r.id} value={r.id}>
+              <LookGlyph look={roleLook(r.look)} className="size-3.5" />
+              {roleName(r)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground">{t("users.roleHint")}</p>
+      <Button
+        variant="link"
+        size="sm"
+        className="h-auto min-h-11 px-0 md:min-h-0"
+        render={<Link href="/admin/roles" />}
+      >
+        <ShieldCheck className="size-3.5" />
+        {t("users.roleManage")}
+      </Button>
+    </div>
+  );
+}
 
 // ── Détection de fautes de frappe dans les courriels ──────────────────────────
 
@@ -363,12 +482,17 @@ function PhoneStatusCell({ phone }: { phone: PhoneStatusDto }) {
 
 export function UsersClient({
   initialUsers,
+  roles,
+  defaultRoleId,
   currentUserId,
 }: {
   initialUsers: AdminUserDto[];
+  roles: RoleOptionDto[];
+  defaultRoleId: string;
   currentUserId: string;
 }) {
   const t = useTranslations("admin");
+  const roleName = useRoleName();
   const fmt = useDateFmt();
   const [users, setUsers] = useState(initialUsers);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -379,7 +503,18 @@ export function UsersClient({
       const i = prev.findIndex((p) => p.id === u.id);
       if (i === -1) return [...prev, u];
       const next = [...prev];
-      next[i] = u;
+      // Les routes voip.ms ne lisent pas la matrice : leur réponse ne porte
+      // aucun rôle (`roleId` nul). La ligne garde le sien plutôt que de perdre
+      // sa pastille à chaque numéro attribué.
+      next[i] = u.roleId
+        ? u
+        : {
+            ...u,
+            roleId: prev[i].roleId,
+            roleNameFr: prev[i].roleNameFr,
+            roleNameEn: prev[i].roleNameEn,
+            roleLook: prev[i].roleLook,
+          };
       return next;
     });
 
@@ -392,16 +527,14 @@ export function UsersClient({
       upsert(res.user);
       toast.success(isActive ? t("users.activated") : t("users.deactivated"));
     } catch (err) {
-      toast.error(errorMessage(t, err));
+      toast.error(userErrorMessage(t, err));
     }
   };
 
-  const roleBadge = (u: AdminUserDto) =>
-    u.role === "admin" ? (
-      <Badge>{t("users.roleAdmin")}</Badge>
-    ) : (
-      <Badge variant="secondary">{t("users.roleCaller")}</Badge>
-    );
+  const roleBadge = (u: AdminUserDto) => {
+    const role = roleOfUser(u, roles);
+    return <RoleBadge role={role} label={role ? roleName(role) : t("users.roleCaller")} />;
+  };
 
   return (
     <div className="space-y-4">
@@ -409,7 +542,14 @@ export function UsersClient({
         icon={<UsersRound />}
         title={t("users.title")}
         subtitle={t("users.subtitle")}
-        actions={<CreateUserDialog onCreated={upsert} onConfigure={setEditingId} />}
+        actions={
+          <CreateUserDialog
+            roles={roles}
+            defaultRoleId={defaultRoleId}
+            onCreated={upsert}
+            onConfigure={setEditingId}
+          />
+        }
       />
 
       {/* ── Tableau (desktop) ── */}
@@ -522,6 +662,8 @@ export function UsersClient({
       <UserEditSheet
         key={editingId ?? "none"}
         user={editing}
+        roles={roles}
+        defaultRoleId={defaultRoleId}
         currentUserId={currentUserId}
         onClose={() => setEditingId(null)}
         onUpdated={upsert}
@@ -643,22 +785,28 @@ function ProvisionStatus({
 // ── Création ─────────────────────────────────────────────────────────────────
 
 function CreateUserDialog({
+  roles,
+  defaultRoleId,
   onCreated,
   onConfigure,
 }: {
+  roles: RoleOptionDto[];
+  defaultRoleId: string;
   onCreated: (u: AdminUserDto) => void;
   onConfigure: (userId: string) => void;
 }) {
   const t = useTranslations("admin");
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", role: "caller", locale: "fr" });
+  // Le rôle proposé est celui que la matrice donne d'office : créer un compte
+  // sans y toucher ne doit jamais accorder plus que le réglage par défaut.
+  const [form, setForm] = useState({ name: "", email: "", roleId: defaultRoleId, locale: "fr" });
   /** Identifiants complets (courriel + mot de passe) montrés une seule fois. */
   const [created, setCreated] = useState<{ id: string; email: string; password: string } | null>(null);
   const [provision, setProvision] = useState<ProvisionState>({ state: "idle" });
 
   const reset = () => {
-    setForm({ name: "", email: "", role: "caller", locale: "fr" });
+    setForm({ name: "", email: "", roleId: defaultRoleId, locale: "fr" });
     setCreated(null);
     setProvision({ state: "idle" });
   };
@@ -674,7 +822,7 @@ function CreateUserDialog({
       onCreated(res.user);
       setProvision({ state: "done", account: res.account, reused: !res.created });
     } catch (err) {
-      setProvision({ state: "error", message: errorMessage(t, err) });
+      setProvision({ state: "error", message: userErrorMessage(t, err) });
     }
   };
 
@@ -692,7 +840,7 @@ function CreateUserDialog({
       // ce deuxième pas manuel que personne ne faisait.
       void runProvision(res.user.id);
     } catch (err) {
-      toast.error(errorMessage(t, err));
+      toast.error(userErrorMessage(t, err));
     } finally {
       setPending(false);
     }
@@ -753,45 +901,31 @@ function CreateUserDialog({
                 value={form.email}
                 onChange={(email) => setForm({ ...form, email })}
               />
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>{t("users.role")}</Label>
-                  <Select
-                    items={[
-                      { value: "caller", label: t("users.roleCaller") },
-                      { value: "admin", label: t("users.roleAdmin") },
-                    ]}
-                    value={form.role}
-                    onValueChange={(v) => setForm({ ...form, role: String(v) })}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="caller">{t("users.roleCaller")}</SelectItem>
-                      <SelectItem value="admin">{t("users.roleAdmin")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>{t("users.locale")}</Label>
-                  <Select
-                    items={[
-                      { value: "fr", label: t("users.localeFr") },
-                      { value: "en", label: t("users.localeEn") },
-                    ]}
-                    value={form.locale}
-                    onValueChange={(v) => setForm({ ...form, locale: String(v) })}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="fr">{t("users.localeFr")}</SelectItem>
-                      <SelectItem value="en">{t("users.localeEn")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              {/* Le rôle prend toute la largeur : sa liste s'allonge à chaque
+                  rôle créé, et il porte son indice et son lien. */}
+              <RoleField
+                roles={roles}
+                value={form.roleId}
+                onChange={(roleId) => setForm({ ...form, roleId })}
+              />
+              <div className="space-y-1.5">
+                <Label>{t("users.locale")}</Label>
+                <Select
+                  items={[
+                    { value: "fr", label: t("users.localeFr") },
+                    { value: "en", label: t("users.localeEn") },
+                  ]}
+                  value={form.locale}
+                  onValueChange={(v) => setForm({ ...form, locale: String(v) })}
+                >
+                  <SelectTrigger className="min-h-11 w-full md:min-h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="fr">{t("users.localeFr")}</SelectItem>
+                    <SelectItem value="en">{t("users.localeEn")}</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <DialogFooter>
@@ -926,6 +1060,8 @@ function VerifyChecklist({
 
 function UserEditSheet({
   user,
+  roles,
+  defaultRoleId,
   currentUserId,
   onClose,
   onUpdated,
@@ -933,6 +1069,8 @@ function UserEditSheet({
   onDidReleased,
 }: {
   user: AdminUserDto | null;
+  roles: RoleOptionDto[];
+  defaultRoleId: string;
   currentUserId: string;
   onClose: () => void;
   onUpdated: (u: AdminUserDto) => void;
@@ -944,7 +1082,7 @@ function UserEditSheet({
   const [form, setForm] = useState(() => ({
     name: user?.name ?? "",
     email: user?.email ?? "",
-    role: user?.role ?? "caller",
+    roleId: user?.roleId ?? defaultRoleId,
     locale: user?.locale ?? "fr",
     sipUsername: user?.sipUsername ?? "",
     sipPassword: "",
@@ -997,7 +1135,7 @@ function UserEditSheet({
       toast.success(successMsg ?? t("saved"));
       return true;
     } catch (err) {
-      toast.error(errorMessage(t, err));
+      toast.error(userErrorMessage(t, err));
       return false;
     } finally {
       setPending(false);
@@ -1008,7 +1146,9 @@ function UserEditSheet({
     const ok = await patch({
       name: form.name,
       email: form.email.trim(),
-      role: form.role,
+      // Le rôle CONFIGURÉ, jamais le plancher « admin/caller » : c'est le
+      // serveur qui en déduit la colonne (`setUserRole`).
+      roleId: form.roleId,
       locale: form.locale,
       sipUsername: form.sipUsername || null,
       ...(form.sipPassword ? { sipPassword: form.sipPassword } : {}),
@@ -1257,46 +1397,33 @@ function UserEditSheet({
               value={form.email}
               onChange={(email) => setForm({ ...form, email })}
             />
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>{t("users.role")}</Label>
-                <Select
-                  items={[
-                    { value: "caller", label: t("users.roleCaller") },
-                    { value: "admin", label: t("users.roleAdmin") },
-                  ]}
-                  value={form.role}
-                  onValueChange={(v) => setForm({ ...form, role: v as "admin" | "caller" })}
-                  disabled={isSelf}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="caller">{t("users.roleCaller")}</SelectItem>
-                    <SelectItem value="admin">{t("users.roleAdmin")}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>{t("users.locale")}</Label>
-                <Select
-                  items={[
-                    { value: "fr", label: t("users.localeFr") },
-                    { value: "en", label: t("users.localeEn") },
-                  ]}
-                  value={form.locale}
-                  onValueChange={(v) => setForm({ ...form, locale: v as "fr" | "en" })}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="fr">{t("users.localeFr")}</SelectItem>
-                    <SelectItem value="en">{t("users.localeEn")}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            {/* Sur son PROPRE compte, le sélecteur est fermé : le serveur
+                refuse de toute façon (`cannot_demote_self`) — se retirer les
+                clés de la maison ne se rattrape pas depuis l'application. */}
+            <RoleField
+              roles={roles}
+              value={form.roleId}
+              onChange={(roleId) => setForm({ ...form, roleId })}
+              disabled={isSelf}
+            />
+            <div className="space-y-1.5">
+              <Label>{t("users.locale")}</Label>
+              <Select
+                items={[
+                  { value: "fr", label: t("users.localeFr") },
+                  { value: "en", label: t("users.localeEn") },
+                ]}
+                value={form.locale}
+                onValueChange={(v) => setForm({ ...form, locale: v as "fr" | "en" })}
+              >
+                <SelectTrigger className="min-h-11 w-full md:min-h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fr">{t("users.localeFr")}</SelectItem>
+                  <SelectItem value="en">{t("users.localeEn")}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </section>
 
@@ -1656,7 +1783,7 @@ function UserEditSheet({
                             toast.success(t("users.deleted"));
                             onDeleted(user.id);
                           } catch (err) {
-                            toast.error(errorMessage(t, err));
+                            toast.error(userErrorMessage(t, err));
                           }
                         }}
                       >

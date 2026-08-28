@@ -4,7 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { assistants, conversations, smsNumbers } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 
 const patchSchema = z.object({
   label: z.string().trim().max(80).nullable().optional(),
@@ -16,8 +16,8 @@ const patchSchema = z.object({
 
 /** PATCH /api/admin/sms-numbers/:id — libellé, plafond, actif, assistant par défaut. */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) return NextResponse.json({ error: "invalid_id" }, { status: 400 });
   let raw: unknown;
@@ -44,7 +44,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     .returning({ id: smsNumbers.id, e164: smsNumbers.e164 });
   if (!row) return NextResponse.json({ error: "not_found" }, { status: 404 });
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "sms_number.update",
     entity: "sms_number",
     entityId: id,
@@ -58,8 +58,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
  * un numéro qui a servi garde son histoire, on le désactive plutôt.
  */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) return NextResponse.json({ error: "invalid_id" }, { status: 400 });
   const [used] = await db
@@ -70,7 +70,7 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
   const [row] = await db.delete(smsNumbers).where(eq(smsNumbers.id, id)).returning({ e164: smsNumbers.e164 });
   if (!row) return NextResponse.json({ error: "not_found" }, { status: 404 });
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "sms_number.delete",
     entity: "sms_number",
     entityId: id,

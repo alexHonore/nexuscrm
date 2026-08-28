@@ -547,10 +547,15 @@ describe("createAppointment — concurrence", () => {
   it("deux téléphonistes en parallèle sur DEUX créneaux : chacun son RDV (sessions bien distinctes)", async () => {
     const t1 = await sessionToken(ids.caller, "caller");
     const t2 = await sessionToken(ids.otherCaller, "caller");
+    // Chacun sa fiche : depuis que les droits sont configurables, la fiche du
+    // décor appartient à `caller`, et un téléphoniste ne prend pas rendez-vous
+    // sur celle d'un collègue. Ce que ce test mesure — deux sessions bien
+    // distinctes sur deux créneaux — n'a rien à voir avec ça.
+    const sienne = await makeClient({ fullName: "Jean Roy", phone: "+14185550001" });
 
     const results = await Promise.all([
       as(t1, () => createAppointment(input({ startsAt: SLOT }))),
-      as(t2, () => createAppointment(input({ startsAt: SLOT_B }))),
+      as(t2, () => createAppointment(input({ startsAt: SLOT_B, clientId: sienne.id }))),
     ]);
     expect(results.every((r) => r.ok)).toBe(true);
 
@@ -562,10 +567,14 @@ describe("createAppointment — concurrence", () => {
   it("deux téléphonistes DIFFÉRENTS visant le même créneau : un seul RDV planifié", async () => {
     const t1 = await sessionToken(ids.caller, "caller");
     const t2 = await sessionToken(ids.otherCaller, "caller");
+    // Deux fiches, deux téléphonistes, UN créneau : c'est la course au
+    // créneau qu'on mesure, pas le droit d'y toucher (la fiche du décor
+    // appartient à `caller`, et un collègue n'y prend pas rendez-vous).
+    const sienne = await makeClient({ fullName: "Jean Roy", phone: "+14185550001" });
 
     const [a, b] = await Promise.all([
       as(t1, () => createAppointment(input({ startsAt: SLOT_B }))),
-      as(t2, () => createAppointment(input({ startsAt: SLOT_B }))),
+      as(t2, () => createAppointment(input({ startsAt: SLOT_B, clientId: sienne.id }))),
     ]);
 
     expect([a, b].filter((r) => r.ok)).toHaveLength(1);

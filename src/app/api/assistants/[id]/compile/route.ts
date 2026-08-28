@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { compileAssistant } from "@/lib/assistants/service";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * POST /api/assistants/:id/compile — recompile L0-L6 et gèle un instantané de
@@ -10,8 +10,8 @@ import { compileAssistant } from "@/lib/assistants/service";
  * re-testé avant toute activation.
  */
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -19,9 +19,9 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
   }
 
   try {
-    const compiled = await compileAssistant(id, admin.id);
+    const compiled = await compileAssistant(id, actor.user.id);
     await logAudit({
-      userId: admin.id,
+      userId: actor.user.id,
       action: "assistant.compile",
       entity: "assistant",
       entityId: id,

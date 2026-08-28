@@ -76,9 +76,12 @@ function activeMention(text: string, caret: number): { start: number; query: str
 export function CommentsTimeline({
   clientId,
   comments,
+  canComment,
 }: {
   clientId: string;
   comments: CommentData[];
+  /** Écrire une note sur CETTE fiche. Le fil se lit sans ce droit. */
+  canComment: boolean;
 }) {
   const t = useTranslations("clients");
   const locale = useLocale();
@@ -142,7 +145,7 @@ export function CommentsTimeline({
 
   const submit = () => {
     const trimmed = body.trim();
-    if (!trimmed) return;
+    if (!trimmed || !canComment) return;
     const draft: CommentData = {
       id: `${DRAFT_PREFIX}${Date.now()}`,
       body: trimmed,
@@ -168,7 +171,13 @@ export function CommentsTimeline({
       } else {
         setRows(snapshot);
         setBody(trimmed);
-        toast.error(t("errors.generic"));
+        toast.error(
+          res.error === "forbidden"
+            ? t("access.noRight")
+            : res.error === "notFound"
+              ? t("errors.notFound")
+              : t("errors.generic"),
+        );
       }
     });
   };
@@ -215,96 +224,100 @@ export function CommentsTimeline({
           </ul>
         )}
 
-        {/* Composer with @mention autocomplete */}
-        <form
-          className="relative space-y-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            submit();
-          }}
-        >
-          {/* Étiquette « interne » explicite : la carte SMS vit juste en
-              dessous, et la ressemblance des deux zones de saisie fait courir
-              le risque d'envoyer une note à un client. On dit donc, des deux
-              côtés, à qui le texte s'adresse. */}
-          <p className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <LockIcon className="size-3.5" />
-            {t("comments.internalOnly")}
-          </p>
-          <Textarea
-            ref={textareaRef}
-            value={body}
-            placeholder={t("comments.placeholder")}
-            maxLength={5000}
-            rows={3}
-            onChange={(e) => {
-              setBody(e.target.value);
-              refreshMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
+        {/* Composer with @mention autocomplete — absent sans le droit de
+            commenter : le fil se lit, la note ne s'écrit pas. Le serveur
+            refuse de toute façon un commentaire sur une fiche fermée. */}
+        {canComment ? (
+          <form
+            className="relative space-y-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              submit();
             }}
-            onClick={(e) => {
-              const el = e.currentTarget;
-              refreshMention(el.value, el.selectionStart ?? el.value.length);
-            }}
-            onKeyDown={(e) => {
-              if (mention && suggestions.length > 0) {
-                if (e.key === "ArrowDown") {
+          >
+            {/* Étiquette « interne » explicite : la carte SMS vit juste en
+                dessous, et la ressemblance des deux zones de saisie fait courir
+                le risque d'envoyer une note à un client. On dit donc, des deux
+                côtés, à qui le texte s'adresse. */}
+            <p className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <LockIcon className="size-3.5" />
+              {t("comments.internalOnly")}
+            </p>
+            <Textarea
+              ref={textareaRef}
+              value={body}
+              placeholder={t("comments.placeholder")}
+              maxLength={5000}
+              rows={3}
+              onChange={(e) => {
+                setBody(e.target.value);
+                refreshMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
+              }}
+              onClick={(e) => {
+                const el = e.currentTarget;
+                refreshMention(el.value, el.selectionStart ?? el.value.length);
+              }}
+              onKeyDown={(e) => {
+                if (mention && suggestions.length > 0) {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setHighlighted((h) => (h + 1) % suggestions.length);
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setHighlighted((h) => (h - 1 + suggestions.length) % suggestions.length);
+                    return;
+                  }
+                  if (e.key === "Enter" || e.key === "Tab") {
+                    e.preventDefault();
+                    insertMention(suggestions[highlighted] ?? suggestions[0]);
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    setMention(null);
+                    return;
+                  }
+                }
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
-                  setHighlighted((h) => (h + 1) % suggestions.length);
-                  return;
+                  submit();
                 }
-                if (e.key === "ArrowUp") {
-                  e.preventDefault();
-                  setHighlighted((h) => (h - 1 + suggestions.length) % suggestions.length);
-                  return;
-                }
-                if (e.key === "Enter" || e.key === "Tab") {
-                  e.preventDefault();
-                  insertMention(suggestions[highlighted] ?? suggestions[0]);
-                  return;
-                }
-                if (e.key === "Escape") {
-                  setMention(null);
-                  return;
-                }
-              }
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-          />
-          {mention && suggestions.length > 0 ? (
-            <ul
-              role="listbox"
-              className="absolute bottom-full left-0 z-20 mb-1 max-h-56 w-full max-w-xs overflow-y-auto rounded-lg bg-popover p-1 shadow-md ring-1 ring-foreground/10"
-            >
-              {suggestions.map((u, i) => (
-                <li key={u.id} role="option" aria-selected={i === highlighted}>
-                  <button
-                    type="button"
-                    className={cn(
-                      "flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-sm md:min-h-9",
-                      i === highlighted && "bg-accent text-accent-foreground",
-                    )}
-                    onMouseEnter={() => setHighlighted(i)}
-                    onClick={() => insertMention(u)}
-                  >
-                    <Avatar className="size-6">
-                      <AvatarFallback className="text-[10px]">{initials(u.name)}</AvatarFallback>
-                    </Avatar>
-                    {u.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <div className="flex justify-end">
-            <Button type="submit" className="min-h-11 md:min-h-8" disabled={pending || !body.trim()}>
-              <SendIcon />
-              {t("comments.submit")}
-            </Button>
-          </div>
-        </form>
+              }}
+            />
+            {mention && suggestions.length > 0 ? (
+              <ul
+                role="listbox"
+                className="absolute bottom-full left-0 z-20 mb-1 max-h-56 w-full max-w-xs overflow-y-auto rounded-lg bg-popover p-1 shadow-md ring-1 ring-foreground/10"
+              >
+                {suggestions.map((u, i) => (
+                  <li key={u.id} role="option" aria-selected={i === highlighted}>
+                    <button
+                      type="button"
+                      className={cn(
+                        "flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-sm md:min-h-9",
+                        i === highlighted && "bg-accent text-accent-foreground",
+                      )}
+                      onMouseEnter={() => setHighlighted(i)}
+                      onClick={() => insertMention(u)}
+                    >
+                      <Avatar className="size-6">
+                        <AvatarFallback className="text-[10px]">{initials(u.name)}</AvatarFallback>
+                      </Avatar>
+                      {u.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="flex justify-end">
+              <Button type="submit" className="min-h-11 md:min-h-8" disabled={pending || !body.trim()}>
+                <SendIcon />
+                {t("comments.submit")}
+              </Button>
+            </div>
+          </form>
+        ) : null}
       </CardContent>
     </Card>
   );

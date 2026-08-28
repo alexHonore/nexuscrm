@@ -20,8 +20,9 @@ import { APP_TZ } from "./timezone";
  * inscrite, avec l'assistant qui tiendra la conversation, et permet d'agir
  * sans partir dans l'éditeur de campagne : mettre en pause, reprendre,
  * retirer. Les actions passent par les MÊMES routes que l'éditeur
- * (PATCH /api/campaigns/…/enrollments/… — RBAC admin + audit côté serveur) ;
- * un téléphoniste voit tout, mais n'agit pas.
+ * (PATCH /api/campaigns/…/enrollments/… — RBAC + audit côté serveur) ; qui
+ * n'a pas le droit `admin.campaigns` lit la carte, mais n'agit pas — et le
+ * serveur refuse de toute façon.
  */
 
 export type ClientEnrollmentData = {
@@ -58,11 +59,12 @@ const TOAST_KEY = {
 
 export function CampaignEnrollmentsCard({
   clientName,
-  isAdmin,
+  canManage,
   enrollments,
 }: {
   clientName: string;
-  isAdmin: boolean;
+  /** Droit `admin.campaigns` : mettre en pause, reprendre, retirer, relancer. */
+  canManage: boolean;
   enrollments: ClientEnrollmentData[];
 }) {
   const t = useTranslations("clients");
@@ -134,7 +136,7 @@ export function CampaignEnrollmentsCard({
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <LookIcon look={look} size="sm" />
-                      {isAdmin ? (
+                      {canManage ? (
                         <Link
                           href={`/admin/campaigns/${e.campaignId}`}
                           className="truncate font-medium hover:underline"
@@ -168,7 +170,7 @@ export function CampaignEnrollmentsCard({
                         : null}
                     </p>
                   </div>
-                  {isAdmin && e.inFlight ? (
+                  {canManage && e.inFlight ? (
                     <div className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-center">
                       {e.paused ? (
                         <Button
@@ -201,7 +203,7 @@ export function CampaignEnrollmentsCard({
                         {tc("editor.enrollments.remove")}
                       </Button>
                     </div>
-                  ) : isAdmin && e.reopenable ? (
+                  ) : canManage && e.reopenable ? (
                     // « Terminée · 1/3 messages envoyés » se lisait déjà ici :
                     // l'échelle a grandi, cette fiche n'a jamais reçu la suite.
                     // Le bouton est la réponse à ce que la carte annonce déjà.

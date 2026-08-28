@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { getLocale } from "next-intl/server";
-import { apiAdmin } from "@/lib/auth/guards";
 import { collectTwilioProbes } from "@/lib/deliverability-server/twilio";
 import { assessTwilio } from "@/lib/deliverability/assess";
 import type { Finding, Probe, TwilioProbes } from "@/lib/deliverability/types";
 import { docLocale } from "@/lib/docs/types";
+import { apiPerm } from "@/lib/permissions/server";
 import { jsonLogger } from "@/lib/sms-server";
 
 /**
@@ -13,11 +13,11 @@ import { jsonLogger } from "@/lib/sms-server";
  *     (compte, service de messagerie, bassin d'expéditeurs, campagne A2P,
  *     alertes) et les constats qui en découlent.
  *
- * Réservé à l'admin. Séparé de la page parce que ces cinq lectures passent par
- * le réseau : les faire au rendu retarderait un écran dont tout le reste vient
- * de la base.
+ * Réservé au droit `admin.deliverability`. Séparé de la page parce que ces cinq
+ * lectures passent par le réseau : les faire au rendu retarderait un écran dont
+ * tout le reste vient de la base.
  *
- * RÈGLE DE CETTE ROUTE : après la garde, un admin obtient TOUJOURS 200.
+ * RÈGLE DE CETTE ROUTE : après la garde, l'appelant obtient TOUJOURS 200.
  *
  * Une clé absente, une console injoignable, un jeton sans la bonne portée sont
  * des ÉTATS de sonde — le vocabulaire `Probe` en distingue quatre exprès. Les
@@ -42,8 +42,8 @@ function degradedProbes(): TwilioProbes {
 }
 
 export async function GET() {
-  const guard = await apiAdmin();
-  if (guard instanceof NextResponse) return guard;
+  const actor = await apiPerm("admin.deliverability");
+  if (actor instanceof NextResponse) return actor;
 
   let probes: TwilioProbes;
   try {

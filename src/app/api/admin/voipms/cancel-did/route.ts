@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { normalizePhone } from "@/lib/phone";
 import { cancelDid, didDigits, getDids } from "@/lib/voipms";
 import { readJson, voipmsErrorResponse } from "../../_helpers";
@@ -44,8 +44,8 @@ function last4(value: string): string | null {
  * bien au compte, et journal d'audit.
  */
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   const body = await readJson(req, schema);
   if (body instanceof NextResponse) return body;
@@ -96,7 +96,7 @@ export async function POST(req: Request) {
   }
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "voipms.did_cancel",
     entity: "user",
     entityId: released[0]?.id,

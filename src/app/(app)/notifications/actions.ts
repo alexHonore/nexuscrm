@@ -26,7 +26,14 @@ export async function markNotificationReadAction(id: string): Promise<Notificati
   return { ok: true };
 }
 
-/** Mark ALL my notifications as read. */
+/**
+ * Mark ALL my notifications as read.
+ *
+ * Volontairement SANS filtre de visibilité, à la différence de l'écran : lire
+ * une notification n'en révèle rien, et la borner à ce qui s'affiche laisserait
+ * pour toujours des non-lues invisibles derrière la pastille de la coquille —
+ * un compteur qu'aucun geste n'éteint. C'est le seul chemin qui les solde.
+ */
 export async function markAllNotificationsReadAction(): Promise<NotificationActionResult> {
   const user = await getCurrentUser();
   if (!user) return { ok: false };

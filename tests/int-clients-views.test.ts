@@ -368,7 +368,7 @@ describe("filtres et tris avancés de /api/clients/list", () => {
   });
 });
 
-describe("changement de source (admin seulement)", () => {
+describe("changement de source", () => {
   async function sourceAuditRows() {
     return testDb
       .select()
@@ -377,18 +377,32 @@ describe("changement de source (admin seulement)", () => {
   }
 
   describe("setClientSourceAction", () => {
-    it("refuse un téléphoniste (protection serveur, pas seulement l'UI)", async () => {
+    it("suit le droit de MODIFIER la fiche, comme n'importe quel champ", async () => {
+      // La source était « admin seulement » par ce seul raccourci : le
+      // formulaire de la fiche, lui, l'écrivait déjà pour tout le monde
+      // (`sourceId` était dans le patch de `updateClientAction`). Garder la
+      // porte fermée pendant que la fenêtre est ouverte ne protégeait rien.
+      // Elle suit donc `clients.edit` et le compartiment de la fiche.
       const caller = await makeUser({ role: "caller" });
+      const collegue = await makeUser({ role: "caller" });
       const src = await makeSource();
-      const c = await makeClient();
+      const sienne = await makeClient({ assignedToId: caller.id });
+      const celleDuCollegue = await makeClient({ assignedToId: collegue.id });
       await login(caller);
 
-      expect(await actions.setClientSourceAction(c.id, src.id)).toEqual({
-        ok: false,
-        error: "forbidden",
+      expect(await actions.setClientSourceAction(sienne.id, src.id)).toEqual({
+        ok: true,
+        id: sienne.id,
       });
-      const [row] = await testDb.select().from(clients).where(eq(clients.id, c.id));
-      expect(row.sourceId).toBeNull();
+
+      // Celle d'un collègue : visible, pas modifiable — et le refus ne
+      // distingue pas « interdit » de « inexistant ».
+      expect((await actions.setClientSourceAction(celleDuCollegue.id, src.id)).ok).toBe(false);
+      const [intacte] = await testDb
+        .select()
+        .from(clients)
+        .where(eq(clients.id, celleDuCollegue.id));
+      expect(intacte.sourceId).toBeNull();
     });
 
     it("change la source, journalise le avant → après, puis remet à null", async () => {

@@ -2,7 +2,7 @@ import { Wallet } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { BillingClient } from "@/components/admin/billing-client";
 import { PageHeader } from "@/components/shell/page-header";
-import { requireAdmin } from "@/lib/auth/guards";
+import { requirePerm } from "@/lib/permissions/server";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +20,7 @@ export async function generateMetadata() {
  * plusieurs secondes à chaque changement de période.
  */
 export default async function BillingPage() {
-  await requireAdmin();
+  await requirePerm("admin.billing");
   const t = await getTranslations("admin");
 
   return (

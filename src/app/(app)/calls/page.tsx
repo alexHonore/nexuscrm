@@ -30,7 +30,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { db } from "@/db";
 import { appointments, calls, categories, clients } from "@/db/schema";
-import { requireUser } from "@/lib/auth/guards";
+import { bucketFor, grantsFor } from "@/lib/permissions/access";
+import type { Grants } from "@/lib/permissions/catalog";
+import { loadDirectory, requireActor } from "@/lib/permissions/server";
 import {
   DISPOSITION_CONFIG,
   dispositionDisplayMap,
@@ -61,10 +63,17 @@ export default async function MyCallsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  // ── RBAC : page personnelle — TOUJOURS restreinte à l'utilisateur courant ──
-  const user = await requireUser();
+  // ── RBAC ──────────────────────────────────────────────────────────────────
+  // `admin.calls` = suivre les appels de l'ÉQUIPE. Sans ce droit, le journal
+  // reste personnel, quel que soit le nom du rôle : c'est la matrice qui
+  // tranche, plus le littéral « admin ».
+  const actor = await requireActor();
+  const user = actor.user;
+  const seesTeam = actor.can("admin.calls");
   const sp = await searchParams;
   const t = await getTranslations("phone");
+  // « Masqué » est écrit une seule fois, chez les fiches.
+  const tAccess = await getTranslations("clients");
   const locale = await getLocale();
   const dateLocale: Locale = locale === "en" ? enCA : fr;
   const nf = new Intl.NumberFormat(locale === "en" ? "en-CA" : "fr-CA");
@@ -91,9 +100,9 @@ export default async function MyCallsPage({
   const periodStart =
     period === "today" ? todayStart : dayStartUtc(shiftDateStr(today, -(Number(period) - 1)));
 
-  // WHERE : userId = utilisateur courant, TOUJOURS — appliqué côté serveur.
+  // WHERE : appliqué côté serveur, aucun paramètre d'URL ne l'élargit.
   const conds: SQL[] = [
-    eq(calls.userId, user.id),
+    ...(seesTeam ? [] : [eq(calls.userId, user.id)]),
     gte(calls.startedAt, periodStart),
     lt(calls.startedAt, todayEnd),
   ];
@@ -122,6 +131,7 @@ export default async function MyCallsPage({
         clientId: clients.id,
         clientName: clients.fullName,
         clientDoNotCall: clients.doNotCall,
+        holderId: clients.assignedToId,
       })
       .from(calls)
       .leftJoin(clients, eq(clients.id, calls.clientId))
@@ -173,6 +183,23 @@ export default async function MyCallsPage({
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  // Suivre les appels de l'équipe n'est pas voir toutes les FICHES : un appel
+  // reste journalisé (il a bien eu lieu), mais il ne NOMME sa fiche que si le
+  // compartiment de celle-ci l'ouvre à ce regard — sinon la ligne se lit comme
+  // un numéro, sans nom ni lien. Le compartiment ne dépend que du détenteur :
+  // une résolution par détenteur suffit pour une page de 25 lignes.
+  const { cfg, roleOf } = await loadDirectory();
+  const grantsCache = new Map<string, Grants>();
+  const grantsOfHolder = (assignedToId: string | null): Grants => {
+    const key = assignedToId ?? "";
+    const hit = grantsCache.get(key);
+    if (hit) return hit;
+    const holder = assignedToId ? (roleOf.get(assignedToId) ?? null) : null;
+    const g = grantsFor(cfg, actor.role, bucketFor(user.id, { assignedToId }, holder));
+    grantsCache.set(key, g);
+    return g;
+  };
+
   // ── Groupement par jour (Toronto) : Aujourd'hui / Hier / date longue ──
   const yesterday = shiftDateStr(today, -1);
   const currentYear = today.slice(0, 4);
@@ -194,6 +221,24 @@ export default async function MyCallsPage({
       row.note && row.note.length > 160 ? `${row.note.slice(0, 160)}…` : row.note;
 
     const rowMissed = row.direction === "inbound" && !row.answeredAt;
+    const open = row.clientId ? grantsOfHolder(row.holderId) : null;
+    const named = open?.visible ?? false;
+    // Le numéro distant EST une coordonnée de la fiche : la case « contact »
+    // décide, et fermée le numéro ne part pas — ni à l'écran, ni dans la prop
+    // du bouton « Rappeler », qui atterrit telle quelle dans le HTML. Un appel
+    // sans fiche rattachée n'a, lui, aucune fiche à protéger.
+    const contact = open ? open.visible && open.contact : true;
+    const shownNumber = contact ? remoteNumber : null;
+    // La note d'après-appel raconte la fiche : c'est de l'historique, et elle
+    // suit la case « history » — même quand c'est soi qui l'a écrite, car ce
+    // qu'elle dit est du contenu de la fiche, pas du journal téléphonique.
+    const history = open ? open.visible && open.history : true;
+    // Rappeler d'un geste, c'est APPELER cette fiche : le droit `clients.call`
+    // plafonne, la case « call » du compartiment tranche fiche par fiche. Sans
+    // fiche rattachée, c'est le droit d'appeler tout court. Et sans numéro à
+    // composer (coordonnées fermées), la ligne n'offre RIEN — pas un bouton
+    // mort qui rendrait le chiffre qu'elle vient de masquer.
+    const mayDial = open ? open.call : actor.can("clients.call");
     const data: CallRowData = {
       id: row.id,
       timeLabel: formatInTimeZone(row.startedAt, APP_TZ, "HH:mm"),
@@ -204,12 +249,16 @@ export default async function MyCallsPage({
         : row.direction === "outbound"
           ? t("callsPage.list.outbound")
           : t("callsPage.list.inbound"),
-      clientId: row.clientId,
-      clientName: row.clientName,
-      numberDisplay: remoteNumber ? formatPhone(remoteNumber) : t("callsPage.list.unknownNumber"),
+      clientId: named ? row.clientId : null,
+      clientName: named ? row.clientName : null,
+      numberDisplay: shownNumber
+        ? formatPhone(shownNumber)
+        : contact
+          ? t("callsPage.list.unknownNumber")
+          : tAccess("access.masked"),
       // Fiche « Ne pas appeler » : aucun « Rappeler » en un geste — même règle
       // que l'en-tête de la fiche et le pipeline (clients.doNotCall est ABSOLU).
-      dialNumber: row.clientDoNotCall ? null : remoteNumber,
+      dialNumber: row.clientDoNotCall || !mayDial ? null : shownNumber,
       durationLabel: mmss(row.durationSec),
       dispositionLabel: row.disposition
         ? (display?.label ??
@@ -227,7 +276,7 @@ export default async function MyCallsPage({
         : rowMissed
           ? "#dc2626"
           : null,
-      note: notePreview,
+      note: history ? notePreview : null,
     };
 
     const last = groups[groups.length - 1];

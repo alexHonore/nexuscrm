@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { settings } from "@/db/schema";
+import { permissionsSettingsSchema } from "@/lib/permissions/schema";
 
 // ── Schemas des réglages ─────────────────────────────────────────────────────
 
@@ -194,6 +195,12 @@ export type TranscriptsSettings = z.infer<typeof transcriptsSettingsSchema>;
 
 const SCHEMAS = {
   booking: bookingSettingsSchema,
+  /**
+   * Rôles, droits et règles d'assignation — voir src/lib/permissions/.
+   * Le schéma vit là-bas parce qu'il est LU ailleurs qu'ici (écrans, tests
+   * purs) et qu'il ne doit pas traîner `server-only` derrière lui.
+   */
+  permissions: permissionsSettingsSchema,
   google: googleSettingsSchema,
   telephony: telephonySettingsSchema,
   sms: smsSettingsSchema,
@@ -206,11 +213,33 @@ export type SettingKey = keyof typeof SCHEMAS;
 
 // ── Accès ────────────────────────────────────────────────────────────────────
 
+/**
+ * Une valeur illisible retombe sur les valeurs par défaut — mais BRUYAMMENT.
+ *
+ * Le compromis est délibéré, et il est déséquilibré : relancer l'erreur ferait
+ * tomber toutes les pages qui lisent ce réglage, c'est-à-dire l'application
+ * entière pour une seule ligne de JSON abîmée. Se taire, en revanche, laisse
+ * l'application tourner AVEC LES MAUVAISES VALEURS sans que personne ne
+ * l'apprenne. On garde donc le repli, on le crie dans le journal du serveur, et
+ * surtout : les schémas dont un repli silencieux serait dangereux se rendent
+ * TOTAUX pour que cette branche ne les concerne jamais.
+ *
+ * C'est le cas de `permissions` (voir src/lib/permissions/schema.ts) : ses
+ * valeurs par défaut, ce sont les quatre rôles livrés avec une table
+ * d'affectation VIDE — tout superviseur et tout observateur redeviendrait
+ * téléphoniste. Un magasin d'autorisations ne doit pas échouer OUVERT, et son
+ * schéma accepte donc n'importe quoi (chaîne, nombre, tableau, `null`) plutôt
+ * que d'échouer.
+ */
 export async function getSetting<K extends SettingKey>(key: K): Promise<z.infer<(typeof SCHEMAS)[K]>> {
   const row = await db.query.settings.findFirst({ where: eq(settings.key, key) });
   const schema = SCHEMAS[key];
   const parsed = schema.safeParse(row?.value ?? {});
   if (parsed.success) return parsed.data as z.infer<(typeof SCHEMAS)[K]>;
+  console.error(
+    `[settings] réglage « ${key} » illisible en base — repli sur les valeurs par défaut`,
+    parsed.error.issues.map((i) => `${i.path.join(".") || "(racine)"}: ${i.message}`),
+  );
   return schema.parse({}) as z.infer<(typeof SCHEMAS)[K]>;
 }
 

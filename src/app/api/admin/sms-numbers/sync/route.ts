@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { smsNumbers } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { fetchTwilioServiceNumbers } from "@/lib/sms-server/numbers";
 
 /**
@@ -11,8 +11,8 @@ import { fetchTwilioServiceNumbers } from "@/lib/sms-server/numbers";
  * envoie, rien ne se met à écrire parce qu'un numéro existe chez Twilio.
  */
 export async function POST() {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
   let remote: { phoneNumber: string; sid: string }[];
   try {
     remote = await fetchTwilioServiceNumbers();
@@ -38,7 +38,7 @@ export async function POST() {
     if (inserted.length > 0) added += 1;
   }
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "sms_number.sync",
     entity: "sms_number",
     detail: { found: remote.length, added },

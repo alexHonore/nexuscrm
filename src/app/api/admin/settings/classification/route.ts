@@ -3,8 +3,8 @@ import { asc } from "drizzle-orm";
 import { db } from "@/db";
 import { categories } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { categoryDispositionValue } from "@/lib/dispositions";
+import { apiPerm } from "@/lib/permissions/server";
 import { classificationSettingsSchema, getSetting, setSetting } from "@/lib/settings";
 import { readJson } from "../../_helpers";
 
@@ -17,8 +17,8 @@ import { readJson } from "../../_helpers";
  * édite un tableau et l'enregistre.
  */
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   const body = await readJson(req, classificationSettingsSchema);
   if (body instanceof NextResponse) return body;
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
   await setSetting("classification", body);
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "settings.classification",
     entity: "settings",
     entityId: "classification",

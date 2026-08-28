@@ -2,13 +2,16 @@ import { Rocket } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { GoLiveChecklist } from "@/components/admin/go-live-checklist";
 import { PageHeader } from "@/components/shell/page-header";
-import { requireAdmin } from "@/lib/auth/guards";
+import { requirePerm } from "@/lib/permissions/server";
 import { EngineReport } from "@/components/admin/engine-report";
 import { collectPreflight } from "@/lib/golive-server";
 import { engineSummary, perAssistant, perCampaign } from "@/lib/golive-server/reporting";
 
 export default async function GoLivePage() {
-  await requireAdmin();
+  // « Mise en service » n'a pas de droit à elle : la liste de contrôle relit
+  // les RÉGLAGES avant le premier envoi, donc c'est `admin.settings` qui
+  // l'ouvre — la même clé que l'écran où l'on va corriger ce qui manque.
+  await requirePerm("admin.settings");
   const t = await getTranslations("assistants");
   // Prêt-à-envoyer ET bilan sur le même écran : savoir si ça peut partir et
   // savoir si ça marche sont la même question, posée avant et après.

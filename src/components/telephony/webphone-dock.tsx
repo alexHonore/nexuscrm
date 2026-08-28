@@ -693,13 +693,19 @@ function IncomingCallDialog() {
                     </Badge>
                   ) : null}
                   <p className="text-sm text-muted-foreground">{formatPhone(incoming.number)}</p>
-                  <Link
-                    href={`/clients/${incoming.client.id}`}
-                    className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-                  >
-                    {t("incoming.viewClient")}
-                    <ExternalLink className="size-3.5" />
-                  </Link>
+                  {/* Le lookup NOMME l'appelant même quand la fiche n'est pas
+                      ouverte à ce regard (décrocher passe avant), mais un lien
+                      mènerait droit à un « introuvable », en pleine sonnerie et
+                      avec le client en ligne. Le nom reste, le lien part. */}
+                  {incoming.client.canOpen ? (
+                    <Link
+                      href={`/clients/${incoming.client.id}`}
+                      className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+                    >
+                      {t("incoming.viewClient")}
+                      <ExternalLink className="size-3.5" />
+                    </Link>
+                  ) : null}
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground">{t("incoming.unknown")}</p>

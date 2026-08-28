@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { exportCampaignFile } from "@/lib/campaigns-server/transfer";
 import { requestDocLocale } from "@/lib/locale-server";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * GET /api/campaigns/:id/export — télécharge la campagne en JSON, annotée par
  * défaut (`?annotate=0` pour le fichier nu). Journalisé comme une sortie.
  */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.campaigns");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -23,7 +23,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     // Annotations = texte lu par un humain : langue de l'interface.
     const file = await exportCampaignFile(id, { annotate, locale: await requestDocLocale() });
     await logAudit({
-      userId: admin.id,
+      userId: actor.user.id,
       action: "campaign.export",
       entity: "campaign",
       entityId: id,

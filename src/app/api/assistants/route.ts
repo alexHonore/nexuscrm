@@ -3,13 +3,13 @@ import { asc, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { assistants } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { assistantConfigInputSchema } from "@/lib/assistants/schema";
+import { apiPerm } from "@/lib/permissions/server";
 
 /** GET /api/assistants — liste, la plus récemment modifiée d'abord. */
 export async function GET() {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   const rows = await db
     .select({
@@ -36,8 +36,8 @@ export async function GET() {
  * et la porte d'activation le refuserait de toute façon.
  */
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   let raw: unknown;
   try {
@@ -74,12 +74,12 @@ export async function POST(req: Request) {
       includeRuntimeLayer: config.includeRuntimeLayer,
       requireSuitePass: config.requireSuitePass,
       needsRecompile: true,
-      createdById: admin.id,
+      createdById: actor.user.id,
     })
     .returning({ id: assistants.id, name: assistants.name });
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "assistant.create",
     entity: "assistant",
     entityId: row.id,

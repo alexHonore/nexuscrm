@@ -3,8 +3,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { guardrailAudit, guardrailRules } from "@/db/schema-sms";
-import { apiAdmin } from "@/lib/auth/guards";
 import { invalidateAssistantsForGuardrails } from "@/lib/guardrails/store";
+import { apiPerm } from "@/lib/permissions/server";
 import {
   GUARDRAIL_KINDS,
   GUARDRAIL_SEVERITIES,
@@ -44,8 +44,8 @@ const createSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.guardrails");
+  if (actor instanceof NextResponse) return actor;
 
   const body = await readJson(req, createSchema);
   if (body instanceof NextResponse) return body;
@@ -91,7 +91,7 @@ export async function POST(req: Request) {
       origin: "custom",
       enabled: body.enabled,
       orderIndex: (last?.orderIndex ?? 0) + 100,
-      updatedById: admin.id,
+      updatedById: actor.user.id,
     })
     .returning();
 
@@ -100,7 +100,7 @@ export async function POST(req: Request) {
   const staleAssistants = await invalidateAssistantsForGuardrails({ assistantId: body.assistantId });
 
   await db.insert(guardrailAudit).values({
-    actorId: admin.id,
+    actorId: actor.user.id,
     action: "rule_created",
     target: `rule:${row.key}`,
     before: null,

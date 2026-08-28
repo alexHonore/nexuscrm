@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { diffFields, logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { getSetting, setSetting, transcriptsSettingsSchema } from "@/lib/settings";
 import { readJson } from "../../_helpers";
 
@@ -24,8 +24,8 @@ const FIELDS = [
 ] as const;
 
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   const body = await readJson(req, schema);
   if (body instanceof NextResponse) return body;
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
 
   const changes = diffFields(current, body, [...FIELDS]);
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "settings.transcripts",
     entity: "settings",
     detail: { enabled: body.enabled, ...(changes ? { changes } : {}) },

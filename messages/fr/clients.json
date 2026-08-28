@@ -282,5 +282,23 @@
     "assistant": "Assistant : {name}",
     "nextTouch": "Prochain message : {when}",
     "open": "Ouvrir la campagne"
+  },
+  "access": {
+    "readOnly": "Lecture seule",
+    "readOnlyHint": "Cette fiche appartient à quelqu'un d'autre : vous la voyez, vous n'y touchez pas.",
+    "masked": "Masqué",
+    "maskedHint": "Les coordonnées ne vous sont pas ouvertes sur cette fiche.",
+    "historyHidden": "L'historique de cette fiche ne vous est pas ouvert.",
+    "heldBy": "Détenue par {name}",
+    "pool": "Au bassin",
+    "claim": "Prendre cette fiche",
+    "claimed": "Fiche prise",
+    "release": "Rendre au bassin",
+    "released": "Fiche rendue au bassin",
+    "locked": "Fiche prise par quelqu'un d'autre : elle se libère après {days} jour(s) sans contact.",
+    "lockedForever": "Fiche prise par quelqu'un d'autre. Seul un administrateur peut la redistribuer.",
+    "capReached": "Plafond atteint : {max} fiches. Rendez-en une avant d'en prendre une autre.",
+    "noRight": "Vous n'avez pas ce droit.",
+    "claimedOnCall": "Fiche prise : vous venez de l'appeler."
   }
 }

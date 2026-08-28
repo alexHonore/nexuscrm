@@ -3,24 +3,34 @@ import { UsersRoundIcon } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
-import { requireUser } from "@/lib/auth/guards";
+import { requireActor, withVisibility } from "@/lib/permissions/server";
 import { torontoDayRange } from "@/components/clients/timezone";
 import { cn } from "@/lib/utils";
 
 /**
  * Desktop empty state of the master-detail workspace. On mobile the layout's
  * panel IS the page, so this renders nothing below md.
+ *
+ * Les trois compteurs comptent CE QUE CE REGARD VOIT. Un « 10 412 fiches »
+ * affiché à un téléphoniste qui n'en atteint que 300 serait le seul endroit de
+ * l'application où le chiffre caché se lit tout haut.
  */
 export default async function ClientsPage() {
-  await requireUser();
+  const actor = await requireActor();
   const t = await getTranslations("clients");
 
   const now = new Date();
   const { start, end } = torontoDayRange(now);
   const [total, overdue, today] = await Promise.all([
-    db.$count(clients),
-    db.$count(clients, and(isNotNull(clients.nextFollowupAt), lt(clients.nextFollowupAt, now))),
-    db.$count(clients, and(gte(clients.nextFollowupAt, start), lt(clients.nextFollowupAt, end))),
+    db.$count(clients, await withVisibility(actor, undefined)),
+    db.$count(
+      clients,
+      await withVisibility(actor, and(isNotNull(clients.nextFollowupAt), lt(clients.nextFollowupAt, now))),
+    ),
+    db.$count(
+      clients,
+      await withVisibility(actor, and(gte(clients.nextFollowupAt, start), lt(clients.nextFollowupAt, end))),
+    ),
   ]);
 
   const stats = [

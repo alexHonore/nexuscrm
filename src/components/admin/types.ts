@@ -17,11 +17,37 @@ export type PhoneStatusDto = {
   hasGateway: boolean;
 };
 
+/**
+ * Un rôle CONFIGURÉ (src/lib/permissions), réduit à ce qu'un sélecteur affiche.
+ * Les droits eux-mêmes ne descendent pas jusqu'ici : cet écran choisit un rôle,
+ * il ne le modifie pas — c'est /admin/roles qui ouvre la matrice.
+ */
+export type RoleOptionDto = {
+  id: string;
+  nameFr: string;
+  nameEn: string;
+  /** Clé de `ROLE_LOOK` (src/components/look.tsx). */
+  look: string;
+  /** Le rôle administrateur — le seul qui met `users.role` à « admin ». */
+  superAdmin: boolean;
+};
+
 export type AdminUserDto = {
   id: string;
   name: string;
   email: string;
+  /** Plancher de la base : administrateur, ou pas. Le rôle réel est `roleId`. */
   role: "admin" | "caller";
+  /**
+   * Le rôle configuré de ce compte — celui qui décide vraiment de ses droits.
+   * `null` quand la réponse vient d'une route qui ne lit pas la matrice (les
+   * routes voip.ms) : la ligne garde alors le rôle qu'elle affichait déjà.
+   */
+  roleId: string | null;
+  roleNameFr: string | null;
+  roleNameEn: string | null;
+  /** Clé de `ROLE_LOOK` — la pastille se peint sans relire la matrice. */
+  roleLook: string | null;
   locale: "fr" | "en";
   isActive: boolean;
   sipUsername: string | null;

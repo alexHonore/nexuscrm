@@ -3,8 +3,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { guardrailAudit, guardrailFixtures } from "@/db/schema-sms";
-import { apiAdmin } from "@/lib/auth/guards";
 import { invalidateAssistantsForGuardrails } from "@/lib/guardrails/store";
+import { apiPerm } from "@/lib/permissions/server";
 import {
   GUARDRAIL_SEVERITIES,
   fixtureExpectationsSchema,
@@ -28,8 +28,8 @@ const patchSchema = z.object({
 });
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.guardrails");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -43,7 +43,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   const patch: Partial<typeof guardrailFixtures.$inferInsert> = {
     updatedAt: new Date(),
-    updatedById: admin.id,
+    updatedById: actor.user.id,
   };
   if (body.label !== undefined) patch.label = body.label;
   if (body.inbound !== undefined) patch.inbound = body.inbound;
@@ -63,7 +63,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   const staleAssistants = await invalidateAssistantsForGuardrails({ assistantId: before.assistantId });
 
   await db.insert(guardrailAudit).values({
-    actorId: admin.id,
+    actorId: actor.user.id,
     action: "fixture_edited",
     target: `fixture:${before.label}`,
     before: { severity: before.severity, enabled: before.enabled },
@@ -78,8 +78,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
  * venaient de la semence ; une fixture écrite à la main, non.
  */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.guardrails");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -96,7 +96,7 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
   const staleAssistants = await invalidateAssistantsForGuardrails({ assistantId: before.assistantId });
 
   await db.insert(guardrailAudit).values({
-    actorId: admin.id,
+    actorId: actor.user.id,
     action: "fixture_deleted",
     target: `fixture:${before.label}`,
     before: { severity: before.severity, enabled: before.enabled, origin: before.origin },

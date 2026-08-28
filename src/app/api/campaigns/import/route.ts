@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { campaignFieldText, getCampaignFieldDoc } from "@/lib/campaigns/docs";
 import { importCampaign, previewCampaignImport } from "@/lib/campaigns-server/transfer";
 import { glossIssues, normalizeIssues, withReceivedValues } from "@/lib/import-diagnostics";
 import { requestDocLocale } from "@/lib/locale-server";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * POST /api/campaigns/import — prévisualise ou importe un fichier de campagne.
@@ -39,8 +39,8 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.campaigns");
+  if (actor instanceof NextResponse) return actor;
 
   let raw: unknown;
   try {
@@ -58,12 +58,12 @@ export async function POST(req: Request) {
       return NextResponse.json(await previewCampaignImport(parsed.data.bundle));
     }
     const result = await importCampaign(parsed.data.bundle, {
-      actorId: admin.id,
+      actorId: actor.user.id,
       resolution: parsed.data.resolution,
       nameOverride: parsed.data.nameOverride,
     });
     await logAudit({
-      userId: admin.id,
+      userId: actor.user.id,
       action: "campaign.import",
       entity: "campaign",
       entityId: result.campaignId,

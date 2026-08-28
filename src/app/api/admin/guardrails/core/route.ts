@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { assistants, guardrailAudit, promptCores } from "@/db/schema-sms";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { readJson } from "../../_helpers";
 
 /**
@@ -25,8 +25,8 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.guardrails");
+  if (actor instanceof NextResponse) return actor;
 
   const input = await readJson(req, bodySchema);
   if (input instanceof NextResponse) return input;
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
         version: nextVersion,
         body: input.body,
         notes: input.notes,
-        createdById: admin.id,
+        createdById: actor.user.id,
       })
       .returning({ version: promptCores.version });
 
@@ -64,7 +64,7 @@ export async function POST(req: Request) {
       .returning({ id: assistants.id });
 
     await tx.insert(guardrailAudit).values({
-      actorId: admin.id,
+      actorId: actor.user.id,
       action: "core_published",
       target: `core:v${row.version}`,
       before: latest ? { version: latest.version } : null,

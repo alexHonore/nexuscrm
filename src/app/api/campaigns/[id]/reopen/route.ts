@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { MAX_REOPEN } from "@/lib/campaigns/reopen";
 import { reopenEnrollments } from "@/lib/campaigns-server/reopen";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * POST /api/campaigns/:id/reopen
@@ -23,7 +23,7 @@ import { reopenEnrollments } from "@/lib/campaigns-server/reopen";
  * le même chemin que le geste réel — un aperçu qui compterait autrement
  * mentirait.
  *
- * Réservé à l'admin. Le geste réel est audité ; l'aperçu ne l'est pas — il
+ * Réservé au droit `admin.campaigns`. Le geste réel est audité ; l'aperçu ne l'est pas — il
  * n'écrit rien, et le journal d'audit doit rester lisible.
  */
 
@@ -36,8 +36,8 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.campaigns");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!UUID.safeParse(id).success) {
@@ -68,7 +68,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   if (!result.dryRun && result.reopened > 0) {
     await logAudit({
-      userId: admin.id,
+      userId: actor.user.id,
       action: "campaign.enrollment.reopen_all",
       entity: "campaign",
       entityId: id,

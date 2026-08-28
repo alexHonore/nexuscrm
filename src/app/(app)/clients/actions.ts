@@ -16,12 +16,21 @@ import {
   sources,
   users,
 } from "@/db/schema";
-import { getCurrentUser } from "@/lib/auth/guards";
 import { notifyCategoryChanged, notifyCategoryChanges } from "@/lib/campaigns-server/match";
 import { diffFields, getClientIp, logAudit, type AuditChanges } from "@/lib/audit";
 import { isForeignKeyViolation } from "@/lib/db-errors";
 import { categoryEntryPatch } from "@/lib/dispositions";
 import { cancelEvent } from "@/lib/google";
+import type { AssignRefusal } from "@/lib/permissions/access";
+import {
+  currentActor,
+  grantsOnClient,
+  guardClient,
+  ownedCount,
+  verifyAssignment,
+  type Actor,
+  type Grants,
+} from "@/lib/permissions/server";
 import { normalizePhone } from "@/lib/phone";
 import {
   commentExcerpt,
@@ -35,18 +44,43 @@ export type ActionResult =
   | { ok: true; id?: string }
   | {
       ok: false;
-      error: "invalid" | "invalidPhone" | "invalidPhoneAlt" | "forbidden" | "notFound";
+      error:
+        | "invalid"
+        | "invalidPhone"
+        | "invalidPhoneAlt"
+        | "forbidden"
+        | "notFound"
+        | "locked"
+        | "capReached";
     };
 
 /** Résultat des actions en masse : nombre de fiches réellement modifiées. */
 export type BulkResult =
   | { ok: true; count: number }
-  | { ok: false; error: "invalid" | "forbidden" | "notFound" };
+  | { ok: false; error: "invalid" | "forbidden" | "notFound" | "locked" | "capReached" };
 
 // `as const` : les mêmes constantes servent ActionResult ET BulkResult.
 const INVALID = { ok: false, error: "invalid" } as const;
 const FORBIDDEN = { ok: false, error: "forbidden" } as const;
 const NOT_FOUND = { ok: false, error: "notFound" } as const;
+const LOCKED = { ok: false, error: "locked" } as const;
+const CAP_REACHED = { ok: false, error: "capReached" } as const;
+
+/**
+ * Un refus d'assignation se NOMME.
+ *
+ * « Verrouillée » (la fiche est à quelqu'un et son verrou tient) et « plafond
+ * atteint » ne se corrigent pas comme un droit manquant : l'un s'attend ou se
+ * fait débloquer par un supérieur, l'autre demande de rendre des fiches. Les
+ * phrases existent déjà (clients.access.locked / lockedForever / capReached) ;
+ * il ne manquait que de leur transmettre le motif au lieu d'un « interdit »
+ * qui n'apprend rien.
+ */
+function assignRefusal(reason: AssignRefusal) {
+  if (reason === "locked") return LOCKED;
+  if (reason === "cap_reached") return CAP_REACHED;
+  return FORBIDDEN;
+}
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -119,13 +153,95 @@ function revalidateClient(clientId: string): void {
   revalidatePath("/pipeline");
 }
 
+/**
+ * Ne garde d'un lot que les fiches VISIBLES dont la case demandée est ouverte.
+ *
+ * Une action en masse reçoit des identifiants venus du navigateur : les croire
+ * sur parole, c'est offrir en une requête ce que la matrice refuse fiche par
+ * fiche. Le filtre coûte peu — l'annuaire des rôles est mis en cache pour la
+ * requête, donc juger 200 fiches ne fait aucune lecture supplémentaire.
+ */
+async function keepGranted<T extends { assignedToId: string | null }>(
+  actor: Actor,
+  rows: T[],
+  grant: keyof Grants,
+): Promise<T[]> {
+  const kept: T[] = [];
+  for (const row of rows) {
+    const grants = await grantsOnClient(actor, row);
+    if (grants.visible && grants[grant]) kept.push(row);
+  }
+  return kept;
+}
+
+/** Une fiche qui change de main : d'où elle vient, où elle va. */
+type HandOver = {
+  clientId: string;
+  clientName: string;
+  from: string | null;
+  to: string | null;
+};
+
+/**
+ * Prévient les personnes CONCERNÉES par un changement de main, chacune dans SA
+ * langue : celle qui reçoit la fiche, et celle à qui on la retire — mais
+ * seulement si les règles globales le demandent (`notifyAssignee` /
+ * `notifyPreviousOwner`).
+ *
+ * L'auteur du geste ne se prévient jamais lui-même : se servir dans le bassin
+ * n'est pas une nouvelle, et la cloche perdrait tout son sens si elle sonnait
+ * pour chacun de ses propres clics.
+ */
+async function notifyHandOvers(actor: Actor, moves: HandOver[]): Promise<void> {
+  const rules = actor.cfg.assignment;
+  const wanted = moves.flatMap((move) => [
+    ...(rules.notifyAssignee && move.to && move.to !== actor.user.id
+      ? [{ userId: move.to, move, taken: false }]
+      : []),
+    ...(rules.notifyPreviousOwner && move.from && move.from !== actor.user.id
+      ? [{ userId: move.from, move, taken: true }]
+      : []),
+  ]);
+  if (wanted.length === 0) return;
+
+  const recipients = await db.query.users.findMany({
+    where: and(
+      inArray(users.id, [...new Set(wanted.map((w) => w.userId))]),
+      eq(users.isActive, true),
+    ),
+    columns: { id: true, locale: true },
+  });
+  const localeOf = new Map(recipients.map((r) => [r.id, r.locale]));
+
+  const rows = wanted.flatMap((w) => {
+    // Compte désactivé entre-temps : pas de notification, pas d'échec non plus.
+    const locale = localeOf.get(w.userId);
+    if (!locale) return [];
+    const vars = { client: w.move.clientName, actor: actor.user.name };
+    return [
+      {
+        userId: w.userId,
+        type: "assignment",
+        title: notificationContent(
+          locale,
+          w.taken ? "clientTakenTitle" : "clientAssignedTitle",
+          vars,
+        ),
+        body: notificationContent(locale, w.taken ? "clientTakenBody" : "clientAssignedBody", vars),
+        link: `/clients/${w.move.clientId}`,
+      },
+    ];
+  });
+  if (rows.length > 0) await db.insert(notifications).values(rows);
+}
+
 // ── Client CRUD ──────────────────────────────────────────────────────────────
 
-/** Admin only — callers can never create clients manually. */
+/** Droit `clients.create` — et l'assignation initiale passe le même verdict. */
 export async function createClientAction(input: ClientFormInput): Promise<ActionResult> {
-  const user = await getCurrentUser();
-  if (!user) return FORBIDDEN;
-  if (user.role !== "admin") return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("clients.create")) return FORBIDDEN;
 
   const parsed = clientFormSchema.safeParse(input);
   if (!parsed.success) return INVALID;
@@ -149,6 +265,15 @@ export async function createClientAction(input: ClientFormInput): Promise<Action
         })) ?? null);
   if (data.categoryId != null && !category) return NOT_FOUND;
 
+  // Créer une fiche DÉJÀ prise, c'est l'assigner : même verdict (droit,
+  // compartiment, verrou, plafond) que sur une fiche existante du bassin —
+  // sinon « créer » serait la porte dérobée du « distribuer ».
+  const assignedToId = data.assignedToId ?? null;
+  if (assignedToId !== null) {
+    const verdict = await verifyAssignment(actor, { assignedToId: null }, assignedToId);
+    if (!verdict.ok) return assignRefusal(verdict.reason);
+  }
+
   const values = {
     fullName: data.fullName,
     phone,
@@ -162,7 +287,7 @@ export async function createClientAction(input: ClientFormInput): Promise<Action
     budget: data.budget,
     ...categoryEntryPatch(category),
     sourceId: data.sourceId ?? null,
-    assignedToId: data.assignedToId ?? null,
+    assignedToId,
     notes: data.notes,
   };
 
@@ -172,7 +297,7 @@ export async function createClientAction(input: ClientFormInput): Promise<Action
   try {
     [created] = await db
       .insert(clients)
-      .values({ ...values, createdById: user.id })
+      .values({ ...values, createdById: actor.user.id })
       .returning({ id: clients.id });
   } catch (err) {
     if (isForeignKeyViolation(err)) return NOT_FOUND;
@@ -182,45 +307,102 @@ export async function createClientAction(input: ClientFormInput): Promise<Action
   // Création : « rien → valeur » pour chaque champ renseigné.
   const changes = diffFields(null, values, CLIENT_AUDIT_FIELDS);
   await logAudit({
-    userId: user.id,
+    userId: actor.user.id,
     action: "client.create",
     entity: "client",
     entityId: created.id,
     detail: { fullName: data.fullName, phone, ...(changes ? { changes } : {}) },
   });
+  if (assignedToId !== null) {
+    await notifyHandOvers(actor, [
+      { clientId: created.id, clientName: data.fullName, from: null, to: assignedToId },
+    ]);
+  }
   revalidateClient(created.id);
   return { ok: true, id: created.id };
 }
 
-/** Single-record edit — allowed for callers. assignedToId applied for admin only. */
+/**
+ * Modification d'UNE fiche — droit `clients.edit` ET case « modifier » ouverte
+ * sur cette fiche-là. Le responsable, lui, ne se change pas « au passage » :
+ * voir plus bas.
+ */
 export async function updateClientAction(
   clientId: string,
   input: ClientFormInput,
 ): Promise<ActionResult> {
-  const user = await getCurrentUser();
-  if (!user) return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("clients.edit")) return FORBIDDEN;
   if (!z.string().uuid().safeParse(clientId).success) return INVALID;
 
   const parsed = clientFormSchema.safeParse(input);
   if (!parsed.success) return INVALID;
   const data = parsed.data;
 
+  // Invisible ou non modifiable : « introuvable ». Un refus explicite
+  // confirmerait l'existence de la fiche, ce que la matrice cache justement.
+  const guard = await guardClient(actor, clientId, "edit");
+  if (!guard) return NOT_FOUND;
+
   const existing = await db.query.clients.findFirst({ where: eq(clients.id, clientId) });
   if (!existing) return NOT_FOUND;
 
-  const phone = normalizePhone(data.phone);
-  if (!phone) return { ok: false, error: "invalidPhone" };
-  // Même exigence que le numéro principal : un « autre téléphone » saisi mais
-  // inutilisable est refusé, pas enregistré NULL en silence (ce qui effaçait
-  // aussi l'ancien numéro tout en affichant « Enregistré »).
-  const phoneAlt = data.phoneAlt ? normalizePhone(data.phoneAlt) : null;
-  if (data.phoneAlt && !phoneAlt) return { ok: false, error: "invalidPhoneAlt" };
+  /**
+   * Les COORDONNÉES ont leur propre case, et « modifier » ne l'ouvre pas.
+   *
+   * Sans ce garde, un rôle qui peut modifier une fiche sans en voir le
+   * téléphone les DÉCOUVRE : il écrit un numéro à lui, relit la fiche, et le
+   * masque n'a plus rien à cacher — en écrasant le vrai numéro au passage. Le
+   * formulaire ne lui envoie de toute façon qu'un masque (« •••-4512 »), qui
+   * finirait tel quel en base.
+   *
+   * On IGNORE ces trois champs plutôt que de refuser tout l'envoi : le reste
+   * de la fiche (ville, budget, notes) lui est bel et bien ouvert, et un refus
+   * global lui apprendrait justement ce que la case cache.
+   */
+  const contactOpen = guard.grants.contact;
+  let phone = existing.phone;
+  let phoneAlt = existing.phoneAlt;
+  let email = existing.email;
+  if (contactOpen) {
+    const nextPhone = normalizePhone(data.phone);
+    if (!nextPhone) return { ok: false, error: "invalidPhone" };
+    // Même exigence que le numéro principal : un « autre téléphone » saisi mais
+    // inutilisable est refusé, pas enregistré NULL en silence (ce qui effaçait
+    // aussi l'ancien numéro tout en affichant « Enregistré »).
+    const nextPhoneAlt = data.phoneAlt ? normalizePhone(data.phoneAlt) : null;
+    if (data.phoneAlt && !nextPhoneAlt) return { ok: false, error: "invalidPhoneAlt" };
+    phone = nextPhone;
+    phoneAlt = nextPhoneAlt;
+    email = data.email;
+  }
+
+  /**
+   * Le responsable a son propre droit, son propre verdict et sa notification.
+   * Sans `clients.assign`, le champ garde sa valeur actuelle — le formulaire
+   * ne le montre même pas, et un envoi bricolé ne doit pas le contourner. Avec
+   * le droit, un changement est jugé comme une assignation à part entière
+   * (verrou, plafond, compartiment) et son refus est NOMMÉ.
+   *
+   * Champ ABSENT ≠ champ vidé : un formulaire qui ne l'affiche pas ne libère
+   * pas la fiche par omission. Seul un `null` explicite la rend au bassin.
+   */
+  const nextAssignee =
+    data.assignedToId === undefined ? existing.assignedToId : data.assignedToId;
+  const handOver = actor.can("clients.assign") && nextAssignee !== existing.assignedToId;
+  if (handOver) {
+    const verdict = await verifyAssignment(actor, existing, nextAssignee);
+    if (!verdict.ok) return assignRefusal(verdict.reason);
+  }
 
   const patch = {
     fullName: data.fullName,
+    // Coordonnées : les valeurs ENREGISTRÉES quand la case « contact » est
+    // fermée — l'écriture est alors un non-événement, journal d'audit compris.
     phone,
     phoneAlt,
-    email: data.email,
+    email,
     language: data.language,
     city: data.city,
     address: data.address,
@@ -229,8 +411,7 @@ export async function updateClientAction(
     budget: data.budget,
     sourceId: data.sourceId ?? null,
     notes: data.notes,
-    // Un téléphoniste ne réassigne pas : le champ garde sa valeur actuelle.
-    ...(user.role === "admin" ? { assignedToId: data.assignedToId ?? null } : {}),
+    ...(handOver ? { assignedToId: nextAssignee } : {}),
   };
 
   // Source / responsable supprimés entre-temps (vieil onglet) : la base refuse
@@ -247,23 +428,34 @@ export async function updateClientAction(
 
   const changes = diffFields(existing, { ...existing, ...patch }, CLIENT_AUDIT_FIELDS);
   await logAudit({
-    userId: user.id,
+    userId: actor.user.id,
     action: "client.update",
     entity: "client",
     entityId: clientId,
     detail: { fullName: data.fullName, phone, ...(changes ? { changes } : {}) },
   });
+  if (handOver) {
+    await notifyHandOvers(actor, [
+      {
+        clientId,
+        clientName: data.fullName,
+        from: existing.assignedToId,
+        to: nextAssignee,
+      },
+    ]);
+  }
   revalidateClient(clientId);
   return { ok: true, id: clientId };
 }
 
-/** Quick pipeline-category change from the client header. */
+/** Changement rapide de statut pipeline — droit `clients.category`. */
 export async function setClientCategoryAction(
   clientId: string,
   categoryId: number | null,
 ): Promise<ActionResult> {
-  const user = await getCurrentUser();
-  if (!user) return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("clients.category")) return FORBIDDEN;
   if (!z.string().uuid().safeParse(clientId).success) return INVALID;
   if (categoryId !== null && !Number.isInteger(categoryId)) return INVALID;
   // Cible résolue AVANT l'écriture : un statut supprimé entre-temps (vieil
@@ -278,6 +470,8 @@ export async function setClientCategoryAction(
         })) ?? null);
   if (categoryId !== null && !target) return NOT_FOUND;
 
+  if (!(await guardClient(actor, clientId, "category"))) return NOT_FOUND;
+
   const existing = await db.query.clients.findFirst({ where: eq(clients.id, clientId) });
   if (!existing) return NOT_FOUND;
 
@@ -288,7 +482,7 @@ export async function setClientCategoryAction(
 
   const changes = diffFields(existing, { categoryId }, ["categoryId"]);
   await logAudit({
-    userId: user.id,
+    userId: actor.user.id,
     action: "client.category",
     entity: "client",
     entityId: clientId,
@@ -303,19 +497,22 @@ export async function setClientCategoryAction(
   return { ok: true, id: clientId };
 }
 
-/** Admin only — changement rapide de source depuis la vue tableau. */
+/** Changement rapide de source depuis la vue tableau — c'est une modification. */
 export async function setClientSourceAction(
   clientId: string,
   sourceId: number | null,
 ): Promise<ActionResult> {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "admin") return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("clients.edit")) return FORBIDDEN;
   if (!z.string().uuid().safeParse(clientId).success) return INVALID;
   if (sourceId !== null && !Number.isInteger(sourceId)) return INVALID;
   if (sourceId !== null) {
     const target = await db.query.sources.findFirst({ where: eq(sources.id, sourceId) });
     if (!target) return NOT_FOUND;
   }
+
+  if (!(await guardClient(actor, clientId, "edit"))) return NOT_FOUND;
 
   const existing = await db.query.clients.findFirst({ where: eq(clients.id, clientId) });
   if (!existing) return NOT_FOUND;
@@ -327,7 +524,7 @@ export async function setClientSourceAction(
 
   const changes = diffFields(existing, { sourceId }, ["sourceId"]);
   await logAudit({
-    userId: user.id,
+    userId: actor.user.id,
     action: "client.update",
     entity: "client",
     entityId: clientId,
@@ -337,13 +534,22 @@ export async function setClientSourceAction(
   return { ok: true, id: clientId };
 }
 
-/** Admin only. */
+/**
+ * Assigner (ou rendre au bassin) UNE fiche.
+ *
+ * Deux gardes, et pas une : la VISIBILITÉ décide si la fiche existe pour ce
+ * regard (sinon « introuvable »), le verdict d'assignation décide s'il peut la
+ * faire changer de main — droit, compartiment, verrou anti-vol, plafond. Une
+ * fiche bien visible refusée n'est pas « introuvable » : elle est verrouillée,
+ * et on le dit.
+ */
 export async function assignClientAction(
   clientId: string,
   assignedToId: string | null,
 ): Promise<ActionResult> {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "admin") return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("clients.assign")) return FORBIDDEN;
   if (!z.string().uuid().safeParse(clientId).success) return INVALID;
   if (assignedToId !== null && !z.string().uuid().safeParse(assignedToId).success) return INVALID;
   if (assignedToId !== null) {
@@ -351,8 +557,19 @@ export async function assignClientAction(
     if (!target) return NOT_FOUND;
   }
 
-  const existing = await db.query.clients.findFirst({ where: eq(clients.id, clientId) });
+  const guard = await guardClient(actor, clientId, "visible");
+  if (!guard) return NOT_FOUND;
+  const verdict = await verifyAssignment(actor, guard.ref, assignedToId);
+  if (!verdict.ok) return assignRefusal(verdict.reason);
+
+  const existing = await db.query.clients.findFirst({
+    where: eq(clients.id, clientId),
+    columns: { id: true, fullName: true, assignedToId: true },
+  });
   if (!existing) return NOT_FOUND;
+  // Réassigner à la même personne n'est pas un changement de main : ni ligne
+  // d'audit, ni cloche pour un clic qui ne déplace rien.
+  if (existing.assignedToId === assignedToId) return { ok: true, id: clientId };
 
   await db
     .update(clients)
@@ -361,12 +578,20 @@ export async function assignClientAction(
 
   const changes = diffFields(existing, { assignedToId }, ["assignedToId"]);
   await logAudit({
-    userId: user.id,
+    userId: actor.user.id,
     action: "client.assign",
     entity: "client",
     entityId: clientId,
     detail: { from: existing.assignedToId, to: assignedToId, ...(changes ? { changes } : {}) },
   });
+  await notifyHandOvers(actor, [
+    {
+      clientId,
+      clientName: existing.fullName,
+      from: existing.assignedToId,
+      to: assignedToId,
+    },
+  ]);
   revalidateClient(clientId);
   return { ok: true, id: clientId };
 }
@@ -417,25 +642,31 @@ async function deleteClientCore(
   });
 }
 
-/** Admin only — callers can never delete. */
+/** Droit `clients.delete` ET case « supprimer » ouverte sur cette fiche. */
 export async function deleteClientAction(clientId: string): Promise<ActionResult> {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "admin") return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("clients.delete")) return FORBIDDEN;
   if (!z.string().uuid().safeParse(clientId).success) return INVALID;
+
+  if (!(await guardClient(actor, clientId, "delete"))) return NOT_FOUND;
 
   const existing = await db.query.clients.findFirst({ where: eq(clients.id, clientId) });
   if (!existing) return NOT_FOUND;
 
-  await deleteClientCore(user.id, existing, false);
+  await deleteClientCore(actor.user.id, existing, false);
   revalidatePath("/clients");
   revalidatePath("/dashboard");
   return { ok: true };
 }
 
 // ── Actions en masse (vue tableau) ───────────────────────────────────────────
-// Admin uniquement — règle du dépôt : un téléphoniste ne fait JAMAIS d'action
-// en masse. Chaque fiche touchée reçoit SA ligne d'audit (marquée `bulk`), afin
-// que « modifiée par qui » et /admin/audit restent exacts fiche par fiche.
+// Le droit `clients.bulk` ouvre la porte, le droit du GESTE (assigner,
+// classer, modifier, supprimer) décide de ce qu'on peut faire, et la matrice
+// tranche ENCORE fiche par fiche : un lot n'est jamais un passe-droit sur ce
+// qui serait refusé à l'unité. Chaque fiche touchée reçoit SA ligne d'audit
+// (marquée `bulk`), afin que « modifiée par qui » et /admin/audit restent
+// exacts fiche par fiche.
 
 const bulkIdsSchema = z.array(z.string().uuid()).min(1).max(BULK_MAX);
 
@@ -472,13 +703,14 @@ function revalidateClientLists(): void {
   revalidatePath("/pipeline");
 }
 
-/** Admin only — assigne (ou désassigne) plusieurs fiches d'un coup. */
+/** Assigne (ou rend au bassin) plusieurs fiches — fiche par fiche, quand même. */
 export async function bulkAssignClientsAction(
   clientIds: string[],
   assignedToId: string | null,
 ): Promise<BulkResult> {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "admin") return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("clients.bulk") || !actor.can("clients.assign")) return FORBIDDEN;
 
   const ids = bulkIdsSchema.safeParse(clientIds);
   if (!ids.success) return INVALID;
@@ -489,46 +721,92 @@ export async function bulkAssignClientsAction(
   }
 
   const existing = await db
-    .select({ id: clients.id, assignedToId: clients.assignedToId })
+    .select({
+      id: clients.id,
+      fullName: clients.fullName,
+      assignedToId: clients.assignedToId,
+      lastContactedAt: clients.lastContactedAt,
+      updatedAt: clients.updatedAt,
+    })
     .from(clients)
     .where(inArray(clients.id, ids.data));
-  const changed = existing.filter((c) => c.assignedToId !== assignedToId);
 
-  if (changed.length > 0) {
+  /**
+   * Le plafond se compte SUR LE LOT. Le verdict le vérifie fiche par fiche
+   * avec le même compte de départ : 200 fiches d'un coup passeraient donc
+   * toutes sous un plafond que la première franchit déjà. Il ne concerne que
+   * ce qu'on prend POUR SOI — donner ne remplit pas l'appétit de l'autre.
+   */
+  const cap =
+    assignedToId !== null && assignedToId === actor.user.id && !actor.role.superAdmin
+      ? actor.role.assignment.maxOwned
+      : 0;
+  let headroom =
+    cap > 0 ? Math.max(0, cap - (await ownedCount(actor.user.id))) : Number.POSITIVE_INFINITY;
+
+  const moves: HandOver[] = [];
+  let refused: AssignRefusal | null = null;
+  for (const row of await keepGranted(actor, existing, "visible")) {
+    if (row.assignedToId === assignedToId) continue;
+    const verdict = await verifyAssignment(actor, row, assignedToId);
+    if (!verdict.ok) {
+      refused ??= verdict.reason;
+      continue;
+    }
+    if (headroom <= 0) {
+      refused ??= "cap_reached";
+      continue;
+    }
+    headroom -= 1;
+    moves.push({
+      clientId: row.id,
+      clientName: row.fullName,
+      from: row.assignedToId,
+      to: assignedToId,
+    });
+  }
+
+  // Rien n'a bougé ET quelque chose a été refusé : le lot mérite son motif.
+  // « 0 fiche assignée » laisserait croire à un clic sans effet.
+  if (moves.length === 0 && refused) return assignRefusal(refused);
+
+  if (moves.length > 0) {
     await db
       .update(clients)
       .set({ assignedToId, updatedAt: new Date() })
       .where(
         inArray(
           clients.id,
-          changed.map((c) => c.id),
+          moves.map((m) => m.clientId),
         ),
       );
     await logBulkAudit(
-      changed.map((c) => ({
-        userId: user.id,
+      moves.map((m) => ({
+        userId: actor.user.id,
         action: "client.assign",
-        entityId: c.id,
+        entityId: m.clientId,
         detail: {
           bulk: true,
-          from: c.assignedToId,
+          from: m.from,
           to: assignedToId,
-          changes: { assignedToId: { from: c.assignedToId, to: assignedToId } } as AuditChanges,
+          changes: { assignedToId: { from: m.from, to: assignedToId } } as AuditChanges,
         },
       })),
     );
+    await notifyHandOvers(actor, moves);
     revalidateClientLists();
   }
-  return { ok: true, count: changed.length };
+  return { ok: true, count: moves.length };
 }
 
-/** Admin only — change la catégorie pipeline de plusieurs fiches d'un coup. */
+/** Change le statut pipeline de plusieurs fiches d'un coup. */
 export async function bulkSetClientsCategoryAction(
   clientIds: string[],
   categoryId: number | null,
 ): Promise<BulkResult> {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "admin") return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("clients.bulk") || !actor.can("clients.category")) return FORBIDDEN;
 
   const ids = bulkIdsSchema.safeParse(clientIds);
   if (!ids.success) return INVALID;
@@ -544,10 +822,15 @@ export async function bulkSetClientsCategoryAction(
   if (categoryId !== null && !target) return NOT_FOUND;
 
   const existing = await db
-    .select({ id: clients.id, categoryId: clients.categoryId })
+    .select({
+      id: clients.id,
+      categoryId: clients.categoryId,
+      assignedToId: clients.assignedToId,
+    })
     .from(clients)
     .where(inArray(clients.id, ids.data));
-  const changed = existing.filter((c) => c.categoryId !== categoryId);
+  const allowed = await keepGranted(actor, existing, "category");
+  const changed = allowed.filter((c) => c.categoryId !== categoryId);
 
   if (changed.length > 0) {
     await db
@@ -561,7 +844,7 @@ export async function bulkSetClientsCategoryAction(
       );
     await logBulkAudit(
       changed.map((c) => ({
-        userId: user.id,
+        userId: actor.user.id,
         action: "client.category",
         entityId: c.id,
         detail: {
@@ -580,13 +863,14 @@ export async function bulkSetClientsCategoryAction(
   return { ok: true, count: changed.length };
 }
 
-/** Admin only — change la source de plusieurs fiches d'un coup. */
+/** Change la source de plusieurs fiches d'un coup — c'est une modification. */
 export async function bulkSetClientsSourceAction(
   clientIds: string[],
   sourceId: number | null,
 ): Promise<BulkResult> {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "admin") return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("clients.bulk") || !actor.can("clients.edit")) return FORBIDDEN;
 
   const ids = bulkIdsSchema.safeParse(clientIds);
   if (!ids.success) return INVALID;
@@ -597,10 +881,11 @@ export async function bulkSetClientsSourceAction(
   }
 
   const existing = await db
-    .select({ id: clients.id, sourceId: clients.sourceId })
+    .select({ id: clients.id, sourceId: clients.sourceId, assignedToId: clients.assignedToId })
     .from(clients)
     .where(inArray(clients.id, ids.data));
-  const changed = existing.filter((c) => c.sourceId !== sourceId);
+  const allowed = await keepGranted(actor, existing, "edit");
+  const changed = allowed.filter((c) => c.sourceId !== sourceId);
 
   if (changed.length > 0) {
     await db
@@ -614,7 +899,7 @@ export async function bulkSetClientsSourceAction(
       );
     await logBulkAudit(
       changed.map((c) => ({
-        userId: user.id,
+        userId: actor.user.id,
         action: "client.update",
         entityId: c.id,
         detail: {
@@ -630,15 +915,17 @@ export async function bulkSetClientsSourceAction(
   return { ok: true, count: changed.length };
 }
 
-/** Admin only — suppression en masse, avec annulation des événements Google. */
+/** Suppression en masse, avec annulation des événements Google. */
 export async function bulkDeleteClientsAction(clientIds: string[]): Promise<BulkResult> {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "admin") return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("clients.bulk") || !actor.can("clients.delete")) return FORBIDDEN;
 
   const ids = bulkIdsSchema.safeParse(clientIds);
   if (!ids.success) return INVALID;
 
-  const existing = await db.query.clients.findMany({ where: inArray(clients.id, ids.data) });
+  const rows = await db.query.clients.findMany({ where: inArray(clients.id, ids.data) });
+  const existing = await keepGranted(actor, rows, "delete");
   if (existing.length === 0) return { ok: true, count: 0 };
   const found = existing.map((c) => c.id);
 
@@ -669,7 +956,7 @@ export async function bulkDeleteClientsAction(clientIds: string[]): Promise<Bulk
     existing.map((row) => {
       const changes = diffFields(row, null, CLIENT_AUDIT_FIELDS);
       return {
-        userId: user.id,
+        userId: actor.user.id,
         action: "client.delete",
         entityId: row.id,
         detail: {
@@ -694,8 +981,9 @@ export async function createFollowupAction(input: {
   time: string;
   note?: string;
 }): Promise<ActionResult> {
-  const user = await getCurrentUser();
-  if (!user) return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("clients.followup")) return FORBIDDEN;
 
   const parsed = z
     .object({
@@ -708,18 +996,20 @@ export async function createFollowupAction(input: {
   if (!parsed.success) return INVALID;
   const { clientId, date, time, note } = parsed.data;
 
-  const client = await db.query.clients.findFirst({ where: eq(clients.id, clientId) });
-  if (!client) return NOT_FOUND;
+  // La garde charge déjà la fiche RÉDUITE à ce qui décide de l'accès — dont le
+  // responsable, seule chose dont la relance ait besoin ici.
+  const guard = await guardClient(actor, clientId, "followup");
+  if (!guard) return NOT_FOUND;
 
   const dueAt = fromZonedTime(`${date}T${time}:00`, APP_TZ);
   if (Number.isNaN(dueAt.getTime())) return INVALID;
 
   await db.insert(followups).values({
     clientId,
-    assignedToId: client.assignedToId ?? user.id,
+    assignedToId: guard.ref.assignedToId ?? actor.user.id,
     dueAt,
     note,
-    createdById: user.id,
+    createdById: actor.user.id,
   });
 
   await syncNextFollowup(clientId);
@@ -728,12 +1018,15 @@ export async function createFollowupAction(input: {
 }
 
 export async function completeFollowupAction(followupId: string): Promise<ActionResult> {
-  const user = await getCurrentUser();
-  if (!user) return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("clients.followup")) return FORBIDDEN;
   if (!z.string().uuid().safeParse(followupId).success) return INVALID;
 
   const followup = await db.query.followups.findFirst({ where: eq(followups.id, followupId) });
   if (!followup) return NOT_FOUND;
+  // La relance suit sa fiche : invisible, elle n'existe pas non plus.
+  if (!(await guardClient(actor, followup.clientId, "followup"))) return NOT_FOUND;
 
   await db
     .update(followups)
@@ -750,8 +1043,9 @@ export async function updateFollowupDueAction(input: {
   date: string;
   time: string;
 }): Promise<ActionResult> {
-  const user = await getCurrentUser();
-  if (!user) return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("clients.followup")) return FORBIDDEN;
 
   const parsed = z
     .object({ followupId: z.string().uuid(), date: dateStr, time: timeStr })
@@ -761,6 +1055,7 @@ export async function updateFollowupDueAction(input: {
 
   const followup = await db.query.followups.findFirst({ where: eq(followups.id, followupId) });
   if (!followup) return NOT_FOUND;
+  if (!(await guardClient(actor, followup.clientId, "followup"))) return NOT_FOUND;
 
   const dueAt = fromZonedTime(`${date}T${time}:00`, APP_TZ);
   if (Number.isNaN(dueAt.getTime())) return INVALID;
@@ -778,8 +1073,9 @@ export async function addCommentAction(input: {
   clientId: string;
   body: string;
 }): Promise<ActionResult> {
-  const user = await getCurrentUser();
-  if (!user) return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("clients.comment")) return FORBIDDEN;
 
   const parsed = z
     .object({ clientId: z.string().uuid(), body: z.string().trim().min(1).max(5000) })
@@ -787,13 +1083,12 @@ export async function addCommentAction(input: {
   if (!parsed.success) return INVALID;
   const { clientId, body } = parsed.data;
 
-  const client = await db.query.clients.findFirst({ where: eq(clients.id, clientId) });
-  if (!client) return NOT_FOUND;
+  if (!(await guardClient(actor, clientId, "comment"))) return NOT_FOUND;
 
-  await db.insert(comments).values({ clientId, userId: user.id, body });
+  await db.insert(comments).values({ clientId, userId: actor.user.id, body });
 
   // Notify mentioned users (in THEIR locale), excluding the author.
-  const mentionIds = extractMentionIds(body).filter((id) => id !== user.id);
+  const mentionIds = extractMentionIds(body).filter((id) => id !== actor.user.id);
   if (mentionIds.length > 0) {
     const mentioned = await db.query.users.findMany({
       where: and(inArray(users.id, mentionIds), eq(users.isActive, true)),
@@ -804,7 +1099,7 @@ export async function addCommentAction(input: {
         mentioned.map((m) => ({
           userId: m.id,
           type: "mention",
-          title: notificationContent(m.locale, "mentionTitle", { name: user.name }),
+          title: notificationContent(m.locale, "mentionTitle", { name: actor.user.name }),
           body: excerpt,
           link: `/clients/${clientId}`,
         })),

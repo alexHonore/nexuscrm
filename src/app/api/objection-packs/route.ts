@@ -4,8 +4,8 @@ import { z } from "zod";
 import { db } from "@/db";
 import { objectionPacks } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { objectionItemSchema } from "@/lib/guardrails/types";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * Les paquets d'objections — jusqu'ici semés une fois et jamais modifiables.
@@ -43,8 +43,8 @@ export const packInputSchema = z.object({
 
 /** GET /api/objection-packs — tous les paquets, contenu compris. */
 export async function GET() {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   const rows = await db.select().from(objectionPacks).orderBy(asc(objectionPacks.label));
   return NextResponse.json({ packs: rows });
@@ -52,8 +52,8 @@ export async function GET() {
 
 /** POST /api/objection-packs — crée un paquet. */
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   let raw: unknown;
   try {
@@ -86,7 +86,7 @@ export async function POST(req: Request) {
     .returning();
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "objection_pack.create",
     entity: "objection_pack",
     entityId: row.id,

@@ -20,22 +20,39 @@ import {
   scheduledJobs,
   suppressions,
 } from "@/db/schema-sms";
-import { requireUser } from "@/lib/auth/guards";
+import { bucketFor, grantsFor } from "@/lib/permissions/access";
+import type { Grants } from "@/lib/permissions/catalog";
+import { loadDirectory, requirePerm, withVisibility } from "@/lib/permissions/server";
 import { settingsSendGate } from "@/lib/sms-server";
 import { resolveSmsMode } from "@/lib/sms/provider";
 import { DEFAULT_QUIET_HOURS, isWithinSendWindow } from "@/lib/sms/quiet-hours";
 
 /**
- * Boîte de réception des conversations — accessible aux TÉLÉPHONISTES.
+ * Boîte de réception des conversations — ouverte à qui détient
+ * `conversations.view`.
  *
  * L'écran répond à une seule question : à quoi dois-je répondre maintenant?
  * D'où le tri par « à traiter » d'abord, et la bande d'état en haut : savoir
  * que les envois sont suspendus AVANT de taper une réponse évite de croire
  * qu'on a répondu.
+ *
+ * Un fil PARLE d'une fiche : il se cache donc avec elle. Toute requête de cet
+ * écran passe par `withVisibility` — la même matrice que les listes de fiches,
+ * et non un filtre d'affichage. Une rangée envoyée au navigateur est une
+ * rangée fuitée, même si l'écran choisit de ne pas la dessiner.
+ *
+ * Voir un fil n'est pas le LIRE. La case `visible` dit quelles rangées
+ * existent ; ce que chacune emporte se règle case par case — `contact` pour le
+ * numéro, `history` pour le dernier message et les actes de l'assistant. Sans
+ * cette seconde question, un téléphoniste lisait dans sa propre boîte le
+ * numéro et la conversation du client d'un collègue : la fiche est visible
+ * (pour ne pas la rappeler), son contenu ne l'est pas.
  */
 export default async function ConversationsPage() {
-  const user = await requireUser();
+  const actor = await requirePerm("conversations.view");
   const t = await getTranslations("conversations");
+  // « Masqué » est écrit une seule fois, chez les fiches.
+  const tAccess = await getTranslations("clients");
 
   const lastMessage = db
     .select({
@@ -58,6 +75,14 @@ export default async function ConversationsPage() {
     .groupBy(messages.conversationId)
     .as("last_message");
 
+  // Les fils sans aucun message n'ont rien à traiter (ils encombreraient la
+  // liste sans jamais rien demander), et ceux dont la fiche échappe à ce regard
+  // n'existent pas pour lui — la jointure sur `clients` porte la visibilité.
+  const threadsWhere = await withVisibility(
+    actor,
+    or(eq(conversations.needsAttention, true), isNotNull(lastMessage.at)),
+  );
+
   const rows = await db
     .select({
       id: conversations.id,
@@ -71,6 +96,9 @@ export default async function ConversationsPage() {
       assignedToName: users.name,
       assistantName: assistants.name,
       lastInboundAt: conversations.lastInboundAt,
+      // Le DÉTENTEUR de la fiche : c'est lui, et lui seul, qui décide du
+      // compartiment — donc de ce que cette rangée a le droit d'emporter.
+      holderId: clients.assignedToId,
       lastBody: lastMessage.body,
       lastDirection: lastMessage.direction,
       lastSource: lastMessage.source,
@@ -81,18 +109,37 @@ export default async function ConversationsPage() {
     .leftJoin(users, eq(users.id, conversations.assignedToId))
     .leftJoin(assistants, eq(assistants.id, conversations.activeAssistantId))
     .leftJoin(lastMessage, eq(lastMessage.conversationId, conversations.id))
-    // Les fils sans aucun message n'ont rien à traiter : ils encombreraient la
-    // liste sans jamais rien demander.
-    .where(or(eq(conversations.needsAttention, true), isNotNull(lastMessage.at)))
+    .where(threadsWhere)
     .orderBy(desc(conversations.needsAttention), desc(lastMessage.at))
     .limit(200);
+
+  // ── Ce que chaque rangée a le droit d'emporter ───────────────────────────
+  // Le compartiment ne dépend que du DÉTENTEUR de la fiche : on le résout une
+  // fois par détenteur et non une fois par ligne — 200 fils ne coûtent donc
+  // pas 200 questions de plus à la matrice.
+  const { cfg, roleOf } = await loadDirectory();
+  const grantsCache = new Map<string, Grants>();
+  const grantsOfHolder = (assignedToId: string | null): Grants => {
+    const key = assignedToId ?? "";
+    const hit = grantsCache.get(key);
+    if (hit) return hit;
+    const holder = assignedToId ? (roleOf.get(assignedToId) ?? null) : null;
+    const g = grantsFor(cfg, actor.role, bucketFor(actor.user.id, { assignedToId }, holder));
+    grantsCache.set(key, g);
+    return g;
+  };
 
   // ── Ce que l'assistant a FAIT sur chaque fil ─────────────────────────────
   // La conclusion de son travail, pas son journal : seuls les outils REUSSIS
   // qui laissent une trace pour le client (rendez-vous, classement,
   // qualification, rappel, note, transfert) — jamais les lectures.
+  //
+  // « Rendez-vous réservé », « fiche classée » : c'est l'historique de la
+  // fiche. On ne le DEMANDE donc que pour les fils dont la case `history` est
+  // ouverte — ce qu'on ne charge pas ne peut pas partir dans le HTML.
+  const historyIds = rows.filter((r) => grantsOfHolder(r.holderId).history).map((r) => r.id);
   const deedsByConversation = new Map<string, ConversationDeed[]>();
-  if (rows.length > 0) {
+  if (historyIds.length > 0) {
     const eventRows = await db
       .selectDistinct({
         conversationId: agentEvents.conversationId,
@@ -101,10 +148,7 @@ export default async function ConversationsPage() {
       .from(agentEvents)
       .where(
         and(
-          inArray(
-            agentEvents.conversationId,
-            rows.map((r) => r.id),
-          ),
+          inArray(agentEvents.conversationId, historyIds),
           or(
             and(eq(agentEvents.type, "tool_call"), sql`${agentEvents.payload}->>'ok' = 'true'`),
             inArray(agentEvents.type, ["auto_categorized", "followup_created", "transfer"]),
@@ -134,13 +178,26 @@ export default async function ConversationsPage() {
   // train de composer, et les barreaux de campagne planifiés — parfois à des
   // jours d'ici (campaign_enrollments.next_touch_at, la vraie source des
   // relances futures : le job n'existe qu'au moment dû).
-  // Réservé à l'ADMIN, et pas seulement à l'écran : la file d'envoi et la
-  // bande d'état exposent la santé du moteur — ce qui attend, ce qui a échoué,
-  // combien de numéros se sont désabonnés. C'est la conduite de l'entreprise,
-  // pas le travail d'un téléphoniste. On ne les CALCULE donc pas pour lui : une
-  // donnée qu'on n'envoie pas ne peut pas fuir par le HTML.
-  const isAdmin = user.role === "admin";
-  const [sendJobs, turnJobs, upcomingTouches] = isAdmin
+  // Réservé au droit `admin.settings`, et pas seulement à l'écran : la file
+  // d'envoi et la bande d'état exposent la santé du moteur — ce qui attend, ce
+  // qui a échoué, combien de numéros se sont désabonnés. C'est la conduite de
+  // l'entreprise, pas le travail d'un téléphoniste. On ne les CALCULE donc pas
+  // pour lui : une donnée qu'on n'envoie pas ne peut pas fuir par le HTML.
+  const canEngine = actor.can("admin.settings");
+  // Conduire le moteur n'est pas voir toutes les fiches : un rôle peut recevoir
+  // `admin.settings` sans ouvrir le compartiment de l'administrateur. La file
+  // d'envoi reste donc bornée à la même visibilité que la liste — elle nomme
+  // des fiches et montre le TEXTE des messages à venir.
+  const touchesWhere = canEngine
+    ? await withVisibility(
+        actor,
+        and(
+          inArray(campaignEnrollments.status, ["pending", "active"]),
+          isNotNull(campaignEnrollments.nextTouchAt),
+        ),
+      )
+    : undefined;
+  const [sendJobs, turnJobs, upcomingTouches] = canEngine
     ? await Promise.all([
     db
       .select({ id: scheduledJobs.id, runAt: scheduledJobs.runAt, payload: scheduledJobs.payload })
@@ -166,12 +223,7 @@ export default async function ConversationsPage() {
       .from(campaignEnrollments)
       .innerJoin(campaigns, eq(campaigns.id, campaignEnrollments.campaignId))
       .innerJoin(clients, eq(clients.id, campaignEnrollments.clientId))
-      .where(
-        and(
-          inArray(campaignEnrollments.status, ["pending", "active"]),
-          isNotNull(campaignEnrollments.nextTouchAt),
-        ),
-      )
+      .where(touchesWhere)
       .orderBy(asc(campaignEnrollments.nextTouchAt))
       .limit(100),
       ])
@@ -192,45 +244,60 @@ export default async function ConversationsPage() {
           clientId: conversations.clientId,
           clientName: clients.fullName,
           clientPhone: conversations.clientPhone,
+          holderId: clients.assignedToId,
         })
         .from(conversations)
         .leftJoin(clients, eq(clients.id, conversations.clientId))
-        .where(inArray(conversations.id, jobConversationIds))
+        .where(await withVisibility(actor, inArray(conversations.id, jobConversationIds)))
     : [];
   const threadById = new Map(jobThreads.map((c) => [c.id, c]));
 
   const queue: QueueItem[] = [
-    ...sendJobs.map((job): QueueItem => {
+    // Un job dont le fil n'est pas revenu de la requête ci-dessus porte sur une
+    // fiche invisible : il DISPARAÎT au lieu de s'afficher anonyme, parce que
+    // la carte montre le texte du message et pas seulement un nom.
+    ...sendJobs.flatMap((job): QueueItem[] => {
       const payload = job.payload as { conversationId?: string; body?: string; source?: string };
       const thread = payload.conversationId ? threadById.get(payload.conversationId) : undefined;
-      return {
-        id: job.id,
-        kind: "send",
-        clientId: thread?.clientId ?? null,
-        clientName: thread?.clientName ?? thread?.clientPhone ?? "—",
-        when: job.runAt.toISOString(),
-        body: payload.body ?? null,
-        source: payload.source ?? null,
-        campaignName: null,
-        step: null,
-        jobId: job.id,
-      };
+      if (!thread) return [];
+      // Conduire le moteur n'ouvre pas les fiches des autres : le nom de
+      // secours et le TEXTE du message à venir suivent les mêmes cases que la
+      // boîte — `contact` pour le numéro, `history` pour la conversation.
+      const open = grantsOfHolder(thread.holderId);
+      return [
+        {
+          id: job.id,
+          kind: "send",
+          clientId: thread.clientId,
+          clientName:
+            thread.clientName ?? (open.contact ? thread.clientPhone : tAccess("access.masked")),
+          when: job.runAt.toISOString(),
+          body: open.history ? (payload.body ?? null) : null,
+          source: payload.source ?? null,
+          campaignName: null,
+          step: null,
+          jobId: job.id,
+        },
+      ];
     }),
-    ...turnJobs.map((job): QueueItem => {
+    ...turnJobs.flatMap((job): QueueItem[] => {
       const payload = job.payload as { conversationId?: string };
       const thread = payload.conversationId ? threadById.get(payload.conversationId) : undefined;
-      return {
-        id: job.id,
-        kind: "turn",
-        clientId: thread?.clientId ?? null,
-        clientName: thread?.clientName ?? thread?.clientPhone ?? "—",
-        when: job.runAt.toISOString(),
-        body: null,
-        source: null,
-        campaignName: null,
-        step: null,
-        jobId: null,
-      };
+      if (!thread) return [];
+      return [
+        {
+          id: job.id,
+          kind: "turn",
+          clientId: thread.clientId,
+          clientName: thread.clientName ?? thread.clientPhone,
+          when: job.runAt.toISOString(),
+          body: null,
+          source: null,
+          campaignName: null,
+          step: null,
+          jobId: null,
+        },
+      ];
     }),
     ...upcomingTouches.map(
       (touch): QueueItem => ({
@@ -250,7 +317,7 @@ export default async function ConversationsPage() {
   ].sort((a, b) => Date.parse(a.when) - Date.parse(b.when));
 
   // ── Bande d'état ─────────────────────────────────────────────────────────
-  const [sendingAllowed, queueCounts, suppressedCount] = isAdmin
+  const [sendingAllowed, queueCounts, suppressedCount] = canEngine
     ? await Promise.all([
     // On réutilise la PORTE d'envoi plutôt que de relire la rangée ici : elle
     // échoue fermé sur un réglage illisible, et réécrire cette règle à côté la
@@ -269,8 +336,8 @@ export default async function ConversationsPage() {
 
   const locale = await getLocale();
   // Les catégories du pipeline — pour classer une fiche sans quitter la boîte.
-  // Chargées pour tout le monde : ranger une fiche n'est pas un geste d'admin,
-  // c'est le travail d'après-conversation.
+  // Ranger une fiche n'est pas un geste d'admin, c'est le travail
+  // d'après-conversation : le droit `clients.category` seul en décide.
   const pipeline = await db.query.categories.findMany({
     orderBy: [asc(categories.sortOrder), asc(categories.id)],
   });
@@ -279,23 +346,39 @@ export default async function ConversationsPage() {
     label: locale === "en" ? c.nameEn : c.nameFr,
   }));
 
-  const items: InboxRow[] = rows.map((r) => ({
-    id: r.id,
-    clientId: r.clientId,
-    clientName: r.clientName ?? r.clientPhone,
-    clientPhone: r.clientPhone,
-    needsAttention: r.needsAttention,
-    attentionReason: r.attentionReason,
-    aiEnabled: r.aiEnabled,
-    assignedToId: r.assignedToId,
-    assignedToName: r.assignedToName,
-    assistantName: r.assistantName,
-    did: deedsByConversation.get(r.id) ?? [],
-    lastBody: r.lastBody ?? null,
-    lastDirection: r.lastDirection === "in" || r.lastDirection === "out" ? r.lastDirection : null,
-    lastSource: r.lastSource ?? null,
-    lastAt: r.lastAt ? new Date(r.lastAt).toISOString() : null,
-  }));
+  const items: InboxRow[] = rows.map((r) => {
+    const open = grantsOfHolder(r.holderId);
+    return {
+      id: r.id,
+      clientId: r.clientId,
+      // Le numéro sert de nom de secours quand la fiche n'en a pas — mais un
+      // secours qui DIT le numéro n'en est pas un ici : sans la case
+      // `contact`, la carte porte le mot qui le dit.
+      clientName: r.clientName ?? (open.contact ? r.clientPhone : tAccess("access.masked")),
+      clientPhone: open.contact ? r.clientPhone : null,
+      contactHidden: !open.contact,
+      needsAttention: r.needsAttention,
+      attentionReason: r.attentionReason,
+      aiEnabled: r.aiEnabled,
+      assignedToId: r.assignedToId,
+      assignedToName: r.assignedToName,
+      assistantName: r.assistantName,
+      // Fil fermé : ni le dernier message, ni les actes de l'assistant. Reste
+      // ce qu'il faut pour que la rangée EXISTE — un nom, un état, une heure.
+      did: open.history ? (deedsByConversation.get(r.id) ?? []) : [],
+      lastBody: open.history ? (r.lastBody ?? null) : null,
+      historyHidden: !open.history,
+      lastDirection: r.lastDirection === "in" || r.lastDirection === "out" ? r.lastDirection : null,
+      lastSource: r.lastSource ?? null,
+      lastAt: r.lastAt ? new Date(r.lastAt).toISOString() : null,
+      // Les gestes de la carte, fiche par fiche : conduire l'assistant change
+      // ce que le robot ENVERRA à ce client (case `sms`), ranger la fiche
+      // touche au pipeline (case `category`). Le serveur revérifie les deux —
+      // ceci évite d'offrir un bouton qui répondra « introuvable ».
+      smsOpen: open.sms,
+      categoryOpen: open.category,
+    };
+  });
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-5 p-4 pb-safe md:p-6">
@@ -307,11 +390,22 @@ export default async function ConversationsPage() {
       <ConversationsInbox
         rows={items}
         queue={queue}
-        currentUserId={user.id}
-        isAdmin={isAdmin}
+        currentUserId={actor.user.id}
+        // Ce que ce regard peut FAIRE ici. L'écran s'en sert pour ne pas
+        // promettre un geste que le serveur refusera — chaque action revérifie
+        // de son côté, l'affichage n'est jamais la garde.
+        abilities={{
+          engine: canEngine,
+          control: actor.can("conversations.control"),
+          reply: actor.can("conversations.reply"),
+          classify: actor.can("clients.category"),
+          // Le rejeu après panne passe par une route d'API gardée par
+          // `admin.settings` : l'offrir sans ce droit serait offrir un échec.
+          replay: actor.can("admin.settings"),
+        }}
         categories={categoryOptions}
         health={
-          isAdmin
+          canEngine
             ? {
                 killSwitch: !sendingAllowed,
                 mode: resolveSmsMode(process.env),

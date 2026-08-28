@@ -1,7 +1,7 @@
 import { google } from "googleapis";
 import { NextResponse } from "next/server";
-import { apiAdmin } from "@/lib/auth/guards";
 import { decryptSecret } from "@/lib/crypto";
+import { apiPerm } from "@/lib/permissions/server";
 import { getSetting } from "@/lib/settings";
 
 /**
@@ -13,8 +13,8 @@ import { getSetting } from "@/lib/settings";
  * cette route peut être basculée dessus — même contrat de données.
  */
 export async function GET() {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   const settings = await getSetting("google");
   if (!settings.refreshTokenEnc) {

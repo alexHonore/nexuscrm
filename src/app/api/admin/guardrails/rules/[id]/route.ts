@@ -3,9 +3,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { guardrailAudit, guardrailRules } from "@/db/schema-sms";
-import { apiAdmin } from "@/lib/auth/guards";
 import { invalidateAssistantsForGuardrails } from "@/lib/guardrails/store";
 import { GUARDRAIL_SEVERITIES, safeParseRuleConfig, type GuardrailKind } from "@/lib/guardrails/types";
+import { apiPerm } from "@/lib/permissions/server";
 import { readJson } from "../../../_helpers";
 
 /**
@@ -29,8 +29,8 @@ const patchSchema = z.object({
 });
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.guardrails");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -54,7 +54,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     }
   }
 
-  const patch: Partial<typeof guardrailRules.$inferInsert> = { updatedAt: new Date(), updatedById: admin.id };
+  const patch: Partial<typeof guardrailRules.$inferInsert> = { updatedAt: new Date(), updatedById: actor.user.id };
   if (body.label !== undefined) patch.label = body.label;
   if (body.description !== undefined) patch.description = body.description;
   if (body.promptText !== undefined) patch.promptText = body.promptText;
@@ -75,7 +75,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   const staleAssistants = await invalidateAssistantsForGuardrails({ assistantId: before.assistantId });
 
   await db.insert(guardrailAudit).values({
-    actorId: admin.id,
+    actorId: actor.user.id,
     action: body.enabled === false ? "rule_disabled" : "rule_edited",
     target: `rule:${before.key}`,
     before: {
@@ -99,8 +99,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 /** DELETE — supprime une règle. L'admin peut tout supprimer ; « Tout
  * réinitialiser » (§16.6) la recréera si elle venait de la semence. */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.guardrails");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -113,7 +113,7 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
   const staleAssistants = await invalidateAssistantsForGuardrails({ assistantId: deleted.assistantId });
 
   await db.insert(guardrailAudit).values({
-    actorId: admin.id,
+    actorId: actor.user.id,
     action: "rule_deleted",
     target: `rule:${deleted.key}`,
     before: { severity: deleted.severity, enabled: deleted.enabled, config: deleted.config },

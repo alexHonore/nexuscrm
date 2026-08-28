@@ -6,10 +6,10 @@ import type { CategoryDto, SourceDto } from "@/components/admin/types";
 import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/db";
 import { categories, clients, sources } from "@/db/schema";
-import { requireAdmin } from "@/lib/auth/guards";
+import { requirePerm } from "@/lib/permissions/server";
 
 export default async function AdminPipelinePage() {
-  await requireAdmin();
+  await requirePerm("admin.pipeline");
   const t = await getTranslations("admin");
 
   const [cats, srcs, catCounts, srcCounts] = await Promise.all([

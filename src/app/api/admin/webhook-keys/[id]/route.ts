@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { webhookKeys } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { readJson } from "../../_helpers";
 
 const patchSchema = z.object({
@@ -22,8 +22,8 @@ const patchSchema = z.object({
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function PATCH(req: Request, ctx: Ctx) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.webhooks");
+  if (actor instanceof NextResponse) return actor;
   const id = Number((await ctx.params).id);
   if (!Number.isInteger(id)) return NextResponse.json({ error: "invalid_id" }, { status: 400 });
 
@@ -34,7 +34,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (!updated) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "webhook.key_update",
     entity: "webhookKey",
     entityId: String(id),
@@ -54,8 +54,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
 }
 
 export async function DELETE(_req: Request, ctx: Ctx) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.webhooks");
+  if (actor instanceof NextResponse) return actor;
   const id = Number((await ctx.params).id);
   if (!Number.isInteger(id)) return NextResponse.json({ error: "invalid_id" }, { status: 400 });
 
@@ -65,7 +65,7 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   await db.delete(webhookKeys).where(eq(webhookKeys.id, id));
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "webhook.key_delete",
     entity: "webhookKey",
     entityId: String(id),

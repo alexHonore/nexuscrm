@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { exportAssistantFile } from "@/lib/assistants/transfer";
 import { requestDocLocale } from "@/lib/locale-server";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * GET /api/assistants/:id/export — télécharge l'assistant en JSON.
@@ -12,8 +12,8 @@ import { requestDocLocale } from "@/lib/locale-server";
  * sortie de données : il est journalisé comme telle.
  */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -27,7 +27,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     // l'interface. La configuration exportée, elle, ne bouge pas d'un poil.
     const file = await exportAssistantFile(id, { annotate, locale: await requestDocLocale() });
     await logAudit({
-      userId: admin.id,
+      userId: actor.user.id,
       action: "assistant.export",
       entity: "assistant",
       entityId: id,

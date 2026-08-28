@@ -31,8 +31,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { asc } from "drizzle-orm";
 import { db } from "@/db";
 import { categories } from "@/db/schema";
-import { requireAdmin } from "@/lib/auth/guards";
 import { dispositionDisplayMap } from "@/lib/dispositions";
+import { requirePerm } from "@/lib/permissions/server";
 import { cn } from "@/lib/utils";
 import {
   getBookingsPerWeek,
@@ -78,7 +78,7 @@ export default async function AnalyticsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireAdmin();
+  await requirePerm("admin.analytics");
   const sp = await searchParams;
   const t = await getTranslations("analytics");
   const locale = await getLocale();

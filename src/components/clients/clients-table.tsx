@@ -9,6 +9,7 @@ import {
   ChevronDownIcon,
   ClockAlertIcon,
   Columns3Icon,
+  EyeOffIcon,
   MegaphoneIcon,
   PhoneOffIcon,
   TagsIcon,
@@ -32,9 +33,12 @@ import {
   type ActionResult,
   type BulkResult,
 } from "@/app/(app)/clients/actions";
-import type { ClientListItem } from "@/components/clients/client-list-nav";
 import type { FilterOption } from "@/components/clients/clients-filters";
-import type { PanelCategory } from "@/components/clients/clients-workspace";
+import type {
+  ClientListCapabilities,
+  ClientRow,
+  PanelCategory,
+} from "@/components/clients/clients-workspace";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -144,9 +148,14 @@ function subscribeHiddenColumns(onChange: () => void): () => void {
 
 /**
  * Vue tableau de /clients : colonnes triables (nom, création, modification) et,
- * pour l'admin seulement, sélection multiple + barre d'actions en masse
- * (assigner, catégoriser, supprimer). Le serveur refuse de toute façon ces
- * actions aux téléphonistes — la sélection cachée n'est pas la protection.
+ * pour qui en a le droit, sélection multiple + barre d'actions en masse
+ * (assigner, catégoriser, supprimer) et édition en ligne.
+ *
+ * Chaque geste dépend de SA case (`can.bulk`, `can.category`, `can.assign`…) et
+ * d'aucune autre : « administrateur » n'est plus une réponse à « peut-il
+ * reclasser cette ligne ? ». Rien de tout cela ne protège quoi que ce soit — le
+ * serveur refuse l'action, ligne par ligne, quoi qu'affiche le tableau.
+ *
  * Mobile : le tableau devient une liste de cartes cochables.
  */
 /** Motifs de refus connus — seuls ceux-là ont une étiquette traduite. */
@@ -155,7 +164,7 @@ const ENROLL_REFUSAL_KEYS = new Set<string>(ENROLL_REFUSALS);
 export function ClientsTable({
   items,
   loading,
-  isAdmin,
+  can,
   categories,
   sources,
   users,
@@ -165,9 +174,9 @@ export function ClientsTable({
   onSort,
   now,
 }: {
-  items: ClientListItem[];
+  items: ClientRow[];
   loading: boolean;
-  isAdmin: boolean;
+  can: ClientListCapabilities;
   categories: PanelCategory[];
   sources: FilterOption[];
   users: FilterOption[];
@@ -265,11 +274,16 @@ export function ClientsTable({
         const res = await run(ids.slice(i, i + BULK_MAX));
         if (!res.ok) {
           toast.error(
+            // « Verrouillée » se nomme : ce lot touchait des fiches tenues par
+            // quelqu'un d'autre. Le plafond, lui, n'a pas son compte ici (le
+            // tableau ne connaît pas le maximum du rôle) et retombe au générique.
             res.error === "forbidden"
-              ? t("errors.forbidden")
-              : done > 0
-                ? t("errors.bulkPartial", { done, total: ids.length })
-                : t("errors.generic"),
+              ? t("access.noRight")
+              : res.error === "locked"
+                ? t("access.lockedForever")
+                : done > 0
+                  ? t("errors.bulkPartial", { done, total: ids.length })
+                  : t("errors.generic"),
           );
           setDeleteOpen(false);
           if (done > 0) {
@@ -355,7 +369,17 @@ export function ClientsTable({
         emitDataChange("clients");
         router.refresh();
       } else {
-        toast.error(res.error === "forbidden" ? t("errors.forbidden") : t("errors.generic"));
+        // Une ligne devenue invisible (rendue, réassignée) répond
+        // « introuvable » : jamais « interdit », qui dirait qu'elle existe.
+        toast.error(
+          res.error === "forbidden"
+            ? t("access.noRight")
+            : res.error === "notFound"
+              ? t("errors.notFound")
+              : res.error === "locked"
+                ? t("access.lockedForever")
+                : t("errors.generic"),
+        );
       }
     });
   };
@@ -383,7 +407,7 @@ export function ClientsTable({
     </button>
   );
 
-  const categoryChip = (item: ClientListItem) => {
+  const categoryChip = (item: ClientRow) => {
     const category = item.categoryId !== null ? categoryById.get(item.categoryId) : undefined;
     if (!category) {
       return <span className="text-xs text-muted-foreground">{t("list.noCategory")}</span>;
@@ -407,7 +431,7 @@ export function ClientsTable({
     );
   };
 
-  const sourceChip = (item: ClientListItem) => {
+  const sourceChip = (item: ClientRow) => {
     const source = item.sourceId !== null ? sourceByValue.get(String(item.sourceId)) : undefined;
     if (!source) return <span className="text-muted-foreground">—</span>;
     return (
@@ -424,10 +448,28 @@ export function ClientsTable({
     );
   };
 
-  const assigneeText = (item: ClientListItem) =>
+  /**
+   * Le téléphone d'une ligne — ou la pastille qui dit qu'il n'est pas ouvert.
+   * L'API n'a pas envoyé le numéro : il n'y a rien à révéler ici, et rien à
+   * composer non plus.
+   */
+  const phoneCell = (item: ClientRow) =>
+    item.contactHidden ? (
+      <span
+        title={t("access.maskedHint")}
+        className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+      >
+        <EyeOffIcon aria-hidden className="size-3" />
+        {t("access.masked")}
+      </span>
+    ) : (
+      formatPhone(item.phone)
+    );
+
+  const assigneeText = (item: ClientRow) =>
     (item.assignedToId ? userLabels.get(item.assignedToId) : null) ?? t("list.unassigned");
 
-  const followupCell = (item: ClientListItem) => {
+  const followupCell = (item: ClientRow) => {
     if (!item.nextFollowupAt) return <span className="text-muted-foreground">—</span>;
     const overdue = Date.parse(item.nextFollowupAt) < now;
     return (
@@ -469,7 +511,7 @@ export function ClientsTable({
     </DropdownMenu>
   );
 
-  const categoryMenu = (item: ClientListItem) => (
+  const categoryMenu = (item: ClientRow) => (
     <DropdownMenuContent align="start" className="min-w-48">
       {categories.map((c) => (
         <DropdownMenuItem
@@ -498,7 +540,7 @@ export function ClientsTable({
     </DropdownMenuContent>
   );
 
-  const sourceMenu = (item: ClientListItem) => (
+  const sourceMenu = (item: ClientRow) => (
     <DropdownMenuContent align="start" className="min-w-48">
       {sources.map((s) => (
         <DropdownMenuItem
@@ -526,7 +568,7 @@ export function ClientsTable({
     </DropdownMenuContent>
   );
 
-  const assigneeMenu = (item: ClientListItem) => (
+  const assigneeMenu = (item: ClientRow) => (
     <DropdownMenuContent align="start" className="min-w-48">
       {users.map((u) => (
         <DropdownMenuItem
@@ -592,7 +634,7 @@ export function ClientsTable({
         <Table className="[&_th]:h-10 [&_th]:whitespace-nowrap [&_th]:text-[11px] [&_th]:font-medium [&_th]:uppercase [&_th]:tracking-wider">
           <TableHeader className="bg-muted/40">
             <TableRow className="hover:bg-transparent">
-              {isAdmin ? (
+              {can.bulk ? (
                 <TableHead className="w-10">
                   <Checkbox
                     checked={allSelected}
@@ -657,7 +699,7 @@ export function ClientsTable({
                 className="cursor-pointer"
                 onClick={() => router.push(`/clients/${item.id}`)}
               >
-                {isAdmin ? (
+                {can.bulk ? (
                   <TableCell
                     className="w-10"
                     onClick={(e) => e.stopPropagation()}
@@ -687,11 +729,11 @@ export function ClientsTable({
                   </span>
                 </TableCell>
                 {show("phone") ? (
-                  <TableCell className="tabular-nums">{formatPhone(item.phone)}</TableCell>
+                  <TableCell className="tabular-nums">{phoneCell(item)}</TableCell>
                 ) : null}
                 {show("category") ? (
-                  <TableCell onClick={isAdmin ? (e) => e.stopPropagation() : undefined}>
-                    {isAdmin
+                  <TableCell onClick={can.category ? (e) => e.stopPropagation() : undefined}>
+                    {can.category
                       ? inlineMenu(
                           categoryChip(item),
                           t("table.editCategory", { name: item.fullName }),
@@ -708,9 +750,9 @@ export function ClientsTable({
                 {show("source") ? (
                   <TableCell
                     className="text-muted-foreground"
-                    onClick={isAdmin ? (e) => e.stopPropagation() : undefined}
+                    onClick={can.source ? (e) => e.stopPropagation() : undefined}
                   >
-                    {isAdmin
+                    {can.source
                       ? inlineMenu(
                           sourceChip(item),
                           t("table.editSource", { name: item.fullName }),
@@ -722,9 +764,9 @@ export function ClientsTable({
                 {show("assignedTo") ? (
                   <TableCell
                     className="text-muted-foreground"
-                    onClick={isAdmin ? (e) => e.stopPropagation() : undefined}
+                    onClick={can.assign ? (e) => e.stopPropagation() : undefined}
                   >
-                    {isAdmin
+                    {can.assign
                       ? inlineMenu(
                           assigneeText(item),
                           t("table.editAssignee", { name: item.fullName }),
@@ -763,7 +805,7 @@ export function ClientsTable({
       <ul className="divide-y divide-border/60 md:hidden">
         {items.map((item) => (
           <li key={item.id} className="flex min-h-[52px] items-center gap-1.5 px-3">
-            {isAdmin ? (
+            {can.bulk ? (
               <span className="-ml-2 flex size-11 shrink-0 items-center justify-center">
                 {/* after:-inset-3.5 : la zone de frappe du Checkbox remplit les 44px. */}
                 <Checkbox
@@ -799,7 +841,7 @@ export function ClientsTable({
                 ) : null}
               </span>
               <span className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="tabular-nums">{formatPhone(item.phone)}</span>
+                <span className="tabular-nums">{phoneCell(item)}</span>
                 {item.city ? <span className="truncate">{item.city}</span> : null}
                 <span className="shrink-0">
                   {t("table.createdShort", { date: day(item.createdAt) })}
@@ -811,7 +853,7 @@ export function ClientsTable({
       </ul>
 
       {/* ── Barre d'actions en masse (admin) ── */}
-      {isAdmin && selected.size > 0 ? (
+      {can.bulk && selected.size > 0 ? (
         <div className="fixed inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 mx-auto max-w-3xl animate-in rounded-xl border bg-background/95 p-2 shadow-lg ring-1 ring-border/60 backdrop-blur duration-200 fade-in-0 slide-in-from-bottom-3 md:bottom-6">
           <div className="flex items-center gap-2">
             <span className="shrink-0 px-1.5 text-sm font-medium tabular-nums">
@@ -819,36 +861,40 @@ export function ClientsTable({
             </span>
 
             <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto [scrollbar-width:none] md:flex-wrap [&::-webkit-scrollbar]:hidden">
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={<Button variant="outline" className="min-h-11 md:min-h-8" disabled={pending} />}
-              >
-                <UserRoundPlusIcon />
-                {t("bulk.assign")}
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="min-w-48">
-                {users.map((u) => (
-                  <DropdownMenuItem
-                    key={u.value}
-                    className="min-h-10"
-                    onClick={() => runBulk((ids) => bulkAssignClientsAction(ids, u.value), "bulk.assigned")}
-                  >
-                    {u.label}
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="min-h-10"
-                  onClick={() => runBulk((ids) => bulkAssignClientsAction(ids, null), "bulk.assigned")}
+            {/* Chaque geste de la barre a SA case : assigner, reclasser,
+                changer la source et supprimer ne se donnent pas ensemble. */}
+            {can.assign ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={<Button variant="outline" className="min-h-11 md:min-h-8" disabled={pending} />}
                 >
-                  {t("list.unassigned")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  <UserRoundPlusIcon />
+                  {t("bulk.assign")}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-48">
+                  {users.map((u) => (
+                    <DropdownMenuItem
+                      key={u.value}
+                      className="min-h-10"
+                      onClick={() => runBulk((ids) => bulkAssignClientsAction(ids, u.value), "bulk.assigned")}
+                    >
+                      {u.label}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="min-h-10"
+                    onClick={() => runBulk((ids) => bulkAssignClientsAction(ids, null), "bulk.assigned")}
+                  >
+                    {t("list.unassigned")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
 
             {/* Inscrire la sélection à une campagne. Absent s'il n'y en a
                 aucune : un menu vide se clique une fois, jamais deux. */}
-            {campaigns.length > 0 ? (
+            {can.campaign && campaigns.length > 0 ? (
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
@@ -872,111 +918,117 @@ export function ClientsTable({
               </DropdownMenu>
             ) : null}
 
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={<Button variant="outline" className="min-h-11 md:min-h-8" disabled={pending} />}
-              >
-                <TagsIcon />
-                {t("bulk.category")}
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="min-w-48">
-                {categories.map((c) => (
-                  <DropdownMenuItem
-                    key={c.id}
-                    className="min-h-10"
-                    onClick={() =>
-                      runBulk((ids) => bulkSetClientsCategoryAction(ids, c.id), "bulk.categorized")
-                    }
-                  >
-                    <span
-                      aria-hidden
-                      className="size-2.5 rounded-full"
-                      style={{ backgroundColor: c.color }}
-                    />
-                    {c.label}
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="min-h-10"
-                  onClick={() =>
-                    runBulk((ids) => bulkSetClientsCategoryAction(ids, null), "bulk.categorized")
-                  }
+            {can.category ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={<Button variant="outline" className="min-h-11 md:min-h-8" disabled={pending} />}
                 >
-                  <span aria-hidden className="size-2.5 rounded-full bg-muted-foreground/40" />
-                  {t("detail.noCategory")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={<Button variant="outline" className="min-h-11 md:min-h-8" disabled={pending} />}
-              >
-                <MegaphoneIcon />
-                {t("bulk.source")}
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="min-w-48">
-                {sources.map((s) => (
-                  <DropdownMenuItem
-                    key={s.value}
-                    className="min-h-10"
-                    onClick={() =>
-                      runBulk(
-                        (ids) => bulkSetClientsSourceAction(ids, Number(s.value)),
-                        "bulk.sourced",
-                      )
-                    }
-                  >
-                    {s.color ? (
+                  <TagsIcon />
+                  {t("bulk.category")}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-48">
+                  {categories.map((c) => (
+                    <DropdownMenuItem
+                      key={c.id}
+                      className="min-h-10"
+                      onClick={() =>
+                        runBulk((ids) => bulkSetClientsCategoryAction(ids, c.id), "bulk.categorized")
+                      }
+                    >
                       <span
                         aria-hidden
                         className="size-2.5 rounded-full"
-                        style={{ backgroundColor: s.color }}
+                        style={{ backgroundColor: c.color }}
                       />
-                    ) : null}
-                    {s.label}
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="min-h-10"
-                  onClick={() =>
-                    runBulk((ids) => bulkSetClientsSourceAction(ids, null), "bulk.sourced")
-                  }
-                >
-                  {t("list.filters.noSource")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-              <AlertDialogTrigger
-                render={<Button variant="destructive" className="min-h-11 md:min-h-8" disabled={pending} />}
-              >
-                <Trash2Icon />
-                {t("bulk.delete")}
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>{t("bulk.deleteTitle")}</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    {t("bulk.deleteDescription", { count: selected.size })}
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>{t("delete.cancel")}</AlertDialogCancel>
-                  <AlertDialogAction
-                    variant="destructive"
-                    className="bg-destructive text-white hover:bg-destructive/90"
-                    disabled={pending}
-                    onClick={() => runBulk(bulkDeleteClientsAction, "bulk.deleted")}
+                      {c.label}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="min-h-10"
+                    onClick={() =>
+                      runBulk((ids) => bulkSetClientsCategoryAction(ids, null), "bulk.categorized")
+                    }
                   >
-                    {t("delete.confirm")}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+                    <span aria-hidden className="size-2.5 rounded-full bg-muted-foreground/40" />
+                    {t("detail.noCategory")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+
+            {can.source ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={<Button variant="outline" className="min-h-11 md:min-h-8" disabled={pending} />}
+                >
+                  <MegaphoneIcon />
+                  {t("bulk.source")}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-48">
+                  {sources.map((s) => (
+                    <DropdownMenuItem
+                      key={s.value}
+                      className="min-h-10"
+                      onClick={() =>
+                        runBulk(
+                          (ids) => bulkSetClientsSourceAction(ids, Number(s.value)),
+                          "bulk.sourced",
+                        )
+                      }
+                    >
+                      {s.color ? (
+                        <span
+                          aria-hidden
+                          className="size-2.5 rounded-full"
+                          style={{ backgroundColor: s.color }}
+                        />
+                      ) : null}
+                      {s.label}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="min-h-10"
+                    onClick={() =>
+                      runBulk((ids) => bulkSetClientsSourceAction(ids, null), "bulk.sourced")
+                    }
+                  >
+                    {t("list.filters.noSource")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+
+            {can.delete ? (
+              <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+                <AlertDialogTrigger
+                  render={<Button variant="destructive" className="min-h-11 md:min-h-8" disabled={pending} />}
+                >
+                  <Trash2Icon />
+                  {t("bulk.delete")}
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t("bulk.deleteTitle")}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t("bulk.deleteDescription", { count: selected.size })}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t("delete.cancel")}</AlertDialogCancel>
+                    <AlertDialogAction
+                      variant="destructive"
+                      className="bg-destructive text-white hover:bg-destructive/90"
+                      disabled={pending}
+                      onClick={() => runBulk(bulkDeleteClientsAction, "bulk.deleted")}
+                    >
+                      {t("delete.confirm")}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : null}
             </div>
 
             <Button

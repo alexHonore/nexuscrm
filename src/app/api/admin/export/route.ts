@@ -7,7 +7,8 @@ import { db } from "@/db";
 import { categories, clients, sources, users } from "@/db/schema";
 import { runAfterResponse } from "@/lib/after-response";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
+import { bucketFor, grantsFor } from "@/lib/permissions/access";
+import { apiPerm, loadDirectory, withVisibility } from "@/lib/permissions/server";
 
 const HEADERS = [
   "id",
@@ -83,10 +84,17 @@ function dayBound(day: string, suffix: "T00:00:00" | "T23:59:59.999"): Date | nu
 /**
  * Export CSV des clients (UTF-8 avec BOM pour Excel), en flux.
  * Filtres : categoryId, sourceId, assignedToId, from, to (créés entre).
+ *
+ * `clients.export` dit « il peut télécharger », jamais « il peut tout voir » :
+ * un CSV sort de l'application pour de bon (un disque, une pièce jointe, un
+ * tableur partagé), donc la PORTÉE du regard s'ajoute au `where` du flux et le
+ * compartiment de chaque fiche décide, ligne par ligne, si ses coordonnées
+ * partent. Une fiche fermée sort avec ses cellules téléphone / courriel VIDES —
+ * pas un masque qui aurait l'air d'un vrai numéro une fois dans Excel.
  */
 export async function GET(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("clients.export");
+  if (actor instanceof NextResponse) return actor;
 
   const url = new URL(req.url);
   // Un paramètre vide (« ?from= ») vaut « pas de filtre », comme avant.
@@ -114,6 +122,28 @@ export async function GET(req: Request) {
   if (fromDate) filters.push(gte(clients.createdAt, fromDate));
   if (toDate) filters.push(lte(clients.createdAt, toDate));
 
+  // La visibilité s'ajoute AUX filtres et ne se négocie pas : un filtre reçu
+  // de l'URL (assignedToId = le patron) ne peut que rétrécir ce que la portée
+  // autorise déjà. Calculée une seule fois, elle est ensuite recombinée avec
+  // le curseur de pagination à chaque tranche.
+  const scoped = await withVisibility(actor, and(...filters));
+
+  // Le compartiment d'une fiche ne dépend que de son DÉTENTEUR : on le résout
+  // une fois par détenteur et non une fois par ligne — un export de 10 000
+  // fiches ne coûte donc pas 10 000 questions de plus à la matrice.
+  const { cfg, roleOf } = await loadDirectory();
+  const contactCache = new Map<string, boolean>();
+  const contactOpen = (assignedToId: string | null): boolean => {
+    const key = assignedToId ?? "";
+    const hit = contactCache.get(key);
+    if (hit !== undefined) return hit;
+    const holder = assignedToId ? (roleOf.get(assignedToId) ?? null) : null;
+    const bucket = bucketFor(actor.user.id, { assignedToId }, holder);
+    const open = grantsFor(cfg, actor.role, bucket).contact;
+    contactCache.set(key, open);
+    return open;
+  };
+
   // Journalisé AVANT le premier octet : un export interrompu (connexion
   // coupée, requête en échec à mi-parcours) a déjà livré des données
   // personnelles — il doit laisser une trace quoi qu'il arrive.
@@ -125,7 +155,7 @@ export async function GET(req: Request) {
     to: query.to ?? null,
   };
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "export.csv",
     entity: "clients",
     detail: { filters: auditFilters },
@@ -148,8 +178,8 @@ export async function GET(req: Request) {
         let lastId: string | null = null;
         for (;;) {
           const where: SQL | undefined = lastId
-            ? and(...filters, gt(clients.id, lastId))
-            : and(...filters);
+            ? and(scoped, gt(clients.id, lastId))
+            : scoped;
           const rows = await db
             .select({
               c: clients,
@@ -168,12 +198,17 @@ export async function GET(req: Request) {
           if (rows.length === 0) break;
           let buffer = "";
           for (const r of rows) {
+            // Coordonnées : la case `contact` du compartiment, déjà plafonnée
+            // par le droit `clients.contact`. Fermée, elles ne partent PAS —
+            // on n'écrit pas un numéro tronqué qu'un tableur présenterait
+            // comme une donnée, on laisse la cellule vide.
+            const contact = contactOpen(r.c.assignedToId);
             const cells = [
               r.c.id,
               r.c.fullName,
-              r.c.phone,
-              r.c.phoneAlt,
-              r.c.email,
+              contact ? r.c.phone : null,
+              contact ? r.c.phoneAlt : null,
+              contact ? r.c.email : null,
               r.c.language,
               r.categoryFr,
               r.sourceName,
@@ -213,7 +248,7 @@ export async function GET(req: Request) {
   runAfterResponse(async () => {
     const partial = await finished;
     await logAudit({
-      userId: admin.id,
+      userId: actor.user.id,
       action: "export.csv",
       entity: "clients",
       detail: { count: exported, partial, filters: auditFilters },

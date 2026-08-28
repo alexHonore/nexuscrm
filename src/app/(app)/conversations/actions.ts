@@ -15,19 +15,43 @@ import {
 } from "@/db/schema-sms";
 import { UNDELIVERED_STATUSES } from "@/lib/agent/runtime";
 import { logAudit } from "@/lib/audit";
-import { getCurrentUser } from "@/lib/auth/guards";
+import type { Grants } from "@/lib/permissions/catalog";
+import {
+  type Actor,
+  currentActor,
+  guardClient,
+  verifyAssignment,
+} from "@/lib/permissions/server";
 import { cancelPendingJobs, enqueueJob } from "@/lib/jobs/queue";
 import { kickDispatch } from "@/lib/jobs/kick";
 import { analyzeSms } from "@/lib/sms/segments";
 import { setClientCategoryAction } from "../clients/actions";
 
 /**
- * Actions du fil SMS — accessibles aux TÉLÉPHONISTES.
+ * Actions du fil SMS.
  *
  * C'est le point du cahier §16 : quelqu'un doit pouvoir reprendre la main sur
  * une conversation depuis son cellulaire, en pleine journée d'appels. Les
  * gestes réservés à l'administrateur (interrupteur général, suppression
  * manuelle d'un numéro) ne sont PAS ici.
+ *
+ * DEUX questions se posent à chaque geste, jamais une seule :
+ *
+ *   · le RÔLE l'autorise-t-il ? — `conversations.reply` pour écrire,
+ *     `conversations.control` pour reprendre, rendre, assigner, archiver ;
+ *   · la FICHE derrière le fil s'ouvre-t-elle à lui ? — la même matrice que
+ *     partout ailleurs (`guardClient`), parce qu'un fil parle d'une fiche.
+ *
+ * Et la case exigée sur la fiche est celle du geste RÉEL, jamais la simple
+ * visibilité : commander l'assistant (couper, rendre, réessayer, archiver,
+ * s'attribuer le fil) décide de ce que le robot ENVERRA à ce client-là — donc
+ * la case `sms`, comme écrire soi-même. Voir une fiche prise par un collègue
+ * pour ne pas la rappeler ne donne pas la parole sur elle. Classer, c'est la
+ * case `category`. Les droits `conversations.control` / `conversations.reply`
+ * restent le plafond au-dessus.
+ *
+ * Quand la fiche est invisible, la réponse est « introuvable » et jamais
+ * « interdit » : un refus confirmerait l'existence de ce que le réglage cache.
  *
  * Un envoi manuel n'est pas un envoi d'agent : il est marqué `automated: false`,
  * ce qui le dispense des heures de politesse ET de la pause IA — un humain qui
@@ -57,6 +81,27 @@ function revalidateFor(clientId: string): void {
   revalidatePath("/conversations");
 }
 
+/**
+ * Le fil VU par cet acteur — et rien du tout si la fiche derrière lui échappe.
+ *
+ * Toutes les actions passent par ici : elles n'ont pas le droit de charger une
+ * conversation par son identifiant sans repasser par la fiche, sinon il
+ * suffirait de connaître un UUID pour agir sur un fil qu'on ne voit pas.
+ *
+ * @param grant la case exigée sur la fiche. Sans valeur par défaut, à dessein :
+ *   un geste ajouté demain doit DIRE ce qu'il ouvre, et non hériter en silence
+ *   de la case la plus faible.
+ */
+async function threadFor(actor: Actor, conversationId: string, grant: keyof Grants) {
+  const thread = await db.query.conversations.findFirst({
+    where: eq(conversations.id, conversationId),
+  });
+  if (!thread) return null;
+  const guarded = await guardClient(actor, thread.clientId, grant);
+  if (!guarded) return null;
+  return { thread, client: guarded.ref, grants: guarded.grants };
+}
+
 const sendSchema = z.object({
   clientId: z.uuid(),
   body: z.string().trim().min(1).max(1600),
@@ -65,16 +110,25 @@ const sendSchema = z.object({
 /**
  * Envoi manuel. Crée le fil s'il n'existe pas encore : un téléphoniste doit
  * pouvoir écrire le premier, sans dépendre d'une campagne ou d'un entrant.
+ *
+ * Deux verrous : le droit d'écrire (`conversations.reply`) et la case `sms` de
+ * CETTE fiche — un rôle peut avoir le droit de répondre partout où il travaille
+ * sans pouvoir écrire à la fiche que le courtier a prise.
  */
 export async function sendManualSmsAction(input: {
   clientId: string;
   body: string;
 }): Promise<SmsActionResult> {
-  const user = await getCurrentUser();
-  if (!user) return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("conversations.reply")) return FORBIDDEN;
 
   const parsed = sendSchema.safeParse(input);
   if (!parsed.success) return INVALID;
+
+  // La fiche tranche avant tout le reste : invisible pour ce regard, ou canal
+  // SMS fermé sur elle, et la réponse est « introuvable ».
+  if (!(await guardClient(actor, parsed.data.clientId, "sms"))) return NOT_FOUND;
 
   const client = await db.query.clients.findFirst({
     where: eq(clients.id, parsed.data.clientId),
@@ -127,7 +181,7 @@ export async function sendManualSmsAction(input: {
           source: "human",
           automated: false,
           aiGenerated: false,
-          sentById: user.id,
+          sentById: actor.user.id,
         },
       },
       tx,
@@ -144,7 +198,7 @@ export async function sendManualSmsAction(input: {
   });
 
   await logAudit({
-    userId: user.id,
+    userId: actor.user.id,
     action: "sms.send_manual",
     entity: "conversation",
     entityId: conversationId,
@@ -161,14 +215,23 @@ export async function sendManualSmsAction(input: {
  * répartiteur ne l'a pas pris, aucune rangée `messages` n'existe : c'est le
  * job qu'il faut annuler, et c'est le seul moment où « annuler » veut dire
  * quelque chose. Un SMS remis à Twilio ne se rappelle pas.
+ *
+ * Retenir un message est l'envers d'en écrire un : c'est `conversations.reply`
+ * qui l'autorise, et la case `sms` de la fiche visée qui le borne.
  */
 export async function cancelQueuedSmsAction(jobId: string): Promise<SmsActionResult> {
-  const user = await getCurrentUser();
-  if (!user) return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("conversations.reply")) return FORBIDDEN;
   if (!z.uuid().safeParse(jobId).success) return INVALID;
   const job = await db.query.scheduledJobs.findFirst({ where: eq(scheduledJobs.id, jobId) });
   if (!job || job.type !== "send_sms") return NOT_FOUND;
   const payload = job.payload as { conversationId?: string };
+  // Un job d'envoi porte TOUJOURS son fil : sans lui, impossible de dire à
+  // quelle fiche ce message appartient — donc impossible de l'autoriser.
+  if (!payload.conversationId) return NOT_FOUND;
+  const seen = await threadFor(actor, payload.conversationId, "sms");
+  if (!seen) return NOT_FOUND;
   const rows = await db
     .update(scheduledJobs)
     .set({ status: "cancelled" })
@@ -176,18 +239,13 @@ export async function cancelQueuedSmsAction(jobId: string): Promise<SmsActionRes
     .returning({ id: scheduledJobs.id });
   if (rows.length === 0) return { ok: false, error: "alreadySent" };
   await logAudit({
-    userId: user.id,
+    userId: actor.user.id,
     action: "sms.cancel",
     entity: "conversation",
     entityId: payload.conversationId,
     detail: { jobId },
   });
-  if (payload.conversationId) {
-    const thread = await db.query.conversations.findFirst({
-      where: eq(conversations.id, payload.conversationId),
-    });
-    if (thread?.clientId) revalidateFor(thread.clientId);
-  }
+  revalidateFor(seen.thread.clientId);
   return { ok: true, id: jobId };
 }
 
@@ -195,19 +253,22 @@ export async function cancelQueuedSmsAction(jobId: string): Promise<SmsActionRes
  * Confier le fil à un assistant (ou le lui retirer). Avant, seul un barreau de
  * campagne savait le faire : un contact qui écrivait de lui-même n'avait jamais
  * de réponse IA, et un humain ne pouvait pas « rendre » un fil à l'assistant.
+ *
+ * Décider QUI mène la conversation — la machine ou un humain — est le geste de
+ * contrôle par excellence : `conversations.control`.
  */
 export async function assignAssistantAction(input: {
   conversationId: string;
   assistantId: string | null;
 }): Promise<SmsActionResult> {
-  const user = await getCurrentUser();
-  if (!user) return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("conversations.control")) return FORBIDDEN;
   if (!z.uuid().safeParse(input.conversationId).success) return INVALID;
   if (input.assistantId !== null && !z.uuid().safeParse(input.assistantId).success) return INVALID;
-  const thread = await db.query.conversations.findFirst({
-    where: eq(conversations.id, input.conversationId),
-  });
-  if (!thread) return NOT_FOUND;
+  const seen = await threadFor(actor, input.conversationId, "sms");
+  if (!seen) return NOT_FOUND;
+  const { thread } = seen;
 
   let version: number | null = null;
   if (input.assistantId !== null) {
@@ -253,7 +314,7 @@ export async function assignAssistantAction(input: {
     }
   }
   await logAudit({
-    userId: user.id,
+    userId: actor.user.id,
     action: input.assistantId ? "conversation.assign_assistant" : "conversation.unassign_assistant",
     entity: "conversation",
     entityId: thread.id,
@@ -273,6 +334,10 @@ const pauseSchema = z.object({
 /**
  * Prise de contrôle : couper ou rendre l'IA sur un fil.
  *
+ * Couper l'IA, c'est retenir tout ce qu'elle allait envoyer à ce client (les
+ * envois différés en file sont annulés plus bas) ; la rendre, c'est la
+ * relancer. Dans les deux sens, c'est la case `sms` de la fiche.
+ *
  * On enregistre QUI a coupé et POURQUOI. Six semaines plus tard, « pourquoi
  * cette conversation ne répond-elle plus? » doit avoir une réponse dans la
  * donnée, pas dans la mémoire de quelqu'un.
@@ -282,16 +347,16 @@ export async function setConversationAiAction(input: {
   enabled: boolean;
   reason?: string | null;
 }): Promise<SmsActionResult> {
-  const user = await getCurrentUser();
-  if (!user) return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("conversations.control")) return FORBIDDEN;
 
   const parsed = pauseSchema.safeParse(input);
   if (!parsed.success) return INVALID;
 
-  const thread = await db.query.conversations.findFirst({
-    where: eq(conversations.id, parsed.data.conversationId),
-  });
-  if (!thread) return NOT_FOUND;
+  const seen = await threadFor(actor, parsed.data.conversationId, "sms");
+  if (!seen) return NOT_FOUND;
+  const { thread } = seen;
 
   const now = new Date();
   await db
@@ -301,7 +366,7 @@ export async function setConversationAiAction(input: {
         ? { aiEnabled: true, pausedById: null, pausedAt: null, pauseReason: null }
         : {
             aiEnabled: false,
-            pausedById: user.id,
+            pausedById: actor.user.id,
             pausedAt: now,
             pauseReason: parsed.data.reason ?? "manual",
           },
@@ -316,7 +381,7 @@ export async function setConversationAiAction(input: {
   }
 
   await logAudit({
-    userId: user.id,
+    userId: actor.user.id,
     action: parsed.data.enabled ? "conversation.ai_resume" : "conversation.ai_pause",
     entity: "conversation",
     entityId: thread.id,
@@ -339,14 +404,14 @@ export async function setConversationAiAction(input: {
  * l'IA » laisserait le client sans réponse jusqu'à son prochain message.
  */
 export async function handBackToAiAction(conversationId: string): Promise<SmsActionResult> {
-  const user = await getCurrentUser();
-  if (!user) return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("conversations.control")) return FORBIDDEN;
   if (!z.uuid().safeParse(conversationId).success) return INVALID;
 
-  const thread = await db.query.conversations.findFirst({
-    where: eq(conversations.id, conversationId),
-  });
-  if (!thread) return NOT_FOUND;
+  const seen = await threadFor(actor, conversationId, "sms");
+  if (!seen) return NOT_FOUND;
+  const { thread } = seen;
 
   // Rendre la main à personne n'est pas rendre la main : sans assistant actif
   // et compilé, le fil resterait muet en prétendant le contraire.
@@ -390,7 +455,7 @@ export async function handBackToAiAction(conversationId: string): Promise<SmsAct
   }
 
   await logAudit({
-    userId: user.id,
+    userId: actor.user.id,
     action: "conversation.ai_resume",
     entity: "conversation",
     entityId: thread.id,
@@ -425,14 +490,16 @@ export async function handBackToAiAction(conversationId: string): Promise<SmsAct
  * pas afficher le même toast.
  */
 export async function retryAiTurnAction(conversationId: string): Promise<SmsActionResult> {
-  const user = await getCurrentUser();
-  if (!user) return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  // Rejouer un tour, c'est remettre l'assistant aux commandes du fil : même
+  // droit que reprendre ou rendre la main.
+  if (!actor.can("conversations.control")) return FORBIDDEN;
   if (!z.uuid().safeParse(conversationId).success) return INVALID;
 
-  const thread = await db.query.conversations.findFirst({
-    where: eq(conversations.id, conversationId),
-  });
-  if (!thread) return NOT_FOUND;
+  const seen = await threadFor(actor, conversationId, "sms");
+  if (!seen) return NOT_FOUND;
+  const { thread } = seen;
 
   // Réessayer sans assistant actif et compilé ne relancerait rien : refuser
   // vaut mieux qu'une pastille qui tombe en silence.
@@ -551,7 +618,7 @@ export async function retryAiTurnAction(conversationId: string): Promise<SmsActi
   if (relaunched) kickDispatch();
 
   await logAudit({
-    userId: user.id,
+    userId: actor.user.id,
     action: "sms.retry_turn",
     entity: "conversation",
     entityId: thread.id,
@@ -563,54 +630,80 @@ export async function retryAiTurnAction(conversationId: string): Promise<SmsActi
   return { ok: true, id: thread.id, relaunched };
 }
 
-/** Marque un fil comme traité — retire la pastille « à traiter ». */
+/**
+ * Marque un fil comme traité — retire la pastille « à traiter ».
+ *
+ * C'est ARCHIVER : la demande disparaît de la file de tout le monde, pas
+ * seulement de son propre écran. D'où `conversations.control` — et la case
+ * `sms` de la fiche : faire taire la demande d'un client, c'est décider que
+ * personne ne lui répondra.
+ */
 export async function markConversationHandledAction(
   conversationId: string,
 ): Promise<SmsActionResult> {
-  const user = await getCurrentUser();
-  if (!user) return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("conversations.control")) return FORBIDDEN;
   if (!z.uuid().safeParse(conversationId).success) return INVALID;
 
-  const thread = await db.query.conversations.findFirst({
-    where: eq(conversations.id, conversationId),
-  });
-  if (!thread) return NOT_FOUND;
+  const seen = await threadFor(actor, conversationId, "sms");
+  if (!seen) return NOT_FOUND;
 
   await db
     .update(conversations)
     .set({ needsAttention: false, attentionReason: null })
     .where(eq(conversations.id, conversationId));
 
-  if (thread.clientId) revalidateFor(thread.clientId);
-  else revalidatePath("/conversations");
+  revalidateFor(seen.thread.clientId);
   return { ok: true, id: conversationId };
 }
 
 /**
- * Assigner un fil à quelqu'un. Un téléphoniste peut se l'attribuer, ou
- * RELÂCHER un fil qu'il tient (ou que personne ne tient) ; seul un
- * administrateur peut l'attribuer à AUTRUI ou désattribuer le fil d'un
- * collègue — même règle que les fiches clients.
+ * Assigner un fil à quelqu'un — ou le rendre au bassin (`userId: null`).
+ *
+ * Cette action DISAIT suivre la règle des fiches ; elle ne la suivait pas :
+ * n'importe quel téléphoniste pouvait s'attribuer le fil d'un collègue, alors
+ * que la fiche derrière lui, elle, ne changeait pas de main. Un fil est une
+ * poignée sur une fiche : le voler revient à voler le lead.
+ *
+ * Le verdict est donc rendu par le MÊME moteur que les fiches
+ * (`verifyAssignment` sur la fiche du fil) — plafond de fiches détenues,
+ * verrou anti-vol et son expiration compris. Ce qui change de main ici reste
+ * le fil seul : réassigner la FICHE est un geste de la fiche, pas de la boîte.
+ *
+ * Et avant même le verdict, la case `sms` : prendre un fil, c'est prendre la
+ * parole vers ce client. Une fiche seulement visible ne se prend pas.
  */
 export async function assignConversationAction(input: {
   conversationId: string;
   userId: string | null;
 }): Promise<SmsActionResult> {
-  const user = await getCurrentUser();
-  if (!user) return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("conversations.control")) return FORBIDDEN;
   if (!z.uuid().safeParse(input.conversationId).success) return INVALID;
   if (input.userId !== null && !z.uuid().safeParse(input.userId).success) return INVALID;
 
-  const thread = await db.query.conversations.findFirst({
-    where: eq(conversations.id, input.conversationId),
-  });
-  if (!thread) return NOT_FOUND;
+  const seen = await threadFor(actor, input.conversationId, "sms");
+  if (!seen) return NOT_FOUND;
 
-  if (user.role !== "admin") {
-    const releasesOwn =
-      input.userId === null &&
-      (thread.assignedToId === null || thread.assignedToId === user.id);
-    if (input.userId !== user.id && !releasesOwn) return FORBIDDEN;
+  // La fiche est visible à ce stade : un refus d'assignation peut donc se dire
+  // franchement, il ne révèle rien qu'on cachait.
+  const verdict = await verifyAssignment(actor, seen.client, input.userId);
+  if (!verdict.ok) return FORBIDDEN;
+
+  /**
+   * Le FIL a son propre titulaire, indépendant de celui de la fiche : une
+   * fiche peut dormir au bassin pendant qu'un collègue tient la conversation.
+   * Le verdict ci-dessus ne dit donc rien de ce cas-là — et sans cette
+   * seconde question, n'importe qui « désattribuait » le fil d'un collègue
+   * pour le reprendre ensuite, ce qui est exactement le vol qu'on ferme
+   * ailleurs. Même règle que pour une fiche : on ne retire à quelqu'un que si
+   * le rôle l'autorise.
+   */
+  const held = seen.thread.assignedToId;
+  if (held !== null && held !== actor.user.id && !actor.role.superAdmin) {
+    if (!actor.role.assignment.takeFromOthers) return FORBIDDEN;
   }
 
   await db
@@ -618,8 +711,7 @@ export async function assignConversationAction(input: {
     .set({ assignedToId: input.userId })
     .where(eq(conversations.id, input.conversationId));
 
-  if (thread.clientId) revalidateFor(thread.clientId);
-  else revalidatePath("/conversations");
+  revalidateFor(seen.thread.clientId);
   return { ok: true, id: input.conversationId };
 }
 
@@ -636,15 +728,22 @@ export async function assignConversationAction(input: {
  * Dès que Twilio a accepté le message, on refuse plutôt que de faire semblant :
  * afficher « annulé » sur un message déjà parti serait pire que ne rien offrir,
  * parce que quelqu'un s'y fierait.
+ *
+ * Retenir un message est l'envers d'en écrire un : `conversations.reply`, et la
+ * case `sms` de la fiche visée.
  */
 export async function cancelOutboundSmsAction(messageId: string): Promise<SmsActionResult> {
-  const user = await getCurrentUser();
-  if (!user) return FORBIDDEN;
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("conversations.reply")) return FORBIDDEN;
   if (!z.uuid().safeParse(messageId).success) return INVALID;
 
   const message = await db.query.messages.findFirst({ where: eq(messages.id, messageId) });
   if (!message) return NOT_FOUND;
   if (message.direction !== "out") return INVALID;
+
+  const seen = await threadFor(actor, message.conversationId, "sms");
+  if (!seen) return NOT_FOUND;
 
   // `twilioSid` renseigné = l'opérateur l'a accepté : c'est parti.
   const gone =
@@ -676,17 +775,14 @@ export async function cancelOutboundSmsAction(messageId: string): Promise<SmsAct
   if (!cancelled) return { ok: false, error: "alreadySent" };
 
   await logAudit({
-    userId: user.id,
+    userId: actor.user.id,
     action: "sms.cancel",
     entity: "conversation",
     entityId: message.conversationId,
     detail: { messageId, source: message.source },
   });
 
-  const thread = await db.query.conversations.findFirst({
-    where: eq(conversations.id, message.conversationId),
-  });
-  if (thread?.clientId) revalidateFor(thread.clientId);
+  revalidateFor(seen.thread.clientId);
   return { ok: true, id: messageId };
 }
 
@@ -702,11 +798,23 @@ export async function cancelOutboundSmsAction(messageId: string): Promise<SmsAct
  *
  * Effet de bord VOULU, et c'est tout l'intérêt du geste : ranger une fiche
  * libère les campagnes qui ne visent plus sa nouvelle catégorie.
+ *
+ * Relayer n'est pas déléguer la GARDE : ce point d'entrée a sa propre porte —
+ * le droit `clients.category` et la case `category` de cette fiche-là. Compter
+ * sur celle de l'action relayée reviendrait à faire de cette signature un
+ * contournement de la matrice, et une fiche invisible se range à travers un
+ * relais aussi bien qu'à travers une fiche ouverte.
  */
 export async function classifyConversationClientAction(
   clientId: string,
   categoryId: number,
 ): Promise<{ ok: boolean }> {
+  const actor = await currentActor();
+  if (!actor) return { ok: false };
+  if (!actor.can("clients.category")) return { ok: false };
+  if (!z.uuid().safeParse(clientId).success) return { ok: false };
+  if (!(await guardClient(actor, clientId, "category"))) return { ok: false };
+
   const result = await setClientCategoryAction(clientId, categoryId);
   return { ok: result.ok };
 }

@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { apiAdmin } from "@/lib/auth/guards";
 import { logAudit } from "@/lib/audit";
+import { apiPerm } from "@/lib/permissions/server";
 import {
   extractRecordingAudio,
   getCallRecordingFile,
@@ -41,16 +41,16 @@ function rangeResponse(buf: Buffer, range: string | null, contentType: string) {
 /**
  * GET /api/admin/recordings?url=<référence>&callId=<uuid>
  *
- * Écoute d'un enregistrement d'appel, réservée à l'admin et auditée à chaque
- * lecture. Deux formes de référence :
+ * Écoute d'un enregistrement d'appel, réservée au droit `clients.recordings`
+ * et auditée à chaque lecture. Deux formes de référence :
  *   - `https://…voip.ms/…`  : URL directe (relayée en continu, avec Range) ;
  *   - `voipms:<compte>:<id>` : voip.ms ne donne pas d'URL — l'audio est
  *     retéléchargé via l'API puis servi ici. C'est le cas réel en production.
  * L'URL voip.ms n'est jamais exposée au navigateur.
  */
 export async function GET(req: NextRequest) {
-  const auth = await apiAdmin();
-  if (auth instanceof NextResponse) return auth;
+  const actor = await apiPerm("clients.recordings");
+  if (actor instanceof NextResponse) return actor;
 
   const rawUrl = req.nextUrl.searchParams.get("url");
   if (!rawUrl) {
@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
   // Chaque écoute est tracée, quelle que soit la forme de la référence.
   const audit = (detail: Record<string, unknown>) =>
     logAudit({
-      userId: auth.id,
+      userId: actor.user.id,
       action: "recording.play",
       entity: "call",
       entityId: callId,

@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { enrollClients } from "@/lib/campaigns-server/enroll";
 import { applyEnrollmentAction } from "@/lib/campaigns-server/enrollment-admin";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * Collection des inscriptions d'une campagne.
@@ -17,7 +17,7 @@ import { applyEnrollmentAction } from "@/lib/campaigns-server/enrollment-admin";
  *  - PATCH { action, enrollmentIds }  → applique pause / reprise / retrait à un
  *                                       LOT d'inscriptions existantes.
  *
- * Réservé à l'admin. Chaque geste est audité.
+ * Réservé au droit `admin.campaigns`. Chaque geste est audité.
  */
 
 const MAX_BATCH = 500;
@@ -44,8 +44,8 @@ async function readBody<S extends z.ZodType>(req: Request, schema: S): Promise<z
 }
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.campaigns");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!UUID.safeParse(id).success) {
@@ -69,7 +69,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   const added = results.filter((r) => r.enrolled).length;
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "campaign.enrollment.add",
     entity: "campaign",
     entityId: id,
@@ -80,8 +80,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 }
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.campaigns");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!UUID.safeParse(id).success) {
@@ -104,7 +104,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   const done = outcomes.filter((o) => o.ok).length;
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: `campaign.enrollment.bulk_${body.action}`,
     entity: "campaign",
     entityId: id,

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { normalizePhone } from "@/lib/phone";
 import { getDids } from "@/lib/voipms";
 import { voipmsErrorResponse } from "../../_helpers";
@@ -11,8 +11,8 @@ import { didKey, indexByDid, loadAssignments } from "../_assignments";
  * Les numéros disponibles sont remontés en tête.
  */
 export async function GET() {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   try {
     const [dids, assignments] = await Promise.all([getDids(), loadAssignments()]);

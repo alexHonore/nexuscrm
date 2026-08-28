@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { campaigns } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { campaignConfigSchema } from "@/lib/campaigns/schema";
 import { listCampaignsWithCounts } from "@/lib/campaigns-server/list";
 import { isForeignKeyViolation } from "@/lib/db-errors";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * Un assistant ou un numéro inconnu passe zod (c'est un UUID) et fait sauter
@@ -20,8 +20,8 @@ function missingReference(err: unknown): "assistant_not_found" | "sms_number_not
 
 /** GET /api/campaigns — liste avec le décompte des inscriptions par état. */
 export async function GET() {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.campaigns");
+  if (actor instanceof NextResponse) return actor;
 
   const rows = await listCampaignsWithCounts();
 
@@ -30,8 +30,8 @@ export async function GET() {
 
 /** POST /api/campaigns — crée un BROUILLON. Aucune campagne ne naît active. */
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.campaigns");
+  if (actor instanceof NextResponse) return actor;
 
   let raw: unknown;
   try {
@@ -64,7 +64,7 @@ export async function POST(req: Request) {
         totalEnrollmentCap: config.totalEnrollmentCap,
         startsAt: config.startsAt,
         endsAt: config.endsAt,
-        createdById: admin.id,
+        createdById: actor.user.id,
       })
       .returning({ id: campaigns.id, name: campaigns.name });
   } catch (err) {
@@ -74,7 +74,7 @@ export async function POST(req: Request) {
   }
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "campaign.create",
     entity: "campaign",
     entityId: row.id,

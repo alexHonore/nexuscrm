@@ -607,7 +607,13 @@ describe("pipeline d'appel", () => {
   describe("relance de rappel", () => {
     it("crée la relance assignée à l'appelant et pose nextFollowupAt", async () => {
       const cats = await seedSystemCategories();
-      const me = await makeUser({ name: "Appelant" });
+      // L'appelant est ici l'ADMINISTRATEUR : depuis que les droits sont
+      // configurables, classer un appel écrit dans la fiche et exige donc la
+      // case « catégorie » de SON compartiment — un téléphoniste ne l'a pas
+      // sur la fiche d'un collègue (préréglage livré). Ce que le test prouve
+      // reste le même : la relance échoit à qui a PROMIS de rappeler, pas au
+      // titulaire de la fiche.
+      const me = await makeUser({ name: "Appelant", role: "admin" });
       const owner = await makeUser({ name: "Titulaire" });
       await login(me);
       const client = await makeClient({ categoryId: cats.new.id, assignedToId: owner.id });

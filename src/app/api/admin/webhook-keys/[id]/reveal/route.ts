@@ -3,13 +3,13 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { webhookKeys } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { decryptSecret } from "@/lib/crypto";
+import { apiPerm } from "@/lib/permissions/server";
 
 /** Révèle la clé complète (pour configurer n8n) — action auditée. */
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.webhooks");
+  if (actor instanceof NextResponse) return actor;
   const id = Number((await ctx.params).id);
   if (!Number.isInteger(id)) return NextResponse.json({ error: "invalid_id" }, { status: 400 });
 
@@ -17,7 +17,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
   if (!target) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "webhook.key_reveal",
     entity: "webhookKey",
     entityId: String(id),

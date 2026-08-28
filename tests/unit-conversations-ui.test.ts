@@ -15,6 +15,7 @@ import commonFr from "../messages/fr/common.json";
 import type { SmsThreadData } from "@/components/clients/sms-thread-card";
 import type {
   EngineHealth,
+  InboxAbilities,
   InboxRow,
   QueueItem,
 } from "@/components/conversations/conversations-inbox";
@@ -115,6 +116,27 @@ const THREAD: SmsThreadData = {
       sentByName: "Alex-Honoré",
     },
   ],
+};
+
+/**
+ * Les CAPACITÉS ont remplacé le booléen « isAdmin » : l'écran ne demande plus
+ * qui on est, il demande ce qu'on a le droit de faire. WORKER est ce que porte
+ * un téléphoniste par défaut, ALL ce que porte l'administrateur.
+ */
+const WORKER: InboxAbilities = {
+  engine: false,
+  control: true,
+  reply: true,
+  classify: true,
+  replay: false,
+};
+
+const ALL: InboxAbilities = {
+  engine: true,
+  control: true,
+  reply: true,
+  classify: true,
+  replay: true,
 };
 
 const HEALTH: EngineHealth = {
@@ -232,7 +254,7 @@ const HELD_ROW: InboxRow = {
 
 describe("fil SMS", () => {
   it("dit QUI parle pour chaque message", () => {
-    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD, canReply: true, canControl: true }));
     // Une ouverture de campagne, une réponse d'assistant et un message tapé par
     // un collègue se ressemblent : les confondre fait répondre par-dessus une
     // machine, ou croire qu'un humain a déjà traité le fil.
@@ -242,7 +264,7 @@ describe("fil SMS", () => {
   });
 
   it("un envoi en ÉCHEC se voit, avec son code", () => {
-    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD, canReply: true, canControl: true }));
     expect(html).toContain("Échec");
     expect(html).toContain("30007");
   });
@@ -254,7 +276,7 @@ describe("fil SMS", () => {
       pausedByName: "Alex-Honoré",
       pausedAt: "2026-08-21T15:05:00.000Z",
     };
-    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: paused }));
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: paused, canReply: true, canControl: true }));
     expect(html).toContain("Vous avez le contr");
     expect(html).toContain("Alex-Honor");
     // Et le bouton propose de rendre la main, pas de reprendre le contrôle.
@@ -263,7 +285,7 @@ describe("fil SMS", () => {
 
   it("un numéro désabonné bloque la rédaction et le dit", () => {
     const html = wrap(
-      createElement(SmsThreadCard, { clientId: "x", thread: { ...THREAD, suppressed: true } }),
+      createElement(SmsThreadCard, { clientId: "x", thread: { ...THREAD, suppressed: true }, canReply: true, canControl: true }),
     );
     expect(html).toContain("désabonn");
     expect(html).toContain("disabled");
@@ -273,6 +295,8 @@ describe("fil SMS", () => {
     const html = wrap(
       createElement(SmsThreadCard, {
         clientId: "x",
+        canReply: true,
+        canControl: true,
         thread: { ...THREAD, messages: [], hasActiveNumber: false },
       }),
     );
@@ -283,6 +307,8 @@ describe("fil SMS", () => {
     const html = wrap(
       createElement(SmsThreadCard, {
         clientId: "x",
+        canReply: true,
+        canControl: true,
         thread: { ...THREAD, needsAttention: true, attentionReason: "inbound" },
       }),
     );
@@ -294,14 +320,14 @@ describe("fil SMS", () => {
     // C'est ce qui distingue le plus sûrement une note interne (aucun
     // destinataire) d'un SMS (quelqu'un le reçoit). Les deux cartes vivent
     // l'une sous l'autre.
-    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD, canReply: true, canControl: true }));
     expect(html).toContain("part par SMS");
     expect(html).toContain("Marie Tremblay");
     expect(html).toContain("418");
   });
 
   it("la carte SMS ne ressemble PAS à ses voisines", () => {
-    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD, canReply: true, canControl: true }));
     // Le signal doit être perçu du coin de l'œil, pas lu : une note envoyée
     // par erreur à un client ne se rattrape pas.
     //
@@ -315,7 +341,7 @@ describe("fil SMS", () => {
 
   it("le numéro du destinataire se lit dans l'EN-TÊTE, pas seulement près du champ", () => {
     // Savoir à qui on parle ne doit pas demander de faire défiler la carte.
-    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD, canReply: true, canControl: true }));
     // Avant la zone de saisie, donc dans l'en-tête.
     const composerAt = html.indexOf("Votre message");
     expect(composerAt).toBeGreaterThan(0);
@@ -333,19 +359,19 @@ describe("fil SMS", () => {
         },
       ],
     };
-    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: queued }));
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: queued, canReply: true, canControl: true }));
     expect(html).toContain("Annuler l&#x27;envoi");
   });
 
   it("un message DÉJÀ LIVRÉ n'offre pas d'annulation", () => {
     // Un SMS remis à l'opérateur ne se rappelle pas : offrir le bouton serait
     // pire que ne rien offrir, parce que quelqu'un s'y fierait.
-    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD, canReply: true, canControl: true }));
     expect(html).not.toContain("Annuler l&#x27;envoi");
   });
 
   it("aucune clé i18n non résolue", () => {
-    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD, canReply: true, canControl: true }));
     expect(html).not.toContain("MISSING_MESSAGE");
     expect(html).not.toMatch(/thread\.[a-zA-Z]+\./);
   });
@@ -354,7 +380,7 @@ describe("fil SMS", () => {
 describe("boîte de réception", () => {
   it("montre le motif et l'état de l'IA de chaque fil", () => {
     const html = wrap(
-      createElement(ConversationsInbox, { rows: ROWS, currentUserId: "me", health: HEALTH }),
+      createElement(ConversationsInbox, { abilities: WORKER, rows: ROWS, currentUserId: "me", health: HEALTH }),
     );
     expect(html).toContain("Marie Tremblay");
     expect(html).toContain("Passé à un humain");
@@ -371,7 +397,7 @@ describe("boîte de réception", () => {
         rows: ROWS,
         currentUserId: "me",
         health: null,
-        isAdmin: false,
+        abilities: WORKER,
         queue: [],
       }),
     );
@@ -402,7 +428,7 @@ describe("boîte de réception", () => {
         rows: [held],
         currentUserId: "me",
         health: null,
-        isAdmin: false,
+        abilities: WORKER,
         categories: [
           { id: 1, label: "À rappeler" },
           { id: 2, label: "Pas intéressé" },
@@ -428,7 +454,7 @@ describe("boîte de réception", () => {
         rows: [held],
         currentUserId: "me",
         health: null,
-        isAdmin: false,
+        abilities: WORKER,
         categories: [],
       }),
     );
@@ -441,7 +467,7 @@ describe("boîte de réception", () => {
         rows: ROWS,
         currentUserId: "me",
         health: HEALTH,
-        isAdmin: true,
+        abilities: ALL,
         queue: [],
       }),
     );
@@ -452,6 +478,7 @@ describe("boîte de réception", () => {
   it("l'interrupteur coupé est une ALERTE, pas une pastille", () => {
     const html = wrap(
       createElement(ConversationsInbox, {
+        abilities: WORKER,
         rows: ROWS,
         currentUserId: "me",
         health: { ...HEALTH, killSwitch: true },
@@ -466,6 +493,7 @@ describe("boîte de réception", () => {
   it("un mode qui n'est pas « réel » est affiché", () => {
     const html = wrap(
       createElement(ConversationsInbox, {
+        abilities: WORKER,
         rows: ROWS,
         currentUserId: "me",
         health: { ...HEALTH, mode: "dry_run" },
@@ -477,6 +505,7 @@ describe("boîte de réception", () => {
   it("hors heures de politesse, la bande le dit", () => {
     const html = wrap(
       createElement(ConversationsInbox, {
+        abilities: WORKER,
         rows: ROWS,
         currentUserId: "me",
         health: { ...HEALTH, sendWindowOpen: false },
@@ -487,12 +516,13 @@ describe("boîte de réception", () => {
 
   it("les échecs en file ne sont montrés que s'il y en a", () => {
     const clean = wrap(
-      createElement(ConversationsInbox, { rows: ROWS, currentUserId: "me", health: HEALTH }),
+      createElement(ConversationsInbox, { abilities: WORKER, rows: ROWS, currentUserId: "me", health: HEALTH }),
     );
     expect(clean).not.toContain("en échec");
 
     const broken = wrap(
       createElement(ConversationsInbox, {
+        abilities: WORKER,
         rows: ROWS,
         currentUserId: "me",
         health: { ...HEALTH, failed: 4 },
@@ -503,7 +533,7 @@ describe("boîte de réception", () => {
 
   it("le filtre par défaut est « à traiter »", () => {
     const html = wrap(
-      createElement(ConversationsInbox, { rows: ROWS, currentUserId: "me", health: HEALTH }),
+      createElement(ConversationsInbox, { abilities: WORKER, rows: ROWS, currentUserId: "me", health: HEALTH }),
     );
     // Marie est à traiter, Jean non : seul Marie doit apparaître au départ.
     expect(html).toContain("Marie Tremblay");
@@ -516,6 +546,7 @@ describe("boîte de réception", () => {
     // « Toutes ») — le mêler aux fils qui attendent noierait ce qui attend.
     const html = wrap(
       createElement(ConversationsInbox, {
+        abilities: WORKER,
         rows: [...ROWS, FINISHED_ROW, REFUSED_ROW],
         currentUserId: "me",
         health: HEALTH,
@@ -530,6 +561,7 @@ describe("boîte de réception", () => {
     // travail humain — pas dans un cinquième onglet.
     const html = wrap(
       createElement(ConversationsInbox, {
+        abilities: WORKER,
         rows: [...ROWS, HELD_ROW],
         currentUserId: "me",
         health: HEALTH,
@@ -545,6 +577,7 @@ describe("boîte de réception", () => {
     const withAssistant: InboxRow = { ...ROWS[0], assistantName: "Acheteur FB" };
     const html = wrap(
       createElement(ConversationsInbox, {
+        abilities: WORKER,
         rows: [withAssistant],
         currentUserId: "me",
         health: HEALTH,
@@ -560,6 +593,7 @@ describe("boîte de réception", () => {
     // d'ouvrir la fiche pour être découverts.
     const html = wrap(
       createElement(ConversationsInbox, {
+        abilities: WORKER,
         rows: [{ ...ROWS[0], did: ["booked", "categorized", "followup"] }],
         currentUserId: "me",
         health: HEALTH,
@@ -593,6 +627,7 @@ describe("boîte de réception", () => {
     // main ne le fait pas : sur une panne, c'est le rejeu qu'il faut offrir.
     const html = wrap(
       createElement(ConversationsInbox, {
+        abilities: WORKER,
         rows: [ENGINE_ROW],
         currentUserId: "me",
         health: HEALTH,
@@ -606,7 +641,7 @@ describe("boîte de réception", () => {
     // Rendre la main à personne laisserait le fil muet en prétendant le
     // contraire — Marie n'a pas d'assistant, le bouton n'existe pas.
     const html = wrap(
-      createElement(ConversationsInbox, { rows: [ROWS[0]], currentUserId: "me", health: HEALTH }),
+      createElement(ConversationsInbox, { abilities: WORKER, rows: [ROWS[0]], currentUserId: "me", health: HEALTH }),
     );
     expect(html).not.toContain("Rendre à l&#x27;IA");
     expect(html).toContain("Je réponds");
@@ -615,6 +650,7 @@ describe("boîte de réception", () => {
   it("répondre et réparer sont DEUX sections, pas un entremêlement", () => {
     const html = wrap(
       createElement(ConversationsInbox, {
+        abilities: WORKER,
         rows: [...ROWS, ENGINE_ROW],
         currentUserId: "me",
         health: HEALTH,
@@ -631,7 +667,7 @@ describe("boîte de réception", () => {
     // c'est le client ou l'assistant : sans préfixe, on répond à la mauvaise
     // personne.
     const html = wrap(
-      createElement(ConversationsInbox, { rows: ROWS, currentUserId: "me", health: HEALTH }),
+      createElement(ConversationsInbox, { abilities: WORKER, rows: ROWS, currentUserId: "me", health: HEALTH }),
     );
     expect(html).toContain("Client");
     expect(html).toContain("Je préfère parler à quelqu");
@@ -639,7 +675,7 @@ describe("boîte de réception", () => {
 
   it("toute la carte est un lien vers la fiche", () => {
     const html = wrap(
-      createElement(ConversationsInbox, { rows: ROWS, currentUserId: "me", health: HEALTH }),
+      createElement(ConversationsInbox, { abilities: WORKER, rows: ROWS, currentUserId: "me", health: HEALTH }),
     );
     // Viser un petit bouton depuis un cellulaire était le geste le plus
     // fréquent et le plus pénible de l'écran.
@@ -660,6 +696,7 @@ describe("boîte de réception", () => {
     };
     const html = wrap(
       createElement(ConversationsInbox, {
+        abilities: WORKER,
         rows: [ROWS[0], older],
         currentUserId: "me",
         health: HEALTH,
@@ -670,7 +707,7 @@ describe("boîte de réception", () => {
 
   it("un état vide reste lisible", () => {
     const html = wrap(
-      createElement(ConversationsInbox, { rows: [], currentUserId: "me", health: HEALTH }),
+      createElement(ConversationsInbox, { abilities: WORKER, rows: [], currentUserId: "me", health: HEALTH }),
     );
     expect(html).toContain("Rien à traiter");
     expect(html).not.toContain("MISSING_MESSAGE");
@@ -678,7 +715,7 @@ describe("boîte de réception", () => {
 
   it("aucune clé i18n non résolue", () => {
     const html = wrap(
-      createElement(ConversationsInbox, { rows: ROWS, currentUserId: "me", health: HEALTH }),
+      createElement(ConversationsInbox, { abilities: WORKER, rows: ROWS, currentUserId: "me", health: HEALTH }),
     );
     expect(html).not.toContain("MISSING_MESSAGE");
     expect(html).not.toMatch(/inbox\.[a-zA-Z]+\./);
@@ -692,6 +729,8 @@ describe("fil SMS", () => {
     const html = wrap(
       createElement(SmsThreadCard, {
         clientId: "x",
+        canReply: true,
+        canControl: true,
         thread: {
           ...THREAD,
           messages: [
@@ -731,6 +770,7 @@ describe("la file d'envoi", () => {
   it("montre QUI recevra un texto, sous ses trois formes", () => {
     const html = wrap(
       createElement(ConversationsInbox, {
+        abilities: ALL,
         rows: [],
         queue: QUEUE,
         currentUserId: "me",
@@ -755,6 +795,7 @@ describe("la file d'envoi", () => {
     // ici — offrir le bouton serait mentir sur ce qu'il ferait.
     const html = wrap(
       createElement(ConversationsInbox, {
+        abilities: ALL,
         rows: [],
         queue: QUEUE,
         currentUserId: "me",
@@ -768,6 +809,7 @@ describe("la file d'envoi", () => {
   it("file vide : un état vide dédié, pas « rien à traiter »", () => {
     const html = wrap(
       createElement(ConversationsInbox, {
+        abilities: ALL,
         rows: ROWS,
         queue: [],
         currentUserId: "me",
@@ -862,6 +904,8 @@ describe("envois en file, envois non partis, assistant du fil", () => {
     const html = wrap(
       createElement(SmsThreadCard, {
         clientId: "x",
+        canReply: true,
+        canControl: true,
         thread: {
           ...THREAD,
           queued: [{ jobId: "j1", body: "Bonjour, ça part bientôt", source: "human", automated: false, runAt: new Date().toISOString() }],
@@ -877,6 +921,8 @@ describe("envois en file, envois non partis, assistant du fil", () => {
     const html = wrap(
       createElement(SmsThreadCard, {
         clientId: "x",
+        canReply: true,
+        canControl: true,
         thread: {
           ...THREAD,
           messages: [
@@ -893,7 +939,7 @@ describe("envois en file, envois non partis, assistant du fil", () => {
   });
 
   it("le fil montre à quel assistant il est confié, et propose de changer", () => {
-    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD }));
+    const html = wrap(createElement(SmsThreadCard, { clientId: "x", thread: THREAD, canReply: true, canControl: true }));
     expect(html).toContain("Assistant");
     expect(html).toContain("Aucun (un humain répond)");
   });

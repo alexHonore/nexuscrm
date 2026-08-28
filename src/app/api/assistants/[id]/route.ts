@@ -4,8 +4,8 @@ import { z } from "zod";
 import { db } from "@/db";
 import { agentTurnTraces, assistants, campaigns, conversations, messages } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { diffConfig } from "@/lib/assistants/changes";
+import { apiPerm } from "@/lib/permissions/server";
 import {
   assistantConfigInputSchema,
   assistantRowToConfig,
@@ -18,8 +18,8 @@ async function loadRow(id: string) {
 
 /** GET /api/assistants/:id — configuration complète + état de compilation. */
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -53,8 +53,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
  *    assistant actif, cette distinction n'est pas cosmétique.
  */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -123,7 +123,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     .where(eq(assistants.id, id));
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "assistant.update",
     entity: "assistant",
     entityId: id,
@@ -151,8 +151,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
  * non plus : 409 `in_use`, avec le nombre de campagnes à re-pointer d'abord.
  */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -184,7 +184,7 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
       .set({ status: "archived", updatedAt: new Date() })
       .where(eq(assistants.id, id));
     await logAudit({
-      userId: admin.id,
+      userId: actor.user.id,
       action: "assistant.archive",
       entity: "assistant",
       entityId: id,
@@ -211,7 +211,7 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
 
   await db.delete(assistants).where(eq(assistants.id, id));
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "assistant.delete",
     entity: "assistant",
     entityId: id,

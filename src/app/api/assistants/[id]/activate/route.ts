@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { activateAssistant } from "@/lib/assistants/service";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * POST /api/assistants/:id/activate — porte d'activation (§11.4).
@@ -13,8 +13,8 @@ import { activateAssistant } from "@/lib/assistants/service";
  * directe ne peut pas contourner la porte.
  */
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -30,7 +30,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
       );
     }
     await logAudit({
-      userId: admin.id,
+      userId: actor.user.id,
       action: "assistant.activate",
       entity: "assistant",
       entityId: id,

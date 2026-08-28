@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { getSubAccounts } from "@/lib/voipms";
 import { readJson, toAdminUser, voipmsErrorResponse } from "../../_helpers";
 import { indexBySipAccount, loadAssignments } from "../_assignments";
@@ -16,8 +16,8 @@ import { provisionSipLine, SIP_USERNAME_RE } from "../_provisioning";
  * Les sous-comptes libres sont remontés en tête.
  */
 export async function GET() {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   try {
     const [accounts, assignments] = await Promise.all([getSubAccounts(), loadAssignments()]);
@@ -77,8 +77,8 @@ export const maxDuration = 60;
  * (bouton « Réessayer ») est donc toujours sûr.
  */
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   const body = await readJson(req, createSchema);
   if (body instanceof NextResponse) return body;
@@ -90,7 +90,7 @@ export async function POST(req: Request) {
     const result = await provisionSipLine(target, body.username);
 
     await logAudit({
-      userId: admin.id,
+      userId: actor.user.id,
       action: "voipms.subaccount_create",
       entity: "user",
       entityId: target.id,

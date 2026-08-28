@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, EyeOffIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -29,7 +29,20 @@ export type AttentionRowData = {
   id: string;
   clientId: string | null;
   clientName: string | null;
-  clientPhone: string;
+  /**
+   * Le numéro du fil, ou `null` quand le compartiment de la fiche FERME les
+   * coordonnées : la ligne se nomme alors « Masqué » plutôt que de rendre en
+   * clair ce que la fiche cache. `null` est un DROIT refusé, pas un fil sans
+   * numéro — un fil en a toujours un.
+   */
+  clientPhone: string | null;
+  /**
+   * Le numéro manque par DROIT, pas parce que le fil n'en aurait pas. Un
+   * booléen à part plutôt qu'un `clientPhone` nul à interpréter : la ligne
+   * NOMMÉE (le client a un nom visible) doit elle aussi dire qu'elle masque
+   * ses coordonnées, et le nul seul ne le disait qu'aux lignes sans nom.
+   */
+  contactHidden?: boolean;
   attentionReason: string | null;
   /**
    * Dernier mouvement du fil, DÉJÀ mis en forme par la page.
@@ -52,6 +65,9 @@ export function AttentionList({
 }) {
   const t = useTranslations("dashboard");
   const tc = useTranslations("conversations");
+  // Le vocabulaire de l'accès vit chez les fiches — « Masqué » y est écrit une
+  // seule fois, pour la fiche comme pour ce résumé.
+  const ta = useTranslations("clients");
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
@@ -81,6 +97,11 @@ export function AttentionList({
         const reason = row.attentionReason ?? "";
         const reasonKey = `inbox.reason.${reason}`;
         const look = ATTENTION_LOOK[reason] ?? CONVERSATION_STATE_LOOK.attention;
+        const title =
+          row.clientName ?? (row.clientPhone ? formatPhone(row.clientPhone) : ta("access.masked"));
+        // Une ligne dont le titre EST déjà « Masqué » se passe de la pastille :
+        // elle dirait deux fois la même chose sur la même ligne.
+        const showMasked = row.contactHidden === true && row.clientName !== null;
         return (
           // Le lien couvre la ligne SANS l'envelopper : un bouton dans un lien
           // navigue à chaque clic. Même montage que la boîte de réception —
@@ -92,13 +113,11 @@ export function AttentionList({
             <Link
               href={row.clientId ? `/clients/${row.clientId}` : "/conversations"}
               className="absolute inset-0 rounded-lg"
-              aria-label={`${tc("inbox.open")} — ${row.clientName ?? formatPhone(row.clientPhone)}`}
+              aria-label={`${tc("inbox.open")} — ${title}`}
             />
             <LookIcon look={look} className="shrink-0" />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">
-                {row.clientName ?? formatPhone(row.clientPhone)}
-              </p>
+              <p className="truncate text-sm font-medium">{title}</p>
               {/* Motif et date sur la MÊME ligne, sous le nom : la droite est
                   rendue au geste, qui reste atteignable au pouce sur un
                   téléphone. */}
@@ -106,6 +125,16 @@ export function AttentionList({
                 {reason !== "" ? (
                   <Badge variant="outline" className="gap-1 font-normal" style={lookTint(look)}>
                     {tc.has(reasonKey as never) ? tc(reasonKey as never) : reason}
+                  </Badge>
+                ) : null}
+                {showMasked ? (
+                  <Badge
+                    variant="outline"
+                    className="gap-1 font-normal"
+                    title={ta("access.maskedHint")}
+                  >
+                    <EyeOffIcon aria-hidden className="size-3" />
+                    {ta("access.masked")}
                   </Badge>
                 ) : null}
                 {row.lastAtLabel ? (

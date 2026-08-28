@@ -30,7 +30,8 @@
     "groupSystem": "System",
     "goLive": "Go live",
     "docs": "Documentation",
-    "deliverability": "Deliverability"
+    "deliverability": "Deliverability",
+    "roles": "Roles & rights"
   },
   "actions": {
     "save": "Save",

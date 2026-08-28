@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { exampleAssistantFile, exampleCampaignFile } from "@/lib/docs/examples";
 import { requestDocLocale } from "@/lib/locale-server";
 
@@ -11,7 +11,7 @@ import { requestDocLocale } from "@/lib/locale-server";
 const kindSchema = z.enum(["assistant", "campaign"]);
 
 export async function GET(_req: Request, ctx: { params: Promise<{ kind: string }> }) {
-  const admin = await apiAdmin();
+  const admin = await apiPerm("admin.docs");
   if (admin instanceof NextResponse) return admin;
 
   const { kind } = await ctx.params;

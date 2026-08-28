@@ -15,7 +15,8 @@
     "incoming_lead": "New lead",
     "appointment": "Appointment",
     "system": "System",
-    "missed_call": "Missed call"
+    "missed_call": "Missed call",
+    "assignment": "Assignment"
   },
   "content": {
     "mentionTitle": "{name} mentioned you",
@@ -37,6 +38,10 @@
     "smsStoppedTitle": "Conversation stopped",
     "smsStoppedBody": "{name}: the conversation was stopped ({reason}).",
     "smsClosedTitle": "Conversation closed by the assistant",
-    "smsClosedBody": "{name}: {reason}."
+    "smsClosedBody": "{name}: {reason}.",
+    "clientAssignedTitle": "Record assigned: {client}",
+    "clientAssignedBody": "{actor} handed you this record.",
+    "clientTakenTitle": "Record taken back: {client}",
+    "clientTakenBody": "{actor} took this record over."
   }
 }

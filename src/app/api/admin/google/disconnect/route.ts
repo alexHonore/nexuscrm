@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { revokeStoredToken } from "@/lib/google";
+import { apiPerm } from "@/lib/permissions/server";
 import { getSetting, setSetting } from "@/lib/settings";
 
 /**
@@ -11,8 +11,8 @@ import { getSetting, setSetting } from "@/lib/settings";
  * resterait valable indéfiniment alors que l'écran dit « déconnecté ».
  */
 export async function POST() {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   const current = await getSetting("google");
   // Avant l'effacement : la révocation relit le jeton stocké.
@@ -25,7 +25,7 @@ export async function POST() {
   });
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "settings.google_disconnect",
     entity: "settings",
     detail: { email: current.email },

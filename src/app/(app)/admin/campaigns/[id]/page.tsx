@@ -5,16 +5,16 @@ import type { CampaignEditorData, EnrollmentRow } from "@/components/admin/campa
 import { db } from "@/db";
 import { categories, clients, sources, users } from "@/db/schema";
 import { assistants, campaignEnrollments, campaigns, smsNumbers } from "@/db/schema-sms";
-import { requireAdmin } from "@/lib/auth/guards";
 import { countReopenCandidates } from "@/lib/campaigns-server/reopen";
 import { campaignRowToConfig } from "@/lib/campaigns/schema";
+import { requirePerm } from "@/lib/permissions/server";
 
 export default async function CampaignEditorPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireAdmin();
+  await requirePerm("admin.campaigns");
   const { id } = await params;
   // Un identifiant qui n'est pas un uuid donnait une erreur Postgres (500)
   // au lieu d'une page introuvable.

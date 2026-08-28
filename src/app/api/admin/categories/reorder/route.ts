@@ -4,15 +4,15 @@ import { z } from "zod";
 import { db } from "@/db";
 import { categories } from "@/db/schema";
 import { diffFields, logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { readJson } from "../../_helpers";
 
 const schema = z.object({ orderedIds: z.array(z.number().int()).min(1).max(200) });
 
 /** Réordonne les catégories : sortOrder = index dans orderedIds. */
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.pipeline");
+  if (actor instanceof NextResponse) return actor;
 
   const body = await readJson(req, schema);
   if (body instanceof NextResponse) return body;
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     ["order"],
   );
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "category.reorder",
     entity: "category",
     detail: { orderedIds: body.orderedIds, ...(changes ? { changes } : {}) },

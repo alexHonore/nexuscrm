@@ -5,6 +5,7 @@ import {
   AlertTriangleIcon,
   BotIcon,
   CheckIcon,
+  EyeOffIcon,
   MessageCircleIcon,
   MoonIcon,
   PencilLineIcon,
@@ -62,7 +63,24 @@ export type InboxRow = {
   id: string;
   clientId: string | null;
   clientName: string;
-  clientPhone: string;
+  /**
+   * Le numéro du fil — `null` quand la case `contact` de la fiche est fermée.
+   * Ce qui ne doit pas se voir ne s'ENVOIE pas : une rangée partie au
+   * navigateur est une rangée lue, même si aucune carte ne la dessine.
+   */
+  clientPhone: string | null;
+  /** Coordonnées fermées sur cette fiche — la carte porte la pastille « Masqué ». */
+  contactHidden?: boolean;
+  /** Fil fermé : ni dernier message, ni actes de l'assistant, sur cette fiche. */
+  historyHidden?: boolean;
+  /**
+   * Cases de CETTE fiche pour ce regard (le serveur revérifie les deux) :
+   * `sms` commande l'assistant sur ce fil — reprendre, rendre, réessayer,
+   * marquer traité, s'attribuer —, `category` range la fiche. Absentes =
+   * ouvertes, pour ne pas fermer une carte construite sans ces champs.
+   */
+  smsOpen?: boolean;
+  categoryOpen?: boolean;
   needsAttention: boolean;
   attentionReason: string | null;
   aiEnabled: boolean;
@@ -127,14 +145,41 @@ export type EngineHealth = {
  */
 type Tab = "attention" | "waiting" | "queue" | "refused" | "all";
 const TABS: Tab[] = ["attention", "waiting", "queue", "refused", "all"];
+
 /**
- * Ce qu'un téléphoniste voit. La file d'envoi et la bande d'état disent la
- * santé du MOTEUR — ce qui attend, ce qui a échoué, combien de numéros se sont
- * désabonnés : la conduite de l'entreprise, pas son travail. Le serveur ne les
- * lui envoie déjà pas (voir la page) ; cette liste évite en plus un onglet qui
- * s'ouvrirait sur le vide.
+ * Ce que CE regard peut faire ici — un droit par geste, plus deux rôles en dur.
+ *
+ * Ces booléens ne GARDENT rien : chaque action serveur revérifie le droit ET la
+ * fiche derrière le fil. Ils évitent seulement d'offrir un bouton dont on sait
+ * qu'il sera refusé — une promesse qu'on ne tient pas est pire qu'un bouton
+ * absent.
  */
-const CALLER_TABS: Tab[] = ["attention", "waiting", "refused", "all"];
+export type InboxAbilities = {
+  /**
+   * File d'envoi et bande d'état : la santé du MOTEUR — ce qui attend, ce qui a
+   * échoué, combien de numéros se sont désabonnés. La conduite de l'entreprise
+   * (`admin.settings`), pas le travail d'un téléphoniste. Le serveur ne calcule
+   * même pas ces données pour les autres (voir la page) ; ici, ça évite en plus
+   * un onglet qui s'ouvrirait sur le vide.
+   */
+  engine: boolean;
+  /** Reprendre, rendre à l'IA, réessayer, marquer traité, s'attribuer un fil. */
+  control: boolean;
+  /** Écrire — et donc RETENIR un envoi encore en file (`conversations.reply`). */
+  reply: boolean;
+  /** Ranger la fiche sans quitter la boîte (`clients.category`). */
+  classify: boolean;
+  /** Rejeu après panne — route d'API réservée à l'administrateur. */
+  replay: boolean;
+};
+
+const NO_ABILITIES: InboxAbilities = {
+  engine: false,
+  control: false,
+  reply: false,
+  classify: false,
+  replay: false,
+};
 
 /** Quels états chaque vue montre. `all` les montre tous, en sections ; `queue` a sa propre matière. */
 const TAB_STATES: Record<Exclude<Tab, "all" | "queue">, ConversationState[]> = {
@@ -179,19 +224,19 @@ export function ConversationsInbox({
   categories = [],
   currentUserId,
   health,
-  isAdmin = false,
+  abilities = NO_ABILITIES,
   initialTab = "attention",
 }: {
   rows: InboxRow[];
   /** La file d'envoi — les textos à venir (voir `QueueItem`). */
   queue?: QueueItem[];
   currentUserId: string;
-  /** `null` pour un téléphoniste : la donnée ne lui est pas envoyée. */
+  /** `null` sans le droit `admin.settings` : la donnée n'est pas envoyée. */
   health: EngineHealth | null;
   /** Catégories du pipeline — pour classer une fiche sans quitter la boîte. */
   categories?: { id: number; label: string }[];
-  /** Le rejeu après panne est un geste d'administrateur (l'API le refuse aux autres). */
-  isAdmin?: boolean;
+  /** Ce que ce regard peut faire — voir `InboxAbilities`. */
+  abilities?: InboxAbilities;
   initialTab?: Tab;
 }) {
   const t = useTranslations("conversations");
@@ -199,16 +244,29 @@ export function ConversationsInbox({
   const dfnsLocale = locale === "en" ? enUS : fr;
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [tab, setTab] = useState<Tab>(initialTab);
+  // Un onglet qu'on n'a pas le droit d'ouvrir ne s'ouvre pas, même demandé par
+  // la propriété : on retombe sur « à traiter ».
+  const [tab, setTab] = useState<Tab>(
+    initialTab === "queue" && !abilities.engine ? "attention" : initialTab,
+  );
   const [mineOnly, setMineOnly] = useState(false);
 
   useDataChange(["sms"], () => router.refresh());
   useVisiblePolling(POLL_MS, () => router.refresh());
 
+  // « Les miennes » est un CONFORT, pas une frontière : les rangées reçues ont
+  // déjà été triées par la visibilité des fiches côté serveur (voir la page).
+  // Ce bouton range un écran, il ne protège rien.
   const base = useMemo(
     () => (mineOnly ? rows.filter((r) => r.assignedToId === currentUserId) : rows),
     [rows, mineOnly, currentUserId],
   );
+
+  // Les onglets suivent les droits : la file d'envoi n'existe que pour qui
+  // conduit le moteur — sans elle, l'onglet s'ouvrirait sur du vide.
+  const tabs = useMemo(() => TABS.filter((k) => k !== "queue" || abilities.engine), [
+    abilities.engine,
+  ]);
 
   const byState = useMemo(() => {
     const groups: Record<ConversationState, InboxRow[]> = {
@@ -407,6 +465,8 @@ export function ConversationsInbox({
     onRetry: retry,
     onRespond: respond,
     onClassify: classify,
+    canControl: abilities.control,
+    canClassify: abilities.classify,
     categories,
     dfnsLocale,
   };
@@ -424,7 +484,7 @@ export function ConversationsInbox({
 
       <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
         <div className="flex w-max items-center gap-2">
-          {(isAdmin ? TABS : CALLER_TABS).map((key) => (
+          {tabs.map((key) => (
             <Button
               key={key}
               variant={tab === key ? "default" : "outline"}
@@ -491,7 +551,7 @@ export function ConversationsInbox({
                 label={t("inbox.sections.engine")}
                 count={engineRows.length}
                 action={
-                  isAdmin ? (
+                  abilities.replay ? (
                     <Button
                       variant="outline"
                       size="sm"
@@ -524,7 +584,7 @@ export function ConversationsInbox({
           {/* Pas de panne visible mais un rejeu quand même possible (entrants
               orphelins, tours morts sans fil listé) : le geste reste offert,
               discrètement. */}
-          {isAdmin && engineRows.length === 0 ? (
+          {abilities.replay && engineRows.length === 0 ? (
             <div className="flex justify-end">
               <Button
                 variant="ghost"
@@ -546,6 +606,7 @@ export function ConversationsInbox({
               key={`${item.kind}:${item.id}`}
               item={item}
               pending={pending}
+              canCancel={abilities.reply}
               onCancel={cancelQueued}
               dfnsLocale={dfnsLocale}
             />
@@ -624,6 +685,8 @@ function InboxRowCard({
   onRetry,
   onRespond,
   onClassify,
+  canControl,
+  canClassify,
   categories,
   dfnsLocale,
 }: {
@@ -636,10 +699,16 @@ function InboxRowCard({
   onRetry: (row: InboxRow) => void;
   onRespond: (row: InboxRow) => void;
   onClassify: (row: InboxRow, categoryId: number) => void;
+  /** Reprendre le fil, le rendre à l'IA, le marquer traité (`conversations.control`). */
+  canControl: boolean;
+  /** Ranger la fiche depuis la carte (`clients.category`). */
+  canClassify: boolean;
   categories: { id: number; label: string }[];
   dfnsLocale: typeof fr;
 }) {
   const t = useTranslations("conversations");
+  // « Masqué » est écrit une seule fois, chez les fiches.
+  const tAccess = useTranslations("clients");
   // Une PANNE se réessaie (entrants rouverts, tour rejoué) ; une demande du
   // client se REND à l'IA ou se répond — pas le même geste.
   const isEngine =
@@ -654,6 +723,24 @@ function InboxRowCard({
   // Le client a parlé en dernier et le fil est à traiter : c'est LUI qui
   // attend, et depuis l'heure affichée. Le texte reste en pleine couleur.
   const clientWaiting = state === "attention" && row.lastDirection === "in";
+
+  // Les gestes réellement offerts sur CETTE carte, à ce regard. Le pied de
+  // carte disparaît quand il n'en reste aucun et que personne ne tient le
+  // fil : une barre vide n'apprend rien.
+  //
+  // Le droit du rôle est le PLAFOND, la case de la fiche le robinet : conduire
+  // l'assistant change ce qu'il ENVERRA à ce client-là (case `sms`), ranger la
+  // fiche touche à son pipeline (case `category`). Sans ce second filtre, la
+  // carte offrirait sur la fiche d'un collègue des boutons que le serveur
+  // refuse — une promesse qu'on ne tient pas.
+  const mayControl = canControl && row.smsOpen !== false;
+  const mayClassify = canClassify && row.categoryOpen !== false;
+  const showHandBack =
+    mayControl && (state === "attention" || state === "human") && row.assistantName !== null;
+  const showClassify =
+    mayClassify && state === "human" && row.clientId !== null && categories.length > 0;
+  const showDecide = mayControl && state === "attention";
+  const showFooter = row.assignedToName !== null || showHandBack || showClassify || showDecide;
 
   const speaker =
     row.lastDirection === "in"
@@ -734,6 +821,23 @@ function InboxRowCard({
               {row.lastBody}
             </span>
           </p>
+        ) : row.historyHidden || row.contactHidden ? (
+          /* Le serveur n'a envoyé ni le message ni le numéro : le dire vaut
+             mieux qu'une carte muette qu'on croirait vide. La même pastille
+             que dans la liste des fiches — un seul mot pour une seule idée. */
+          <p>
+            <span
+              title={
+                row.historyHidden
+                  ? tAccess("access.historyHidden")
+                  : tAccess("access.maskedHint")
+              }
+              className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+            >
+              <EyeOffIcon aria-hidden className="size-3" />
+              {tAccess("access.masked")}
+            </span>
+          </p>
         ) : null}
 
         {/* La conclusion de l'assistant — ce qu'il a FAIT sur ce fil. Un
@@ -758,7 +862,7 @@ function InboxRowCard({
           </p>
         ) : null}
 
-        {state === "attention" || state === "human" || row.assignedToName ? (
+        {showFooter ? (
           <div className="flex flex-wrap items-center gap-2 pt-0.5">
             {row.assignedToName ? (
               <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
@@ -770,7 +874,7 @@ function InboxRowCard({
             {/* Les 2-3 décisions possibles, sur place. « Réessayer » sur une
                 panne, « Rendre à l'IA » sur une demande — et seulement si un
                 assistant tient réellement le fil. */}
-            {(state === "attention" || state === "human") && row.assistantName ? (
+            {showHandBack ? (
               <Button
                 variant="outline"
                 size="sm"
@@ -786,7 +890,7 @@ function InboxRowCard({
                 souvent « il n'est plus intéressé ». La prendre ICI range la
                 fiche dans le pipeline — et libère du même geste les campagnes
                 qui ne visent plus sa nouvelle catégorie. */}
-            {state === "human" && row.clientId && categories.length > 0 ? (
+            {showClassify ? (
               <Select
                 items={categories.map((c) => ({ value: String(c.id), label: c.label }))}
                 value=""
@@ -809,7 +913,7 @@ function InboxRowCard({
                 </SelectContent>
               </Select>
             ) : null}
-            {state === "attention" ? (
+            {showDecide ? (
               <>
                 <Button
                   variant="outline"
@@ -850,11 +954,14 @@ function InboxRowCard({
 function QueueRowCard({
   item,
   pending,
+  canCancel,
   onCancel,
   dfnsLocale,
 }: {
   item: QueueItem;
   pending: boolean;
+  /** Retenir l'envoi demande le droit d'écrire — voir `InboxAbilities.reply`. */
+  canCancel: boolean;
   onCancel: (item: QueueItem) => void;
   dfnsLocale: typeof fr;
 }) {
@@ -903,7 +1010,7 @@ function QueueRowCard({
           </p>
         ) : null}
 
-        {item.kind === "send" && item.jobId ? (
+        {canCancel && item.kind === "send" && item.jobId ? (
           <div className="flex justify-end">
             <Button
               variant="ghost"

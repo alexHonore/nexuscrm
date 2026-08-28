@@ -72,18 +72,43 @@ export type AuditEntryView = {
   entityId: string | null;
   entityName: string | null;
   entityHref: string | null;
+  /**
+   * La FICHE de cette ligne n'a pas de nom pour ce regard — fermée par son
+   * compartiment, ou supprimée depuis. L'écran la désigne alors par son
+   * identifiant : une ligne d'audit doit toujours dire sur quoi elle porte.
+   */
+  clientHidden: boolean;
   ip: string | null;
   changes: AuditChangeView[];
   facts: AuditFactView[];
   rawJson: string | null;
 };
 
-/** Correspondances id → nom, chargées en lot pour la page entière. */
+/**
+ * Correspondances id → nom, chargées en lot pour la page entière.
+ *
+ * `clients` ne contient que les fiches OUVERTES à celui qui lit le journal :
+ * une fiche absente de cette table (fermée par son compartiment, ou supprimée)
+ * n'a pas de nom ici, et sa ligne se désigne alors par son identifiant.
+ */
 export type AuditLookups = {
   users: Map<string, string>;
   categories: Map<number, string>;
   sources: Map<number, string>;
   clients: Map<string, string>;
+  /**
+   * Rôles CONFIGURÉS : identifiant → nom dans la langue de l'écran. Les rôles
+   * ne sont plus deux valeurs figées ; un identifiant qui n'y figure plus
+   * (rôle supprimé depuis) reste affiché tel quel — le journal ne réécrit pas
+   * l'histoire.
+   */
+  roles?: Map<string, string>;
+  /**
+   * Les COORDONNÉES de cette fiche sont-elles ouvertes à ce regard ?
+   * `null` : la ligne ne parle d'aucune fiche (un DID, un réglage). Prédicat
+   * absent : aucune restriction connue (tests, appelant sans regard).
+   */
+  contactOpen?: (clientId: string | null) => boolean;
 };
 
 export type AuditLogRow = {
@@ -102,6 +127,24 @@ type Ctx = {
   lookups: AuditLookups;
   /** Entité de la ligne courante — désambiguïse `reassignTo` (catégorie/source). */
   entity: string | null;
+  /** La fiche dont parle la ligne est-elle ouverte à ce regard ? */
+  clientOpen: boolean;
+  /** … et ses coordonnées ? (jamais vrai quand la fiche est fermée) */
+  contact: boolean;
+  /** Le mot qui remplace une valeur fermée. */
+  mask: string;
+};
+
+/**
+ * Ce que l'ÉCRAN fournit. Le reste du contexte (fiche ouverte ou non) se
+ * déduit ligne par ligne : c'est la ligne qui dit de quelle fiche elle parle.
+ */
+export type AuditRenderContext = {
+  t: AuditTranslator;
+  dateLocale: DateFnsLocale;
+  lookups: AuditLookups;
+  /** « Masqué » (`clients.access.masked`), écrit une seule fois chez les fiches. */
+  mask?: string;
 };
 
 const EMPTY = "—";
@@ -113,6 +156,14 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 const USER_ID_FIELDS = new Set(["assignedToId", "createdById", "userId", "assignedTo"]);
 const PHONE_FIELDS = new Set(["phone", "phoneAlt", "didNumber", "did", "number"]);
+/** Ce que la case « coordonnées » couvre : le téléphone ET le courriel. */
+const CONTACT_FIELDS = new Set([...PHONE_FIELDS, "email", "clientEmail", "previousEmail"]);
+/** Le NOM de la fiche : rejouer le journal ne doit pas le rendre à qui la fiche échappe. */
+const IDENTITY_FIELDS = new Set(["fullName", "clientName"]);
+/** Les rôles ne sont plus « admin » ou « caller » : ce sont des identifiants configurés. */
+const ROLE_FIELDS = new Set(["role", "roleId", "previousRoleId"]);
+/** Repli quand l'écran n'a pas fourni son mot : trois points ne mentent dans aucune langue. */
+const MASK = "•••";
 const SECRET_TEXTS: Record<string, string> = {
   [SECRET_MARKERS.set]: "audit.secret.set",
   [SECRET_MARKERS.none]: "audit.secret.none",
@@ -177,16 +228,24 @@ function renderScalar(field: string, value: string | number, ctx: Ctx): AuditVal
     return { text: lookups.users.get(value) ?? String(value) };
   }
   if (field === "clientId" && typeof value === "string") {
+    // Fiche fermée (ou supprimée) : son identifiant, jamais son nom.
     return { text: lookups.clients.get(value) ?? String(value) };
   }
+  if (!ctx.clientOpen && IDENTITY_FIELDS.has(field)) return { text: ctx.mask };
+  if (!ctx.contact && CONTACT_FIELDS.has(field)) return { text: ctx.mask };
   if (PHONE_FIELDS.has(field) && typeof value === "string") {
     return { text: formatPhone(value) || String(value) };
   }
   if ((field === "language" || field === "locale") && (value === "fr" || value === "en")) {
     return { text: t(value === "fr" ? "users.localeFr" : "users.localeEn") };
   }
-  if (field === "role" && (value === "admin" || value === "caller")) {
-    return { text: t(value === "admin" ? "users.roleAdmin" : "users.roleCaller") };
+  if (ROLE_FIELDS.has(field) && typeof value === "string") {
+    // Les rôles sont un RÉGLAGE : « admin » et « caller » n'étaient que les
+    // deux premiers. On lit le nom dans la configuration courante, et un rôle
+    // disparu depuis reste écrit tel qu'il a été journalisé — une entrée
+    // ancienne portant le nom du rôle (« Superviseur ») s'affiche aussi telle
+    // quelle, faute d'identifiant à résoudre.
+    return { text: lookups.roles?.get(value) ?? truncate(String(value)) };
   }
   if (field === "days") {
     const day = numericId(value);
@@ -267,15 +326,54 @@ function entityName(entity: string | null, entityId: string | null, lookups: Aud
   return null;
 }
 
+/**
+ * De quelle FICHE cette ligne parle-t-elle ? De l'entité elle-même quand c'en
+ * est une, sinon de celle que le détail nomme : un appel, un rendez-vous ou un
+ * suivi portent un `clientId` et rejouent, eux aussi, des coordonnées.
+ */
+function clientOfRow(log: AuditLogRow, detail: Record<string, AuditValue> | null): string | null {
+  if (log.entity === "client" && isUuid(log.entityId)) return log.entityId;
+  const cited = detail?.clientId;
+  return typeof cited === "string" && isUuid(cited) ? cited : null;
+}
+
+/**
+ * Les fiches que ces lignes CITENT, dédoublonnées — de quoi charger noms et
+ * compartiments en une requête plutôt qu'une par ligne. Même règle que
+ * `clientOfRow` : c'est la seule définition de « la fiche de cette ligne ».
+ */
+export function citedClientIds(logs: readonly AuditLogRow[]): string[] {
+  const ids = new Set<string>();
+  for (const log of logs) {
+    const id = clientOfRow(log, asRecord(log.detail));
+    if (id) ids.add(id);
+  }
+  return [...ids];
+}
+
 /** Une ligne d'audit → tout ce que l'écran doit montrer, déjà mis en forme. */
 export function buildAuditEntry(
   log: AuditLogRow,
   userName: string | null,
-  base: Omit<Ctx, "entity">,
+  base: AuditRenderContext,
 ): AuditEntryView {
-  const ctx: Ctx = { ...base, entity: log.entity };
   const { t } = base;
   const detail = asRecord(log.detail);
+
+  // Le journal ne rouvre pas ce que la matrice ferme : une ligne qui porte sur
+  // une fiche hors de portée en garde l'action, la date et l'auteur, mais rien
+  // de ce qui NOMME la fiche — ni nom, ni coordonnées, ni JSON brut, qui les
+  // rendrait toutes d'un coup.
+  const clientId = clientOfRow(log, detail);
+  const clientOpen = clientId === null || base.lookups.clients.has(clientId);
+  const contact = clientOpen && (base.lookups.contactOpen?.(clientId) ?? true);
+  const ctx: Ctx = {
+    ...base,
+    entity: log.entity,
+    clientOpen,
+    contact,
+    mask: base.mask ?? MASK,
+  };
 
   const changes: AuditChangeView[] = [];
   const rawChanges = detail ? asRecord(detail.changes) : null;
@@ -343,9 +441,14 @@ export function buildAuditEntry(
     entityId: log.entityId,
     entityName: entityName(log.entity, log.entityId, base.lookups),
     entityHref: hrefFor(log.entity, log.entityId, base.lookups),
+    clientHidden:
+      log.entity === "client" && isUuid(log.entityId) && !base.lookups.clients.has(log.entityId),
     ip: log.ip,
     changes,
     facts,
-    rawJson: log.detail != null ? JSON.stringify(log.detail, null, 2) : null,
+    // Le JSON brut rend TOUT le détail d'un coup : il ne part que lorsque la
+    // fiche et ses coordonnées sont ouvertes, sinon masquer les champs un à un
+    // ne serait qu'un rideau devant une porte ouverte.
+    rawJson: log.detail != null && contact ? JSON.stringify(log.detail, null, 2) : null,
   };
 }

@@ -5,12 +5,12 @@ import { CampaignsListClient, type CampaignListItem } from "@/components/admin/c
 import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/db";
 import { campaigns } from "@/db/schema-sms";
-import { requireAdmin } from "@/lib/auth/guards";
 import type { TriggerKind } from "@/lib/campaigns/schema";
 import { listCampaignsWithCounts } from "@/lib/campaigns-server/list";
+import { requirePerm } from "@/lib/permissions/server";
 
 export default async function AdminCampaignsPage() {
-  await requireAdmin();
+  await requirePerm("admin.campaigns");
   const t = await getTranslations("campaigns");
 
   const rows = await listCampaignsWithCounts();

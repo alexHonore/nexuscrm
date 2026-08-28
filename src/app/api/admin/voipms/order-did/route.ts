@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { normalizePhone } from "@/lib/phone";
 import {
   didDigits,
@@ -88,8 +88,8 @@ async function didLandedOnAccount(wantedDigits: string): Promise<boolean> {
  * numéro déjà présent sur le compte est simplement routé et attribué.
  */
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   const body = await readJson(req, schema);
   if (body instanceof NextResponse) return body;
@@ -145,7 +145,7 @@ export async function POST(req: Request) {
           // débité. Le journal doit donc garder la trace de la tentative,
           // sinon un achat réel disparaîtrait sans laisser de trace.
           await logAudit({
-            userId: admin.id,
+            userId: actor.user.id,
             action: "voipms.did_order_failed",
             entity: "user",
             entityId: target.id,
@@ -166,7 +166,7 @@ export async function POST(req: Request) {
       // peut encore échouer ou être interrompu — le journal doit garder la
       // preuve de l'achat même dans ce cas.
       await logAudit({
-        userId: admin.id,
+        userId: actor.user.id,
         action: "voipms.did_purchase",
         entity: "user",
         entityId: target.id,
@@ -202,7 +202,7 @@ export async function POST(req: Request) {
   });
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "voipms.did_order",
     entity: "user",
     entityId: target.id,

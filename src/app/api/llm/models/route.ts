@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { LlmUnconfiguredError, configuredProviders, getModelCatalog } from "@/lib/llm-server";
 import { PROVIDER_IDS } from "@/lib/assistants/schema";
 
@@ -15,7 +15,7 @@ import { PROVIDER_IDS } from "@/lib/assistants/schema";
 const querySchema = z.object({ provider: z.enum(PROVIDER_IDS).default("openrouter") });
 
 export async function GET(req: NextRequest) {
-  const auth = await apiAdmin();
+  const auth = await apiPerm("admin.assistants");
   if (auth instanceof NextResponse) return auth;
 
   const parsed = querySchema.safeParse({

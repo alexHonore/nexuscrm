@@ -4,8 +4,8 @@ import { z } from "zod";
 import { db } from "@/db";
 import { assistants, objectionPacks } from "@/db/schema-sms";
 import { diffFields, logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { objectionItemSchema } from "@/lib/guardrails/types";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * Modifier ou supprimer un paquet d'objections.
@@ -29,8 +29,8 @@ async function assistantsUsing(packId: string) {
 }
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   let raw: unknown;
@@ -67,7 +67,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   }
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "objection_pack.update",
     entity: "objection_pack",
     entityId: id,
@@ -82,8 +82,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 }
 
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   const before = await db.query.objectionPacks.findFirst({
@@ -104,7 +104,7 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
 
   await db.delete(objectionPacks).where(eq(objectionPacks.id, id));
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "objection_pack.delete",
     entity: "objection_pack",
     entityId: id,

@@ -20,7 +20,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { emitDataChange } from "@/lib/live";
 
-/** Admin-only delete with confirmation (server refuses callers too). */
+/**
+ * Supprimer une fiche, avec confirmation.
+ *
+ * Le bouton n'est rendu que si la case `delete` est ouverte sur CETTE fiche —
+ * et l'action revérifie : ni le rendu conditionnel, ni la boîte de dialogue ne
+ * protègent quoi que ce soit.
+ */
 export function DeleteClientButton({
   clientId,
   clientName,
@@ -46,7 +52,15 @@ export function DeleteClientButton({
         if (pathname !== "/clients") router.push("/clients");
         else router.refresh();
       } else {
-        toast.error(res.error === "forbidden" ? t("errors.forbidden") : t("errors.generic"));
+        // Une fiche devenue invisible répond « introuvable », jamais
+        // « interdit » : le refus dirait qu'elle existe.
+        toast.error(
+          res.error === "forbidden"
+            ? t("access.noRight")
+            : res.error === "notFound"
+              ? t("errors.notFound")
+              : t("errors.generic"),
+        );
       }
     });
   };

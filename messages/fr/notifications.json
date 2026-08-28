@@ -15,7 +15,8 @@
     "incoming_lead": "Nouveau prospect",
     "appointment": "Rendez-vous",
     "system": "Système",
-    "missed_call": "Appel manqué"
+    "missed_call": "Appel manqué",
+    "assignment": "Assignation"
   },
   "content": {
     "mentionTitle": "{name} vous a mentionné",
@@ -37,6 +38,10 @@
     "smsStoppedTitle": "Conversation arrêtée",
     "smsStoppedBody": "{name} : la conversation est arrêtée ({reason}).",
     "smsClosedTitle": "Conversation close par l'assistant",
-    "smsClosedBody": "{name} : {reason}."
+    "smsClosedBody": "{name} : {reason}.",
+    "clientAssignedTitle": "Fiche assignée : {client}",
+    "clientAssignedBody": "{actor} vous a confié cette fiche.",
+    "clientTakenTitle": "Fiche retirée : {client}",
+    "clientTakenBody": "{actor} a repris cette fiche."
   }
 }

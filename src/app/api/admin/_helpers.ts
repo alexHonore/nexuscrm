@@ -3,6 +3,9 @@ import { randomInt } from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { users } from "@/db/schema";
+import { adminRole, roleById } from "@/lib/permissions/access";
+import { CALLER_ROLE_ID } from "@/lib/permissions/defaults";
+import type { PermissionsConfig, Role } from "@/lib/permissions/types";
 import { VoipMsError } from "@/lib/voipms";
 import { computePhoneStatus, sipGatewayConfigured } from "./users/_phone-status";
 
@@ -127,14 +130,71 @@ export function voipmsErrorResponse(err: unknown): NextResponse {
   return NextResponse.json({ error: "voipms", status: "unknown", message }, { status: 502 });
 }
 
+// ── Rôle demandé par un formulaire de compte ─────────────────────────────────
+
+/**
+ * Le rôle CONFIGURÉ que vise une création ou une modification de compte.
+ *
+ * Deux formes arrivent ici, une seule est à jour : `roleId` désigne un rôle de
+ * la matrice ; `role` (« admin » / « caller ») est l'ancien couple de valeurs
+ * de l'énumération de la base, encore envoyé par des appels plus vieux que cet
+ * écran — on le traduit plutôt que de le refuser.
+ *
+ * Rend `null` quand la requête ne demande aucun rôle (une modification de
+ * courriel n'en parle pas), et un 422 quand l'identifiant ne correspond à
+ * rien : retomber en silence sur le rôle par défaut donnerait des droits que
+ * personne n'a choisis.
+ */
+export function requestedRole(
+  cfg: PermissionsConfig,
+  body: { roleId?: string; role?: "admin" | "caller" },
+): Role | null | NextResponse {
+  const unknown = () => NextResponse.json({ error: "unknown_role" }, { status: 422 });
+
+  if (body.roleId !== undefined) return roleById(cfg, body.roleId) ?? unknown();
+  if (body.role === undefined) return null;
+
+  // Ancienne forme : « admin » vise le rôle super-administrateur, « caller »
+  // le rôle livré du même nom — et jamais un rôle qui aurait les clés de la
+  // maison, même si quelqu'un a renommé les identifiants entre-temps.
+  if (body.role === "admin") return adminRole(cfg);
+  const caller = roleById(cfg, CALLER_ROLE_ID);
+  if (caller && !caller.superAdmin) return caller;
+  return defaultRole(cfg) ?? unknown();
+}
+
+/** Le rôle donné à un compte qui n'en demande aucun — celui de la matrice. */
+export function defaultRole(cfg: PermissionsConfig): Role | null {
+  const fallback = roleById(cfg, cfg.defaultRoleId);
+  return fallback && !fallback.superAdmin ? fallback : null;
+}
+
 // ── Sérialisation utilisateur (jamais de secrets) ────────────────────────────
 
-export function toAdminUser(u: typeof users.$inferSelect, gateway = sipGatewayConfigured()) {
+/**
+ * L'UNIQUE forme d'un compte qui atteint le navigateur.
+ *
+ * `role` reste le plancher de la base (« admin », ou pas) ; ce qui décide des
+ * droits est le rôle CONFIGURÉ, que l'appelant résout et passe ici. Les routes
+ * voip.ms ne lisent pas la matrice : elles laissent `role` absent, `roleId`
+ * vaut alors `null` et l'écran garde le rôle qu'il affichait. Le déduire du
+ * plancher rétrograderait un superviseur en téléphoniste à chaque numéro
+ * attribué.
+ */
+export function toAdminUser(
+  u: typeof users.$inferSelect,
+  gateway = sipGatewayConfigured(),
+  role?: Role | null,
+) {
   return {
     id: u.id,
     name: u.name,
     email: u.email,
     role: u.role,
+    roleId: role?.id ?? null,
+    roleNameFr: role?.nameFr ?? null,
+    roleNameEn: role?.nameEn ?? null,
+    roleLook: role?.look ?? null,
     locale: u.locale,
     isActive: u.isActive,
     sipUsername: u.sipUsername,

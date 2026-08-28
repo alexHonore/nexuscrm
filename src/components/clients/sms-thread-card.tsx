@@ -75,7 +75,14 @@ export type SmsThreadData = {
   conversationId: string | null;
   /** Destinataire — affiché en permanence au-dessus de la zone de rédaction. */
   clientName: string;
+  /** Déjà MASQUÉ par le serveur quand `clientPhoneMasked` — rien à reformater. */
   clientPhone: string;
+  /**
+   * Optionnel parce qu'il n'est qu'un INDICE de mise en forme : un producteur
+   * qui l'oublie affiche quand même juste (mettre en forme un masque le laisse
+   * intact). Ce qui protège, c'est que le serveur n'envoie pas le vrai numéro.
+   */
+  clientPhoneMasked?: boolean;
   aiEnabled: boolean;
   pausedByName: string | null;
   pausedAt: string | null;
@@ -125,9 +132,22 @@ const POLL_MS = 30_000;
 export function SmsThreadCard({
   clientId,
   thread,
+  canReply = false,
+  canControl = false,
 }: {
   clientId: string;
   thread: SmsThreadData;
+  /**
+   * Écrire un SMS à la main dans ce fil (`clients.sms` × `conversations.reply`).
+   *
+   * Non dit = fermé, comme partout dans la matrice (`noGrants()` est le socle,
+   * un droit vaut par sa présence). Un appelant qui oublie perd la zone de
+   * rédaction — bruyant et sans danger — plutôt que d'ouvrir en silence ce qui
+   * envoie des messages HORS de l'application.
+   */
+  canReply?: boolean;
+  /** Reprendre / rendre le fil à l'assistant, le confier, le marquer traité. */
+  canControl?: boolean;
 }) {
   const t = useTranslations("conversations");
   const tCommon = useTranslations("common");
@@ -157,7 +177,14 @@ export function SmsThreadCard({
   }, [rows.length]);
 
   const analysis = analyzeSms(body);
-  const blocked = thread.suppressed || !thread.hasActiveNumber;
+  const blocked = thread.suppressed || !thread.hasActiveNumber || !canReply;
+  // Annuler ce qui n'est pas encore parti appartient aux deux métiers : celui
+  // qui écrit, et celui qui reprend la main sur l'assistant.
+  const canCancel = canReply || canControl;
+  /** Le numéro tel qu'il doit s'afficher — masqué, il est déjà mis en forme. */
+  const phoneLabel = thread.clientPhoneMasked
+    ? thread.clientPhone
+    : formatPhone(thread.clientPhone);
 
   const send = () => {
     const text = body.trim();
@@ -329,11 +356,11 @@ export function SmsThreadCard({
               borderColor: `color-mix(in srgb, ${SMS.color} 40%, transparent)`,
             }}
           >
-            {formatPhone(thread.clientPhone)}
+            {phoneLabel}
           </Badge>
         </CardTitle>
         <CardAction>
-          {thread.conversationId ? (
+          {thread.conversationId && canControl ? (
             <Button
               variant="outline"
               size="sm"
@@ -375,7 +402,7 @@ export function SmsThreadCard({
             lui, seul un barreau de campagne savait donner un fil à un
             assistant : un contact qui écrivait de lui-même n'avait jamais de
             réponse IA. */}
-        {thread.conversationId ? (
+        {thread.conversationId && canControl ? (
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <BotIcon className="size-4 shrink-0 text-muted-foreground" />
             <span className="text-muted-foreground">{t("assistant.label")} :</span>
@@ -457,15 +484,17 @@ export function SmsThreadCard({
               );
             })()}
             <span className="flex-1" />
-            <Button
-              variant="ghost"
-              size="sm"
-              className="min-h-11 md:min-h-7"
-              disabled={pending}
-              onClick={markHandled}
-            >
-              {t("inbox.markHandled")}
-            </Button>
+            {canControl ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="min-h-11 md:min-h-7"
+                disabled={pending}
+                onClick={markHandled}
+              >
+                {t("inbox.markHandled")}
+              </Button>
+            ) : null}
           </div>
         ) : null}
 
@@ -480,7 +509,7 @@ export function SmsThreadCard({
                 key={message.id}
                 message={message}
                 dfnsLocale={dfnsLocale}
-                onCancel={cancelSend}
+                onCancel={canCancel ? cancelSend : null}
                 busy={pending}
               />
             ))}
@@ -508,73 +537,76 @@ export function SmsThreadCard({
                     })}
                   </span>
                 </p>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="min-h-11 px-2 text-[11px] text-muted-foreground md:min-h-7"
-                  disabled={pending}
-                  onClick={() => cancelQueued(q.jobId)}
-                >
-                  <Undo2Icon className="size-3" /> {t("thread.cancelQueued")}
-                </Button>
+                {canCancel ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="min-h-11 px-2 text-[11px] text-muted-foreground md:min-h-7"
+                    disabled={pending}
+                    onClick={() => cancelQueued(q.jobId)}
+                  >
+                    <Undo2Icon className="size-3" /> {t("thread.cancelQueued")}
+                  </Button>
+                ) : null}
               </div>
             ))}
           </div>
         )}
 
-        <div
-          className="space-y-1.5 rounded-lg border-2 p-3"
-          style={{
-            borderColor: `color-mix(in srgb, ${SMS.color} 40%, transparent)`,
-            backgroundColor: `color-mix(in srgb, ${SMS.color} 6%, transparent)`,
-          }}
-        >
-          {/* Le destinataire est toujours visible : c'est ce qui distingue le
-              plus sûrement une note interne (personne) d'un SMS (quelqu'un). */}
-          <p
-            className="flex flex-wrap items-center gap-1.5 text-xs font-medium"
-            style={{ color: SMS.color }}
-          >
-            <SmartphoneIcon className="size-3.5" />
-            {t("thread.sendsTo", {
-              name: thread.clientName,
-              phone: formatPhone(thread.clientPhone),
-            })}
-          </p>
-          <Textarea
-            rows={2}
-            value={body}
-            disabled={blocked}
-            placeholder={t("thread.placeholder")}
-            onChange={(e) => setBody(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                send();
-              }
+        {/* Écrire est un droit à part : sans lui le fil se LIT (l'assistant
+            continue de travailler), il ne s'écrit pas. */}
+        {canReply ? (
+          <div
+            className="space-y-1.5 rounded-lg border-2 p-3"
+            style={{
+              borderColor: `color-mix(in srgb, ${SMS.color} 40%, transparent)`,
+              backgroundColor: `color-mix(in srgb, ${SMS.color} 6%, transparent)`,
             }}
-          />
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-muted-foreground">
-              {body.trim() === ""
-                ? t("thread.hint")
-                : // Le nombre de segments décide du coût réel de l'envoi.
-                  t("thread.segments", { chars: analysis.units, segments: analysis.segments })}
-            </p>
-            <Button
-              size="sm"
-              className="min-h-11 text-white md:min-h-8"
-              // Le bouton qui envoie VRAIMENT porte la couleur du canal ; tous
-              // les autres boutons de la fiche sont bleus.
-              style={{ backgroundColor: SMS.color }}
-              disabled={pending || blocked || body.trim() === ""}
-              onClick={send}
+          >
+            {/* Le destinataire est toujours visible : c'est ce qui distingue le
+                plus sûrement une note interne (personne) d'un SMS (quelqu'un). */}
+            <p
+              className="flex flex-wrap items-center gap-1.5 text-xs font-medium"
+              style={{ color: SMS.color }}
             >
-              <SendIcon />
-              {pending ? t("thread.sending") : t("thread.send")}
-            </Button>
+              <SmartphoneIcon className="size-3.5" />
+              {t("thread.sendsTo", { name: thread.clientName, phone: phoneLabel })}
+            </p>
+            <Textarea
+              rows={2}
+              value={body}
+              disabled={blocked}
+              placeholder={t("thread.placeholder")}
+              onChange={(e) => setBody(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+            />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">
+                {body.trim() === ""
+                  ? t("thread.hint")
+                  : // Le nombre de segments décide du coût réel de l'envoi.
+                    t("thread.segments", { chars: analysis.units, segments: analysis.segments })}
+              </p>
+              <Button
+                size="sm"
+                className="min-h-11 text-white md:min-h-8"
+                // Le bouton qui envoie VRAIMENT porte la couleur du canal ; tous
+                // les autres boutons de la fiche sont bleus.
+                style={{ backgroundColor: SMS.color }}
+                disabled={pending || blocked || body.trim() === ""}
+                onClick={send}
+              >
+                <SendIcon />
+                {pending ? t("thread.sending") : t("thread.send")}
+              </Button>
+            </div>
           </div>
-        </div>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -588,7 +620,8 @@ function MessageBubble({
 }: {
   message: SmsMessageData;
   dfnsLocale: typeof fr;
-  onCancel: (id: string) => void;
+  /** null : ce regard ne rappelle pas un envoi — la bulle reste lisible. */
+  onCancel: ((id: string) => void) | null;
   busy: boolean;
 }) {
   const t = useTranslations("conversations");
@@ -602,7 +635,10 @@ function MessageBubble({
   const skipCode = message.skipReason ? message.skipReason.split(":")[0] : null;
   // Encore en file : la seule fenêtre où « annuler » veut dire quelque chose.
   const cancellable =
-    outbound && message.status === "queued" && !message.id.startsWith(DRAFT_PREFIX);
+    onCancel !== null &&
+    outbound &&
+    message.status === "queued" &&
+    !message.id.startsWith(DRAFT_PREFIX);
 
   return (
     <div className={cn("flex flex-col gap-1", outbound ? "items-end" : "items-start")}>

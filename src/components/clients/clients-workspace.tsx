@@ -8,6 +8,7 @@ import {
   ArrowUpIcon,
   CheckIcon,
   ClockAlertIcon,
+  EyeOffIcon,
   Loader2Icon,
   PhoneOffIcon,
   Rows3Icon,
@@ -60,8 +61,41 @@ import { cn } from "@/lib/utils";
 
 export type PanelCategory = { id: number; label: string; color: string; count: number };
 
+/**
+ * Une ligne telle que l'API la rend.
+ *
+ * `contactHidden` arrive quand ce regard n'a pas la case `contact` sur cette
+ * fiche-là : le numéro n'est PAS dans la réponse — il n'y a rien à masquer à
+ * l'écran, seulement une pastille à mettre à sa place.
+ */
+export type ClientRow = ClientListItem & { contactHidden?: boolean };
+
+/**
+ * Ce que la coquille de /clients ouvre, GESTE PAR GESTE.
+ *
+ * Un booléen par geste et non un rôle : « peut-il reclasser cette ligne » et
+ * « peut-il supprimer ce lot » ne se répondent plus par « est-il
+ * administrateur ». Aucun de ces booléens ne protège quoi que ce soit — chaque
+ * action est revérifiée par le serveur, fiche par fiche.
+ */
+export type ClientListCapabilities = {
+  /** Ajouter une fiche à la main. */
+  create: boolean;
+  /** Sélection multiple et barre d'actions en masse. */
+  bulk: boolean;
+  /** Changer le statut de pipeline à même la ligne. */
+  category: boolean;
+  /** Changer la source à même la ligne (droit `clients.edit`). */
+  source: boolean;
+  /** Changer le détenteur à même la ligne. */
+  assign: boolean;
+  delete: boolean;
+  /** Inscrire une sélection à une campagne (droit `admin.campaigns`). */
+  campaign: boolean;
+};
+
 type ListResponse = {
-  items: ClientListItem[];
+  items: ClientRow[];
   total: number;
   page: number;
   pageSize: number;
@@ -137,11 +171,13 @@ function writeStoredPanelState(state: SavedViewState): void {
 }
 
 /** Signature d'affichage d'une ligne — évite les rendus inutiles au sondage. */
-function rowsSignature(rows: ClientListItem[]): string {
+function rowsSignature(rows: ClientRow[]): string {
   return rows
     .map(
+      // `contactHidden` en fait partie : une fiche qui change de main ouvre ou
+      // ferme son numéro sans que rien d'autre ne bouge sur la ligne.
       (r) =>
-        `${r.id}:${r.fullName}:${r.phone}:${r.city ?? ""}:${r.categoryId ?? ""}:${r.categoryColor ?? ""}:${r.nextFollowupAt ?? ""}:${r.lastContactedAt ?? ""}:${r.doNotCall ? 1 : 0}:${r.updatedAt}:${r.assignedToId ?? ""}:${r.sourceId ?? ""}`,
+        `${r.id}:${r.fullName}:${r.phone}:${r.contactHidden ? 1 : 0}:${r.city ?? ""}:${r.categoryId ?? ""}:${r.categoryColor ?? ""}:${r.nextFollowupAt ?? ""}:${r.lastContactedAt ?? ""}:${r.doNotCall ? 1 : 0}:${r.updatedAt}:${r.assignedToId ?? ""}:${r.sourceId ?? ""}`,
     )
     .join("|");
 }
@@ -193,7 +229,7 @@ function hasDateFilter(f: DateFilter): boolean {
  * Mobile: /clients shows only the panel; /clients/<id> shows only the detail.
  */
 export function ClientsWorkspace({
-  isAdmin,
+  can,
   categories,
   sources,
   users,
@@ -202,7 +238,16 @@ export function ClientsWorkspace({
   noCategoryCount,
   children,
 }: {
-  isAdmin: boolean;
+  /**
+   * Ce que ce regard ouvre, GESTE PAR GESTE.
+   *
+   * Plus de repli « est-il administrateur » : un seul interrupteur pour cinq
+   * droits fermait tout le panneau à un rôle qui n'en avait que quatre — celui
+   * qui peut créer une fiche sans pouvoir agir en masse n'avait même plus le
+   * bouton « + ». La coquille résout chaque droit séparément et les passe tels
+   * quels.
+   */
+  can: ClientListCapabilities;
   categories: PanelCategory[];
   sources: FilterOption[];
   users: FilterOption[];
@@ -322,7 +367,7 @@ export function ClientsWorkspace({
   }, []);
 
   // ── List state ─────────────────────────────────────────────────────────────
-  const [items, setItems] = useState<ClientListItem[]>([]);
+  const [items, setItems] = useState<ClientRow[]>([]);
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -419,7 +464,7 @@ export function ClientsWorkspace({
   }, [filterQuery, sortKey, sortDir, view]);
 
   // Latest-value refs so loadMore stays stable for the context consumers.
-  const itemsRef = useRef<ClientListItem[]>([]);
+  const itemsRef = useRef<ClientRow[]>([]);
   const pageRef = useRef(1);
   const hasMoreRef = useRef(false);
   const queryRef = useRef(filterQuery);
@@ -1126,7 +1171,7 @@ export function ClientsWorkspace({
                 {view === "list" ? <Table2Icon /> : <Rows3Icon />}
               </Button>
 
-              {isAdmin ? (
+              {can.create ? (
                 <AddClientDialog
                   compact
                   categories={categoryOptions}
@@ -1254,7 +1299,7 @@ export function ClientsWorkspace({
                 <ClientsTable
                   items={items}
                   loading={loading}
-                  isAdmin={isAdmin}
+                  can={can}
                   categories={categories}
                   sources={sources}
                   users={users}
@@ -1333,7 +1378,19 @@ export function ClientsWorkspace({
                             ) : null}
                           </span>
                           <span className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                            <span className="tabular-nums">{formatPhone(item.phone)}</span>
+                            {/* Numéro non ouvert sur cette fiche : l'API ne
+                                l'a pas envoyé, la ligne le dit. */}
+                            {item.contactHidden ? (
+                              <span
+                                title={t("access.maskedHint")}
+                                className="inline-flex items-center gap-1 rounded-full border px-1.5 text-[10px] font-medium"
+                              >
+                                <EyeOffIcon aria-hidden className="size-2.5" />
+                                {t("access.masked")}
+                              </span>
+                            ) : (
+                              <span className="tabular-nums">{formatPhone(item.phone)}</span>
+                            )}
                             {item.city ? <span className="truncate">{item.city}</span> : null}
                           </span>
                         </span>

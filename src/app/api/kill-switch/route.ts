@@ -4,8 +4,8 @@ import { z } from "zod";
 import { db } from "@/db";
 import { campaignTouches, conversations, messages, scheduledJobs } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { sendSmsPayloadSchema } from "@/lib/jobs/types";
+import { apiPerm } from "@/lib/permissions/server";
 import { analyzeSms } from "@/lib/sms/segments";
 import { getSetting, setSetting } from "@/lib/settings";
 
@@ -15,7 +15,7 @@ const bodySchema = z.object({
 });
 
 /**
- * Interrupteur d'arrêt global du moteur SMS — admin seulement.
+ * Interrupteur d'arrêt global du moteur SMS — réservé au droit `admin.settings`.
  *
  * Deux mécanismes complémentaires : le réglage `sms.killSwitch` est relu par
  * le fournisseur avant CHAQUE envoi (`settingsSendGate` de
@@ -36,8 +36,8 @@ const bodySchema = z.object({
  * traiter », et le barreau de campagne passe « cancelled ».
  */
 export async function POST(req: Request) {
-  const auth = await apiAdmin();
-  if (auth instanceof NextResponse) return auth;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   const raw: unknown = await req.json().catch(() => null);
   const parsed = bodySchema.safeParse(raw);
@@ -62,7 +62,7 @@ export async function POST(req: Request) {
   const cancelledJobs = enabled ? await cancelPendingSends() : 0;
 
   await logAudit({
-    userId: auth.id,
+    userId: actor.user.id,
     action: "sms.kill_switch",
     entity: "settings",
     detail: { enabled, reason: reason ?? null, cancelledJobs },

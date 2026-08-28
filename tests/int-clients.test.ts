@@ -216,18 +216,27 @@ describe("intégrité des données clients", () => {
       expect(untouched.fullName).toBe("Avant");
     });
 
-    it("n'applique assignedToId que pour un admin", async () => {
+    it("applique assignedToId selon les règles d'assignation du rôle", async () => {
+      // Règle du 2026-08-28 : le téléphoniste PREND une fiche libre (le
+      // bassin), mais ne la donne à personne. L'administrateur distribue.
       const admin = await makeUser({ role: "admin" });
       const caller = await makeUser({ role: "caller" });
+      const collegue = await makeUser({ role: "caller" });
       const client = await makeClient({ assignedToId: null });
 
       await login(caller);
       await actions.updateClientAction(client.id, form({ assignedToId: caller.id }));
-      expect((await getClient(client.id)).assignedToId).toBeNull();
+      expect((await getClient(client.id)).assignedToId).toBe(caller.id);
+
+      // La donner à un collègue : refusé, et la fiche ne bouge pas.
+      expect(
+        (await actions.updateClientAction(client.id, form({ assignedToId: collegue.id }))).ok,
+      ).toBe(false);
+      expect((await getClient(client.id)).assignedToId).toBe(caller.id);
 
       await login(admin);
-      await actions.updateClientAction(client.id, form({ assignedToId: caller.id }));
-      expect((await getClient(client.id)).assignedToId).toBe(caller.id);
+      await actions.updateClientAction(client.id, form({ assignedToId: collegue.id }));
+      expect((await getClient(client.id)).assignedToId).toBe(collegue.id);
     });
 
     it("répond notFound pour une fiche inexistante et forbidden sans session", async () => {
@@ -350,7 +359,12 @@ describe("intégrité des données clients", () => {
 
     it("assigne la relance au responsable de la fiche, sinon à l'auteur", async () => {
       const owner = await makeUser({ role: "caller", name: "Titulaire" });
-      const author = await makeUser({ role: "caller", name: "Auteur" });
+      // L'auteur est l'ADMINISTRATEUR : planifier un suivi sur la fiche d'un
+      // collègue exige la case « suivi » de son compartiment, qu'un
+      // téléphoniste n'a pas (préréglage livré). Ce que le test prouve ne
+      // change pas : la relance échoit au TITULAIRE de la fiche, pas à celui
+      // qui l'a écrite — et à l'auteur seulement quand la fiche est au bassin.
+      const author = await makeUser({ role: "admin", name: "Auteur" });
       await login(author);
 
       const assigned = await makeClient({ assignedToId: owner.id });

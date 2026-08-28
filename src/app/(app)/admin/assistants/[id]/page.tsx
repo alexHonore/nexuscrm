@@ -8,12 +8,12 @@ import type { AssistantEditorData, EditorRule, EditorRun } from "@/components/ad
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { assistants, guardrailRules, guardrailRuns, objectionPacks } from "@/db/schema-sms";
-import { requireAdmin } from "@/lib/auth/guards";
 import { objectionItemSchema } from "@/lib/guardrails/types";
 import { assistantRowToConfig } from "@/lib/assistants/schema";
 import { getParamDocs } from "@/lib/docs-server";
 import { docLocale } from "@/lib/docs/locale";
 import type { GuardrailKind, GuardrailSeverity } from "@/lib/guardrails/types";
+import { requirePerm } from "@/lib/permissions/server";
 
 export default async function AssistantEditorPage({
   params,
@@ -22,7 +22,7 @@ export default async function AssistantEditorPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ tab?: string }>;
 }) {
-  await requireAdmin();
+  await requirePerm("admin.assistants");
   const { id } = await params;
   const { tab } = await searchParams;
 

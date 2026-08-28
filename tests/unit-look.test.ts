@@ -29,7 +29,9 @@ import {
   LookGlyph,
   LookIcon,
   ORIGIN_LOOK,
+  PERMISSION_GROUP_LOOK,
   QUEUE_KIND_LOOK,
+  ROLE_LOOK,
   RESULT_LOOK,
   SEVERITY_LOOK,
   TONE,
@@ -40,6 +42,8 @@ import {
 import { ATTENTION_REASONS, attentionKindOf } from "@/components/conversations/state";
 import { assistantStatusEnum } from "@/db/schema-sms";
 import { ASSISTANT_TOOLS, GOAL_TYPES } from "@/lib/assistants/schema";
+import { PERMISSION_GROUPS } from "@/lib/permissions/catalog";
+import { defaultRoles } from "@/lib/permissions/defaults";
 import { GUARDRAIL_KINDS, GUARDRAIL_SEVERITIES } from "@/lib/guardrails/types";
 import { FINDING_FAMILIES, VERDICTS } from "@/lib/deliverability/types";
 
@@ -155,8 +159,37 @@ describe("discipline des couleurs", () => {
       ...Object.values(EDITOR_TAB_LOOK).map((l) => l.color),
       ...Object.values(ASSISTANT_STATUS_LOOK).map((l) => l.color),
       ...Object.values(CREATE_MODE_TONE),
+      ...Object.values(ROLE_LOOK).map((l) => l.color),
+      ...Object.values(PERMISSION_GROUP_LOOK).map((l) => l.color),
     ];
     expect(everythingElse).not.toContain(CHANNEL_LOOK.sms.color);
+  });
+
+  it("chaque rôle livré porte une pastille qui existe", () => {
+    // Les rôles ne sont plus une énumération figée : l'administrateur en crée.
+    // Ce qui reste fermé, c'est la liste des PASTILLES — un rôle choisit parmi
+    // elles, il n'en invente pas. Un rôle livré qui pointerait vers une
+    // pastille disparue s'afficherait sans rien.
+    const missing = defaultRoles().filter((r) => !(r.look in ROLE_LOOK)).map((r) => r.id);
+    expect(missing, `rôles sans pastille : ${missing.join(", ")}`).toEqual([]);
+  });
+
+  it("les quatre pastilles d'autorité se distinguent par la forme ET la teinte", () => {
+    // Elles disent un NIVEAU (qui a les clés, qui ne fait que regarder) : deux
+    // niveaux qui se ressemblent ne servent à rien.
+    const icons = Object.values(ROLE_LOOK).map((l) => l.Icon);
+    const colors = Object.values(ROLE_LOOK).map((l) => l.color);
+    expect(new Set(icons).size, "deux rôles partagent un pictogramme").toBe(icons.length);
+    expect(new Set(colors).size, "deux rôles partagent une teinte").toBe(colors.length);
+  });
+
+  it("chaque famille de droits a son pictogramme", () => {
+    const missing = PERMISSION_GROUPS.filter((g) => !(g in PERMISSION_GROUP_LOOK));
+    expect(missing, `familles sans pictogramme : ${missing.join(", ")}`).toEqual([]);
+    // Jamais le violet réservé du canal SMS : il ne dit pas « messages ».
+    for (const [key, look] of Object.entries(PERMISSION_GROUP_LOOK)) {
+      expect(look.color, `${key} emprunte le violet du canal SMS`).not.toBe(CHANNEL_LOOK.sms.color);
+    }
   });
 
   it("les trois sévérités sont un feu de circulation, jamais deux fois la même teinte", () => {
@@ -271,6 +304,8 @@ describe("un pictogramme ne remplace pas un libellé", () => {
       ...QUEUE_KIND_LOOK,
       ...VERDICT_LOOK,
       ...DELIVERABILITY_LOOK,
+      ...ROLE_LOOK,
+      ...PERMISSION_GROUP_LOOK,
       sms: CHANNEL_LOOK.sms,
     })) {
       expect(typeof look.Icon, `${key}.Icon`).not.toBe("string");

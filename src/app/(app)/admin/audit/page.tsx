@@ -21,11 +21,14 @@ import {
 } from "@/components/ui/table";
 import { db } from "@/db";
 import { auditLogs, clients, users } from "@/db/schema";
-import { requireAdmin } from "@/lib/auth/guards";
+import { bucketFor, grantsFor } from "@/lib/permissions/access";
+import type { Grants } from "@/lib/permissions/catalog";
+import { loadDirectory, requirePerm, withVisibility } from "@/lib/permissions/server";
 import { cn } from "@/lib/utils";
 import {
   AUDIT_TZ,
   buildAuditEntry,
+  citedClientIds,
   isUuid,
   type AuditActionFamily,
   type AuditLookups,
@@ -80,8 +83,14 @@ export default async function AdminAuditPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireAdmin();
-  const [t, locale, params] = await Promise.all([getTranslations("admin"), getLocale(), searchParams]);
+  const actor = await requirePerm("admin.audit");
+  const [t, tAccess, locale, params] = await Promise.all([
+    getTranslations("admin"),
+    // « Masqué » est écrit une seule fois, chez les fiches.
+    getTranslations("clients"),
+    getLocale(),
+    searchParams,
+  ]);
   const dateLocale = locale === "fr" ? fr : enCA;
 
   // Paramètres d'URL validés : un filtre mal formé (uuid ou date) est ignoré
@@ -125,25 +134,62 @@ export default async function AdminAuditPage({
   ]);
 
   // Noms des fiches citées par cette page — une seule requête, ids uniques.
-  const clientIds = [
-    ...new Set(
-      rows
-        .filter((r) => r.log.entity === "client" && isUuid(r.log.entityId))
-        .map((r) => r.log.entityId as string),
-    ),
-  ];
-  const clientRows = clientIds.length
-    ? await db
-        .select({ id: clients.id, fullName: clients.fullName })
-        .from(clients)
-        .where(inArray(clients.id, clientIds))
-    : [];
+  //
+  // Le journal est global (il DOIT l'être : c'est sa raison d'être), mais il ne
+  // rouvre pas ce que la matrice ferme. La correspondance id → nom se bâtit
+  // donc sur les seules fiches que ce regard peut voir ; les autres lignes
+  // restent, désignées par leur identifiant. Une deuxième liste, non filtrée,
+  // dit seulement lesquelles EXISTENT encore : une fiche supprimée n'a plus de
+  // détenteur, donc plus de compartiment — c'est le droit du rôle qui tranche
+  // alors, sinon auditer une suppression ne montrerait plus rien de ce qui a
+  // été supprimé.
+  const clientIds = citedClientIds(rows.map((r) => r.log));
+  const [visibleClients, existingClients] = clientIds.length
+    ? await Promise.all([
+        db
+          .select({ id: clients.id, fullName: clients.fullName, holderId: clients.assignedToId })
+          .from(clients)
+          .where(await withVisibility(actor, inArray(clients.id, clientIds))),
+        db
+          .select({ id: clients.id })
+          .from(clients)
+          .where(inArray(clients.id, clientIds)),
+      ])
+    : [[], []];
+
+  // Le compartiment ne dépend que du DÉTENTEUR : une résolution par détenteur,
+  // pas une par ligne — la page en affiche cinquante.
+  const { cfg, roleOf } = await loadDirectory();
+  const grantsCache = new Map<string, Grants>();
+  const grantsOfHolder = (assignedToId: string | null): Grants => {
+    const key = assignedToId ?? "";
+    const hit = grantsCache.get(key);
+    if (hit) return hit;
+    const holder = assignedToId ? (roleOf.get(assignedToId) ?? null) : null;
+    const g = grantsFor(cfg, actor.role, bucketFor(actor.user.id, { assignedToId }, holder));
+    grantsCache.set(key, g);
+    return g;
+  };
+  const contactOpenIds = new Set(
+    visibleClients.filter((c) => grantsOfHolder(c.holderId).contact).map((c) => c.id),
+  );
+  const stillExists = new Set(existingClients.map((c) => c.id));
 
   const lookups: AuditLookups = {
     users: new Map(allUsers.map((u) => [u.id, u.name])),
     categories: new Map(allCategories.map((c) => [c.id, locale === "fr" ? c.nameFr : c.nameEn])),
     sources: new Map(allSources.map((s) => [s.id, s.name])),
-    clients: new Map(clientRows.map((c) => [c.id, c.fullName])),
+    clients: new Map(visibleClients.map((c) => [c.id, c.fullName])),
+    // Les rôles sont configurés : leur nom se lit dans le réglage, dans la
+    // langue de l'écran — et un rôle supprimé depuis reste son identifiant.
+    roles: new Map(cfg.roles.map((r) => [r.id, locale === "fr" ? r.nameFr : r.nameEn])),
+    // Une ligne sans fiche (un DID, un réglage) ou portant sur une fiche
+    // disparue n'a plus de compartiment à interroger : c'est le droit du rôle,
+    // le plafond, qui dit si un numéro peut encore se lire.
+    contactOpen: (clientId) =>
+      clientId !== null && stillExists.has(clientId)
+        ? contactOpenIds.has(clientId)
+        : actor.can("clients.contact"),
   };
 
   /** Aperçu en ligne : « Téléphone, Catégorie +2 » — le détail reste dans le dialogue. */
@@ -155,7 +201,12 @@ export default async function AdminAuditPage({
   };
 
   const entries = rows.map(({ log, userName }) => {
-    const entry = buildAuditEntry(log, userName, { t, dateLocale, lookups });
+    const entry = buildAuditEntry(log, userName, {
+      t,
+      dateLocale,
+      lookups,
+      mask: tAccess("access.masked"),
+    });
     return { entry, summary: changeSummary(entry.changes) };
   });
 
@@ -231,7 +282,14 @@ export default async function AdminAuditPage({
                     {entry.entityLabel ? (
                       <>
                         {entry.entityLabel}
-                        {entry.entityName ? ` · ${entry.entityName}` : ""}
+                        {/* Fiche fermée à ce regard (ou supprimée) : son
+                            identifiant, jamais son nom — une ligne d'audit doit
+                            quand même dire sur QUOI elle porte. */}
+                        {entry.entityName
+                          ? ` · ${entry.entityName}`
+                          : entry.clientHidden
+                            ? ` · ${entry.entityId}`
+                            : ""}
                       </>
                     ) : (
                       "—"
@@ -275,9 +333,13 @@ export default async function AdminAuditPage({
                   entry.userLabel
                 )}
                 {entry.entityLabel ? (
-                  <span className="ml-2 text-xs text-muted-foreground">
+                  <span className="ml-2 text-xs break-all text-muted-foreground">
                     {entry.entityLabel}
-                    {entry.entityName ? ` · ${entry.entityName}` : ""}
+                    {entry.entityName
+                      ? ` · ${entry.entityName}`
+                      : entry.clientHidden
+                        ? ` · ${entry.entityId}`
+                        : ""}
                   </span>
                 ) : null}
               </span>

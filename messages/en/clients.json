@@ -282,5 +282,23 @@
     "assistant": "Assistant: {name}",
     "nextTouch": "Next message: {when}",
     "open": "Open campaign"
+  },
+  "access": {
+    "readOnly": "Read only",
+    "readOnlyHint": "This record belongs to someone else: you can see it, not touch it.",
+    "masked": "Hidden",
+    "maskedHint": "Contact details are not open to you on this record.",
+    "historyHidden": "The history of this record is not open to you.",
+    "heldBy": "Held by {name}",
+    "pool": "In the pool",
+    "claim": "Take this record",
+    "claimed": "Record taken",
+    "release": "Return to the pool",
+    "released": "Record returned to the pool",
+    "locked": "Held by someone else: it frees up after {days} day(s) without contact.",
+    "lockedForever": "Held by someone else. Only an administrator can hand it over.",
+    "capReached": "Cap reached: {max} records. Return one before taking another.",
+    "noRight": "You do not have this right.",
+    "claimedOnCall": "Record taken: you just called it."
   }
 }

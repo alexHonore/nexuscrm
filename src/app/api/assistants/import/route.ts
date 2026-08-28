@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { importAssistant, previewImport } from "@/lib/assistants/transfer";
 import { paramDocText } from "@/lib/docs/locale";
 import { getParamDoc } from "@/lib/docs/params";
 import { glossIssues, normalizeIssues, withReceivedValues } from "@/lib/import-diagnostics";
 import { requestDocLocale } from "@/lib/locale-server";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * POST /api/assistants/import — prévisualise ou importe un fichier.
@@ -52,8 +52,8 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   let raw: unknown;
   try {
@@ -76,13 +76,13 @@ export async function POST(req: Request) {
     }
 
     const result = await importAssistant(parsed.data.bundle, {
-      actorId: admin.id,
+      actorId: actor.user.id,
       resolution: parsed.data.resolution,
       nameOverride: parsed.data.nameOverride,
       runSuite: parsed.data.runSuite,
     });
     await logAudit({
-      userId: admin.id,
+      userId: actor.user.id,
       action: "assistant.import",
       entity: "assistant",
       entityId: result.assistantId,

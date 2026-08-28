@@ -3,11 +3,11 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { DocsContent, type DocsLabels } from "@/components/admin/docs/docs-content";
 import { PageHeader } from "@/components/shell/page-header";
 import { TOOL_DEFS } from "@/lib/agent/tools";
-import { requireAdmin } from "@/lib/auth/guards";
 import { CAMPAIGN_FIELD_DOCS, campaignFieldText } from "@/lib/campaigns/docs";
 import { getParamDocs } from "@/lib/docs-server";
 import { exampleAssistantFile, exampleCampaignFile } from "@/lib/docs/examples";
 import { docLocale } from "@/lib/docs/locale";
+import { requirePerm } from "@/lib/permissions/server";
 import {
   FIXTURE_FIELD_DOCS,
   GUARDRAIL_KIND_DOCS,
@@ -26,7 +26,7 @@ import { DEFAULT_QUIET_HOURS } from "@/lib/sms/quiet-hours";
  * existe déjà ailleurs : quand un paramètre change, la page suit.
  */
 export default async function AdminDocsPage() {
-  await requireAdmin();
+  await requirePerm("admin.docs");
   // Les registres sont écrits en français ; ils sont RÉSOLUS ici, une fois,
   // dans la langue de la requête. Rien de tout cela ne touche la langue de
   // l'assistant, qui vient de sa propre configuration.

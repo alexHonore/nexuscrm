@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { apiUser } from "@/lib/auth/guards";
+import { apiActor } from "@/lib/permissions/server";
 import {
   BOARD_CARD_LIMIT,
   getBoardData,
@@ -9,7 +9,10 @@ import {
 type BoardClientPayload = {
   id: string;
   fullName: string;
-  phone: string;
+  /** null quand les coordonnées ne sont pas ouvertes sur cette fiche. */
+  phone: string | null;
+  /** Numéro absent par DROIT — de quoi afficher la pastille « Masqué ». */
+  contactHidden: boolean;
   city: string | null;
   nextFollowupAt: Date | null;
   doNotCall: boolean;
@@ -38,6 +41,7 @@ function serializeClient(c: BoardClientRow): BoardClientPayload {
     id: c.id,
     fullName: c.fullName,
     phone: c.phone,
+    contactHidden: c.contactHidden,
     city: c.city,
     nextFollowupAt: c.nextFollowupAt,
     doNotCall: c.doNotCall,
@@ -53,12 +57,15 @@ function serializeClient(c: BoardClientRow): BoardClientPayload {
  * Colonnes du pipeline (catégories par sortOrder), chacune avec son compte
  * total et ses ~40 clients les plus récents. Efficace : une requête de
  * comptes groupés + une sélection fenêtrée (voir getBoardData).
+ *
+ * Cartes ET comptes sont bornés à la portée de celui qui demande : le sondage
+ * de fond du tableau ne doit pas rendre ce que la page a refusé d'afficher.
  */
 export async function GET() {
-  const auth = await apiUser();
-  if (auth instanceof NextResponse) return auth;
+  const actor = await apiActor();
+  if (actor instanceof NextResponse) return actor;
 
-  const board = await getBoardData();
+  const board = await getBoardData(actor);
 
   const columns: BoardColumnPayload[] = board.categories.map((cat) => ({
     category: {

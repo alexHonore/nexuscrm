@@ -4,8 +4,8 @@ import { db } from "@/db";
 import { campaignEnrollments, conversations, messages, scheduledJobs } from "@/db/schema-sms";
 import { UNDELIVERED_STATUSES } from "@/lib/agent/runtime";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { enqueueJob } from "@/lib/jobs/queue";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * POST /api/admin/sms/replay-llm-errors — rejouer les tours tombés en panne.
@@ -39,8 +39,8 @@ import { enqueueJob } from "@/lib/jobs/queue";
  * la limite de débit de l'amont.
  */
 export async function POST() {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   const stuck = await db
     .select({ id: conversations.id })
@@ -169,7 +169,7 @@ export async function POST() {
   }
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "sms.replay_llm_errors",
     entity: "conversation",
     detail: { stuck: stuck.length, replayedInbound, replayedOutreach, replayedOrphans, cleared },

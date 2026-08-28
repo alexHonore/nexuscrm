@@ -345,8 +345,14 @@ describe("#55 — le sélecteur de langue de la coquille", () => {
     // La langue de l'écran vient du cookie NEXT_LOCALE ; `users.locale` peut
     // en diverger (compte créé en anglais, navigateur neuf) et le bouton
     // proposait alors la langue DÉJÀ affichée : premier clic sans effet.
-    const body = code("src/components/shell/app-shell.tsx");
-    expect(body).toContain("useLocale()");
-    expect(body).not.toContain("user.locale");
+    //
+    // Le fichier a été coupé en deux quand la navigation est devenue affaire
+    // de droits : `app-shell.tsx` résout côté serveur, `app-shell-client.tsx`
+    // dessine. Le sélecteur vit désormais dans le second — mais la règle vaut
+    // pour les DEUX : ni l'un ni l'autre ne doit lire `user.locale`.
+    const client = code("src/components/shell/app-shell-client.tsx");
+    expect(client).toContain("useLocale()");
+    expect(client).not.toContain("user.locale");
+    expect(code("src/components/shell/app-shell.tsx")).not.toContain("user.locale");
   });
 });

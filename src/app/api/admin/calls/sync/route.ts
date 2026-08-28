@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { shiftDateStr, todayStr } from "@/components/analytics/period";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { syncCdrRange } from "@/lib/cdr-sync";
+import { apiPerm } from "@/lib/permissions/server";
 
 export const dynamic = "force-dynamic";
 // L'API voip.ms peut mettre plus de 90 s à répondre — laisser de la marge.
@@ -27,8 +27,8 @@ const schema = z
  * cron du lendemain matin.
  */
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.calls");
+  if (actor instanceof NextResponse) return actor;
 
   let body: z.infer<typeof schema>;
   try {
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
   const { counts, recordingFields, errors } = await syncCdrRange(from, to);
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "calls.sync",
     entity: "calls",
     detail: { range: { from, to }, counts, errors },

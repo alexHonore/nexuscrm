@@ -17,9 +17,11 @@ import {
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { db } from "@/db";
-import { appointments, calls, clients, followups } from "@/db/schema";
+import { appointments, calls, clients, followups, users } from "@/db/schema";
 import { conversations } from "@/db/schema-sms";
-import { requireUser } from "@/lib/auth/guards";
+import { bucketFor, grantsFor } from "@/lib/permissions/access";
+import type { Grants } from "@/lib/permissions/catalog";
+import { loadDirectory, requireActor, scopeFor, withVisibility } from "@/lib/permissions/server";
 import { formatPhone, phoneMatchKey } from "@/lib/phone";
 import { RedialButton } from "@/components/calls/redial-button";
 import { APP_TZ, torontoDayRange, torontoMonthStart } from "@/components/clients/timezone";
@@ -53,8 +55,12 @@ const UPCOMING_MONTHS = 3;
 const FOLLOWUP_FETCH_LIMIT = 500;
 
 export default async function DashboardPage() {
-  const user = await requireUser();
+  const actor = await requireActor();
+  const user = actor.user;
   const t = await getTranslations("dashboard");
+  // Le vocabulaire de l'ACCÈS vit chez les fiches : « Masqué » y est déjà
+  // écrit, et cet écran ne fait que le reprendre.
+  const tAccess = await getTranslations("clients");
   const locale = await getLocale();
   const dfnsLocale = locale === "en" ? enUS : fr;
 
@@ -66,55 +72,124 @@ export default async function DashboardPage() {
   const upcomingEnd = torontoMonthStart(now, UPCOMING_MONTHS);
   const missedWindowStart = new Date(now.getTime() - 7 * 24 * 3600_000);
 
-  // Prochains rendez-vous (14 jours), en cours inclus. Le courtier (admin)
-  // voit TOUTE l'équipe — chaque rencontre prise par un téléphoniste est la
-  // sienne ; un téléphoniste ne voit que les siennes.
+  // ── Ce que CE regard atteint ────────────────────────────────────────────
+  // Le compartiment d'une fiche ne dépend que de son DÉTENTEUR : on résout les
+  // cases une fois par détenteur et non une fois par ligne — l'annuaire et la
+  // matrice sont en cache de requête, la question ne coûte donc rien.
+  const [{ cfg, roleOf }, scope] = await Promise.all([loadDirectory(), scopeFor(actor)]);
+  const grantsCache = new Map<string, Grants>();
+  const grantsOfHolder = (assignedToId: string | null): Grants => {
+    const key = assignedToId ?? "";
+    const hit = grantsCache.get(key);
+    if (hit) return hit;
+    const holder = assignedToId ? (roleOf.get(assignedToId) ?? null) : null;
+    const g = grantsFor(cfg, actor.role, bucketFor(user.id, { assignedToId }, holder));
+    grantsCache.set(key, g);
+    return g;
+  };
+
+  /**
+   * L'agenda et la boîte de TOUTE l'équipe, ou seulement les siens ?
+   *
+   * La question n'est plus « est-il administrateur » mais « toutes les fiches
+   * lui sont-elles ouvertes » : qui voit tout le monde mène tout le monde
+   * (courtier, superviseur). Un téléphoniste garde son propre agenda.
+   */
+  const seesEveryone = scope.kind === "all";
+
+  // Prochains rendez-vous (14 jours), en cours inclus. Un rendez-vous NOMME une
+  // fiche : il se cache donc avec elle, même quand c'est le rendez-vous de
+  // celui qui regarde — d'où la visibilité EN PLUS du filtre par propriétaire.
   const upcomingHorizon = new Date(now.getTime() + 14 * 24 * 3600_000);
-  const upcomingWhere = and(
-    ...(user.role === "admin" ? [] : [eq(appointments.userId, user.id)]),
-    eq(appointments.status, "scheduled"),
-    gte(appointments.endsAt, now),
-    lt(appointments.startsAt, upcomingHorizon),
+  const upcomingWhere = await withVisibility(
+    actor,
+    and(
+      ...(seesEveryone ? [] : [eq(appointments.userId, user.id)]),
+      eq(appointments.status, "scheduled"),
+      gte(appointments.endsAt, now),
+      lt(appointments.startsAt, upcomingHorizon),
+    ),
   );
 
-  // Les fils que l'assistant SMS a rendus à un humain. Le courtier les voit
-  // tous — chaque conversation rendue est la sienne ; un téléphoniste ne voit
-  // que celles qui lui sont assignées, comme pour ses suivis et ses rendez-vous.
-  const attentionWhere = and(
-    eq(conversations.needsAttention, true),
-    ...(user.role === "admin" ? [] : [eq(conversations.assignedToId, user.id)]),
+  // Les fils que l'assistant SMS a rendus à un humain — un fil PARLE d'une
+  // fiche, il disparaît avec elle. Qui voit toute l'équipe voit tous les fils ;
+  // les autres n'ont que ceux qui leur sont assignés, comme leurs suivis.
+  const attentionWhere = await withVisibility(
+    actor,
+    and(
+      eq(conversations.needsAttention, true),
+      ...(seesEveryone ? [] : [eq(conversations.assignedToId, user.id)]),
+    ),
+  );
+
+  // Un suivi m'est assigné, la fiche derrière peut avoir changé de main depuis :
+  // la MÊME condition sert à la liste et à son compte, sinon le compte annonce
+  // ce que la liste cache.
+  const followupWhere = await withVisibility(
+    actor,
+    and(
+      eq(followups.assignedToId, user.id),
+      isNull(followups.doneAt),
+      lt(followups.dueAt, upcomingEnd),
+    ),
   );
 
   const [
     pendingFollowups,
     upcomingAppointments,
-    upcomingCount,
+    [upcomingCountRow],
     [callStats],
     bookedToday,
     missedRows,
     attentionRows,
-    attentionCount,
-    pendingFollowupTotal,
+    [attentionCountRow],
+    [followupTotalRow],
   ] = await Promise.all([
     // En retard + aujourd'hui + les 7 jours qui viennent, en UNE requête —
     // l'index (assigned_to_id, due_at) couvre la borne haute.
-    db.query.followups.findMany({
-      where: and(
-        eq(followups.assignedToId, user.id),
-        isNull(followups.doneAt),
-        lt(followups.dueAt, upcomingEnd),
-      ),
-      with: { client: true },
-      orderBy: [asc(followups.dueAt)],
-      limit: FOLLOWUP_FETCH_LIMIT,
-    }),
-    db.query.appointments.findMany({
-      where: upcomingWhere,
-      with: { client: true, user: { columns: { name: true } } },
-      orderBy: [asc(appointments.startsAt)],
-      limit: 8,
-    }),
-    db.$count(appointments, upcomingWhere),
+    //
+    // Jointure explicite et colonnes NOMMÉES là où un `with: { client: true }`
+    // chargeait la fiche entière : la visibilité se pose sur `clients` (donc
+    // il faut la table), et une colonne qu'on ne lit pas ne peut pas fuir.
+    db
+      .select({
+        id: followups.id,
+        clientId: followups.clientId,
+        dueAt: followups.dueAt,
+        note: followups.note,
+        createdById: followups.createdById,
+        clientName: clients.fullName,
+        clientPhone: clients.phone,
+        clientDoNotCall: clients.doNotCall,
+        holderId: clients.assignedToId,
+      })
+      .from(followups)
+      .innerJoin(clients, eq(clients.id, followups.clientId))
+      .where(followupWhere)
+      .orderBy(asc(followups.dueAt))
+      .limit(FOLLOWUP_FETCH_LIMIT),
+    db
+      .select({
+        id: appointments.id,
+        clientId: appointments.clientId,
+        startsAt: appointments.startsAt,
+        endsAt: appointments.endsAt,
+        type: appointments.type,
+        title: appointments.title,
+        clientName: clients.fullName,
+        bookedByName: users.name,
+      })
+      .from(appointments)
+      .innerJoin(clients, eq(clients.id, appointments.clientId))
+      .innerJoin(users, eq(users.id, appointments.userId))
+      .where(upcomingWhere)
+      .orderBy(asc(appointments.startsAt))
+      .limit(8),
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(appointments)
+      .innerJoin(clients, eq(clients.id, appointments.clientId))
+      .where(upcomingWhere),
     db
       .select({
         count: sql<number>`count(*)::int`,
@@ -141,6 +216,7 @@ export default async function DashboardPage() {
         clientId: clients.id,
         clientName: clients.fullName,
         clientDoNotCall: clients.doNotCall,
+        holderId: clients.assignedToId,
       })
       .from(calls)
       .leftJoin(clients, eq(clients.id, calls.clientId))
@@ -166,23 +242,29 @@ export default async function DashboardPage() {
         attentionReason: conversations.attentionReason,
         lastInboundAt: conversations.lastInboundAt,
         lastOutboundAt: conversations.lastOutboundAt,
+        holderId: clients.assignedToId,
       })
       .from(conversations)
-      .leftJoin(clients, eq(clients.id, conversations.clientId))
+      .innerJoin(clients, eq(clients.id, conversations.clientId))
       .where(attentionWhere)
       .orderBy(desc(conversations.lastInboundAt))
       .limit(6),
-    db.$count(conversations, attentionWhere),
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(conversations)
+      .innerJoin(clients, eq(clients.id, conversations.clientId))
+      .where(attentionWhere),
     // Le VRAI nombre, pour que le plafond de chargement ne mente jamais.
-    db.$count(
-      followups,
-      and(
-        eq(followups.assignedToId, user.id),
-        isNull(followups.doneAt),
-        lt(followups.dueAt, upcomingEnd),
-      ),
-    ),
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(followups)
+      .innerJoin(clients, eq(clients.id, followups.clientId))
+      .where(followupWhere),
   ]);
+
+  const upcomingCount = upcomingCountRow?.n ?? 0;
+  const attentionCount = attentionCountRow?.n ?? 0;
+  const pendingFollowupTotal = followupTotalRow?.n ?? 0;
 
   // « Jamais retourné » : aucun appel POSTÉRIEUR, de qui que ce soit dans
   // l'équipe, vers ou depuis ce numéro (sortant = on a tenté un rappel ;
@@ -219,29 +301,51 @@ export default async function DashboardPage() {
     });
   }
 
+  // Un manqué reste MON appel : il figure dans la liste même quand la fiche
+  // derrière le numéro échappe à ce regard — mais elle n'y est plus nommée, et
+  // la ligne se lit alors comme un numéro inconnu. Taire l'appel serait pire :
+  // le téléphone a bel et bien sonné.
+  const missedShown = unreturnedMissed.map((row) =>
+    row.clientId && grantsOfHolder(row.holderId).visible
+      ? row
+      : { ...row, clientId: null, clientName: null },
+  );
+
   // 16:09 en français, 4:09 PM en anglais — la carte des rendez-vous juste à
   // côté le fait déjà ; les suivis affichaient l'heure sur 24 h dans les deux
   // langues, ce qui donnait deux conventions dans la même colonne.
   const timeFormat = locale === "en" ? "h:mm a" : "HH:mm";
 
-  const toItem = (f: (typeof pendingFollowups)[number], overdue: boolean): FollowupItemData => ({
-    id: f.id,
-    clientId: f.clientId,
-    clientName: f.client?.fullName ?? "—",
-    phone: f.client?.phone ?? "",
-    phoneDisplay: formatPhone(f.client?.phone),
-    note: f.note,
-    dueLabel: formatInTimeZone(f.dueAt, APP_TZ, overdue ? `d MMM ${timeFormat}` : timeFormat, {
-      locale: dfnsLocale,
-    }),
-    overdue,
-    doNotCall: f.client?.doNotCall ?? false,
-    // Programmé par l'assistant SMS : lui seul écrit un suivi sans auteur
-    // (`createdById` null). Les trois autres chemins portent l'utilisateur qui
-    // l'a créé. Les deux familles vivent dans la MÊME liste — la marque est ce
-    // qui permet de les y distinguer.
-    aiScheduled: f.createdById === null,
-  });
+  const toItem = (f: (typeof pendingFollowups)[number], overdue: boolean): FollowupItemData => {
+    // Le suivi reste DÛ même quand le compartiment de la fiche ferme les
+    // coordonnées (une fiche prise par un collègue) : la tâche s'affiche, le
+    // numéro non — et le bouton d'appel disparaît avec lui. La chaîne vide
+    // d'avant gardait un composeur vivant qui composait « rien ».
+    const open = grantsOfHolder(f.holderId);
+    return {
+      id: f.id,
+      clientId: f.clientId,
+      clientName: f.clientName,
+      phone: open.contact ? f.clientPhone : null,
+      contactHidden: !open.contact,
+      // Appeler demande la case « appeler » ET le numéro : la première sans le
+      // second n'a rien à composer, le second sans la première n'en a pas le
+      // droit.
+      canCall: open.call && open.contact,
+      phoneDisplay: open.contact ? formatPhone(f.clientPhone) : tAccess("access.masked"),
+      note: f.note,
+      dueLabel: formatInTimeZone(f.dueAt, APP_TZ, overdue ? `d MMM ${timeFormat}` : timeFormat, {
+        locale: dfnsLocale,
+      }),
+      overdue,
+      doNotCall: f.clientDoNotCall,
+      // Programmé par l'assistant SMS : lui seul écrit un suivi sans auteur
+      // (`createdById` null). Les trois autres chemins portent l'utilisateur qui
+      // l'a créé. Les deux familles vivent dans la MÊME liste — la marque est ce
+      // qui permet de les y distinguer.
+      aiScheduled: f.createdById === null,
+    };
+  };
 
   const todayKey = formatInTimeZone(now, APP_TZ, "yyyy-MM-dd");
   // « Demain » = prochain minuit de Toronto (`end`), pas maintenant + 24 h —
@@ -289,7 +393,7 @@ export default async function DashboardPage() {
   };
   const missedGroups: MissedGroup[] = [];
   const missedByKey = new Map<string, MissedGroup>();
-  for (const row of unreturnedMissed) {
+  for (const row of missedShown) {
     const key = phoneMatchKey(row.fromNumber) ?? row.fromNumber ?? row.id;
     const existing = missedByKey.get(key);
     if (existing) {
@@ -364,7 +468,7 @@ export default async function DashboardPage() {
           </h1>
           <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
         </div>
-        {user.role === "admin" ? (
+        {actor.can("admin.analytics") ? (
           <Button variant="outline" render={<Link href="/admin/analytics" />}>
             <BarChart3Icon />
             {t("analyticsLink")}
@@ -582,7 +686,12 @@ export default async function DashboardPage() {
                   id: row.id,
                   clientId: row.clientId,
                   clientName: row.clientName,
-                  clientPhone: row.clientPhone,
+                  // Le fil PORTE le numéro du client : il se masque comme celui
+                  // de la fiche, sinon la boîte de réception rend en clair ce
+                  // que la fiche cache. Et la ligne DIT qu'elle masque, au lieu
+                  // de laisser croire à un fil sans numéro.
+                  clientPhone: grantsOfHolder(row.holderId).contact ? row.clientPhone : null,
+                  contactHidden: !grantsOfHolder(row.holderId).contact,
                   attentionReason: row.attentionReason,
                   // Mise en forme ICI : une locale `date-fns` est un objet de
                   // fonctions, et rien de tel ne traverse la frontière
@@ -656,11 +765,11 @@ export default async function DashboardPage() {
                               href={`/clients/${a.clientId}`}
                               className="block truncate text-sm font-medium hover:underline"
                             >
-                              {a.client?.fullName ?? a.title}
+                              {a.clientName}
                             </Link>
                             <p className="truncate text-xs text-muted-foreground">
-                              {user.role === "admin" && a.user?.name
-                                ? t("appointments.bookedBy", { name: a.user.name })
+                              {seesEveryone
+                                ? t("appointments.bookedBy", { name: a.bookedByName })
                                 : a.title}
                             </p>
                           </div>

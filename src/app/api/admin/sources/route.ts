@@ -3,8 +3,8 @@ import { z } from "zod";
 import { db } from "@/db";
 import { sources } from "@/db/schema";
 import { diffFields, logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { isUniqueViolation } from "@/lib/db-errors";
+import { apiPerm } from "@/lib/permissions/server";
 import { readJson } from "../_helpers";
 
 const createSchema = z.object({
@@ -13,8 +13,8 @@ const createSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.pipeline");
+  if (actor instanceof NextResponse) return actor;
 
   const body = await readJson(req, createSchema);
   if (body instanceof NextResponse) return body;
@@ -24,7 +24,7 @@ export async function POST(req: Request) {
 
     const changes = diffFields(null, created, ["name", "color"]);
     await logAudit({
-      userId: admin.id,
+      userId: actor.user.id,
       action: "source.create",
       entity: "source",
       entityId: String(created.id),

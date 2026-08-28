@@ -12,6 +12,7 @@ import {
   completeFollowupAction,
   createFollowupAction,
   updateFollowupDueAction,
+  type ActionResult,
 } from "@/app/(app)/clients/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,9 +46,12 @@ const DRAFT_PREFIX = "draft:";
 export function FollowupsCard({
   clientId,
   followups,
+  canManage,
 }: {
   clientId: string;
   followups: FollowupData[];
+  /** Créer, déplacer, terminer un suivi sur CETTE fiche. Sinon : lecture. */
+  canManage: boolean;
 }) {
   const t = useTranslations("clients");
   const locale = useLocale();
@@ -76,9 +80,12 @@ export function FollowupsCard({
   /** Exécute une mutation optimiste : applique `next`, restaure en cas d'échec. */
   const mutate = (
     next: (current: FollowupData[]) => FollowupData[],
-    run: () => Promise<{ ok: boolean }>,
+    run: () => Promise<ActionResult>,
     successMessage: string,
   ) => {
+    // Sans le droit, aucun bouton n'existe : ce garde-fou couvre le raccourci
+    // clavier et l'écran resté ouvert pendant qu'un rôle changeait.
+    if (!canManage) return;
     let snapshot: FollowupData[] = [];
     setRows((current) => {
       snapshot = current;
@@ -95,7 +102,13 @@ export function FollowupsCard({
         router.refresh();
       } else {
         setRows(snapshot);
-        toast.error(t("errors.generic"));
+        toast.error(
+          res.error === "forbidden"
+            ? t("access.noRight")
+            : res.error === "notFound"
+              ? t("errors.notFound")
+              : t("errors.generic"),
+        );
       }
     });
   };
@@ -210,12 +223,14 @@ export function FollowupsCard({
           <CalendarClockIcon className="size-4 text-muted-foreground" />
           {t("followups.title")}
         </CardTitle>
-        <CardAction>
-          <Button variant="outline" size="sm" className="min-h-11 md:min-h-7" onClick={openCreate}>
-            <PlusIcon />
-            {t("followups.add")}
-          </Button>
-        </CardAction>
+        {canManage ? (
+          <CardAction>
+            <Button variant="outline" size="sm" className="min-h-11 md:min-h-7" onClick={openCreate}>
+              <PlusIcon />
+              {t("followups.add")}
+            </Button>
+          </CardAction>
+        ) : null}
       </CardHeader>
       <CardContent className="space-y-4">
         {open.length === 0 && done.length === 0 ? (
@@ -259,24 +274,30 @@ export function FollowupsCard({
                         <p className="truncate text-xs text-muted-foreground">{f.note}</p>
                       ) : null}
                     </div>
-                    <Button
-                      variant="ghost"
-                      className="size-11 md:size-8"
-                      aria-label={t("followups.editDue")}
-                      disabled={isDraft}
-                      onClick={() => openEdit(f)}
-                    >
-                      <PencilIcon className="size-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      className="size-11 text-emerald-600 md:size-8"
-                      aria-label={t("followups.complete")}
-                      disabled={isDraft}
-                      onClick={() => complete(f.id)}
-                    >
-                      <CheckIcon className="size-5" />
-                    </Button>
+                    {/* Déplacer et terminer : des gestes, donc rien à afficher
+                        quand ils sont fermés — un bouton grisé n'apprend rien. */}
+                    {canManage ? (
+                      <>
+                        <Button
+                          variant="ghost"
+                          className="size-11 md:size-8"
+                          aria-label={t("followups.editDue")}
+                          disabled={isDraft}
+                          onClick={() => openEdit(f)}
+                        >
+                          <PencilIcon className="size-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          className="size-11 text-emerald-600 md:size-8"
+                          aria-label={t("followups.complete")}
+                          disabled={isDraft}
+                          onClick={() => complete(f.id)}
+                        >
+                          <CheckIcon className="size-5" />
+                        </Button>
+                      </>
+                    ) : null}
                   </li>
                 );
               })}

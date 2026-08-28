@@ -46,7 +46,12 @@ export type AppointmentItem = {
   endsAt: string;
   meetLink: string | null;
   location: string | null;
-  clientId: string;
+  /**
+   * `null` quand la fiche échappe à ce regard : le rendez-vous reste (c'est
+   * l'agenda de celui qui l'a pris), la fiche derrière ne se rouvre pas — pas
+   * de lien, et `clientName`/`clientPhone` valent déjà le mot « Masqué ».
+   */
+  clientId: string | null;
   clientName: string;
   clientPhone: string;
   bookedByName: string;
@@ -81,6 +86,9 @@ export function AppointmentCard({
   showDate?: boolean;
 }) {
   const t = useTranslations("booking");
+  // Le vocabulaire de l'accès vit chez les fiches — « Masqué » et « Lecture
+  // seule » s'y écrivent une seule fois, pour la fiche comme pour l'agenda.
+  const ta = useTranslations("clients");
   const locale = useLocale();
   const dateLocale = locale === "en" ? enCA : frLocale;
   const timeFormat = locale === "en" ? "h:mm a" : "HH 'h' mm";
@@ -142,6 +150,11 @@ export function AppointmentCard({
             {showDate || item.status !== "scheduled" ? (
               <StatusBadge status={item.status} />
             ) : null}
+            {item.clientId ? null : (
+              <Badge variant="outline" className="font-normal">
+                {ta("access.readOnly")}
+              </Badge>
+            )}
           </div>
           <p
             className={cn(
@@ -152,13 +165,24 @@ export function AppointmentCard({
             {fullDate}
           </p>
           <p className="mt-1 truncate">
-            <Link
-              href={`/clients/${item.clientId}`}
-              className="font-medium text-primary underline-offset-4 hover:underline"
-            >
-              {item.clientName}
-            </Link>
-            <span className="text-muted-foreground"> · {formatPhone(item.clientPhone)}</span>
+            {item.clientId ? (
+              <>
+                <Link
+                  href={`/clients/${item.clientId}`}
+                  className="font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  {item.clientName}
+                </Link>
+                <span className="text-muted-foreground"> · {formatPhone(item.clientPhone)}</span>
+              </>
+            ) : (
+              // Fiche fermée : le mot, pas le lien. Une page « introuvable »
+              // annoncerait quand même qu'il y a une fiche derrière ce
+              // rendez-vous, et le numéro n'a plus à être composé d'ici.
+              <span className="font-medium text-muted-foreground" title={ta("access.maskedHint")}>
+                {item.clientName}
+              </span>
+            )}
           </p>
           {item.type === "inperson" && item.location ? (
             <p className="mt-0.5 flex items-start gap-1 text-xs text-muted-foreground">

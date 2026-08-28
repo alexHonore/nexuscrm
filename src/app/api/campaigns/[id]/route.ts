@@ -4,10 +4,10 @@ import { z } from "zod";
 import { db } from "@/db";
 import { assistants, campaignEnrollments, campaigns, smsNumbers } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { campaignConfigSchema, campaignRowToConfig } from "@/lib/campaigns/schema";
 import { closeCampaignEnrollments } from "@/lib/campaigns-server/lifecycle";
 import { isForeignKeyViolation } from "@/lib/db-errors";
+import { apiPerm } from "@/lib/permissions/server";
 
 const CAMPAIGN_STATUSES = ["draft", "active", "paused", "archived"] as const;
 
@@ -28,8 +28,8 @@ function missingReference(err: unknown): "assistant_not_found" | "sms_number_not
 }
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.campaigns");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -96,8 +96,8 @@ async function activationProblem(config: {
  * campagnes en pause, et les inscriptions doivent repartir à la reprise.
  */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.campaigns");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -165,7 +165,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       : null;
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: parsed.data.status ? `campaign.${parsed.data.status}` : "campaign.update",
     entity: "campaign",
     entityId: id,
@@ -181,8 +181,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
  * inscriptions en cascade, et avec elles la seule trace de qui a reçu quoi.
  */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.campaigns");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -204,7 +204,7 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
       .where(eq(campaigns.id, id));
     const closed = await closeCampaignEnrollments(id);
     await logAudit({
-      userId: admin.id,
+      userId: actor.user.id,
       action: "campaign.archive",
       entity: "campaign",
       entityId: id,
@@ -215,7 +215,7 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
 
   await db.delete(campaigns).where(eq(campaigns.id, id));
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "campaign.delete",
     entity: "campaign",
     entityId: id,

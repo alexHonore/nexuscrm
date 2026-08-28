@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { runAssistantSuite } from "@/lib/assistants/service";
+import { apiPerm } from "@/lib/permissions/server";
 
 /** Une suite complète enchaîne ~14 appels modèle : il lui faut du temps. */
 export const maxDuration = 300;
@@ -13,8 +13,8 @@ export const maxDuration = 300;
  * et consigne l'exécution dans `guardrail_runs`.
  */
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -22,9 +22,9 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
   }
 
   try {
-    const outcome = await runAssistantSuite(id, admin.id);
+    const outcome = await runAssistantSuite(id, actor.user.id);
     await logAudit({
-      userId: admin.id,
+      userId: actor.user.id,
       action: "assistant.suite_run",
       entity: "assistant",
       entityId: id,

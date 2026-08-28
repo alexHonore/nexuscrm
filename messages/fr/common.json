@@ -30,7 +30,8 @@
     "groupSystem": "Système",
     "goLive": "Mise en service",
     "docs": "Documentation",
-    "deliverability": "Délivrabilité"
+    "deliverability": "Délivrabilité",
+    "roles": "Rôles et droits"
   },
   "actions": {
     "save": "Enregistrer",

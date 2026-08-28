@@ -3,8 +3,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { guardrailAudit, guardrailRules } from "@/db/schema-sms";
-import { apiAdmin } from "@/lib/auth/guards";
 import { invalidateAssistantsForGuardrails } from "@/lib/guardrails/store";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * POST /api/admin/guardrails/rules/:id/reset — restaure EXACTEMENT l'état
@@ -13,8 +13,8 @@ import { invalidateAssistantsForGuardrails } from "@/lib/guardrails/store";
  * les assistants concernés sont périmés.
  */
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.guardrails");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -40,7 +40,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
       enabled: snapshot.enabled !== false,
       orderIndex: Number(snapshot.orderIndex ?? before.orderIndex),
       modifiedFromDefault: false,
-      updatedById: admin.id,
+      updatedById: actor.user.id,
       updatedAt: new Date(),
     })
     .where(eq(guardrailRules.id, id))
@@ -49,7 +49,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
   const staleAssistants = await invalidateAssistantsForGuardrails({ assistantId: before.assistantId });
 
   await db.insert(guardrailAudit).values({
-    actorId: admin.id,
+    actorId: actor.user.id,
     action: "rule_reset",
     target: `rule:${before.key}`,
     before: { severity: before.severity, enabled: before.enabled, config: before.config },

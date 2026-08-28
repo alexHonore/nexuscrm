@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { categories } from "@/db/schema";
 import { diffFields, logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { readJson } from "../_helpers";
 
 const createSchema = z.object({
@@ -15,8 +15,8 @@ const createSchema = z.object({
 
 /** Crée une catégorie personnalisée (non système), placée en fin de liste. */
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.pipeline");
+  if (actor instanceof NextResponse) return actor;
 
   const body = await readJson(req, createSchema);
   if (body instanceof NextResponse) return body;
@@ -29,7 +29,7 @@ export async function POST(req: Request) {
 
   const changes = diffFields(null, created, ["nameFr", "nameEn", "color", "sortOrder"]);
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "category.create",
     entity: "category",
     entityId: String(created.id),

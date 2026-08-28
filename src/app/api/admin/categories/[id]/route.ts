@@ -4,8 +4,8 @@ import { z } from "zod";
 import { db } from "@/db";
 import { categories, clients } from "@/db/schema";
 import { diffFields, logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { notifyCategoryChanges } from "@/lib/campaigns-server/match";
+import { apiPerm } from "@/lib/permissions/server";
 import { AbortDelete, abortDeleteResponse, readJson, readReassignTarget } from "../../_helpers";
 
 const patchSchema = z.object({
@@ -20,8 +20,8 @@ const patchSchema = z.object({
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function PATCH(req: Request, ctx: Ctx) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.pipeline");
+  if (actor instanceof NextResponse) return actor;
   const id = Number((await ctx.params).id);
   if (!Number.isInteger(id)) return NextResponse.json({ error: "invalid_id" }, { status: 400 });
 
@@ -35,7 +35,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
   const changes = diffFields(before, updated, ["nameFr", "nameEn", "color"]);
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "category.update",
     entity: "category",
     entityId: String(id),
@@ -54,8 +54,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
  * (`reassign_required`) plutôt que d'orphelin­iser les fiches en silence.
  */
 export async function DELETE(req: Request, ctx: Ctx) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.pipeline");
+  if (actor instanceof NextResponse) return actor;
   const id = Number((await ctx.params).id);
   if (!Number.isInteger(id)) return NextResponse.json({ error: "invalid_id" }, { status: 400 });
 
@@ -98,7 +98,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
 
   const changes = diffFields(target, null, ["nameFr", "nameEn", "color"]);
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "category.delete",
     entity: "category",
     entityId: String(id),

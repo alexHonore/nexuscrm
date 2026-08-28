@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { deactivateAssistant } from "@/lib/assistants/service";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * POST /api/assistants/:id/deactivate — retire un assistant du service : il
@@ -15,8 +15,8 @@ import { deactivateAssistant } from "@/lib/assistants/service";
  * assistant archivé reste archivé : l'archivage est terminal.
  */
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -30,7 +30,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
     }
     if (result.changed) {
       await logAudit({
-        userId: admin.id,
+        userId: actor.user.id,
         action: "assistant.deactivate",
         entity: "assistant",
         entityId: id,

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { guardrailAudit } from "@/db/schema-sms";
-import { apiAdmin } from "@/lib/auth/guards";
 import { invalidateAssistantsForGuardrails, resetGuardrailDefaults } from "@/lib/guardrails/store";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * POST /api/admin/guardrails/reset-all — « Tout réinitialiser aux valeurs par
@@ -14,13 +14,13 @@ import { invalidateAssistantsForGuardrails, resetGuardrailDefaults } from "@/lib
  * chaque assistant, dont le L6 et la suite reflétaient l'état expérimental.
  */
 export async function POST() {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.guardrails");
+  if (actor instanceof NextResponse) return actor;
 
   const counts = await resetGuardrailDefaults();
   const staleAssistants = await invalidateAssistantsForGuardrails({ assistantId: null });
   await db.insert(guardrailAudit).values({
-    actorId: admin.id,
+    actorId: actor.user.id,
     action: "reset_all",
     target: "guardrails:core",
     before: null,

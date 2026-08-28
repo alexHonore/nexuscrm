@@ -53,6 +53,14 @@ export type IncomingCallInfo = {
   client: {
     id: string;
     fullName: string;
+    /**
+     * La fiche s'OUVRE-t-elle pour ce regard ? Le lookup nomme l'appelant même
+     * quand la fiche est tenue par quelqu'un d'autre (décrocher en disant
+     * « bonjour Madame Tremblay » vaut mieux que « allô ? »), mais nommer
+     * n'est pas ouvrir : sans ce drapeau, le popup proposerait un lien vers un
+     * « introuvable » en pleine sonnerie.
+     */
+    canOpen: boolean;
     categoryName: string | null;
     categoryColor: string | null;
   } | null;
@@ -122,18 +130,26 @@ const KNOWN_ERRORS = new Set([
 
 const TelephonyContext = createContext<TelephonyContextValue | null>(null);
 
-async function createCallLog(body: {
-  clientId?: string | null;
-  direction: CallDirection;
-  toNumber?: string | null;
-  fromNumber?: string | null;
-  startedAt: string;
-  /** Posé dès le décroché : si le PATCH final se perd (onglet fermé en plein
-   *  appel), la rangée reste classée « répondu » au lieu de « manqué ». */
-  answeredAt?: string;
-  /** Entrant jamais décroché : l'appel manqué se journalise en une requête. */
-  endedAt?: string;
-}): Promise<string | null> {
+async function createCallLog(
+  body: {
+    clientId?: string | null;
+    direction: CallDirection;
+    toNumber?: string | null;
+    fromNumber?: string | null;
+    startedAt: string;
+    /** Posé dès le décroché : si le PATCH final se perd (onglet fermé en plein
+     *  appel), la rangée reste classée « répondu » au lieu de « manqué ». */
+    answeredAt?: string;
+    /** Entrant jamais décroché : l'appel manqué se journalise en une requête. */
+    endedAt?: string;
+  },
+  /**
+   * Appelé quand le serveur signale que CET appel vient de prendre la fiche au
+   * bassin (règle `claimOnCall`). Personne n'a cliqué « Prendre » : sans ce
+   * signal, la fiche changerait de main en silence.
+   */
+  onClaimed?: () => void,
+): Promise<string | null> {
   try {
     const res = await fetch("/api/calls", {
       method: "POST",
@@ -141,7 +157,8 @@ async function createCallLog(body: {
       body: JSON.stringify(body),
     });
     if (!res.ok) return null;
-    const data = (await res.json()) as { id?: string };
+    const data = (await res.json()) as { id?: string; claimed?: boolean };
+    if (data.claimed) onClaimed?.();
     return data.id ?? null;
   } catch {
     return null;
@@ -165,6 +182,8 @@ async function finalizeCallLog(
 
 export function TelephonyProvider({ children }: { children: React.ReactNode }) {
   const t = useTranslations("phone");
+  /** La prise de fiche est un fait du module CLIENTS — son texte y vit aussi. */
+  const tClients = useTranslations("clients");
   const locale = useLocale();
 
   const [provider, setProvider] = useState<"voipms" | "twilio" | null>(null);
@@ -233,6 +252,9 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
         return {
           id: raw.id,
           fullName: typeof raw.fullName === "string" ? raw.fullName : "",
+          // Le doute ferme le lien : un `canOpen` absent (réponse d'une autre
+          // version) ne doit pas rouvrir la fiche par accident.
+          canOpen: raw.canOpen === true,
           categoryName:
             (i18nRef.current.locale === "en" ? (nameEn ?? nameFr) : (nameFr ?? nameEn)) ?? null,
           categoryColor: typeof category?.color === "string" ? category.color : null,
@@ -510,13 +532,23 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
       const chain: Promise<string | null> = engine
         .dial(number)
         .then(() =>
-          createCallLog({
-            clientId: target.clientId ?? null,
-            direction: "outbound",
-            toNumber: number,
-            fromNumber: config.callerId ?? null,
-            startedAt,
-          }),
+          createCallLog(
+            {
+              clientId: target.clientId ?? null,
+              direction: "outbound",
+              toNumber: number,
+              fromNumber: config.callerId ?? null,
+              startedAt,
+            },
+            () => {
+              // Composer une fiche du bassin la PREND (règle « claimOnCall ») :
+              // le seul geste de l'agent a été d'appeler, et la fiche a changé
+              // de main. Le dire tout de suite, sinon il l'apprend au prochain
+              // rechargement — ou jamais.
+              toast.info(tClients("access.claimedOnCall"));
+              emitDataChange("clients");
+            },
+          ),
         )
         .catch(() => {
           // dial() a échoué (déjà signalé via onError) — pas de ligne de journal.
@@ -531,7 +563,7 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
         });
       callLogIdRef.current = chain;
     },
-    [t],
+    [t, tClients],
   );
 
   const answer = useCallback(() => {

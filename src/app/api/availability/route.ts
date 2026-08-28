@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { apiUser } from "@/lib/auth/guards";
+import { apiActor } from "@/lib/permissions/server";
 import { computeAvailability, isRealDate } from "./slots";
 
 /**
@@ -7,7 +7,7 @@ import { computeAvailability, isRealDate } from "./slots";
  * Any authenticated user (callers book on the admin's calendar).
  */
 export async function GET(req: NextRequest) {
-  const auth = await apiUser();
+  const auth = await apiActor();
   if (auth instanceof NextResponse) return auth;
 
   const params = req.nextUrl.searchParams;
@@ -22,8 +22,9 @@ export async function GET(req: NextRequest) {
     const result = await computeAvailability(date, type);
     return NextResponse.json({
       ...result,
-      // Lets the dialog show the "Google not connected" warning to admins only.
-      viewerIsAdmin: auth.role === "admin",
+      // L'avertissement « Google non connecté » ne sert qu'à qui peut y
+      // remédier : c'est le droit sur les réglages, pas le rôle.
+      viewerIsAdmin: auth.can("admin.settings"),
     });
   } catch (err) {
     console.error("availability failed", err);

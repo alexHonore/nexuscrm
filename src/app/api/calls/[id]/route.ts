@@ -5,7 +5,7 @@ import { missedCallNotification } from "@/components/clients/notification-conten
 import { db } from "@/db";
 import { DISPOSITIONS, calls, categories, clients, followups, notifications } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
-import { apiUser } from "@/lib/auth/guards";
+import { apiActor, canSeeClient, clientRef, grantsOnClient } from "@/lib/permissions/server";
 import { notifyCategoryChanged } from "@/lib/campaigns-server/match";
 
 const patchCallSchema = z.object({
@@ -25,10 +25,18 @@ const patchCallSchema = z.object({
  * appels. La disposition est appliquée CÔTÉ SERVEUR dans une transaction :
  * depuis l'alignement du pipeline sur Notion, classer un appel = déplacer la
  * fiche dans le statut choisi (+ dernier contact, Ne plus appeler, relance).
+ *
+ * Deux propriétés, donc deux gardes, et elles ne portent pas sur la même chose :
+ * l'appel est le sien (`calls.user_id`) — sans quoi rien ne s'écrit ; la FICHE,
+ * elle, ne bouge que si son compartiment ouvre la case « catégorie ». Fermée,
+ * l'appel est quand même classé (disposition + note sur la ligne d'appel) et la
+ * fiche reste où elle est. Le second n'est pas impliqué par le premier — on
+ * peut avoir appelé une fiche qui a changé de main depuis.
  */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const auth = await apiUser();
-  if (auth instanceof NextResponse) return auth;
+  const actor = await apiActor();
+  if (actor instanceof NextResponse) return actor;
+  const auth = actor.user;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) {
@@ -46,6 +54,32 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     where: and(eq(calls.id, id), eq(calls.userId, auth.id)),
   });
   if (!call) return NextResponse.json({ error: "not_found" }, { status: 404 });
+
+  // Classer un appel écrit à DEUX endroits, et un seul des deux appartient à
+  // la fiche : la disposition et la note se posent sur la LIGNE D'APPEL, le
+  // statut du pipeline (catégorie, dernier contact, « ne plus appeler ») sur la
+  // fiche. La case « catégorie » du compartiment ne commande donc que le
+  // second : un téléphoniste qui décroche un entrant sur une fiche tenue par le
+  // patron doit pouvoir dire ce qui s'est passé — sinon le seul témoignage de
+  // l'échange se perd, et l'appel reste éternellement « sans résultat ».
+  //
+  // Fiche invisible, elle, reste « introuvable » : un refus confirmerait son
+  // existence. La distinction ne renseigne personne — pour arriver ici avec une
+  // fiche visible, il faut déjà la voir nommée dans son journal d'appels.
+  let mayWriteClient = false;
+  if (body.disposition && call.clientId) {
+    const ref = await clientRef(call.clientId);
+    const grants = ref ? await grantsOnClient(actor, ref) : null;
+    if (!grants || !grants.visible) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
+    // Programmer une relance est un geste de plus. Ici la fiche est visible :
+    // un refus explicite ne révèle rien.
+    if (body.followupDueAt && !grants.followup) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
+    mayWriteClient = grants.category;
+  }
 
   // ── Résolution du statut visé ──
   // « no_answer » ne déplace pas la fiche. Toute autre valeur doit être une
@@ -109,21 +143,27 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (call.disposition === body.disposition) return;
 
     // ── Effets pipeline sur la fiche client ──
+    // `mayWriteClient` est faux quand la case « catégorie » du compartiment est
+    // fermée : la fiche ne bouge alors d'AUCUN champ (statut, dernier contact,
+    // « ne plus appeler »), et c'est tout ce qui est refusé — l'appel, lui, est
+    // déjà classé plus haut. La relance suit sa propre case, vérifiée avant.
     if (call.clientId) {
       const client = await tx.query.clients.findFirst({ where: eq(clients.id, call.clientId) });
       if (client) {
-        await tx
-          .update(clients)
-          .set({
-            lastDisposition: body.disposition,
-            lastContactedAt: now,
-            updatedAt: now,
-            ...(targetCategory ? { categoryId: targetCategory.id } : {}),
-            ...(targetCategory?.key === "dncl" ? { doNotCall: true } : {}),
-          })
-          .where(eq(clients.id, client.id));
-        if (targetCategory && client.categoryId !== targetCategory.id) {
-          categoryChange = { clientId: client.id, from: client.categoryId, to: targetCategory.id };
+        if (mayWriteClient) {
+          await tx
+            .update(clients)
+            .set({
+              lastDisposition: body.disposition,
+              lastContactedAt: now,
+              updatedAt: now,
+              ...(targetCategory ? { categoryId: targetCategory.id } : {}),
+              ...(targetCategory?.key === "dncl" ? { doNotCall: true } : {}),
+            })
+            .where(eq(clients.id, client.id));
+          if (targetCategory && client.categoryId !== targetCategory.id) {
+            categoryChange = { clientId: client.id, from: client.categoryId, to: targetCategory.id };
+          }
         }
 
         if (body.followupDueAt) {
@@ -160,11 +200,14 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   if (call.direction === "inbound" && !answeredAt && endedAt && !call.endedAt) {
     let client: { id: string; fullName: string } | null = null;
     if (call.clientId) {
-      client =
-        (await db.query.clients.findFirst({
-          where: eq(clients.id, call.clientId),
-          columns: { id: true, fullName: true },
-        })) ?? null;
+      const row = await db.query.clients.findFirst({
+        where: eq(clients.id, call.clientId),
+        columns: { id: true, fullName: true, assignedToId: true },
+      });
+      // Une notification SURVIT à l'écran : elle ne nomme la fiche que si
+      // celle-ci existe pour son destinataire. Sinon, le numéro seul et le
+      // journal d'appels — même règle que POST /api/calls.
+      client = row && (await canSeeClient(actor, row)) ? row : null;
     }
     await db.insert(notifications).values(
       missedCallNotification({
@@ -186,6 +229,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         disposition: body.disposition,
         clientId: call.clientId,
         followupDueAt: body.followupDueAt?.toISOString() ?? null,
+        // « Pourquoi la fiche n'a-t-elle pas bougé ? » — la trace le dit, sinon
+        // l'audit montre un classement et un pipeline immobile sans explication.
+        pipelineApplied: mayWriteClient,
       },
     });
   }

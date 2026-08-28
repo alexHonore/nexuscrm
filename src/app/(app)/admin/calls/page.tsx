@@ -9,6 +9,7 @@ import {
   eq,
   gte,
   ilike,
+  inArray,
   isNotNull,
   isNull,
   like,
@@ -29,8 +30,10 @@ import { PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
 import { db } from "@/db";
 import { calls, categories, clients, users } from "@/db/schema";
-import { requireAdmin } from "@/lib/auth/guards";
 import { dispositionDisplayMap, pipelineDispositionOptions } from "@/lib/dispositions";
+import { bucketFor, grantsFor } from "@/lib/permissions/access";
+import type { Grants } from "@/lib/permissions/catalog";
+import { loadDirectory, requirePerm, visibilityCondition } from "@/lib/permissions/server";
 import { formatPhone } from "@/lib/phone";
 import { getUserOptions } from "../analytics/queries";
 
@@ -54,9 +57,11 @@ export default async function CallsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireAdmin();
+  const actor = await requirePerm("admin.calls");
   const sp = await searchParams;
   const t = await getTranslations("analytics");
+  // « Masqué » est écrit une seule fois, chez les fiches.
+  const tAccess = await getTranslations("clients");
   const locale = await getLocale();
   const dateLocale: Locale = locale === "en" ? enCA : fr;
   const nf = new Intl.NumberFormat(locale === "en" ? "en-CA" : "fr-CA");
@@ -82,6 +87,51 @@ export default async function CallsPage({
   const pageParam = Number(first(sp.page));
   const page = Number.isInteger(pageParam) && pageParam >= 1 ? pageParam : 1;
 
+  // ── Portée du regard ──────────────────────────────────────────────────────
+  // « Suivre les appels de l'ÉQUIPE » n'est pas « voir toutes les FICHES ». Le
+  // journal joint `clients` : la visibilité s'y pose donc directement, sur la
+  // même requête que le total — un total non filtré sous une liste filtrée
+  // annoncerait à lui seul le nombre de lignes qu'on cache.
+  // Un appel SANS fiche ne protège rien (il n'y a pas de fiche derrière) : il
+  // reste au journal, sinon les appels hors fiche disparaîtraient pour qui ne
+  // voit pas le bassin. Composition à la main plutôt que `withVisibility`, qui
+  // ajoute toujours une condition — ici c'est un OU.
+  const [visible, { cfg, roleOf, rows: accounts }] = await Promise.all([
+    visibilityCondition(actor),
+    loadDirectory(),
+  ]);
+  const noClient = isNull(calls.clientId);
+  const reach: SQL | undefined = visible ? or(noClient, visible)! : undefined;
+
+  // Le compartiment d'une fiche ne dépend que de son DÉTENTEUR : on le résout
+  // une fois par détenteur, pas une fois par ligne — une page de 25 appels ne
+  // coûte donc pas 25 questions de plus à la matrice.
+  const grantsCache = new Map<string, Grants>();
+  const grantsOfHolder = (assignedToId: string | null): Grants => {
+    const key = assignedToId ?? "";
+    const hit = grantsCache.get(key);
+    if (hit) return hit;
+    const holder = assignedToId ? (roleOf.get(assignedToId) ?? null) : null;
+    const g = grantsFor(cfg, actor.role, bucketFor(actor.user.id, { assignedToId }, holder));
+    grantsCache.set(key, g);
+    return g;
+  };
+
+  // Sur quelles fiches ce regard a-t-il droit aux COORDONNÉES ? La même
+  // réduction « par détenteur » que /api/clients/list, traduite en condition
+  // SQL : elle empêche la recherche par numéro de devenir un oracle.
+  const contactHolders = accounts.filter((a) => grantsOfHolder(a.id).contact).map((a) => a.id);
+  const contactOpen: SQL | undefined =
+    grantsOfHolder(null).contact && contactHolders.length === accounts.length
+      ? undefined
+      : (() => {
+          const parts: SQL[] = [];
+          if (grantsOfHolder(null).contact) parts.push(isNull(clients.assignedToId));
+          if (contactHolders.length > 0) parts.push(inArray(clients.assignedToId, contactHolders));
+          if (parts.length === 0) return sql`false`;
+          return parts.length === 1 ? parts[0] : or(...parts)!;
+        })();
+
   const conds: SQL[] = [];
   if (userId) conds.push(eq(calls.userId, userId));
   // Manqués = entrants jamais décrochés (même définition que les analytiques).
@@ -97,17 +147,25 @@ export default async function CallsPage({
   if (toStr) conds.push(lt(calls.startedAt, dayStartUtc(shiftDateStr(toStr, 1))));
   if (q) {
     const digits = q.replace(/\D/g, "");
+    // Le NOM se cherche partout où la fiche est visible (la portée est déjà
+    // dans le `where`). Les NUMÉROS, eux, ne se comparent que là où le
+    // compartiment ouvre les coordonnées : sans cette garde, la recherche
+    // devient un oracle qui rend chiffre par chiffre le numéro que la page
+    // refuse d'afficher. Même règle que /api/clients/list.
     const parts: SQL[] = [ilike(clients.fullName, `%${q}%`)];
     if (digits.length >= 3) {
-      parts.push(
+      const numbers = or(
         like(calls.fromNumber, `%${digits}%`),
         like(calls.toNumber, `%${digits}%`),
         like(clients.phone, `%${digits}%`),
-      );
+      )!;
+      const guard = contactOpen ? or(noClient, contactOpen)! : undefined;
+      parts.push(guard ? and(guard, numbers)! : numbers);
     }
     const orCond = or(...parts);
     if (orCond) conds.push(orCond);
   }
+  if (reach) conds.push(reach);
   const where = conds.length > 0 ? and(...conds) : undefined;
 
   // ── Requêtes : page + total (agrégé, jamais toutes les lignes) ──
@@ -127,6 +185,7 @@ export default async function CallsPage({
         userName: users.name,
         clientId: clients.id,
         clientName: clients.fullName,
+        holderId: clients.assignedToId,
       })
       .from(calls)
       .innerJoin(users, eq(users.id, calls.userId))
@@ -172,6 +231,14 @@ export default async function CallsPage({
       row.direction === "outbound"
         ? (row.toNumber ?? row.fromNumber)
         : (row.fromNumber ?? row.toNumber);
+    // La portée a déjà écarté les fiches invisibles ; ce qui reste à trancher
+    // ligne par ligne, ce sont les DEUX cases qui n'ouvrent pas avec elle :
+    // les coordonnées (le numéro distant) et l'historique (la note d'après-appel
+    // et l'enregistrement). Un appel sans fiche n'a rien à protéger.
+    const open = row.clientId ? grantsOfHolder(row.holderId) : null;
+    const named = open ? open.visible : false;
+    const contact = open ? open.visible && open.contact : true;
+    const history = open ? open.visible && open.history : true;
     return {
       id: row.id,
       dateLabel: formatInTimeZone(row.startedAt, APP_TZ, "d MMM yyyy", { locale: dateLocale }),
@@ -179,9 +246,15 @@ export default async function CallsPage({
       userName: row.userName,
       direction: row.direction,
       missed: row.direction === "inbound" && !row.answeredAt,
-      clientId: row.clientId,
-      clientName: row.clientName,
-      number: rawNumber ? formatPhone(rawNumber) : t("callsPage.unknownNumber"),
+      clientId: named ? row.clientId : null,
+      clientName: named ? row.clientName : null,
+      // Un numéro fermé ne PART PAS : on n'envoie pas au navigateur un chiffre
+      // qu'on masquerait ensuite en CSS.
+      number: contact
+        ? rawNumber
+          ? formatPhone(rawNumber)
+          : t("callsPage.unknownNumber")
+        : tAccess("access.masked"),
       durationSec: row.durationSec,
       disposition: row.disposition,
       dispositionLabel: row.disposition
@@ -195,8 +268,11 @@ export default async function CallsPage({
       dispositionColor: row.disposition
         ? (dispoDisplay.get(row.disposition)?.color ?? null)
         : null,
-      note: row.note,
-      recordingUrl: row.recordingUrl,
+      // La note d'après-appel raconte la fiche : c'est de l'historique.
+      note: history ? row.note : null,
+      // L'enregistrement aussi — et le proxy exige en plus `clients.recordings`
+      // (il journalise chaque écoute). Sans ce droit, pas de bouton mort ici.
+      recordingUrl: history && actor.can("clients.recordings") ? row.recordingUrl : null,
     };
   });
 

@@ -609,3 +609,50 @@ export const DELIVERABILITY_LOOK = {
   /** La machine tourne-t-elle ? Répartiteur, file, interrupteur, Twilio. */
   engine: { color: TONE.raw, Icon: ServerCogIcon },
 } as const satisfies Record<string, Look>;
+
+/**
+ * Les quatre pastilles d'AUTORITÉ.
+ *
+ * La pastille dit le NIVEAU, le nom dit le rôle. C'est délibéré : les rôles
+ * sont créés par l'administrateur, ils peuvent être quinze, et quinze
+ * pictogrammes dans une colonne ne se distinguent plus. Ce qu'un œil doit
+ * saisir d'un coup, c'est « celui-là a les clés » ou « celui-là ne fait que
+ * regarder » — pas lequel des trois superviseurs c'est.
+ *
+ * Aucune teinte neuve : le violet de la mécanique pour qui règle la machine,
+ * le bleu de la parole pour qui mène l'équipe, le vert du « c'est passé » pour
+ * qui décroche le téléphone, le gris de la matière brute pour qui regarde.
+ */
+export const ROLE_LOOK = {
+  /** Les clés de la maison : réglages, comptes, facturation. */
+  admin: { color: TONE.machinery, Icon: ShieldCheckIcon },
+  /** Mène l'équipe : voit tout, redistribue, ne configure rien. */
+  supervisor: { color: TONE.speech, Icon: UsersIcon },
+  /** Appelle. Ses fiches et le bassin. */
+  caller: { color: RESULT_LOOK.pass.color, Icon: PhoneCallIcon },
+  /** Regarde, et rien d'autre. */
+  observer: { color: TONE.raw, Icon: EyeIcon },
+} as const satisfies Record<string, Look>;
+
+export type RoleLookKey = keyof typeof ROLE_LOOK;
+
+/** La pastille d'un rôle — un look inconnu retombe sur la plus modeste. */
+export function roleLook(key: string): Look {
+  return ROLE_LOOK[key as RoleLookKey] ?? ROLE_LOOK.observer;
+}
+
+/**
+ * Les trois familles de droits, dans l'ordre de l'écran « Rôles et droits ».
+ *
+ * Elles ne colorent pas des concepts nouveaux : elles reprennent la teinte de
+ * ce qu'elles gouvernent. Le vert de qui travaille les fiches, le bleu de la
+ * parole pour ce qui s'écrit, le violet de la mécanique pour ce qui règle la
+ * machine. Surtout PAS le violet réservé du canal SMS : il ne dit pas
+ * « messages », il dit « ceci sort de l'application », et il ne le dit que sur
+ * une fiche client.
+ */
+export const PERMISSION_GROUP_LOOK = {
+  clients: { color: ROLE_LOOK.caller.color, Icon: UserRoundIcon },
+  conversations: { color: TONE.speech, Icon: MessagesSquareIcon },
+  admin: { color: ROLE_LOOK.admin.color, Icon: SlidersHorizontalIcon },
+} as const satisfies Record<string, Look>;

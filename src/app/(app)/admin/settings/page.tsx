@@ -9,13 +9,13 @@ import { listSmsNumbersForAdmin } from "@/lib/sms-server/numbers";
 import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/db";
 import { categories } from "@/db/schema";
-import { requireAdmin } from "@/lib/auth/guards";
 import { categoryDispositionValue } from "@/lib/dispositions";
 import { docLocale } from "@/lib/docs/types";
+import { requirePerm } from "@/lib/permissions/server";
 import { getSetting } from "@/lib/settings";
 
 export default async function AdminSettingsPage() {
-  await requireAdmin();
+  await requirePerm("admin.settings");
   const t = await getTranslations("admin");
 
   const locale = docLocale(await getLocale());

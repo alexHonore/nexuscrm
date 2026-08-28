@@ -538,31 +538,61 @@ describe("actions serveur côté clients — le téléphoniste ne contourne rien
     expect(await testDb.select().from(clients).where(eq(clients.id, client.id))).toHaveLength(1);
   });
 
-  it("assignClientAction refuse un téléphoniste et l'affectation ne bouge pas", async () => {
-    const client = await makeClient({ assignedToId: null });
+  it("assignClientAction : il se sert dans le bassin, il ne se sert pas chez les autres", async () => {
+    // La règle a changé le 2026-08-28 : le téléphoniste PREND une fiche libre
+    // (sans quoi le bassin ne sert à rien), mais ne touche ni à celle d'un
+    // collègue ni au travail qu'il distribuerait à autrui. Le détail est
+    // configurable par rôle ; ce qui est figé ici, c'est le préréglage livré.
+    const libre = await makeClient({ assignedToId: null });
     await loginAs(fixtures.caller);
+    expect(await assignClientAction(libre.id, fixtures.caller.id)).toMatchObject({ ok: true });
+    const [pris] = await testDb.select().from(clients).where(eq(clients.id, libre.id));
+    expect(pris.assignedToId).toBe(fixtures.caller.id);
 
-    expect(await assignClientAction(client.id, fixtures.caller.id)).toEqual({
-      ok: false,
-      error: "forbidden",
+    // Celle du patron : elle ne lui est même pas visible.
+    const priseParLePatron = await makeClient({
+      assignedToId: fixtures.admin.id,
+      lastContactedAt: new Date(),
     });
+    expect((await assignClientAction(priseParLePatron.id, fixtures.caller.id)).ok).toBe(false);
 
-    const [row] = await testDb.select().from(clients).where(eq(clients.id, client.id));
-    expect(row.assignedToId).toBeNull();
+    // Distribuer le travail d'autrui est un geste d'administrateur.
+    const autre = await makeClient({ assignedToId: null });
+    expect((await assignClientAction(autre.id, fixtures.admin.id)).ok).toBe(false);
+
+    const [inchangee] = await testDb.select().from(clients).where(eq(clients.id, autre.id));
+    expect(inchangee.assignedToId).toBeNull();
+    const [duPatron] = await testDb
+      .select()
+      .from(clients)
+      .where(eq(clients.id, priseParLePatron.id));
+    expect(duPatron.assignedToId).toBe(fixtures.admin.id);
   });
 
   it("updateClientAction : un téléphoniste peut éditer mais pas réaffecter", async () => {
     const client = await makeClient({ fullName: "Ancien", assignedToId: fixtures.caller.id });
     await loginAs(fixtures.caller);
 
+    // Sa fiche : il la modifie.
+    expect(
+      await updateClientAction(client.id, {
+        fullName: "Nouveau nom",
+        phone: "4185559999",
+        language: "fr",
+      }),
+    ).toMatchObject({ ok: true });
+
+    // La même modification AVEC une réaffectation : refusée en bloc. Le
+    // formulaire ne la propose pas ; un appel direct ne passe pas non plus, et
+    // il n'obtient pas non plus le renommage au passage.
     const res = await updateClientAction(client.id, {
-      fullName: "Nouveau nom",
+      fullName: "Encore un autre nom",
       phone: "4185559999",
       language: "fr",
       assignedToId: fixtures.admin.id, // tentative de réaffectation
     });
 
-    expect(res).toMatchObject({ ok: true });
+    expect(res).toMatchObject({ ok: false });
     const [row] = await testDb.select().from(clients).where(eq(clients.id, client.id));
     expect(row.fullName).toBe("Nouveau nom");
     expect(row.assignedToId).toBe(fixtures.caller.id); // inchangé

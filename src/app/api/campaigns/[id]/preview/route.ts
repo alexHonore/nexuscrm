@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { apiAdmin } from "@/lib/auth/guards";
 import { campaignConfigSchema } from "@/lib/campaigns/schema";
 import { audienceCount, audienceCountFor } from "@/lib/campaigns-server/enroll";
+import { apiPerm } from "@/lib/permissions/server";
 
 /**
  * /api/campaigns/:id/preview — combien de personnes l'audience vise.
@@ -32,8 +32,8 @@ function failure(err: unknown): NextResponse {
 }
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.campaigns");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   const invalid = badId(id);
@@ -49,8 +49,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
 const previewBodySchema = z.object({ config: campaignConfigSchema });
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.campaigns");
+  if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;
   const invalid = badId(id);

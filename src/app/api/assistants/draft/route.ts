@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { users } from "@/db/schema";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import {
   CREATOR_SYSTEM,
   briefToConfig,
@@ -51,8 +51,8 @@ function extractJson(raw: string): unknown {
 }
 
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.assistants");
+  if (actor instanceof NextResponse) return actor;
 
   let raw: unknown;
   try {
@@ -107,14 +107,14 @@ export async function POST(req: Request) {
   }
 
   const broker = await db.query.users.findFirst({
-    where: eq(users.id, admin.id),
+    where: eq(users.id, actor.user.id),
     columns: { name: true },
   });
 
   const config = briefToConfig(reply.data.brief, {
     orgName: "Groupe Nexus",
     brokerName: broker?.name ?? "Alex-Honoré",
-    brokerUserId: admin.id,
+    brokerUserId: actor.user.id,
   });
 
   return NextResponse.json({ done: true, summary: reply.data.summary, config });

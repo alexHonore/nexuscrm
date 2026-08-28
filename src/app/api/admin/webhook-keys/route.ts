@@ -3,8 +3,8 @@ import { z } from "zod";
 import { db } from "@/db";
 import { webhookKeys } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { encryptSecret, generateApiKey, sha256Hex } from "@/lib/crypto";
+import { apiPerm } from "@/lib/permissions/server";
 import { readJson } from "../_helpers";
 
 const defaultsSchema = z.object({
@@ -20,8 +20,8 @@ const createSchema = z.object({
 
 /** Crée une clé webhook — la clé complète est retournée UNE seule fois. */
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.webhooks");
+  if (actor instanceof NextResponse) return actor;
 
   const body = await readJson(req, createSchema);
   if (body instanceof NextResponse) return body;
@@ -39,7 +39,7 @@ export async function POST(req: Request) {
     .returning();
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "webhook.key_create",
     entity: "webhookKey",
     entityId: String(created.id),

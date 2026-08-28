@@ -4,9 +4,9 @@ import { z } from "zod";
 import { db } from "@/db";
 import { categories, clients } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { categoryEntryPatch } from "@/lib/dispositions";
 import { notifyCategoryChanges } from "@/lib/campaigns-server/match";
+import { apiPerm } from "@/lib/permissions/server";
 import { readJson } from "../../../_helpers";
 
 const schema = z.object({ targetId: z.number().int().nullable() });
@@ -21,8 +21,8 @@ type Ctx = { params: Promise<{ id: string }> };
  * ce geste-ci si.
  */
 export async function POST(req: Request, ctx: Ctx) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.pipeline");
+  if (actor instanceof NextResponse) return actor;
   const id = Number((await ctx.params).id);
   if (!Number.isInteger(id)) return NextResponse.json({ error: "invalid_id" }, { status: 400 });
 
@@ -48,7 +48,7 @@ export async function POST(req: Request, ctx: Ctx) {
     .returning({ id: clients.id });
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "category.transfer",
     entity: "category",
     entityId: String(id),

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { normalizePhone } from "@/lib/phone";
 import { didDigits, routeDidToSubAccount, updateSubAccountCallerId } from "@/lib/voipms";
 import { readJson, voipmsErrorResponse } from "../../_helpers";
@@ -23,8 +23,8 @@ class TargetVanished extends Error {}
 
 /** Route un DID vers un sous-compte (setDIDRouting) + met à jour l'utilisateur. */
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   const body = await readJson(req, schema);
   if (body instanceof NextResponse) return body;
@@ -86,7 +86,7 @@ export async function POST(req: Request) {
   }
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "voipms.did_route",
     entity: "user",
     entityId: body.userId,

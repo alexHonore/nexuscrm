@@ -7,6 +7,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import {
   ArrowRightLeftIcon,
   ClockIcon,
+  EyeOffIcon,
   MapPinIcon,
   MoreVerticalIcon,
   PhoneIcon,
@@ -102,10 +103,18 @@ export function PipelineClientCard({
   onMove: (cardId: string, toId: number | null) => void;
 }) {
   const t = useTranslations("pipeline");
+  // Le vocabulaire de l'ACCÈS vit chez les fiches : « Masqué » y est écrit une
+  // seule fois, pour la fiche comme pour cette carte.
+  const ta = useTranslations("clients");
   const locale = useLocale();
   const dfnsLocale = locale === "en" ? enUS : fr;
   const router = useRouter();
   const { dial, ready } = useTelephony();
+
+  // Ce qu'on peut composer : le numéro reçu, s'il a été envoyé. Une constante
+  // plutôt que `card.phone` relu dans le gestionnaire — c'est elle qui garantit
+  // qu'on ne compose jamais « rien ».
+  const dialNumber = card.phone;
 
   const dispositionKey = `dispositions.${card.lastDisposition}`;
   const dispositionLabel = card.lastDisposition
@@ -160,16 +169,21 @@ export function PipelineClientCard({
               <UserIcon />
               {t("card.open")}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              className="min-h-11"
-              disabled={!ready || card.doNotCall}
-              onClick={() =>
-                dial({ number: card.phone, clientId: card.id, clientName: card.fullName })
-              }
-            >
-              <PhoneIcon />
-              {t("card.call")}
-            </DropdownMenuItem>
+            {/* Pas de numéro dans la carte (coordonnées fermées) : pas d'entrée
+                « Appeler ». Elle composait une chaîne vide, et sa présence
+                laissait croire que le geste était possible. */}
+            {dialNumber ? (
+              <DropdownMenuItem
+                className="min-h-11"
+                disabled={!ready || card.doNotCall}
+                onClick={() =>
+                  dial({ number: dialNumber, clientId: card.id, clientName: card.fullName })
+                }
+              >
+                <PhoneIcon />
+                {t("card.call")}
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuSeparator />
             <DropdownMenuSub>
               <DropdownMenuSubTrigger className="min-h-11">
@@ -198,7 +212,17 @@ export function PipelineClientCard({
         </DropdownMenu>
       </div>
 
-      <p className="text-xs text-muted-foreground tabular-nums">{formatPhone(card.phone)}</p>
+      {card.phone ? (
+        <p className="text-xs text-muted-foreground tabular-nums">{formatPhone(card.phone)}</p>
+      ) : card.contactHidden ? (
+        // Le numéro n'est pas masqué à l'écran : il n'a jamais été envoyé. La
+        // pastille dit POURQUOI la ligne est vide — sinon « rien » se lit comme
+        // « fiche sans numéro », et quelqu'un part en chercher un.
+        <p className="flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground">
+          <EyeOffIcon aria-hidden className="size-3 shrink-0" />
+          {ta("access.masked")}
+        </p>
+      ) : null}
 
       {card.city ? (
         <p className="flex items-center gap-1 text-xs text-muted-foreground">

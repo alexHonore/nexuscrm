@@ -5,12 +5,12 @@ import {
   type AssistantListItem,
 } from "@/components/admin/assistants-list-client";
 import { PageHeader } from "@/components/shell/page-header";
-import { requireAdmin } from "@/lib/auth/guards";
 import type { GoalType } from "@/lib/assistants/schema";
 import { listAssistantsWithCounts } from "@/lib/assistants/list";
+import { requirePerm } from "@/lib/permissions/server";
 
 export default async function AdminAssistantsPage() {
-  await requireAdmin();
+  await requirePerm("admin.assistants");
   const t = await getTranslations("assistants");
 
   const { rows, archivedCount } = await listAssistantsWithCounts();

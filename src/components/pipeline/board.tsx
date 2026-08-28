@@ -28,7 +28,17 @@ import { PipelineColumn } from "./board-column";
 export type PipelineCardData = {
   id: string;
   fullName: string;
-  phone: string;
+  /**
+   * Le numéro, ou `null` quand le compartiment de la fiche FERME les
+   * coordonnées — il n'est alors pas envoyé au navigateur.
+   */
+  phone: string | null;
+  /**
+   * Le numéro manque par DROIT, pas parce que la fiche n'en a pas. Sans ce
+   * booléen, la carte rendait les deux cas de la même façon (rien du tout) et
+   * personne ne pouvait deviner lequel des deux il fallait corriger.
+   */
+  contactHidden: boolean;
   city: string | null;
   /** ISO 8601 ou null. */
   nextFollowupAt: string | null;
@@ -72,7 +82,9 @@ type BoardPayload = {
     clients: {
       id: string;
       fullName: string;
-      phone: string;
+      /** null quand les coordonnées ne sont pas ouvertes sur cette fiche. */
+      phone: string | null;
+      contactHidden: boolean;
       city: string | null;
       nextFollowupAt: string | null;
       doNotCall: boolean;
@@ -90,7 +102,9 @@ function boardSignature(columns: PipelineColumnData[]): string {
         `${columnKey(col.id)}#${col.name}#${col.total}#${col.cards
           .map(
             (c) =>
-              `${c.id}:${c.fullName}:${c.phone}:${c.city ?? ""}:${c.nextFollowupAt ?? ""}:${c.doNotCall ? 1 : 0}:${c.lastDisposition ?? ""}`,
+              // `contactHidden` en fait partie : une fiche qui change de main
+              // ouvre ou ferme son numéro sans que rien d'autre ne bouge.
+              `${c.id}:${c.fullName}:${c.phone ?? ""}:${c.contactHidden ? 1 : 0}:${c.city ?? ""}:${c.nextFollowupAt ?? ""}:${c.doNotCall ? 1 : 0}:${c.lastDisposition ?? ""}`,
           )
           .join(",")}`,
     )
@@ -185,6 +199,7 @@ export function PipelineBoard({
             id: c.id,
             fullName: c.fullName,
             phone: c.phone,
+            contactHidden: c.contactHidden,
             city: c.city,
             nextFollowupAt: c.nextFollowupAt,
             doNotCall: c.doNotCall,

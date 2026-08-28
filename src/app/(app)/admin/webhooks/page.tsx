@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { db } from "@/db";
 import { categories, sources, users, webhookKeys } from "@/db/schema";
-import { requireAdmin } from "@/lib/auth/guards";
+import { requirePerm } from "@/lib/permissions/server";
 
 const N8N_EXAMPLE = `{
   "name": "{{ $json.data.nom_complet }}",
@@ -34,7 +34,7 @@ const PAYLOAD_FIELDS: { aliases: string; key: string; required?: boolean }[] = [
 ];
 
 export default async function AdminWebhooksPage() {
-  await requireAdmin();
+  await requirePerm("admin.webhooks");
   const [t, locale] = await Promise.all([getTranslations("admin"), getLocale()]);
 
   const endpoint = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/api/webhooks/leads`;

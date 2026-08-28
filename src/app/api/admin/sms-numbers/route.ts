@@ -4,14 +4,14 @@ import { db } from "@/db";
 import { assistants, smsNumbers } from "@/db/schema-sms";
 import { eq } from "drizzle-orm";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { normalizePhone } from "@/lib/phone";
 import { listSmsNumbersForAdmin } from "@/lib/sms-server/numbers";
 
 /** GET /api/admin/sms-numbers — les numéros et les assistants actifs (admin). */
 export async function GET() {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
   return NextResponse.json(await listSmsNumbersForAdmin());
 }
 
@@ -26,8 +26,8 @@ export const createNumberSchema = z.object({
 
 /** POST /api/admin/sms-numbers — enregistre un numéro d'envoi (E.164 imposé). */
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
   let raw: unknown;
   try {
     raw = await req.json();
@@ -61,7 +61,7 @@ export async function POST(req: Request) {
     .returning({ id: smsNumbers.id });
   if (!row) return NextResponse.json({ error: "already_exists" }, { status: 409 });
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "sms_number.create",
     entity: "sms_number",
     entityId: row.id,

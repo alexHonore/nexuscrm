@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { getSubAccounts, VoipMsError } from "@/lib/voipms";
 
 /** Test de connexion voip.ms (getSubAccounts) — pour la page Réglages. */
 export async function GET() {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   try {
     const accounts = await getSubAccounts();

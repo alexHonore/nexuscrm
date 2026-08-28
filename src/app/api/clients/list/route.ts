@@ -30,7 +30,9 @@ import {
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
-import { apiUser } from "@/lib/auth/guards";
+import { bucketFor, grantsFor } from "@/lib/permissions/access";
+import type { Grants } from "@/lib/permissions/catalog";
+import { apiActor, loadDirectory, withVisibility } from "@/lib/permissions/server";
 import { APP_TZ, torontoDayRange } from "@/components/clients/timezone";
 
 const MAX_PAGE_SIZE = 50;
@@ -172,10 +174,14 @@ type SortKey = keyof typeof SORT_COLUMNS;
  * - sort (activity | name | city | createdAt | updatedAt | followupAt |
  *   lastContact), dir (asc|desc), page, pageSize (capped at 50).
  * Ordered by recent activity by default.
+ *
+ * La PORTÉE du regard s'ajoute à tout : filtres et compte total lisent le même
+ * `where`, et une ligne dont le compartiment ferme les coordonnées repart avec
+ * `phone: null, email: null, contactHidden: true`.
  */
 export async function GET(req: NextRequest) {
-  const auth = await apiUser();
-  if (auth instanceof NextResponse) return auth;
+  const actor = await apiActor();
+  if (actor instanceof NextResponse) return actor;
 
   const sp = req.nextUrl.searchParams;
   const q = (sp.get("q") ?? "").trim().slice(0, 200);
@@ -194,6 +200,38 @@ export async function GET(req: NextRequest) {
     Math.max(1, Number.parseInt(sp.get("pageSize") ?? "", 10) || MAX_PAGE_SIZE),
   );
 
+  // ── Ce que ce regard a le droit de lire ───────────────────────────────────
+  // Le compartiment d'une fiche ne dépend que de son DÉTENTEUR : on le résout
+  // une fois par détenteur et non une fois par ligne — une page de 50 fiches
+  // ne coûte donc pas 50 questions de plus à la matrice.
+  const { cfg, roleOf, rows: accounts } = await loadDirectory();
+  const grantsCache = new Map<string, Grants>();
+  const grantsOfHolder = (assignedToId: string | null): Grants => {
+    const key = assignedToId ?? "";
+    const hit = grantsCache.get(key);
+    if (hit) return hit;
+    const holder = assignedToId ? (roleOf.get(assignedToId) ?? null) : null;
+    const g = grantsFor(cfg, actor.role, bucketFor(actor.user.id, { assignedToId }, holder));
+    grantsCache.set(key, g);
+    return g;
+  };
+
+  // Chercher « 5145551234 » et voir une fiche remonter DIT le numéro : la
+  // recherche ne compare téléphone et courriel que sur les fiches dont le
+  // compartiment ouvre les coordonnées. Le nom et la ville restent cherchables
+  // partout — c'est ce qui permet de ne pas rappeler un lead déjà pris.
+  const contactHolders = accounts.filter((a) => grantsOfHolder(a.id).contact).map((a) => a.id);
+  const contactOpen: SQL | undefined =
+    grantsOfHolder(null).contact && contactHolders.length === accounts.length
+      ? undefined
+      : (() => {
+          const parts: SQL[] = [];
+          if (grantsOfHolder(null).contact) parts.push(isNull(clients.assignedToId));
+          if (contactHolders.length > 0) parts.push(inArray(clients.assignedToId, contactHolders));
+          if (parts.length === 0) return sql`false`;
+          return parts.length === 1 ? parts[0] : or(...parts)!;
+        })();
+
   const now = new Date();
   const conditions: SQL[] = [];
 
@@ -206,16 +244,18 @@ export async function GET(req: NextRequest) {
 
   if (q) {
     const digits = q.replace(/\D/g, "");
-    const textMatchers = [
-      ilike(clients.fullName, `%${q}%`),
+    const openMatchers = [ilike(clients.fullName, `%${q}%`), ilike(clients.city, `%${q}%`)];
+    const contactMatchers = [
       ilike(clients.email, `%${q}%`),
-      ilike(clients.city, `%${q}%`),
-    ];
-    const phoneMatchers =
-      digits.length >= 3
+      ...(digits.length >= 3
         ? [like(clients.phone, `%${digits}%`), like(clients.phoneAlt, `%${digits}%`)]
-        : [];
-    const merged = or(...textMatchers, ...phoneMatchers);
+        : []),
+    ];
+    const guardedContact = or(...contactMatchers)!;
+    const merged = or(
+      ...openMatchers,
+      contactOpen ? and(contactOpen, guardedContact)! : guardedContact,
+    );
     if (merged) conditions.push(merged);
   }
 
@@ -317,7 +357,11 @@ export async function GET(req: NextRequest) {
   };
   pushOr(...tokens(filterParam).filter((f) => FILTERS.has(f)).map(followupState));
 
-  const where = conditions.length > 0 ? and(...conditions) : undefined;
+  // La visibilité s'ajoute EN DERNIER et ne se négocie pas : un filtre reçu du
+  // client (assignedToId = le patron, par exemple) ne peut que rétrécir ce que
+  // la portée autorise déjà. Le compte total lit le MÊME `where` — un total non
+  // filtré serait à lui seul une fuite : il dirait combien de fiches on cache.
+  const where = await withVisibility(actor, conditions.length > 0 ? and(...conditions) : undefined);
 
   // Activité récente par défaut (même tri que l'ancienne liste) ; la vue
   // tableau peut trier par nom / ville / dates / suivi / dernier contact.
@@ -366,22 +410,30 @@ export async function GET(req: NextRequest) {
   ]);
 
   return NextResponse.json({
-    items: rows.map((r) => ({
-      id: r.id,
-      fullName: r.fullName,
-      phone: r.phone,
-      email: r.email,
-      categoryId: r.categoryId,
-      categoryColor: r.category?.color ?? null,
-      sourceId: r.sourceId,
-      assignedToId: r.assignedToId,
-      nextFollowupAt: r.nextFollowupAt?.toISOString() ?? null,
-      lastContactedAt: r.lastContactedAt?.toISOString() ?? null,
-      doNotCall: r.doNotCall,
-      city: r.city,
-      createdAt: r.createdAt.toISOString(),
-      updatedAt: r.updatedAt.toISOString(),
-    })),
+    items: rows.map((r) => {
+      // Coordonnées : la case `contact` du compartiment, déjà plafonnée par le
+      // droit `clients.contact`. Fermée, elles ne partent PAS — on n'envoie pas
+      // un numéro masqué à l'écran, on n'envoie rien du tout.
+      const contact = grantsOfHolder(r.assignedToId).contact;
+      return {
+        id: r.id,
+        fullName: r.fullName,
+        phone: contact ? r.phone : null,
+        email: contact ? r.email : null,
+        /** Coordonnées absentes par droit, pas par manque de données. */
+        contactHidden: !contact,
+        categoryId: r.categoryId,
+        categoryColor: r.category?.color ?? null,
+        sourceId: r.sourceId,
+        assignedToId: r.assignedToId,
+        nextFollowupAt: r.nextFollowupAt?.toISOString() ?? null,
+        lastContactedAt: r.lastContactedAt?.toISOString() ?? null,
+        doNotCall: r.doNotCall,
+        city: r.city,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      };
+    }),
     total,
     page,
     pageSize,

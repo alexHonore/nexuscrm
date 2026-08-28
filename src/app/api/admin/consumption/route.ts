@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { apiAdmin } from "@/lib/auth/guards";
 import { getConsumption } from "@/lib/consumption";
+import { apiPerm } from "@/lib/permissions/server";
 import { getSetting, setSetting } from "@/lib/settings";
 
 /**
@@ -11,7 +11,7 @@ import { getSetting, setSetting } from "@/lib/settings";
  * PATCH /api/admin/consumption  { smsSegmentCostUsd }
  *   → règle le taux d'estimation SMS.
  *
- * Réservé à l'admin.
+ * Réservé au droit `admin.billing`.
  */
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -29,8 +29,8 @@ function daysBetween(from: string, to: string): number {
 }
 
 export async function GET(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.billing");
+  if (actor instanceof NextResponse) return actor;
 
   const url = new URL(req.url);
   const from = (url.searchParams.get("from") ?? "").trim();
@@ -48,8 +48,8 @@ export async function GET(req: Request) {
 const rateSchema = z.object({ smsSegmentCostUsd: z.number().min(0).max(10) });
 
 export async function PATCH(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.billing");
+  if (actor instanceof NextResponse) return actor;
 
   let raw: unknown;
   try {

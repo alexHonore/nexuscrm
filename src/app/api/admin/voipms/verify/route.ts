@@ -4,8 +4,8 @@ import { z } from "zod";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
-import { apiAdmin } from "@/lib/auth/guards";
 import { decryptSecret } from "@/lib/crypto";
+import { apiPerm } from "@/lib/permissions/server";
 import { getDids, getSubAccounts, type VoipMsDid, type VoipMsSubAccount } from "@/lib/voipms";
 import { readJson, toAdminUser, voipmsErrorResponse } from "../../_helpers";
 import { sipGatewayConfigured } from "../../users/_phone-status";
@@ -46,8 +46,8 @@ function routingTarget(routing: string | null | undefined): { target: string; is
 const querySchema = z.object({ userId: z.uuid() });
 
 export async function GET(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   const parsed = querySchema.safeParse({
     userId: new URL(req.url).searchParams.get("userId") ?? undefined,
@@ -148,7 +148,7 @@ export async function GET(req: Request) {
   }
 
   await logAudit({
-    userId: admin.id,
+    userId: actor.user.id,
     action: "voipms.line_verify",
     entity: "user",
     entityId: target.id,
@@ -175,8 +175,8 @@ const resyncSchema = z.object({ userId: z.uuid() });
  * réellement, pour que le softphone puisse enfin s'enregistrer.
  */
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.settings");
+  if (actor instanceof NextResponse) return actor;
 
   const body = await readJson(req, resyncSchema);
   if (body instanceof NextResponse) return body;
@@ -188,7 +188,7 @@ export async function POST(req: Request) {
     const { account } = await withVoipTimeout(resyncSipPassword(target));
 
     await logAudit({
-      userId: admin.id,
+      userId: actor.user.id,
       action: "voipms.password_resync",
       entity: "user",
       entityId: target.id,

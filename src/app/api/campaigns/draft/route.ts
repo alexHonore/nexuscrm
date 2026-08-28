@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import {
   CAMPAIGN_CREATOR_SYSTEM,
   briefToCampaignConfig,
@@ -41,8 +41,8 @@ function extractJson(raw: string): unknown {
 }
 
 export async function POST(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.campaigns");
+  if (actor instanceof NextResponse) return actor;
 
   let raw: unknown;
   try {

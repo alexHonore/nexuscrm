@@ -15,13 +15,27 @@ export type FollowupItemData = {
   id: string;
   clientId: string;
   clientName: string;
-  phone: string;
+  /**
+   * Le numéro, ou `null` quand le compartiment de la fiche FERME les
+   * coordonnées. `null` est un DROIT refusé, pas une fiche sans numéro : la
+   * chaîne vide d'avant ne disait ni l'un ni l'autre, et partait quand même
+   * dans le composeur.
+   */
+  phone: string | null;
+  /** Le numéro manque par DROIT — `phoneDisplay` porte alors « Masqué ». */
+  contactHidden?: boolean;
   phoneDisplay: string;
   note: string | null;
   dueLabel: string;
   overdue: boolean;
   /** `clients.doNotCall` — gate ABSOLU : le bouton d'appel reste désactivé. */
   doNotCall: boolean;
+  /**
+   * La case « appeler » de CETTE fiche. Absente : la présence du numéro fait
+   * foi — c'est déjà ce que la page envoie, et une ligne sans numéro n'a de
+   * toute façon rien à composer.
+   */
+  canCall?: boolean;
   /** Programmé par l'assistant SMS plutôt que par quelqu'un de l'équipe. */
   aiScheduled: boolean;
 };
@@ -31,6 +45,11 @@ export function FollowupItem({ item }: { item: FollowupItemData }) {
   const router = useRouter();
   const { dial, ready } = useTelephony();
   const [pending, startTransition] = useTransition();
+
+  // Composer demande le DROIT d'appeler ET un numéro : sans l'un des deux, le
+  // bouton DISPARAÎT. Le désactiver aurait laissé croire à une panne, et le
+  // laisser vivant composait une chaîne vide.
+  const dialNumber = (item.canCall ?? true) ? item.phone : null;
 
   const markDone = () => {
     startTransition(async () => {
@@ -84,17 +103,21 @@ export function FollowupItem({ item }: { item: FollowupItemData }) {
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        <Button
-          variant="ghost"
-          className="size-11 rounded-full bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 hover:text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-400 dark:hover:bg-emerald-500/25 dark:hover:text-emerald-300"
-          aria-label={item.doNotCall ? t("followups.doNotCall") : t("followups.call")}
-          // Même règle que l'en-tête de la fiche et la carte du pipeline :
-          // une fiche « Ne pas appeler » ne se compose pas d'un geste.
-          disabled={!ready || item.doNotCall}
-          onClick={() => dial({ number: item.phone, clientId: item.clientId, clientName: item.clientName })}
-        >
-          <PhoneIcon className="size-5" />
-        </Button>
+        {dialNumber ? (
+          <Button
+            variant="ghost"
+            className="size-11 rounded-full bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 hover:text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-400 dark:hover:bg-emerald-500/25 dark:hover:text-emerald-300"
+            aria-label={item.doNotCall ? t("followups.doNotCall") : t("followups.call")}
+            // Même règle que l'en-tête de la fiche et la carte du pipeline :
+            // une fiche « Ne pas appeler » ne se compose pas d'un geste.
+            disabled={!ready || item.doNotCall}
+            onClick={() =>
+              dial({ number: dialNumber, clientId: item.clientId, clientName: item.clientName })
+            }
+          >
+            <PhoneIcon className="size-5" />
+          </Button>
+        ) : null}
         <Button
           variant="ghost"
           className="size-11"

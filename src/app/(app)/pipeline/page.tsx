@@ -1,6 +1,6 @@
 import { Columns3 } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { requireUser } from "@/lib/auth/guards";
+import { requireActor } from "@/lib/permissions/server";
 import {
   PipelineBoard,
   type MoveTargetData,
@@ -17,7 +17,11 @@ function toCard(c: BoardClientRow): PipelineCardData {
   return {
     id: c.id,
     fullName: c.fullName,
+    // Coordonnées fermées : la carte ne porte pas de numéro, et elle DIT
+    // pourquoi. La chaîne vide d'avant rendait « masqué » et « aucun numéro
+    // enregistré » identiques à l'œil — et le composeur, lui, restait offert.
     phone: c.phone,
+    contactHidden: c.contactHidden,
     city: c.city,
     nextFollowupAt: c.nextFollowupAt?.toISOString() ?? null,
     doNotCall: c.doNotCall,
@@ -30,13 +34,17 @@ function toCard(c: BoardClientRow): PipelineCardData {
  * /pipeline — tableau Kanban pour TOUS les utilisateurs authentifiés
  * (c'est la vue de travail des téléphonistes). Colonnes = catégories
  * (sortOrder), + « Sans catégorie » en fin quand de tels clients existent.
+ *
+ * Aucun droit particulier n'est exigé : le tableau est la vue de travail, et
+ * ce qu'il montre est déjà borné par la portée du regard (getBoardData) — un
+ * observateur y voit ses colonnes, vides de ce qui ne lui appartient pas.
  */
 export default async function PipelinePage() {
-  await requireUser();
+  const actor = await requireActor();
   const [t, locale, board] = await Promise.all([
     getTranslations("pipeline"),
     getLocale(),
-    getBoardData(),
+    getBoardData(actor),
   ]);
 
   const categoryName = (c: { nameFr: string; nameEn: string }) =>

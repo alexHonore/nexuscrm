@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { apiAdmin } from "@/lib/auth/guards";
+import { apiPerm } from "@/lib/permissions/server";
 import { getUsageReport } from "@/lib/telephony-usage";
 import { voipmsErrorResponse } from "../_helpers";
 
@@ -25,8 +25,8 @@ function daysBetween(from: string, to: string): number {
  * `?from=YYYY-MM-DD&to=YYYY-MM-DD` (heure de Toronto).
  */
 export async function GET(req: Request) {
-  const admin = await apiAdmin();
-  if (admin instanceof NextResponse) return admin;
+  const actor = await apiPerm("admin.billing");
+  if (actor instanceof NextResponse) return actor;
 
   const url = new URL(req.url);
   const from = (url.searchParams.get("from") ?? "").trim();
