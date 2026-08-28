@@ -785,5 +785,258 @@
     "add": "Ajouter une règle",
     "remove": "Supprimer la règle {index}",
     "toolHint": "Ces règles ne s'appliquent qu'aux assistants dont l'outil « Classer la fiche » est coché dans l'onglet Outils. La liste sert aussi de liste blanche : une catégorie absente d'ici ne peut pas être posée par l'assistant."
+  },
+  "deliverability": {
+    "title": "Délivrabilité",
+    "subtitle": "Ce qui arrive, ce qui est filtré, et ce qu'il faut corriger pour que tout passe.",
+    "period": {
+      "label": "Période",
+      "d7": "7 jours",
+      "d30": "30 jours",
+      "d90": "90 jours"
+    },
+    "tabs": {
+      "overview": "Vue d'ensemble",
+      "numbers": "Numéros",
+      "content": "Contenu",
+      "templates": "Gabarits",
+      "twilio": "Twilio"
+    },
+    "verdict": {
+      "ok": "Rien à signaler",
+      "warn": "À surveiller",
+      "danger": "À corriger",
+      "unknown": "Pas assez de données"
+    },
+    "verdictHint": {
+      "ok": "Aucun indicateur ne franchit son seuil sur cette période.",
+      "warn": "Des indicateurs approchent des barres où les opérateurs commencent à filtrer.",
+      "danger": "Au moins un signal grave est déjà franchi. Chaque envoi supplémentaire creuse le trou.",
+      "unknown": "Rien n’est parti sur cette période : il n’y a rien à mesurer. Les constats ci-dessous disent souvent pourquoi."
+    },
+    "provenance": {
+      "label": "Provenance du seuil",
+      "carrier": "Règle d'opérateur",
+      "vendor": "Repère de fournisseur",
+      "operational": "Barre d'exploitation",
+      "context": "Contexte",
+      "hint": "Presque aucun opérateur ne publie ses barres. Un repère de fournisseur n'est pas une règle."
+    },
+    "family": {
+      "delivery": "Livraison",
+      "consent": "Arrêts",
+      "shape": "Forme du trafic",
+      "content": "Contenu",
+      "engine": "Moteur"
+    },
+    "metric": {
+      "delivered_rate": {
+        "label": "Taux de remise",
+        "hint": "Remis, sur ce qui est réglé (remis + non remis + échoué)."
+      },
+      "no_dlr_rate": {
+        "label": "Sans accusé de remise",
+        "hint": "Partis depuis plus de 24 h et jamais confirmés."
+      },
+      "stale_in_flight": {
+        "label": "Immobiles en file",
+        "hint": "« En file » depuis plus d'une heure."
+      },
+      "filtered_rate": {
+        "label": "Filtrés par l'opérateur",
+        "hint": "Code 30007, pondéré en segments. LE signal de pourriel."
+      },
+      "blocked_rate": {
+        "label": "Bloqués",
+        "hint": "Codes 30004 et 21610 — la ligne refuse le message."
+      },
+      "hard_invalid_rate": {
+        "label": "Numéros invalides",
+        "hint": "Codes 30005 et 30006 — la liste vieillit ou a été achetée."
+      },
+      "unreachable_delta": {
+        "label": "Dérive des injoignables",
+        "hint": "Code 30003 comparé à la période précédente."
+      },
+      "total_error_rate": {
+        "label": "Taux d'erreur global",
+        "hint": "Tous les codes qui comptent, sur ce qui est parti."
+      },
+      "registration_blocks": {
+        "label": "Refus d'inscription",
+        "hint": "Envois refusés faute de marque ou de campagne enregistrée."
+      },
+      "throughput_blocks": {
+        "label": "Débit saturé",
+        "hint": "Cadence ou file dépassée du côté de Twilio."
+      },
+      "optout_rate": {
+        "label": "Désabonnements",
+        "hint": "Téléphones ayant dit STOP, sur ceux réellement texté."
+      },
+      "suppression_leak": {
+        "label": "Fuites de suppression",
+        "hint": "Partis vers un numéro déjà entré en liste d'arrêt."
+      },
+      "carrier_suppressions": {
+        "label": "Suppressions du transporteur",
+        "hint": "Numéros retirés après un échec définitif."
+      },
+      "hostile_reply_rate": {
+        "label": "Réponses hostiles",
+        "hint": "Approximation de plainte — jamais la plainte elle-même."
+      },
+      "reply_rate": {
+        "label": "Taux de réponse",
+        "hint": "Fils ayant reçu au moins un mot en retour."
+      },
+      "out_per_in": {
+        "label": "Sortants par entrant",
+        "hint": "Combien de messages on écrit pour un mot reçu."
+      },
+      "unanswered_tail": {
+        "label": "Fils sans réponse",
+        "hint": "Quatre envois ou plus, aucun retour."
+      },
+      "ucs2_rate": {
+        "label": "Messages en UCS-2",
+        "hint": "Un seul caractère hors GSM fait passer de 160 à 70 par segment."
+      },
+      "segments_per_message": {
+        "label": "Segments par message",
+        "hint": "Au-delà de 1, le message est découpé et refacturé."
+      },
+      "template_spread": {
+        "label": "Gabarit sur plusieurs numéros",
+        "hint": "Le signal d'essaimage, nommé par la CTIA."
+      },
+      "duplication_rate": {
+        "label": "Répétition des textes",
+        "hint": "Contexte seulement — cet indicateur n'alarme jamais."
+      },
+      "reach_concentration": {
+        "label": "Concentration des envois",
+        "hint": "Destinataires distincts par gabarit."
+      },
+      "sender_consistency": {
+        "label": "Expéditeurs mélangés",
+        "hint": "Clients joints depuis plus d'un numéro."
+      },
+      "daily_cap_headroom": {
+        "label": "Marge sous le plafond",
+        "hint": "Part du plafond du jour déjà consommée."
+      },
+      "burst_factor": {
+        "label": "Rafales",
+        "hint": "Pointe par minute rapportée à la médiane."
+      },
+      "quiet_hours_violations": {
+        "label": "Hors heures de politesse",
+        "hint": "Envois automatiques, heure de Toronto."
+      },
+      "us_bound_share": {
+        "label": "Destinations américaines",
+        "hint": "Ce qui déclenche l'inscription A2P 10DLC."
+      },
+      "dispatcher_age": {
+        "label": "Dernier passage du répartiteur",
+        "hint": "En minutes depuis le dernier battement."
+      },
+      "queue_backlog": {
+        "label": "File en retard",
+        "hint": "Envois dus et toujours pas partis."
+      }
+    },
+    "findings": {
+      "title": "À corriger",
+      "none": "Rien à corriger.",
+      "noneHint": "Aucun indicateur ne franchit son seuil et aucun texte de campagne n'a été signalé.",
+      "fixHere": "Corriger ici",
+      "openExternal": "Ouvrir dans Twilio",
+      "evidence": "Pièces",
+      "subject": "Concerne",
+      "more": "{count} constats de plus, non affichés",
+      "source": "Source",
+      "threshold": "seuil {value}",
+      "sampleTooSmall": "Trop peu de messages pour trancher.",
+      "moreSamples": "{count} autres cas non affichés"
+    },
+    "numbers": {
+      "title": "Par numéro expéditeur",
+      "hint": "C'est le numéro que l'opérateur note, jamais le compte : un numéro sain n'en rachète pas un grillé.",
+      "number": "Numéro",
+      "sent": "Envoyés",
+      "segments": "Segments",
+      "delivered": "Remis",
+      "filtered": "Filtrés",
+      "errors": "Erreurs",
+      "noDlr": "Sans accusé",
+      "ucs2": "UCS-2",
+      "cap": "Plafond du jour",
+      "inactive": "Inactif",
+      "empty": "Aucun numéro d'envoi enregistré."
+    },
+    "skipped": {
+      "title": "Ce qui n'est jamais parti",
+      "hint": "Un autre dénominateur, gardé à part : un arrêt volontaire n'est pas un problème de réputation.",
+      "reason": "Raison",
+      "count": "Messages",
+      "empty": "Tout ce qui devait partir est parti.",
+      "r": {
+        "kill_switch": "Interrupteur d'arrêt",
+        "suppressed": "Numéro désabonné",
+        "invalid_to": "Destination invalide",
+        "sandbox_not_allowlisted": "Bac à sable — numéro non autorisé",
+        "not_sent": "Non envoyé",
+        "twilio_message_not_found": "Introuvable chez Twilio",
+        "provider_rejected": "Refusé par Twilio",
+        "transport_error": "Panne de transport",
+        "dry_run": "Essai à blanc"
+      }
+    },
+    "templates": {
+      "title": "Gabarits envoyés",
+      "hint": "Répéter un texte depuis UN numéro est normal. Le répéter depuis plusieurs est de l'essaimage — c'est cette colonne qui compte.",
+      "cluster": "Texte",
+      "sends": "Envois",
+      "recipients": "Destinataires",
+      "senders": "Numéros",
+      "spreadWarning": "Ce texte part depuis {count} numéros différents.",
+      "truncated": "Balayage tronqué : seuls les {count} premiers groupes ont été analysés.",
+      "empty": "Aucun message sortant à regrouper sur cette période."
+    },
+    "content": {
+      "title": "Textes de campagne",
+      "hint": "Un barreau écrit à la main ne passe par AUCUN garde-fou : ce tableau est la seule vérification qu'il recevra.",
+      "empty": "Aucun texte de campagne écrit à la main."
+    },
+    "twilio": {
+      "title": "Ce que Twilio dit",
+      "subtitle": "Réglages et incidents côté fournisseur — la moitié que la base ne peut pas voir.",
+      "account": "Compte",
+      "service": "Service de messagerie",
+      "senderPool": "Bassin d'expéditeurs",
+      "a2p": "Campagne A2P",
+      "alerts": "Alertes (30 jours)",
+      "smartEncoding": "Encodage intelligent",
+      "stickySender": "Expéditeur constant",
+      "statusCallback": "Rappel de statut",
+      "on": "Activé",
+      "off": "Désactivé",
+      "unconfigured": "Non configuré",
+      "unconfiguredHint": "Variables manquantes : {vars}",
+      "unavailable": "Injoignable",
+      "absent": "Aucune campagne A2P enregistrée — normal pour un envoi Canada vers Canada.",
+      "scopeMissing": "La clé API n'a pas la portée nécessaire pour cette lecture.",
+      "poolNumbers": "{count} numéros",
+      "alertsNone": "Aucune alerte d'erreur.",
+      "retry": "Réessayer"
+    },
+    "states": {
+      "loading": "Lecture en cours…",
+      "unavailable": "Indisponible",
+      "empty": "Aucun message envoyé sur cette période.",
+      "emptyHint": "Choisissez une période plus longue, ou vérifiez que le moteur SMS tourne."
+    }
   }
 }

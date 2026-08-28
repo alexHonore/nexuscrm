@@ -17,6 +17,7 @@ import {
   MessageCircle,
   Phone,
   PhoneCall,
+  Radar,
   Rocket,
   Settings,
   ShieldAlert,
@@ -114,6 +115,7 @@ const ADMIN_GROUPS: NavGroup[] = [
     labelKey: "groupInsights",
     items: [
       { href: "/admin/analytics", labelKey: "analytics", icon: BarChart3 },
+      { href: "/admin/deliverability", labelKey: "deliverability", icon: Radar },
       { href: "/admin/calls", labelKey: "calls", icon: PhoneCall },
       { href: "/admin/billing", labelKey: "billing", icon: Wallet },
       { href: "/admin/audit", labelKey: "audit", icon: ShieldCheck },

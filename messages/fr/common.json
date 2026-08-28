@@ -29,7 +29,8 @@
     "groupInsights": "Suivi et activité",
     "groupSystem": "Système",
     "goLive": "Mise en service",
-    "docs": "Documentation"
+    "docs": "Documentation",
+    "deliverability": "Délivrabilité"
   },
   "actions": {
     "save": "Enregistrer",

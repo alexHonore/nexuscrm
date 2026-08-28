@@ -22,6 +22,7 @@ import {
   CHANNEL_LOOK,
   CONVERSATION_STATE_LOOK,
   CREATE_MODE_TONE,
+  DELIVERABILITY_LOOK,
   EDITOR_TAB_LOOK,
   GOAL_LOOK,
   GUARDRAIL_KIND_LOOK,
@@ -33,12 +34,14 @@ import {
   SEVERITY_LOOK,
   TONE,
   TOOL_LOOK,
+  VERDICT_LOOK,
   lookTint,
 } from "@/components/look";
 import { ATTENTION_REASONS, attentionKindOf } from "@/components/conversations/state";
 import { assistantStatusEnum } from "@/db/schema-sms";
 import { ASSISTANT_TOOLS, GOAL_TYPES } from "@/lib/assistants/schema";
 import { GUARDRAIL_KINDS, GUARDRAIL_SEVERITIES } from "@/lib/guardrails/types";
+import { FINDING_FAMILIES, VERDICTS } from "@/lib/deliverability/types";
 
 /**
  * Les trois lectures indépendantes d'une ligne de la liste des assistants :
@@ -266,6 +269,8 @@ describe("un pictogramme ne remplace pas un libellé", () => {
       ...CONVERSATION_STATE_LOOK,
       ...ATTENTION_KIND_LOOK,
       ...QUEUE_KIND_LOOK,
+      ...VERDICT_LOOK,
+      ...DELIVERABILITY_LOOK,
       sms: CHANNEL_LOOK.sms,
     })) {
       expect(typeof look.Icon, `${key}.Icon`).not.toBe("string");
@@ -305,5 +310,62 @@ describe("le vocabulaire est le SEUL endroit où une couleur s'écrit", () => {
         [...source.matchAll(/#[0-9A-Fa-f]{6}\b/g)].map((m) => `${file} : ${m[0]}`),
       );
     expect(offenders, `hex écrits hors du vocabulaire :\n${offenders.join("\n")}`).toEqual([]);
+  });
+});
+
+/**
+ * Le tableau de bord de délivrabilité — deux axes indépendants.
+ *
+ * Ce qui casserait sans ces cas : la GRAVITÉ et la FAMILLE se mettraient à
+ * partager une couleur, et la page virerait au rouge pour une apostrophe
+ * courbe. Un écran de surveillance ne sert que s'il est encore ouvert le jour
+ * où un vrai filtrage commence — le rendre alarmant en permanence est la façon
+ * la plus sûre de le faire fermer.
+ */
+describe("vocabulaire de la délivrabilité", () => {
+  it("les quatre verdicts et les cinq familles ont leur pictogramme", () => {
+    for (const verdict of VERDICTS) {
+      expect(VERDICT_LOOK[verdict], verdict).toBeTruthy();
+    }
+    for (const family of FINDING_FAMILIES) {
+      expect(DELIVERABILITY_LOOK[family], family).toBeTruthy();
+    }
+  });
+
+  it("« tout va bien » et « on ne sait pas » ne se ressemblent JAMAIS", () => {
+    // C'est la règle qui justifie le quatrième verdict : un indicateur calculé
+    // sur onze messages n'est pas vert, il est inconnu. Les confondre fait
+    // croire qu'on surveille une chose qu'on ne surveille pas.
+    expect(VERDICT_LOOK.unknown.color).not.toBe(VERDICT_LOOK.ok.color);
+    expect(VERDICT_LOOK.unknown.Icon).not.toBe(VERDICT_LOOK.ok.Icon);
+    const icons = Object.values(VERDICT_LOOK).map((l) => l.Icon);
+    expect(new Set(icons).size, "deux verdicts partagent un pictogramme").toBe(icons.length);
+    const colors = Object.values(VERDICT_LOOK).map((l) => l.color);
+    expect(new Set(colors).size, "deux verdicts partagent une teinte").toBe(colors.length);
+  });
+
+  it("les cinq familles se distinguent par le pictogramme, pas par une palette neuve", () => {
+    const icons = Object.values(DELIVERABILITY_LOOK).map((l) => l.Icon);
+    expect(new Set(icons).size, "deux familles partagent un pictogramme").toBe(icons.length);
+
+    // Aucune teinte inventée : un écran de surveillance emprunte le
+    // vocabulaire existant, il n'ouvre pas une sixième palette.
+    const allowed = new Set<string>([
+      ...Object.values(TONE),
+      SEVERITY_LOOK.block.color,
+      RESULT_LOOK.pass.color,
+      QUEUE_KIND_LOOK.send.color,
+    ]);
+    for (const [key, look] of Object.entries({ ...VERDICT_LOOK, ...DELIVERABILITY_LOOK })) {
+      expect(allowed, `${key} invente une teinte`).toContain(look.color);
+    }
+  });
+
+  it("aucune des deux cartes n'emprunte la couleur réservée au canal SMS", () => {
+    // Le violet du SMS dit « ceci SORT de l'application ». Le réutiliser pour
+    // un verdict ou une famille lui ferait perdre le seul sens qu'il porte.
+    for (const [key, look] of Object.entries({ ...VERDICT_LOOK, ...DELIVERABILITY_LOOK })) {
+      expect(look.color, `${key} emprunte la couleur du canal SMS`).not.toBe(CHANNEL_LOOK.sms.color);
+    }
   });
 });

@@ -14,6 +14,7 @@ import {
   CircleDashedIcon,
   CircleSlashIcon,
   CircleXIcon,
+  CircleHelpIcon,
   ClipboardCheckIcon,
   ClipboardXIcon,
   ClockIcon,
@@ -27,6 +28,7 @@ import {
   HandIcon,
   HourglassIcon,
   IdCardIcon,
+  LayersIcon,
   LinkIcon,
   ListChecksIcon,
   ListOrderedIcon,
@@ -50,14 +52,17 @@ import {
   PlayIcon,
   PowerIcon,
   QuoteIcon,
+  RadioTowerIcon,
   RefreshCwIcon,
   RegexIcon,
   RulerIcon,
   ScaleIcon,
   ScissorsIcon,
   ScrollTextIcon,
+  ServerCogIcon,
   SearchCheckIcon,
   SendIcon,
+  ShieldCheckIcon,
   ShieldIcon,
   ShieldQuestionMarkIcon,
   ShieldXIcon,
@@ -69,6 +74,7 @@ import {
   SquareArrowOutUpRightIcon,
   SquarePenIcon,
   TargetIcon,
+  TriangleAlertIcon,
   UsersIcon,
   UnplugIcon,
   VideoIcon,
@@ -560,3 +566,46 @@ export function lookTint(look: Look) {
     borderColor: `color-mix(in srgb, ${look.color} 30%, transparent)`,
   };
 }
+
+/**
+ * Le verdict d'un indicateur de délivrabilité — QUATRE lectures, jamais trois.
+ *
+ * « Tout va bien » et « on n'a pas pu savoir » se ressemblent dangereusement
+ * sur un tableau de bord. Un taux calculé sur onze messages n'est pas vert :
+ * il est inconnu, et le peindre en vert fait croire qu'on surveille une chose
+ * qu'on ne surveille pas. `unknown` a donc son propre pictogramme ET sa propre
+ * teinte, partout où un verdict s'affiche.
+ *
+ * Aucune teinte neuve : le vert du « rien à faire », l'ambre de ce qui
+ * vérifie, le rouge de ce qui bloque, le gris de la matière brute. Un écran de
+ * surveillance n'a pas à inventer une sixième palette.
+ */
+export const VERDICT_LOOK = {
+  ok: { color: RESULT_LOOK.pass.color, Icon: ShieldCheckIcon },
+  warn: { color: TONE.scrutiny, Icon: TriangleAlertIcon },
+  danger: { color: SEVERITY_LOOK.block.color, Icon: XOctagonIcon },
+  unknown: { color: TONE.raw, Icon: CircleHelpIcon },
+} as const satisfies Record<string, Look>;
+
+/**
+ * Les cinq familles d'un constat de délivrabilité — CE QUI EST EN CAUSE, pas
+ * sa gravité.
+ *
+ * La gravité est portée par `VERDICT_LOOK` et par elle seule. Confondre les
+ * deux ferait clignoter la page en rouge pour une apostrophe courbe, et
+ * l'opérateur cesserait de la regarder — ce qui est exactement le contraire du
+ * but : un écran de délivrabilité ne sert que s'il est encore ouvert le jour
+ * où un vrai filtrage commence.
+ */
+export const DELIVERABILITY_LOOK = {
+  /** Est-ce arrivé ? Remise, filtrage, codes d'erreur du transporteur. */
+  delivery: { color: QUEUE_KIND_LOOK.send.color, Icon: RadioTowerIcon },
+  /** Qui a dit stop ? Désabonnements, suppressions, réponses hostiles. */
+  consent: { color: SEVERITY_LOOK.block.color, Icon: HandIcon },
+  /** Quelle FORME a le trafic ? Volume, rafales, essaimage, plafonds. */
+  shape: { color: TONE.machinery, Icon: LayersIcon },
+  /** Que dit le TEXTE ? Liens, marque, mention d'arrêt, encodage. */
+  content: { color: TONE.speech, Icon: MessageSquareTextIcon },
+  /** La machine tourne-t-elle ? Répartiteur, file, interrupteur, Twilio. */
+  engine: { color: TONE.raw, Icon: ServerCogIcon },
+} as const satisfies Record<string, Look>;

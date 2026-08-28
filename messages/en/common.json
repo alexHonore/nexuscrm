@@ -29,7 +29,8 @@
     "groupInsights": "Activity and reporting",
     "groupSystem": "System",
     "goLive": "Go live",
-    "docs": "Documentation"
+    "docs": "Documentation",
+    "deliverability": "Deliverability"
   },
   "actions": {
     "save": "Save",

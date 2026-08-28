@@ -32,8 +32,15 @@ export function nextTorontoDayStart(now: Date): Date {
   return new Date(startOfTorontoDay(now).getTime() + 24 * 60 * 60 * 1000);
 }
 
-/** Statuts qui comptent dans le plafond du jour : tout ce qui a quitté la maison. */
-const COUNTED = ["queued", "sending", "sent", "delivered", "accepted", "undelivered", "failed", "unknown"];
+/**
+ * Statuts qui comptent dans le plafond du jour : tout ce qui a quitté la maison.
+ *
+ * Exporté parce qu'un troisième lecteur est apparu — le tableau de bord de
+ * délivrabilité, qui affiche la marge restante sous le plafond. Un tableau de
+ * bord qui compte autrement que l'exécutant est pire qu'aucun tableau de bord :
+ * il dit « il reste de la place » pendant que l'envoi reporte au lendemain.
+ */
+export const COUNTED = ["queued", "sending", "sent", "delivered", "accepted", "undelivered", "failed", "unknown"];
 
 /** Combien ce numéro a-t-il envoyé depuis minuit (heure de Toronto) ? */
 export async function outboundCountToday(smsNumberId: string, now: Date): Promise<number> {

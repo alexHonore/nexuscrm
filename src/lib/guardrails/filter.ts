@@ -31,8 +31,15 @@ function fold(input: string): string {
  * Liens : schéma explicite, préfixe www., ET domaine nu (« groupe-nexus.com »).
  * Sans la troisième forme, « voir nos propriétés sur exemple.com » passait
  * entre les mailles alors même qu'aucun lien n'est autorisé.
+ *
+ * EXPORTÉ parce que le tableau de bord de délivrabilité
+ * (`src/lib/deliverability/content.ts`) compte les liens des messages déjà
+ * partis. Deux définitions de « lien » donneraient un écran qui reproche un
+ * lien que le garde-fou laisse passer — ou l'inverse ; c'est la même expression
+ * ou rien. Le drapeau `g` la rend apatride avec `String.match` / `matchAll`
+ * seulement : ne jamais l'utiliser avec `.test()` ni `.exec()`.
  */
-const URL_RE =
+export const URL_RE =
   /(https?:\/\/[^\s]+|www\.[^\s]+|\b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9][a-z0-9-]*)*\.(?:com|net|org|ca|qc|io|co|info|biz|app|link|ly|me|shop|site|xyz)\b[^\s]*)/gi;
 
 function hostnameOf(rawUrl: string): string | null {

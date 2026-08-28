@@ -785,5 +785,258 @@
     "add": "Add a rule",
     "remove": "Delete rule {index}",
     "toolHint": "These rules only apply to assistants whose \"File the record\" tool is ticked in the Tools tab. The list is also the allow-list: a category absent from here cannot be set by the assistant."
+  },
+  "deliverability": {
+    "title": "Deliverability",
+    "subtitle": "What arrives, what gets filtered, and what to fix so everything gets through.",
+    "period": {
+      "label": "Period",
+      "d7": "7 days",
+      "d30": "30 days",
+      "d90": "90 days"
+    },
+    "tabs": {
+      "overview": "Overview",
+      "numbers": "Numbers",
+      "content": "Content",
+      "templates": "Templates",
+      "twilio": "Twilio"
+    },
+    "verdict": {
+      "ok": "Nothing to report",
+      "warn": "Worth watching",
+      "danger": "Needs fixing",
+      "unknown": "Not enough data"
+    },
+    "verdictHint": {
+      "ok": "No indicator crosses its threshold over this period.",
+      "warn": "Some indicators are nearing the bars where carriers start filtering.",
+      "danger": "At least one serious signal is already crossed. Every further send digs the hole deeper.",
+      "unknown": "Nothing went out over this period, so there is nothing to measure. The items below often say why."
+    },
+    "provenance": {
+      "label": "Where the threshold comes from",
+      "carrier": "Carrier rule",
+      "vendor": "Vendor benchmark",
+      "operational": "Operational bar",
+      "context": "Context",
+      "hint": "Almost no carrier publishes its bars. A vendor benchmark is not a rule."
+    },
+    "family": {
+      "delivery": "Delivery",
+      "consent": "Stop requests",
+      "shape": "Traffic shape",
+      "content": "Content",
+      "engine": "Engine"
+    },
+    "metric": {
+      "delivered_rate": {
+        "label": "Delivery rate",
+        "hint": "Delivered, out of what is settled (delivered + undelivered + failed)."
+      },
+      "no_dlr_rate": {
+        "label": "No delivery receipt",
+        "hint": "Sent over 24 hours ago and never confirmed."
+      },
+      "stale_in_flight": {
+        "label": "Stuck in the queue",
+        "hint": "Still \"queued\" after more than an hour."
+      },
+      "filtered_rate": {
+        "label": "Filtered by the carrier",
+        "hint": "Error 30007, weighted by segment. THE spam signal."
+      },
+      "blocked_rate": {
+        "label": "Blocked",
+        "hint": "Errors 30004 and 21610 — the line refuses the message."
+      },
+      "hard_invalid_rate": {
+        "label": "Invalid numbers",
+        "hint": "Errors 30005 and 30006 — an ageing or purchased list."
+      },
+      "unreachable_delta": {
+        "label": "Unreachable drift",
+        "hint": "Error 30003 against the previous period."
+      },
+      "total_error_rate": {
+        "label": "Overall error rate",
+        "hint": "Every error that counts, over what actually left."
+      },
+      "registration_blocks": {
+        "label": "Registration refusals",
+        "hint": "Sends refused for want of a registered brand or campaign."
+      },
+      "throughput_blocks": {
+        "label": "Throughput saturated",
+        "hint": "Rate or queue limit hit on the Twilio side."
+      },
+      "optout_rate": {
+        "label": "Opt-outs",
+        "hint": "Phones that replied STOP, out of those actually texted."
+      },
+      "suppression_leak": {
+        "label": "Suppression leaks",
+        "hint": "Sent to a number already on the stop list."
+      },
+      "carrier_suppressions": {
+        "label": "Carrier suppressions",
+        "hint": "Numbers dropped after a permanent failure."
+      },
+      "hostile_reply_rate": {
+        "label": "Hostile replies",
+        "hint": "A proxy for complaints — never the complaint itself."
+      },
+      "reply_rate": {
+        "label": "Reply rate",
+        "hint": "Threads that got at least one word back."
+      },
+      "out_per_in": {
+        "label": "Outbound per inbound",
+        "hint": "How many messages we write for every word received."
+      },
+      "unanswered_tail": {
+        "label": "Threads with no reply",
+        "hint": "Four sends or more, nothing back."
+      },
+      "ucs2_rate": {
+        "label": "UCS-2 messages",
+        "hint": "One character outside GSM drops a segment from 160 to 70."
+      },
+      "segments_per_message": {
+        "label": "Segments per message",
+        "hint": "Above 1, the message is split and billed again."
+      },
+      "template_spread": {
+        "label": "One template, several numbers",
+        "hint": "The snowshoeing signal, named by the CTIA."
+      },
+      "duplication_rate": {
+        "label": "Text repetition",
+        "hint": "Context only — this one never raises an alarm."
+      },
+      "reach_concentration": {
+        "label": "Send concentration",
+        "hint": "Distinct recipients per template."
+      },
+      "sender_consistency": {
+        "label": "Mixed senders",
+        "hint": "Clients reached from more than one number."
+      },
+      "daily_cap_headroom": {
+        "label": "Headroom under the cap",
+        "hint": "Share of today's cap already used."
+      },
+      "burst_factor": {
+        "label": "Bursts",
+        "hint": "Per-minute peak against the median."
+      },
+      "quiet_hours_violations": {
+        "label": "Outside courtesy hours",
+        "hint": "Automated sends, Toronto time."
+      },
+      "us_bound_share": {
+        "label": "US destinations",
+        "hint": "What triggers A2P 10DLC registration."
+      },
+      "dispatcher_age": {
+        "label": "Last dispatcher pass",
+        "hint": "Minutes since the last heartbeat."
+      },
+      "queue_backlog": {
+        "label": "Queue backlog",
+        "hint": "Sends that are due and still have not left."
+      }
+    },
+    "findings": {
+      "title": "To fix",
+      "none": "Nothing to fix.",
+      "noneHint": "No indicator crosses its threshold and no campaign text was flagged.",
+      "fixHere": "Fix this here",
+      "openExternal": "Open in Twilio",
+      "evidence": "Evidence",
+      "subject": "Concerns",
+      "more": "{count} further items, not shown",
+      "source": "Source",
+      "threshold": "threshold {value}",
+      "sampleTooSmall": "Too few messages to call it.",
+      "moreSamples": "{count} further cases not shown"
+    },
+    "numbers": {
+      "title": "By sending number",
+      "hint": "The carrier scores the number, never the account: a healthy number does not redeem a burnt one.",
+      "number": "Number",
+      "sent": "Sent",
+      "segments": "Segments",
+      "delivered": "Delivered",
+      "filtered": "Filtered",
+      "errors": "Errors",
+      "noDlr": "No receipt",
+      "ucs2": "UCS-2",
+      "cap": "Today's cap",
+      "inactive": "Inactive",
+      "empty": "No sending number on record."
+    },
+    "skipped": {
+      "title": "What never left",
+      "hint": "A different denominator, kept apart: a deliberate stop is not a reputation problem.",
+      "reason": "Reason",
+      "count": "Messages",
+      "empty": "Everything that had to go out went out.",
+      "r": {
+        "kill_switch": "Kill switch",
+        "suppressed": "Number opted out",
+        "invalid_to": "Invalid destination",
+        "sandbox_not_allowlisted": "Sandbox — number not allowlisted",
+        "not_sent": "Not sent",
+        "twilio_message_not_found": "Not found at Twilio",
+        "provider_rejected": "Refused by Twilio",
+        "transport_error": "Transport failure",
+        "dry_run": "Dry run"
+      }
+    },
+    "templates": {
+      "title": "Templates sent",
+      "hint": "Repeating a text from ONE number is normal. Repeating it from several is snowshoeing — that is the column that matters.",
+      "cluster": "Text",
+      "sends": "Sends",
+      "recipients": "Recipients",
+      "senders": "Numbers",
+      "spreadWarning": "This text goes out from {count} different numbers.",
+      "truncated": "Scan truncated: only the first {count} groups were analysed.",
+      "empty": "No outbound message to group over this period."
+    },
+    "content": {
+      "title": "Campaign texts",
+      "hint": "A hand-written rung passes through NO guardrail: this table is the only check it will ever get.",
+      "empty": "No hand-written campaign text."
+    },
+    "twilio": {
+      "title": "What Twilio says",
+      "subtitle": "Provider-side settings and incidents — the half the database cannot see.",
+      "account": "Account",
+      "service": "Messaging service",
+      "senderPool": "Sender pool",
+      "a2p": "A2P campaign",
+      "alerts": "Alerts (30 days)",
+      "smartEncoding": "Smart encoding",
+      "stickySender": "Sticky sender",
+      "statusCallback": "Status callback",
+      "on": "On",
+      "off": "Off",
+      "unconfigured": "Not configured",
+      "unconfiguredHint": "Missing variables: {vars}",
+      "unavailable": "Unreachable",
+      "absent": "No A2P campaign registered — expected for Canada-to-Canada sending.",
+      "scopeMissing": "The API key lacks the scope needed for this read.",
+      "poolNumbers": "{count} numbers",
+      "alertsNone": "No error alerts.",
+      "retry": "Retry"
+    },
+    "states": {
+      "loading": "Reading…",
+      "unavailable": "Unavailable",
+      "empty": "No message sent over this period.",
+      "emptyHint": "Pick a longer period, or check that the SMS engine is running."
+    }
   }
 }
