@@ -266,3 +266,75 @@ describe("le réglage est la source, la base n'est que le plancher", () => {
     expect(cfg.defaultRoleId).toBe(CALLER_ROLE_ID);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe("sortir des données de l'application", () => {
+  /** Le CSV, lu comme un vrai fichier : entêtes + lignes. */
+  async function exportCsv(): Promise<string> {
+    const mod = await import("@/app/api/admin/export/route");
+    const res = await mod.GET(new Request("http://localhost:3000/api/admin/export"));
+    if (res.status !== 200) return `HTTP_${res.status}`;
+    return await res.text();
+  }
+
+  it("un téléphoniste ne télécharge rien du tout", async () => {
+    await makeClient({ fullName: "Prospect Chaud", assignedToId: patron.id });
+    await loginAs(luc);
+    expect(await exportCsv()).toBe("HTTP_403");
+  });
+
+  it("le CSV ne contient QUE ce que l'exportateur a le droit de voir", async () => {
+    // Un rôle sur mesure : il exporte, mais les fiches du patron lui sont
+    // fermées. C'est le cas qui fait peur — le droit d'export ne doit pas
+    // servir d'échappatoire à la matrice.
+    await writeConfig((cfg) => ({
+      ...cfg,
+      userRoles: { [luc.id]: CALLER_ROLE_ID },
+      roles: cfg.roles.map((r) =>
+        r.id === CALLER_ROLE_ID ? { ...r, perms: { ...r.perms, "clients.export": true } } : r,
+      ),
+    }));
+    await makeClient({ fullName: "Fiche du patron", assignedToId: patron.id });
+    await makeClient({ fullName: "Fiche de Luc", assignedToId: luc.id });
+    await makeClient({ fullName: "Fiche au bassin", assignedToId: null });
+
+    await loginAs(luc);
+    const csv = await exportCsv();
+    expect(csv).toContain("Fiche de Luc");
+    expect(csv).toContain("Fiche au bassin");
+    expect(csv).not.toContain("Fiche du patron");
+  });
+
+  it("les coordonnées d'une fiche fermée sortent VIDES, pas masquées", async () => {
+    // Un masque « •••-4512 » dans un tableur ressemble à un vrai numéro une
+    // fois la colonne élargie : on n'écrit rien plutôt qu'un faux.
+    await writeConfig((cfg) => ({
+      ...cfg,
+      userRoles: { [luc.id]: CALLER_ROLE_ID },
+      roles: cfg.roles.map((r) =>
+        r.id === CALLER_ROLE_ID ? { ...r, perms: { ...r.perms, "clients.export": true } } : r,
+      ),
+    }));
+    await makeClient({ fullName: "Lead de Marie", phone: "+15145550199", assignedToId: marie.id });
+
+    await loginAs(luc);
+    const csv = await exportCsv();
+    // La fiche du collègue est VISIBLE (on ne la rappelle pas), son numéro non.
+    expect(csv).toContain("Lead de Marie");
+    expect(csv).not.toContain("5145550199");
+    expect(csv).not.toContain("•");
+  });
+
+  it("un assistant ne s'emporte pas avec le seul droit de le lire", async () => {
+    // Le superviseur livré LIT les assistants et n'a pas « Modifier » : le
+    // fichier, qui se réimporte ailleurs, lui est fermé.
+    const mod = await import("@/app/api/assistants/[id]/export/route");
+    const id = "11111111-2222-4333-8444-555555555555";
+    await loginAs(chef);
+    const res = await mod.GET(
+      new Request(`http://localhost:3000/api/assistants/${id}/export`),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(res.status).toBe(403);
+  });
+});

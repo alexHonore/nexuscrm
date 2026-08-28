@@ -11,12 +11,14 @@ import { apiPerm } from "@/lib/permissions/server";
  * Annoté par défaut (`?annotate=0` pour le fichier nu). Un export est une
  * sortie de données : il est journalisé comme telle.
  *
- * LECTURE (`admin.assistants`) : le fichier ne contient rien de plus que la
- * fiche déjà lisible à l'écran, et l'export ne change rien ici. C'est le
- * réimport (POST /api/assistants/import) qui écrit, et lui exige l'autre droit.
+ * ÉCRITURE (`admin.assistantsEdit`) et non lecture, décision de l'exploitant
+ * du 2026-08-28. Lire une configuration à l'écran et en EMPORTER le fichier ne
+ * sont pas le même geste : le fichier se réimporte ailleurs, se transmet, et
+ * survit au retrait du droit. Sortir quoi que ce soit de l'application se
+ * donne donc explicitement — jamais en prime d'un droit de lecture.
  */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const actor = await apiPerm("admin.assistants");
+  const actor = await apiPerm("admin.assistantsEdit");
   if (actor instanceof NextResponse) return actor;
 
   const { id } = await ctx.params;

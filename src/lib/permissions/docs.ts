@@ -301,7 +301,7 @@ export const PERMISSION_DOCS: Record<PermissionKey, DocEntry> = {
   "admin.assistants": {
     labelFr: "Voir les assistants",
     whatFr:
-      "Ouvre /admin/assistants en LECTURE : la liste, la configuration d'un assistant, son prompt compilé, ses essais et son historique de versions. Rien ne s'enregistre avec ce seul droit.",
+      "Ouvre /admin/assistants en LECTURE : la liste, la configuration d'un assistant, son prompt compilé, ses essais et son historique de versions. Rien ne s'enregistre, et rien ne SORT : l'export du fichier relève de « Modifier les assistants ».",
     whyFr:
       "Ce que le robot dit aux clients est une information d'équipe : savoir ce qu'il promet évite de le contredire au téléphone. La modifier est un autre métier — voir « Modifier les assistants ».",
     pitfallsFr:
@@ -310,11 +310,11 @@ export const PERMISSION_DOCS: Record<PermissionKey, DocEntry> = {
   "admin.assistantsEdit": {
     labelFr: "Modifier les assistants",
     whatFr:
-      "Créer un assistant, l'éditer, l'activer ou le désactiver, l'importer, et lancer le bac à sable. Sans ce droit, l'écran des assistants s'ouvre en LECTURE : on lit la configuration et le prompt compilé, les boutons d'enregistrement et d'activation restent fermés.",
+      "Créer un assistant, l'éditer, l'activer ou le désactiver, l'importer, l'EXPORTER, et lancer le bac à sable. Sans ce droit, l'écran des assistants s'ouvre en LECTURE : on lit la configuration et le prompt compilé, les boutons d'enregistrement, d'activation et de téléchargement restent fermés.",
     whyFr:
       "Un superviseur a de bonnes raisons de lire ce que le robot est censé dire à ses clients, et aucune de le réécrire un mardi soir. Lire ne casse rien ; écrire change ce que l'entreprise dit à des centaines de personnes.",
     pitfallsFr:
-      "Chaque essai du bac à sable appelle un modèle et coûte de l'argent : c'est pour ça qu'il est ici et non dans « Voir les assistants ». Les paquets d'objections sont PARTAGÉS entre assistants — les modifier change tous les assistants qui s'en servent.",
+      "L'export est ici et non dans « Voir les assistants » : lire une configuration à l'écran et en emporter le fichier ne sont pas le même geste — un fichier se réimporte ailleurs et survit au retrait du droit. Chaque essai du bac à sable appelle un modèle et coûte de l'argent, même raison. Les paquets d'objections sont PARTAGÉS — les modifier change tous les assistants qui s'en servent.",
   },
 
   "admin.campaigns": {

@@ -251,13 +251,17 @@ export function AssistantsListClient({
                             </DropdownMenuItem>
                           </>
                         ) : null}
-                        {/* L'export ne change rien : c'est la même fiche, en
-                            fichier. Il reste ouvert à qui a le droit de la lire. */}
-                        <DropdownMenuItem
-                          render={<a href={`/api/assistants/${item.id}/export`} download />}
-                        >
-                          <Download /> {t("list.actions.export")}
-                        </DropdownMenuItem>
+                        {/* Emporter le fichier se donne explicitement : la route
+                            exige le droit de MODIFIER, le geste ne s'offre donc
+                            qu'à lui. Un fichier sorti se réimporte ailleurs et
+                            survit au retrait du droit — lire à l'écran, non. */}
+                        {canEdit ? (
+                          <DropdownMenuItem
+                            render={<a href={`/api/assistants/${item.id}/export`} download />}
+                          >
+                            <Download /> {t("list.actions.export")}
+                          </DropdownMenuItem>
+                        ) : null}
                         {canEdit && item.status === "active" ? (
                           <DropdownMenuItem onClick={() => setToDeactivate(item)}>
                             <PowerOff /> {t("list.actions.deactivate")}

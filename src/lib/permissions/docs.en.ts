@@ -172,15 +172,15 @@ export const PERMISSION_TEXT_EN: Record<string, DocOverlay> = {
   },
   "admin.assistants": {
     label: "See the assistants",
-    what: "Opens /admin/assistants READ-ONLY: the list, an assistant's configuration, its compiled prompt, its runs and its version history. Nothing saves with this right alone.",
+    what: "Opens /admin/assistants READ-ONLY: the list, an assistant's configuration, its compiled prompt, its runs and its version history. Nothing saves, and nothing LEAVES: downloading the file belongs to \"Edit the assistants\".",
     why: "What the robot tells clients is team information: knowing what it promises keeps you from contradicting it on the phone. Changing it is another job — see \"Edit the assistants\".",
     pitfalls: "The assistant's language is ITS setting, not the screen's: changing the interface language changes nothing in what it writes.",
   },
   "admin.assistantsEdit": {
     label: "Edit the assistants",
-    what: "Create an assistant, edit it, activate or deactivate it, import one, and run the sandbox. Without this right the assistants screen opens READ-ONLY: the configuration and the compiled prompt are readable, the save and activate buttons stay shut.",
+    what: "Create an assistant, edit it, activate or deactivate it, import one, EXPORT it, and run the sandbox. Without this right the assistants screen opens READ-ONLY: the configuration and the compiled prompt are readable, the save, activate and download buttons stay shut.",
     why: "A supervisor has good reason to read what the robot is meant to say to their clients, and none to rewrite it on a Tuesday evening. Reading breaks nothing; writing changes what the company says to hundreds of people.",
-    pitfalls: "Every sandbox run calls a model and costs money: that is why it sits here and not under \"See the assistants\". Objection packs are SHARED between assistants — editing one changes every assistant that uses it.",
+    pitfalls: "Export sits here and not under \"See the assistants\": reading a configuration on screen and carrying the file out are not the same gesture — a file is re-imported elsewhere and outlives the right being taken away. Every sandbox run calls a model and costs money, same reasoning. Objection packs are SHARED — editing one changes every assistant that uses it.",
   },
 
   "admin.campaigns": {

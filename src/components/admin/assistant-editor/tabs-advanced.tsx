@@ -536,14 +536,19 @@ export function JsonTab({ config, update, data }: TabProps) {
             >
               <Copy /> {t("editor.json.copy")}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="min-h-11 md:min-h-9"
-              render={<a href={`/api/assistants/${data.id}/export`} download />}
-            >
-              <DownloadIcon /> {t("editor.json.download")}
-            </Button>
+            {/* Emporter le fichier n'est pas le lire : la route exige le droit
+                de MODIFIER, le bouton suit. Le voir sans pouvoir s'en servir
+                ferait chercher une panne là où il y a un droit en moins. */}
+            {canEdit ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-h-11 md:min-h-9"
+                render={<a href={`/api/assistants/${data.id}/export`} download />}
+              >
+                <DownloadIcon /> {t("editor.json.download")}
+              </Button>
+            ) : null}
             {canEdit ? (
               <Button size="sm" className="min-h-11 md:min-h-9" onClick={apply}>
                 {t("editor.json.apply")}
