@@ -87,7 +87,11 @@ export function ClientSwitcher({ clientId }: { clientId: string }) {
 
       {known ? (
         <div className="ml-auto flex items-center rounded-lg border bg-card px-1">
-          <span className="px-2 text-sm whitespace-nowrap text-muted-foreground tabular-nums">
+          {/* `max-md:` et non nu : empêcher le retour à la ligne servait à tenir
+              « 5 / 10 » sur un 360 px, et cela n'avait rien à faire au bureau,
+              où la rangée a toute la place et où la règle du jour est que rien
+              ne bouge au-delà de md. */}
+          <span className="px-2 text-sm text-muted-foreground tabular-nums max-md:whitespace-nowrap">
             {t("switcher.position", { position: index + 1, total: nav.total })}
           </span>
           <Button

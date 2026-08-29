@@ -134,7 +134,11 @@ export function AttentionList({
                     className="gap-1 font-normal max-md:min-w-0 max-md:shrink"
                     style={lookTint(look)}
                   >
-                    <span className="truncate">
+                    {/* Tronquer était la réponse à une colonne de 207 px ; au
+                        bureau la pastille a la place de se lire en entier, et
+                        l'y couper aurait été un changement de bureau déguisé
+                        en correction mobile. */}
+                    <span className="max-md:truncate">
                       {tc.has(reasonKey as never) ? tc(reasonKey as never) : reason}
                     </span>
                   </Badge>
