@@ -2,12 +2,13 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
-import { calls, clients, notifications } from "@/db/schema";
+import { calls, clients } from "@/db/schema";
 import {
   missedCallNotification,
   notificationContent,
 } from "@/components/clients/notification-content";
 import { logAudit } from "@/lib/audit";
+import { createNotification } from "@/lib/notify";
 import { apiActor, canSeeClient, grantsOnClient, verifyAssignment } from "@/lib/permissions/server";
 import { normalizePhone, phoneMatchKey } from "@/lib/phone";
 import { getSetting } from "@/lib/settings";
@@ -202,7 +203,7 @@ export async function POST(req: NextRequest) {
     // cloche est la seule chose qui le dise. Corps vide à dessein — « X vous a
     // confié cette fiche » serait faux, X étant soi-même.
     if (rules.notifyAssignee) {
-      await db.insert(notifications).values({
+      await createNotification({
         userId: user.id,
         type: "assignment",
         title: notificationContent(locale, "clientAssignedTitle", { client: client.fullName }),
@@ -219,7 +220,7 @@ export async function POST(req: NextRequest) {
   // d'appels — une notification est du contenu qui survit, et elle nommerait
   // pour toujours une fiche que l'écran refuse d'afficher.
   if (body.direction === "inbound" && !body.answeredAt && body.endedAt) {
-    await db.insert(notifications).values(
+    await createNotification(
       missedCallNotification({
         userId: user.id,
         locale,

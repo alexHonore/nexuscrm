@@ -1,11 +1,12 @@
 import { and, eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { categories, clients, notifications, sources, users, webhookKeys } from "@/db/schema";
+import { categories, clients, sources, users, webhookKeys } from "@/db/schema";
 import { notificationContent } from "@/components/clients/notification-content";
 import { runAfterResponse } from "@/lib/after-response";
 import { logAudit } from "@/lib/audit";
 import { sha256Hex } from "@/lib/crypto";
+import { createNotifications } from "@/lib/notify";
 import { formatPhone, normalizePhone, phoneMatchKey } from "@/lib/phone";
 import { clientPhoneMatch } from "@/lib/webhooks/client-match";
 import {
@@ -240,7 +241,7 @@ export async function POST(req: Request) {
     if (assignee) recipients.set(assignee.id, assignee.locale);
   }
   if (recipients.size > 0) {
-    await db.insert(notifications).values(
+    await createNotifications(
       Array.from(recipients, ([userId, locale]) => ({
         userId,
         type: "incoming_lead",

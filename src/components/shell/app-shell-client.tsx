@@ -14,6 +14,7 @@ import {
   LayoutDashboard,
   LogOut,
   Megaphone,
+  Menu,
   MessageCircle,
   Phone,
   PhoneCall,
@@ -32,9 +33,11 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { logoutAction, setLocaleAction } from "@/app/actions";
 import { LookGlyph, roleLook } from "@/components/look";
+import { InstallGuide } from "@/components/pwa/install-guide";
+import { PwaBootstrap } from "@/components/pwa/pwa-bootstrap";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,6 +50,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useDataChange, useVisiblePolling } from "@/lib/live";
 import type { PermissionKey } from "@/lib/permissions/catalog";
 import { cn } from "@/lib/utils";
@@ -184,6 +188,38 @@ const ADMIN_GROUPS: NavGroup[] = [
 ];
 
 /**
+ * Combien d'onglets la barre basse garde en propre. La dernière case est
+ * TOUJOURS « Plus » : sur un écran de 320 px, six pictogrammes se partagent
+ * 53 px chacun et les libellés se réduisent à trois lettres — mais surtout,
+ * une barre pleine MENT, parce qu'il resterait des écrans qu'aucune case
+ * n'ouvre. Quatre onglets et une porte valent mieux que six culs-de-sac.
+ */
+const MOBILE_TAB_SLOTS = 4;
+
+/**
+ * Les écrans que la barre basse ne prendra JAMAIS, quoi qu'il arrive.
+ *
+ * Les notifications ont déjà la cloche du haut, avec sa pastille. Le pipeline
+ * est un tableau kanban : c'est le pire des écrans sur un téléphone. Ni l'un ni
+ * l'autre ne disparaît pour autant — ils descendent dans la feuille « Plus »,
+ * qui est justement là pour ça. Les exclure SANS cette feuille, c'était les
+ * rendre introuvables au doigt.
+ */
+const PHONE_OFF_BAR = new Set(["notifications", "pipeline"]);
+
+/**
+ * L'ordre du POUCE, qui n'est pas celui de la barre latérale.
+ *
+ * Le menu de gauche suit la logique du métier ; la barre basse suit la fréquence
+ * réelle d'un téléphoniste debout dans son auto entre deux appels : son tableau
+ * de bord, ses fiches, ses conversations SMS, sa journée. Le journal d'appels
+ * est un écran de RELECTURE — il se consulte assis, il descend dans « Plus »
+ * quand les quatre cases sont prises. Ce qui n'est pas nommé ici passe après,
+ * dans l'ordre de MAIN_NAV.
+ */
+const MOBILE_TAB_ORDER = ["dashboard", "clients", "conversations", "appointments", "callsShort"];
+
+/**
  * Cadence de rafraîchissement de la pastille « non lues ».
  * Il n'existe pas de route de comptage dédiée : on redemande les données
  * serveur (router.refresh()), et seulement quand l'onglet est au premier plan.
@@ -212,6 +248,12 @@ function allowed(item: NavItem, perms: ShellPerms): boolean {
   return keys.some((key) => perms[key] === true);
 }
 
+/** Rang au pouce ; ce qui n'est pas classé tombe à la fin, sans changer d'ordre. */
+function mobileRank(item: NavItem): number {
+  const rank = MOBILE_TAB_ORDER.indexOf(item.labelKey);
+  return rank === -1 ? MOBILE_TAB_ORDER.length : rank;
+}
+
 export function AppShellClient({
   user,
   unreadCount,
@@ -229,6 +271,10 @@ export function AppShellClient({
   const pathname = usePathname();
   const router = useRouter();
   const [, startTransition] = useTransition();
+  // La feuille « Plus » est PILOTÉE plutôt que déclenchée : une navigation ne
+  // démonte pas la coquille, donc rien ne la refermerait toute seule — on la
+  // ferme sur le clic, avant même que la page suivante arrive.
+  const [moreOpen, setMoreOpen] = useState(false);
 
   // `unreadCount` est rendu côté serveur : sans ça, la pastille reste figée
   // jusqu'à un rechargement complet. On redemande les données serveur quand une
@@ -244,17 +290,26 @@ export function AppShellClient({
   const mainNav = MAIN_NAV.filter((item) => allowed(item, perms));
 
   /**
-   * Nav basse mobile : les notifications restent sur la cloche du haut. Le
-   * pipeline en sort aussi : un tableau kanban est le moins utilisable des
-   * écrans sur un téléphone, alors que les conversations sont précisément
-   * l'écran qu'un téléphoniste ouvre depuis son cellulaire entre deux appels.
+   * Nav basse mobile : les quatre écrans les plus fréquents au pouce, dans
+   * l'ordre du pouce et non celui du menu de gauche.
    *
    * Elle se calcule ICI et plus au chargement du module : la liste dépend
    * maintenant du regard, qui n'existe pas à l'import.
    */
-  const mobileNav = mainNav.filter(
-    (i) => i.labelKey !== "notifications" && i.labelKey !== "pipeline",
-  );
+  const mobileNav = mainNav
+    .filter((i) => !PHONE_OFF_BAR.has(i.labelKey))
+    .sort((a, b) => mobileRank(a) - mobileRank(b))
+    .slice(0, MOBILE_TAB_SLOTS);
+
+  /**
+   * Le RESTE — ce que la barre basse ne peut pas porter. Il n'était nulle part
+   * sur un téléphone : le pipeline ne s'ouvrait qu'en tapant son URL à la main.
+   * Cette liste est le complément exact de la barre, dans l'ordre de MAIN_NAV,
+   * donc elle ne peut pas oublier un écran — ni en inventer un que le regard
+   * courant n'a pas le droit de voir, `mainNav` étant déjà filtrée.
+   */
+  const mobileHrefs = new Set(mobileNav.map((i) => i.href));
+  const moreNav = mainNav.filter((i) => !mobileHrefs.has(i.href));
 
   // Un groupe dont toutes les entrées tombent ne garde pas son titre — et si
   // aucun ne survit, la section d'administration disparaît, séparateur compris.
@@ -271,6 +326,62 @@ export function AppShellClient({
       await setLocaleAction(locale);
       window.location.reload();
     });
+  };
+
+  /**
+   * L'apparence d'une case de la barre basse, partagée par les onglets ET par
+   * le bouton « Plus ». Elle vit ici plutôt que recopiée : une case qui ne
+   * ressemble pas à ses voisines se lit comme un bouton d'action, pas comme un
+   * onglet, et le doigt hésite.
+   */
+  const tabClass = (active: boolean) =>
+    cn(
+      "flex h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+      active ? "text-primary" : "text-muted-foreground",
+    );
+  const tabPillClass = (active: boolean) =>
+    cn(
+      "flex h-7 w-12 items-center justify-center rounded-full transition-colors",
+      active && "bg-primary/10 [&_svg]:stroke-[2.4]",
+    );
+
+  /** « Plus » s'allume quand l'écran ouvert est l'un de ceux qu'il abrite. */
+  const moreActive =
+    moreNav.some((i) => isActive(i.href)) ||
+    adminGroups.some((g) => g.items.some((i) => isActive(i.href)));
+
+  /**
+   * Une entrée de la feuille « Plus » : pleine largeur de colonne, hauteur
+   * plancher de 44 px, libellé qui se replie sur deux lignes plutôt que de se
+   * faire couper — « Journal d'appels » tronqué en « Journal d'a… » n'aide
+   * personne à choisir.
+   */
+  const sheetLink = (item: NavItem) => {
+    const Icon = item.icon;
+    const active = isActive(item.href);
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        prefetch={false}
+        onClick={() => setMoreOpen(false)}
+        aria-current={active ? "page" : undefined}
+        className={cn(
+          "flex min-h-11 items-center gap-2.5 rounded-lg border px-3 py-2 text-sm font-medium leading-tight transition-colors",
+          active
+            ? "border-primary/40 bg-primary/10 text-primary"
+            : "border-border text-foreground hover:bg-accent hover:text-accent-foreground",
+        )}
+      >
+        <Icon className="size-4 shrink-0" />
+        <span className="min-w-0 flex-1">{t(`nav.${item.labelKey}`)}</span>
+        {item.labelKey === "notifications" && unreadCount > 0 ? (
+          <Badge className="h-5 min-w-5 shrink-0 rounded-full px-1.5 text-[11px]">
+            {unreadCount}
+          </Badge>
+        ) : null}
+      </Link>
+    );
   };
 
   const navLink = (item: NavItem) => {
@@ -351,8 +462,19 @@ export function AppShellClient({
 
       {/* ── Contenu ── */}
       <div className="flex min-w-0 flex-1 flex-col md:pl-60">
-        {/* Barre supérieure mobile */}
-        <header className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b bg-background/95 px-4 py-2.5 shadow-[0_1px_8px_-4px_rgb(0_0_0/0.15)] backdrop-blur md:hidden">
+        {/*
+          Barre supérieure mobile.
+
+          Le rembourrage du haut ENGLOBE l'encoche : depuis que la racine
+          déclare `viewportFit: "cover"`, la page occupe tout l'écran en mode
+          autonome et `env(safe-area-inset-top)` cesse de valoir zéro. Sans ce
+          calcul, la barre glissait sous l'encoche et la moitié haute du logo
+          comme de la cloche devenait intouchable. Le 0.625rem est le `py-2.5`
+          d'origine, conservé tel quel sous l'encoche — d'où le `pb-2.5` seul en
+          face : deux règles pour un même bord se disputent l'ordre de la
+          feuille de style, une seule est sûre.
+        */}
+        <header className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b bg-background/95 px-4 pb-2.5 pt-[calc(env(safe-area-inset-top)+0.625rem)] shadow-[0_1px_8px_-4px_rgb(0_0_0/0.15)] backdrop-blur md:hidden">
           <Link href="/dashboard" className="flex items-center gap-2">
             <div className="flex size-7 items-center justify-center rounded-md bg-gradient-to-br from-sidebar-primary to-sidebar-ring text-xs font-bold text-sidebar-primary-foreground shadow-sm ring-1 ring-white/10">
               N
@@ -392,11 +514,12 @@ export function AppShellClient({
         {/* ── Nav basse (mobile) ── */}
         <nav
           className="pb-safe fixed inset-x-0 bottom-0 z-40 grid border-t bg-background/95 shadow-[0_-2px_10px_-6px_rgb(0_0_0/0.2)] backdrop-blur md:hidden"
-          // Le nombre de colonnes suit le nombre d'onglets RESTANTS. Il était
-          // écrit en dur à cinq : dès qu'un droit en retire un, la barre gardait
-          // sa cinquième colonne et tout partait de travers. Tailwind ne sait
-          // pas fabriquer une classe à partir d'un compte connu à l'exécution.
-          style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}
+          // Le nombre de colonnes suit le nombre d'onglets RESTANTS, plus la
+          // case « Plus » qui est toujours là. Il était écrit en dur à cinq :
+          // dès qu'un droit en retire un, la barre gardait sa cinquième colonne
+          // et tout partait de travers. Tailwind ne sait pas fabriquer une
+          // classe à partir d'un compte connu à l'exécution.
+          style={{ gridTemplateColumns: `repeat(${mobileNav.length + 1}, minmax(0, 1fr))` }}
         >
           {mobileNav.map((item) => {
             const Icon = item.icon;
@@ -407,17 +530,9 @@ export function AppShellClient({
                 href={item.href}
                 prefetch={false}
                 aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                  active ? "text-primary" : "text-muted-foreground",
-                )}
+                className={tabClass(active)}
               >
-                <span
-                  className={cn(
-                    "flex h-7 w-12 items-center justify-center rounded-full transition-colors",
-                    active && "bg-primary/10 [&_svg]:stroke-[2.4]",
-                  )}
-                >
+                <span className={tabPillClass(active)}>
                   <span className="relative">
                     <Icon className="size-5" />
                     {item.labelKey === "notifications" && unreadCount > 0 ? (
@@ -429,8 +544,59 @@ export function AppShellClient({
               </Link>
             );
           })}
+          {/*
+            La porte de sortie. Tout ce que la barre ne porte pas — le pipeline
+            en premier, qui n'avait AUCUNE entrée au doigt — se trouve derrière
+            cette case, avec l'administration que le menu du haut listait déjà.
+          */}
+          <button
+            type="button"
+            onClick={() => setMoreOpen(true)}
+            aria-haspopup="dialog"
+            aria-expanded={moreOpen}
+            className={tabClass(moreActive)}
+          >
+            <span className={tabPillClass(moreActive)}>
+              <Menu className="size-5" />
+            </span>
+            <span className="max-w-full truncate px-1">{t("nav.more")}</span>
+          </button>
         </nav>
+
+        <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
+          <SheetContent
+            side="bottom"
+            className="max-h-[85dvh] gap-0 rounded-t-2xl pb-[calc(1rem+env(safe-area-inset-bottom))]"
+          >
+            <SheetHeader className="pb-2">
+              <SheetTitle>{t("nav.moreTitle")}</SheetTitle>
+            </SheetHeader>
+            {/* Le corps défile, l'en-tête reste : la liste dépasse l'écran dès
+                que le regard courant voit l'administration. */}
+            <div className="min-h-0 space-y-5 overflow-y-auto px-4">
+              {moreNav.length > 0 ? (
+                <div className="grid grid-cols-2 gap-2">{moreNav.map(sheetLink)}</div>
+              ) : null}
+              {adminGroups.map((group) => (
+                <div key={group.labelKey} className="space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {t(`nav.${group.labelKey}`)}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">{group.items.map(sheetLink)}</div>
+                </div>
+              ))}
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
+
+      {/* Hors de la mise en page : l'un n'affiche rien (il enregistre le service
+          worker et l'abonnement push), l'autre n'apparaît qu'au bon moment.
+          Ils vivent ICI parce que la coquille est le seul composant client rendu
+          pour un compte CONNECTÉ et pour lui seul — la mise en page du groupe
+          (app) est gelée, et la racine servirait aussi la page de connexion. */}
+      <PwaBootstrap />
+      <InstallGuide />
     </div>
   );
 }
@@ -507,11 +673,12 @@ function UserMenu({
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
+        {/* Plus de hauteur forcée au cas par cas : `DropdownMenuItem` porte
+            désormais son plancher de 44 px jusqu'à `md`, une fois pour toutes
+            les listes de l'application. Ce qui reste ici est ce qui ne se
+            déduit d'aucun composant : où l'on se trouve déjà. */}
         <DropdownMenuItem
-          className={cn(
-            compact && "h-11",
-            pathname === "/profile" && "bg-accent text-accent-foreground",
-          )}
+          className={cn(pathname === "/profile" && "bg-accent text-accent-foreground")}
           render={<Link href="/profile" />}
         >
           <UserRound className="size-4" />
@@ -535,7 +702,7 @@ function UserMenu({
                   return (
                     <DropdownMenuItem
                       key={item.href}
-                      className={cn("h-11", active && "bg-accent text-accent-foreground")}
+                      className={cn(active && "bg-accent text-accent-foreground")}
                       render={<Link href={item.href} />}
                     >
                       <Icon className="size-4" />
@@ -548,17 +715,13 @@ function UserMenu({
             <DropdownMenuSeparator />
           </>
         ) : null}
-        <DropdownMenuItem
-          className={cn(compact && "h-11")}
-          onClick={() => onSwitchLocale(locale === "fr" ? "en" : "fr")}
-        >
+        <DropdownMenuItem onClick={() => onSwitchLocale(locale === "fr" ? "en" : "fr")}>
           <Globe className="size-4" />
           {locale === "fr" ? "English" : "Français"}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           variant="destructive"
-          className={cn(compact && "h-11")}
           onClick={() => {
             void logoutAction();
           }}

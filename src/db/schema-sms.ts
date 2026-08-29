@@ -15,6 +15,14 @@ import {
 } from "drizzle-orm/pg-core";
 import { calls, clients, comments, users } from "./schema";
 
+// `drizzle.config.ts` est gelé (règle 7) et n'énumère que deux fichiers de
+// schéma. Les tables de l'application installée (abonnements push,
+// joignabilité) méritaient malgré tout leur propre fichier plutôt que d'être
+// enfouies ici, où elles auraient menti sur ce que contient ce module. Cette
+// ré-exportation est le pont : drizzle-kit lit les tables exportées de CE
+// fichier, donc il les voit. À supprimer le jour où drizzle.config.ts s'ouvre.
+export * from "./schema-push";
+
 // ── SMS engine — phase 1 (numbers, consent ledger, suppressions, threads) ────
 // Separate module so src/db/schema.ts stays untouched; merged in src/db/index.ts
 // and registered in drizzle.config.ts. Assistant/campaign tables arrive in later

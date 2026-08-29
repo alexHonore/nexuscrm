@@ -12,7 +12,6 @@ import {
   clients,
   comments,
   followups,
-  notifications,
   sources,
   users,
 } from "@/db/schema";
@@ -21,6 +20,7 @@ import { diffFields, getClientIp, logAudit, type AuditChanges } from "@/lib/audi
 import { isForeignKeyViolation } from "@/lib/db-errors";
 import { categoryEntryPatch } from "@/lib/dispositions";
 import { cancelEvent } from "@/lib/google";
+import { createNotifications } from "@/lib/notify";
 import type { AssignRefusal } from "@/lib/permissions/access";
 import {
   currentActor,
@@ -232,7 +232,7 @@ async function notifyHandOvers(actor: Actor, moves: HandOver[]): Promise<void> {
       },
     ];
   });
-  if (rows.length > 0) await db.insert(notifications).values(rows);
+  await createNotifications(rows);
 }
 
 // ── Client CRUD ──────────────────────────────────────────────────────────────
@@ -1095,7 +1095,7 @@ export async function addCommentAction(input: {
     });
     if (mentioned.length > 0) {
       const excerpt = commentExcerpt(body);
-      await db.insert(notifications).values(
+      await createNotifications(
         mentioned.map((m) => ({
           userId: m.id,
           type: "mention",

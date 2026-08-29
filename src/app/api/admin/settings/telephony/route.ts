@@ -16,7 +16,12 @@ export async function POST(req: Request) {
   if (body instanceof NextResponse) return body;
 
   const current = await getSetting("telephony");
-  await setSetting("telephony", { provider: body.provider });
+  // Le réglage est RECOPIÉ avant d'être modifié. `setSetting` écrit la valeur
+  // entière : depuis que la sonnerie simultanée vit sous cette même clé,
+  // n'écrire que `{ provider }` effacerait silencieusement les numéros et les
+  // identifiants de groupe de sonnerie de toute l'équipe — au moment le plus
+  // anodin possible, un simple changement de fournisseur.
+  await setSetting("telephony", { ...current, provider: body.provider });
 
   const changes = diffFields(current, body, ["provider"]);
   await logAudit({

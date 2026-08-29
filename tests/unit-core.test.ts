@@ -710,7 +710,13 @@ describe("settings — googleSettingsSchema", () => {
 
 describe("settings — telephonySettingsSchema", () => {
   it("applique le défaut voip.ms sur un objet vide", () => {
-    expect(telephonySettingsSchema.parse({})).toEqual({ provider: "voipms" });
+    expect(telephonySettingsSchema.parse({})).toEqual({
+      provider: "voipms",
+      // La sonnerie simultanée arrive ÉTEINTE : allumer cette option fait
+      // sonner le numéro personnel d'un employé, et cela ne s'hérite pas d'une
+      // valeur par défaut. Ce test est l'endroit où cette promesse se vérifie.
+      simulRing: { enabled: false, lines: {} },
+    });
   });
 
   it.each(["voipms", "twilio"])("accepte le fournisseur %s", (provider) => {

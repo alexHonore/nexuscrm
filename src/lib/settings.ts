@@ -1,6 +1,7 @@
 import "server-only";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { SIMULRING_OFF, simulRingSettingsSchema } from "@/lib/telephony/simulring";
 import { db } from "@/db";
 import { settings } from "@/db/schema";
 import { permissionsSettingsSchema } from "@/lib/permissions/schema";
@@ -120,6 +121,17 @@ export type ClassificationSettings = z.infer<typeof classificationSettingsSchema
 
 export const telephonySettingsSchema = z.object({
   provider: z.enum(["voipms", "twilio"]).default("voipms"),
+  /**
+   * La sonnerie simultanée sur le cellulaire personnel — ÉTEINTE par défaut.
+   *
+   * Elle vit sous la clé `telephony` plutôt que sous une clé à elle : la règle
+   * 8 énumère les clés en toutes lettres, et « à quoi sert le téléphone
+   * entrant » est déjà la question de ce réglage-ci. Le défaut éteint n'est pas
+   * de la prudence de façade : allumer cette option fait sonner le numéro
+   * PERSONNEL d'un employé, et cela se demande, cela ne s'hérite pas d'une
+   * valeur par défaut.
+   */
+  simulRing: simulRingSettingsSchema.default(SIMULRING_OFF),
 });
 export type TelephonySettings = z.infer<typeof telephonySettingsSchema>;
 

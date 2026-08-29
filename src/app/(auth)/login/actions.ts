@@ -2,6 +2,7 @@
 
 import { eq, inArray, lt, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
+import { afterLoginPath } from "@/lib/auth/next-path";
 import { z } from "zod";
 import { db } from "@/db";
 import { loginThrottle, users } from "@/db/schema";
@@ -68,6 +69,10 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     password: String(formData.get("password") ?? ""),
     remember: formData.get("remember") === "on",
   });
+  // La destination voyage dans le formulaire plutôt que dans l'action : une
+  // action serveur est joignable par n'importe quel POST, et `afterLoginPath`
+  // refuse tout ce qui n'est pas un chemin relatif à nous.
+  const next = afterLoginPath(String(formData.get("next") ?? "") || null);
   if (!parsed.success) return { error: "invalid" };
   const { email, password, remember } = parsed.data;
 
@@ -105,5 +110,5 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   await purgeExpiredThrottle();
   await logAudit({ userId: user.id, action: "login.success" });
 
-  redirect("/dashboard");
+  redirect(next);
 }

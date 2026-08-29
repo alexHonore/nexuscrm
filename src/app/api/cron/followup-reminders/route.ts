@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { followups, notifications } from "@/db/schema";
 import { notificationContent } from "@/components/clients/notification-content";
 import { isCronAuthorized } from "@/lib/cron-auth";
+import { createNotification } from "@/lib/notify";
 
 /** Un suivi entre dans sa fenêtre de rappel 60 min avant l'échéance. */
 const REMINDER_LEAD_MS = 60 * 60 * 1000;
@@ -56,7 +57,7 @@ export async function GET(request: NextRequest) {
     });
     if (existing) continue;
 
-    await db.insert(notifications).values({
+    await createNotification({
       userId: followup.assignedToId,
       type: "followup_due",
       title: notificationContent(followup.assignedTo.locale, "followupDueTitle", {

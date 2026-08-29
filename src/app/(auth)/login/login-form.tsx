@@ -13,7 +13,7 @@ import { loginAction, type LoginState } from "./actions";
 const FIELD_ICON_CLASS =
   "pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground";
 
-export function LoginForm() {
+export function LoginForm({ next }: { next: string }) {
   const t = useTranslations("auth");
   const [state, formAction, pending] = useActionState<LoginState, FormData>(loginAction, null);
 
@@ -28,6 +28,7 @@ export function LoginForm() {
 
   return (
     <form action={formAction} className="space-y-4">
+      <input type="hidden" name="next" value={next} />
       <div className="space-y-2">
         <Label htmlFor="email">{t("email")}</Label>
         <div className="relative">

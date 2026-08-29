@@ -4,7 +4,10 @@ import { fromZonedTime } from "date-fns-tz";
 import { APP_TZ, dayStartUtc } from "@/components/analytics/period";
 import { missedCallNotification } from "@/components/clients/notification-content";
 import { db } from "@/db";
-import { calls, clients, notifications, users } from "@/db/schema";
+import { calls, clients, users } from "@/db/schema";
+import { runAfterResponse } from "@/lib/after-response";
+import { createNotifications } from "@/lib/notify";
+import { fanoutPush, type PushableRow } from "@/lib/push/fanout";
 import { normalizePhone, phoneMatchKey } from "@/lib/phone";
 import { kickTranscripts } from "@/lib/jobs/kick";
 import { queueTranscriptJobs } from "@/lib/transcripts/sweep";
@@ -239,6 +242,20 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
   counts.recordingsFound = recordings.length;
 
   // ── Phase base de données, sous verrou consultatif ──
+  // Les lignes de notification naissent DANS la transaction, la poussée part
+  // DEHORS — d'où cette liste tenue à l'extérieur. Le point de passage
+  // (`createNotifications`) programme d'ordinaire la poussée lui-même, mais
+  // `runAfterResponse` DÉMARRE le travail tout de suite : il le fait survivre à
+  // la réponse, il ne l'attarde pas jusqu'au COMMIT. Poussée depuis l'intérieur,
+  // l'annonce d'un appel manqué s'afficherait sur un écran verrouillé avant que
+  // la réconciliation soit acquise — et un `rollback` n'a aucun moyen de
+  // rappeler une notification déjà lue. On écrit donc les lignes avec `tx`
+  // (elles vivent et meurent avec la synchro, et `counts.missedNotified` ne
+  // ment jamais sur ce qui a été retenu), on coupe la poussée, et on la rallume
+  // une fois la transaction close — le même ordre que l'`afterCommit` du SMS
+  // entrant. Le type vient du côté ENVOI, le plus strict des deux : il passe
+  // tel quel à l'écriture.
+  const missedRows: PushableRow[] = [];
   const ranToCompletion = await db.transaction(async (tx) => {
     const lockRows = (await tx.execute(
       sql`select pg_try_advisory_xact_lock(${SYNC_LOCK_KEY}) as locked`,
@@ -534,8 +551,8 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
 
     // ── 6. Notifications d'appels manqués récents ──
     if (missedToNotify.length > 0) {
-      await tx.insert(notifications).values(
-        missedToNotify.map((m) =>
+      missedRows.push(
+        ...missedToNotify.map((m) =>
           missedCallNotification({
             userId: m.user.id,
             locale: m.user.locale === "en" ? "en" : "fr",
@@ -544,6 +561,7 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
           }),
         ),
       );
+      await createNotifications(missedRows, { tx, push: false });
       counts.missedNotified = missedToNotify.length;
     }
 
@@ -552,6 +570,19 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
 
   if (!ranToCompletion) {
     pushError("sync_already_running");
+  }
+
+  // ── 6 bis. Réveiller les téléphones, la transaction une fois validée ──
+  // Rien ne part si elle n'est pas allée au bout : une seconde passe
+  // concurrente (verrou refusé) n'a rien écrit, et une erreur en chemin a tout
+  // annulé en remontant. Après la réponse, comme partout ailleurs : chaque
+  // envoi vers APNs ou FCM est un aller-retour réseau, et l'admin qui vient de
+  // cliquer « Synchroniser » n'a pas à regarder tourner le sablier pendant
+  // qu'on réveille les cellulaires.
+  if (ranToCompletion && missedRows.length > 0) {
+    runAfterResponse(async () => {
+      await fanoutPush(missedRows);
+    });
   }
 
   // ── 7. Notes d'appel IA — APRÈS la transaction ──

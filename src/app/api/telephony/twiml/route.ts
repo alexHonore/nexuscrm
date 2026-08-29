@@ -3,8 +3,17 @@ import { and, desc, eq, gte, isNull, like, or } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { missedCallNotification } from "@/components/clients/notification-content";
 import { db } from "@/db";
-import { calls, clients, notifications, users } from "@/db/schema";
+import { calls, clients, users } from "@/db/schema";
+import { createNotification } from "@/lib/notify";
+import { userReach } from "@/db/schema-push";
+import { decryptSecret } from "@/lib/crypto";
 import { normalizePhone, phoneMatchKey } from "@/lib/phone";
+import { getSetting } from "@/lib/settings";
+import {
+  inboundDialTwiml,
+  resolveSimulRing,
+  type SimulRingDecision,
+} from "@/lib/telephony/simulring";
 
 /**
  * POST /api/telephony/twiml — webhook TwiML appelé PAR LES SERVEURS TWILIO
@@ -94,6 +103,40 @@ async function outboundOwner(from: string) {
 }
 
 /**
+ * La décision « fait-on sonner son cellulaire ? », lue au moment de l'appel.
+ *
+ * Le numéro est déchiffré ICI et nulle part ailleurs : il vit chiffré dans
+ * `user_reach` (règle 4), il ne traverse aucun écran, et il ne sert qu'à
+ * fabriquer un `<Number>` que Twilio compose. Une clé de chiffrement absente ou
+ * un enregistrement illisible rendent « pas de sonnerie » plutôt qu'une erreur :
+ * un appel entrant qui ÉCHOUE est bien pire qu'un appel entrant qui sonne au
+ * seul poste, et c'est de toute façon le comportement par défaut.
+ */
+async function resolveSimulRingFor(userId: string): Promise<SimulRingDecision> {
+  try {
+    const [telephony, reach] = await Promise.all([
+      getSetting("telephony"),
+      db.query.userReach.findFirst({ where: eq(userReach.userId, userId) }),
+    ]);
+    if (!telephony.simulRing.enabled) return { status: "skipped", reason: "feature_off" };
+    const cell = reach?.mobilePhoneEnc ? decryptSecret(reach.mobilePhoneEnc) : null;
+    return resolveSimulRing(telephony.simulRing, userId, {
+      cell,
+      ringMobile: reach?.ringMobile ?? false,
+    });
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        at: "twiml",
+        event: "simulring_resolve_failed",
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return { status: "skipped", reason: "feature_off" };
+  }
+}
+
+/**
  * Rappel de l'attribut action du Dial entrant. Un statut non abouti devient un
  * appel manqué : rangée `calls` + notification — sauf si le webphone (encore
  * ouvert) l'a déjà journalisé, ou si Twilio relivre le même rappel (CallSid).
@@ -166,7 +209,7 @@ async function handleInboundDialResult(params: URLSearchParams): Promise<NextRes
     provider: "twilio",
     providerCallId: callSid,
   });
-  await db.insert(notifications).values(
+  await createNotification(
     missedCallNotification({
       userId: owner.id,
       locale: owner.locale === "en" ? "en" : "fr",
@@ -216,10 +259,14 @@ export async function POST(req: NextRequest) {
   if (did) {
     const owner = await db.query.users.findFirst({ where: eq(users.didNumber, did) });
     if (owner && owner.isActive) {
-      return twiml(
-        `<Dial answerOnBridge="true" timeout="30" action="/api/telephony/twiml?dialResult=1">` +
-          `<Client>${xmlEscape(`user-${owner.id}`)}</Client></Dial>`,
-      );
+      // La sonnerie simultanée, si et seulement si les TROIS conditions sont
+      // réunies (maison, ligne, accord de la personne — voir
+      // `resolveSimulRing`). Éteinte, `inboundDialTwiml` rend exactement la
+      // chaîne d'avant, octet pour octet : c'est le contrat que vérifie
+      // `tests/unit-simulring.test.ts`, parce qu'une option neuve n'a pas le
+      // droit de changer le comportement de ceux qui ne l'ont pas demandée.
+      const simulRing = await resolveSimulRingFor(owner.id);
+      return twiml(inboundDialTwiml({ identity: `user-${owner.id}`, simulRing }));
     }
   }
 

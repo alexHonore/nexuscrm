@@ -3,8 +3,9 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { missedCallNotification } from "@/components/clients/notification-content";
 import { db } from "@/db";
-import { DISPOSITIONS, calls, categories, clients, followups, notifications } from "@/db/schema";
+import { DISPOSITIONS, calls, categories, clients, followups } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
+import { createNotification } from "@/lib/notify";
 import { apiActor, canSeeClient, clientRef, grantsOnClient } from "@/lib/permissions/server";
 import { notifyCategoryChanged } from "@/lib/campaigns-server/match";
 
@@ -209,7 +210,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       // journal d'appels — même règle que POST /api/calls.
       client = row && (await canSeeClient(actor, row)) ? row : null;
     }
-    await db.insert(notifications).values(
+    await createNotification(
       missedCallNotification({
         userId: auth.id,
         locale: auth.locale === "en" ? "en" : "fr",

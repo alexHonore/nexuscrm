@@ -42,6 +42,10 @@
     "clientAssignedTitle": "Fiche assignée : {client}",
     "clientAssignedBody": "{actor} vous a confié cette fiche.",
     "clientTakenTitle": "Fiche retirée : {client}",
-    "clientTakenBody": "{actor} a repris cette fiche."
+    "clientTakenBody": "{actor} a repris cette fiche.",
+    "appointmentCreatedTitle": "Nouveau rendez-vous",
+    "appointmentCreatedBody": "{name} ({phone}) — {when}",
+    "appointmentCancelledTitle": "Rendez-vous annulé",
+    "appointmentCancelledBody": "{name} — {when}"
   }
 }

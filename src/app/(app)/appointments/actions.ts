@@ -7,7 +7,7 @@ import { and, eq, gt, lt, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
-import { appointments, categories, clients, comments, notifications, users } from "@/db/schema";
+import { appointments, categories, clients, comments, users } from "@/db/schema";
 import { diffFields, logAudit } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth/guards";
 import { clientRef, currentActor, grantsOnClient } from "@/lib/permissions/server";
@@ -18,8 +18,10 @@ import {
   GoogleNotConnectedError,
   validAttendeeEmail,
 } from "@/lib/google";
+import { createNotifications } from "@/lib/notify";
 import { formatPhone } from "@/lib/phone";
 import { getSetting } from "@/lib/settings";
+import { notificationContent } from "@/components/clients/notification-content";
 import { computeAvailability, durationFor } from "@/app/api/availability/slots";
 import enBooking from "../../../../messages/en/booking.json";
 import enClients from "../../../../messages/en/clients.json";
@@ -217,11 +219,31 @@ export type CreateAppointmentResult =
       error: "unauthenticated" | "invalid" | "not_found" | "slot_taken" | "google_error" | "unknown";
     };
 
+/**
+ * Prévient le COURTIER — et lui seul, délibérément.
+ *
+ * `users.role = "admin"` n'est plus qu'un plancher depuis que les rôles se
+ * règlent (règle 13), et ailleurs cette lecture est un bogue : elle oublie les
+ * rôles fabriqués par le courtier, tous stockés `caller`. Ici, c'est le sens
+ * voulu. Ces lignes portent le nom du client et son numéro EN CLAIR, sans
+ * repasser par la matrice fiche par fiche ; le plancher `admin` est justement
+ * la seule population dont on sait, sans rien calculer, qu'elle a le droit de
+ * tout lire. Élargir aux rôles qui « voient les rendez-vous » enverrait des
+ * coordonnées à des gens à qui l'écran les masque — et le catalogue des droits
+ * n'a de toute façon aucune clé « rendez-vous » à qui poser la question.
+ *
+ * Le jour où il en faudra une, c'est ici que ça se corrigera : ajouter la clé
+ * au catalogue, puis choisir les destinataires comme le fait
+ * `src/lib/sms-server/notify.ts` — droit effectif ET fiche visible.
+ *
+ * `text` reçoit la langue du DESTINATAIRE : une notification est du texte
+ * PERSISTÉ, lu plus tard sur un écran verrouillé, donc écrit dans sa langue à
+ * lui et jamais dans celle de l'auteur du geste.
+ */
 async function notifyAdmins(entry: {
   actorId: string;
   type: "appointment" | "system";
-  fr: { title: string; body: string };
-  en: { title: string; body: string };
+  text: (locale: "fr" | "en") => { title: string; body: string };
   link: string;
   includeActor?: boolean;
 }): Promise<void> {
@@ -231,14 +253,11 @@ async function notifyAdmins(entry: {
   });
   const rows = admins
     .filter((a) => entry.includeActor || a.id !== entry.actorId)
-    .map((a) => ({
-      userId: a.id,
-      type: entry.type,
-      title: a.locale === "en" ? entry.en.title : entry.fr.title,
-      body: a.locale === "en" ? entry.en.body : entry.fr.body,
-      link: entry.link,
-    }));
-  if (rows.length > 0) await db.insert(notifications).values(rows);
+    .map((a) => {
+      const { title, body } = entry.text(a.locale);
+      return { userId: a.id, type: entry.type, title, body, link: entry.link };
+    });
+  await createNotifications(rows);
 }
 
 export async function createAppointment(input: CreateAppointmentInput): Promise<CreateAppointmentResult> {
@@ -435,8 +454,14 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
   await notifyAdmins({
     actorId: user.id,
     type: "appointment",
-    fr: { title: "Nouveau rendez-vous", body: `${client.fullName} (${formatPhone(client.phone)}) — ${whenFr}` },
-    en: { title: "New appointment", body: `${client.fullName} (${formatPhone(client.phone)}) — ${whenEn}` },
+    text: (locale) => ({
+      title: notificationContent(locale, "appointmentCreatedTitle"),
+      body: notificationContent(locale, "appointmentCreatedBody", {
+        name: client.fullName,
+        phone: formatPhone(client.phone),
+        when: locale === "en" ? whenEn : whenFr,
+      }),
+    }),
     link: "/appointments",
   });
   if (warning) {
@@ -449,8 +474,11 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
       actorId: user.id,
       type: "system",
       includeActor: true,
-      fr: googleNotificationText("fr", key, { name: client.fullName, when: whenFr }),
-      en: googleNotificationText("en", key, { name: client.fullName, when: whenEn }),
+      text: (locale) =>
+        googleNotificationText(locale, key, {
+          name: client.fullName,
+          when: locale === "en" ? whenEn : whenFr,
+        }),
       link: warning === "google_not_connected" ? "/admin/settings" : "/appointments",
     });
   }
@@ -569,8 +597,13 @@ export async function cancelAppointment(appointmentId: string): Promise<CancelAp
   await notifyAdmins({
     actorId: user.id,
     type: "appointment",
-    fr: { title: "Rendez-vous annulé", body: `${whoFr} — ${whenFr}` },
-    en: { title: "Appointment cancelled", body: `${whoEn} — ${whenEn}` },
+    text: (locale) => ({
+      title: notificationContent(locale, "appointmentCancelledTitle"),
+      body: notificationContent(locale, "appointmentCancelledBody", {
+        name: locale === "en" ? whoEn : whoFr,
+        when: locale === "en" ? whenEn : whenFr,
+      }),
+    }),
     link: "/appointments",
   });
 

@@ -42,6 +42,10 @@
     "clientAssignedTitle": "Record assigned: {client}",
     "clientAssignedBody": "{actor} handed you this record.",
     "clientTakenTitle": "Record taken back: {client}",
-    "clientTakenBody": "{actor} took this record over."
+    "clientTakenBody": "{actor} took this record over.",
+    "appointmentCreatedTitle": "New appointment",
+    "appointmentCreatedBody": "{name} ({phone}) — {when}",
+    "appointmentCancelledTitle": "Appointment cancelled",
+    "appointmentCancelledBody": "{name} — {when}"
   }
 }

@@ -527,6 +527,25 @@
       "exists": "This number already exists.",
       "delete": "Delete",
       "save": "Save"
+    },
+    "simulRing": {
+      "title": "Ring the mobile phone",
+      "desc": "When a client calls, also ring the caller's personal mobile at the same time as their desk line. First to answer takes the call.",
+      "why": "An installed web app cannot receive a call while the phone is locked: the system suspends it and the line registration dies with it. A notification warns — it does not ring. For a call to actually be answered away from the desk, a real phone has to ring.",
+      "off": "Off — only the notification is sent",
+      "on": "On",
+      "enable": "Ring mobile phones",
+      "saved": "Saved",
+      "consentNote": "You open the door; each caller enters their own number and agrees to it from « My profile ». You cannot enter it for them: it is a personal number.",
+      "peopleTitle": "Who can be reached on their mobile",
+      "lineOn": "Line open",
+      "lineOff": "Line closed",
+      "ready": "Ready — number provided and agreed",
+      "waitingNumber": "Waiting: this person has not entered their number yet",
+      "waitingConsent": "Waiting: this person has not agreed to have their mobile ring",
+      "noOne": "Nobody has an open line yet.",
+      "voicemailWarning": "Watch out: a mobile's voicemail often answers around 20 seconds, before the 30-second ring window ends. When it picks up, it WINS the call — the caller reaches the employee's personal mailbox instead of yours. Raise the voicemail delay on the phones concerned, or leave this option off.",
+      "provisionNote": "On voip.ms, opening a line creates a forwarding entry and a ring group at the provider, and changes the number's routing. On Twilio nothing is created: both destinations are dialled together on each call."
     }
   },
   "audit": {

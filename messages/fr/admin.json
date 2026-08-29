@@ -527,6 +527,25 @@
       "exists": "Ce numéro existe déjà.",
       "delete": "Supprimer",
       "save": "Enregistrer"
+    },
+    "simulRing": {
+      "title": "Sonnerie sur le cellulaire",
+      "desc": "Quand un client appelle, faire sonner AUSSI le cellulaire personnel du téléphoniste, en même temps que son poste. Le premier qui décroche prend l'appel.",
+      "why": "Une application web installée ne peut pas recevoir un appel quand le téléphone est verrouillé : le système la met en veille et l'enregistrement de la ligne meurt avec elle. La notification prévient — elle ne fait pas sonner. Pour qu'un appel soit réellement pris hors du bureau, il faut faire sonner un vrai téléphone.",
+      "off": "Éteinte — seule la notification part",
+      "on": "Allumée",
+      "enable": "Faire sonner les cellulaires",
+      "saved": "Enregistré",
+      "consentNote": "Vous ouvrez la porte ; chaque téléphoniste entre son propre numéro et donne son accord depuis « Mon profil ». Vous ne pouvez pas le saisir à sa place : c'est un numéro personnel.",
+      "peopleTitle": "Qui peut être joint sur son cellulaire",
+      "lineOn": "Ligne ouverte",
+      "lineOff": "Ligne fermée",
+      "ready": "Prêt — numéro fourni et accepté",
+      "waitingNumber": "En attente : cette personne n'a pas encore entré son numéro",
+      "waitingConsent": "En attente : cette personne n'a pas accepté que son cellulaire sonne",
+      "noOne": "Personne n'a encore de ligne ouverte.",
+      "voicemailWarning": "À surveiller : la messagerie d'un cellulaire répond souvent vers 20 secondes, avant la fin des 30 secondes de sonnerie. Quand elle décroche, elle GAGNE l'appel — l'appelant tombe sur la boîte vocale personnelle du téléphoniste au lieu de la vôtre. Allongez le délai de la messagerie sur les téléphones concernés, ou gardez cette option éteinte.",
+      "provisionNote": "Sur voip.ms, ouvrir une ligne crée un renvoi et un groupe de sonnerie chez le fournisseur, et modifie le routage du numéro. Sur Twilio, rien n'est créé : les deux destinations sont composées ensemble à chaque appel."
     }
   },
   "audit": {

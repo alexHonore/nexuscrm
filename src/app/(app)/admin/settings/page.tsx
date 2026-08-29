@@ -1,14 +1,16 @@
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { Settings2 } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import { BookingCard, GoogleCard, KillSwitchCard, TelephonyCard } from "@/components/admin/settings-client";
 import { ClassificationCard } from "@/components/admin/classification-card";
+import { SimulRingCard, type ReachRow } from "@/components/admin/simulring-card";
 import { SmsNumbersCard } from "@/components/admin/sms-numbers-card";
 import { TranscriptsCard } from "@/components/admin/transcripts-card";
 import { listSmsNumbersForAdmin } from "@/lib/sms-server/numbers";
 import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/db";
-import { categories } from "@/db/schema";
+import { categories, users } from "@/db/schema";
+import { userReach } from "@/db/schema-push";
 import { categoryDispositionValue } from "@/lib/dispositions";
 import { docLocale } from "@/lib/docs/types";
 import { requirePerm } from "@/lib/permissions/server";
@@ -30,6 +32,33 @@ export default async function AdminSettingsPage() {
       getSetting("transcripts"),
       db.select().from(categories).orderBy(asc(categories.sortOrder)),
     ]);
+
+  // Qui est joignable sur son cellulaire — l'ÉTAT, jamais le numéro. Le
+  // téléphone personnel d'un employé n'a pas à traverser le réseau vers un
+  // écran d'administration pour répondre à « est-ce que ça sonnera ? » ; un
+  // booléen y répond aussi bien. `mobileLast4` existe pour que la PERSONNE
+  // reconnaisse le sien dans /profile, pas pour être exposé ici.
+  const staff = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      isActive: users.isActive,
+      last4: userReach.mobileLast4,
+      ringMobile: userReach.ringMobile,
+    })
+    .from(users)
+    .leftJoin(userReach, eq(userReach.userId, users.id))
+    .orderBy(asc(users.name));
+
+  const reachRows: ReachRow[] = staff
+    .filter((row) => row.isActive)
+    .map((row) => ({
+      userId: row.id,
+      name: row.name,
+      hasNumber: Boolean(row.last4),
+      consented: Boolean(row.ringMobile),
+      lineEnabled: telephony.simulRing.lines[row.id]?.enabled ?? false,
+    }));
 
   // La MÊME valeur que les dispositions d'après-appel (`key` ou « cat:<id> ») :
   // un classement posé par l'assistant et un posé par un téléphoniste restent
@@ -103,6 +132,8 @@ export default async function AdminSettingsPage() {
       <SmsNumbersCard initial={numbers} twilioConfigured={twilioHints.TWILIO_ACCOUNT_SID} />
 
       <TelephonyCard initialProvider={telephony.provider} voipms={voipmsHints} twilio={twilioHints} />
+
+      <SimulRingCard initialEnabled={telephony.simulRing.enabled} people={reachRows} />
     </div>
   );
 }
