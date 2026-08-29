@@ -41,7 +41,7 @@ export function DocsToc({ entries, title }: { entries: TocEntry[]; title: string
           <a
             href={`#${e.id}`}
             className={cn(
-              "flex min-h-9 items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-muted",
+              "flex min-h-11 items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-muted md:min-h-9",
               active === e.id ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground",
             )}
           >

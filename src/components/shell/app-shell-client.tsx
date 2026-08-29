@@ -475,7 +475,16 @@ export function AppShellClient({
           feuille de style, une seule est sûre.
         */}
         <header className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b bg-background/95 px-4 pb-2.5 pt-[calc(env(safe-area-inset-top)+0.625rem)] shadow-[0_1px_8px_-4px_rgb(0_0_0/0.15)] backdrop-blur md:hidden">
-          <Link href="/dashboard" className="flex items-center gap-2">
+          {/*
+            La marque est aussi le retour à l'accueil, et c'est le seul lien de
+            cette barre : `min-h-11` lui donne la hauteur du pouce sans rien
+            déplacer — la barre fait déjà 65 px, le lien s'y étire simplement.
+            Pas d'`aria-label` : le lien porte déjà « Groupe Nexus » en toutes
+            lettres, et un nom accessible qui ne contient pas le libellé visible
+            casse la commande vocale (WCAG 2.5.3). L'en-tête entier est
+            `md:hidden`, donc rien de ceci n'atteint le bureau.
+          */}
+          <Link href="/dashboard" className="flex min-h-11 items-center gap-2">
             <div className="flex size-7 items-center justify-center rounded-md bg-gradient-to-br from-sidebar-primary to-sidebar-ring text-xs font-bold text-sidebar-primary-foreground shadow-sm ring-1 ring-white/10">
               N
             </div>

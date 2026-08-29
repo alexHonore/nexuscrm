@@ -68,19 +68,26 @@ export function ClientSwitcher({ clientId }: { clientId: string }) {
 
   return (
     <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-      {/* Mobile: back to the panel. Also the desktop fallback for deep links. */}
+      {/* Mobile: back to the panel. Also the desktop fallback for deep links.
+
+          Deux libellés pour un seul bouton : « Retour à la liste » ne laissait
+          plus, sur un 360 px, de quoi écrire « 5 / 10 » — le compteur se
+          cassait sur trois lignes entre deux flèches. Sur téléphone on dit
+          « Retour », le chevron portant le reste du sens ; l'écran large, où ce
+          bouton n'apparaît que sur un lien direct, garde sa phrase entière. */}
       <Button
         variant="ghost"
         className={cn("min-h-11 px-2.5 md:min-h-9", known && "md:hidden")}
         onClick={() => router.push("/clients")}
       >
         <ChevronLeftIcon />
-        {t("switcher.backToList")}
+        <span className="md:hidden">{t("switcher.back")}</span>
+        <span className="hidden md:inline">{t("switcher.backToList")}</span>
       </Button>
 
       {known ? (
         <div className="ml-auto flex items-center rounded-lg border bg-card px-1">
-          <span className="px-2 text-sm text-muted-foreground tabular-nums">
+          <span className="px-2 text-sm whitespace-nowrap text-muted-foreground tabular-nums">
             {t("switcher.position", { position: index + 1, total: nav.total })}
           </span>
           <Button

@@ -15,6 +15,7 @@
     "open": "Ouvrir la fiche",
     "call": "Appeler",
     "moveTo": "Déplacer vers",
+    "currentColumn": "Colonne actuelle",
     "doNotCall": "Ne pas appeler",
     "moved": "Fiche déplacée vers {category}",
     "moveFailed": "Le déplacement a échoué. Réessayez."

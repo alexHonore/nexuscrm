@@ -39,14 +39,28 @@ const TYPE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
   system: BellIcon,
 };
 
-export function MarkAllReadButton({ disabled }: { disabled: boolean }) {
+/**
+ * « Tout marquer comme lu ».
+ *
+ * Le bouton accepte une classe parce que l'écran le pose à DEUX endroits selon
+ * la largeur — dans l'en-tête sur grand écran, sous le titre sur téléphone —
+ * et qu'un seul des deux est rendu à la fois. Le geste, lui, reste écrit une
+ * seule fois : c'est tout l'intérêt de le laisser choisir sa place.
+ */
+export function MarkAllReadButton({
+  disabled,
+  className,
+}: {
+  disabled: boolean;
+  className?: string;
+}) {
   const t = useTranslations("notifications");
   const [pending, startTransition] = useTransition();
 
   return (
     <Button
       variant="outline"
-      className="min-h-11 md:min-h-8"
+      className={cn("min-h-11 md:min-h-8", className)}
       disabled={disabled || pending}
       onClick={() =>
         startTransition(async () => {

@@ -177,7 +177,7 @@ export function AssistantsListClient({
                         sinon de la carte sur un écran de 360 px. */}
                     <Link
                       href={`/admin/assistants/${item.id}`}
-                      className="min-w-0 break-words font-medium hover:underline"
+                      className="inline-flex min-h-11 min-w-0 items-center break-words font-medium hover:underline md:inline md:min-h-0"
                     >
                       {item.name}
                     </Link>

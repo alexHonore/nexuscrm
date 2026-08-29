@@ -91,7 +91,17 @@ export default async function NotificationsPage({
             </Badge>
           ) : null
         }
-        actions={<MarkAllReadButton disabled={unreadEverything === 0} />}
+        // Un seul bouton. `PageHeader` renvoie désormais ses actions sur leur
+        // propre ligne pleine largeur sous le titre en dessous de `md`, donc
+        // le doublon « une copie cachée de chaque côté » qui vivait ici n'a
+        // plus de raison d'être — et deux boutons dans le DOM, c'était deux
+        // fois la même chose à maintenir.
+        actions={
+          <MarkAllReadButton
+            disabled={unreadEverything === 0}
+            className="max-md:w-full max-md:justify-center"
+          />
+        }
       />
 
       {rows.length === 0 ? (

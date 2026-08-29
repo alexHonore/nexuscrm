@@ -178,7 +178,7 @@ export function GoogleCard({
                   value={selected}
                   onValueChange={(v) => void saveCalendar(String(v))}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="min-h-11 w-full md:min-h-0">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

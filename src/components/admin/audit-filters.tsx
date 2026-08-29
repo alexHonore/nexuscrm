@@ -42,7 +42,7 @@ export function AuditFilters({ actions, users }: { actions: string[]; users: Opt
           value={current}
           onValueChange={(v) => setParam(key, v === null ? null : String(v))}
         >
-          <SelectTrigger className="w-full" size="sm">
+          <SelectTrigger className="min-h-11 w-full md:min-h-0" size="sm">
             <SelectValue placeholder={allLabel} />
           </SelectTrigger>
           <SelectContent>

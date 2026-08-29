@@ -65,9 +65,20 @@ function SheetContent({
           <SheetPrimitive.Close
             data-slot="sheet-close"
             render={
+              /*
+                Le bouton de fermeture est un `icon-sm` — 28 px, la seule
+                cible sous les 44 px qui restait dans chaque boîte de dialogue
+                et chaque feuille de l'application. Il est en HAUT À DROITE,
+                c'est-à-dire à l'endroit le plus difficile à atteindre d'un
+                pouce, et le rater ferme rarement quelque chose d'autre : on
+                touche le contenu, ou l'on croit l'application bloquée.
+
+                `size-11` sur téléphone, `md:size-7` pour rendre au bureau la
+                géométrie exacte d'avant.
+              */
               <Button
                 variant="ghost"
-                className="absolute top-3 right-3"
+                className="absolute top-3 right-3 size-11 md:size-7"
                 size="icon-sm"
               />
             }

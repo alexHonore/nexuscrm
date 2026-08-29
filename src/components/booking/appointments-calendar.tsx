@@ -141,8 +141,14 @@ export function AppointmentsCalendar({
           </div>
         </div>
 
-        {/* ── Grille ── */}
-        <div className="grid grid-cols-7 gap-1">
+        {/* ── Grille ──
+            Sept colonnes ne se négocient pas : sur un 360 px, la gouttière de
+            4 px entre les jours coûtait 24 px, et chaque case tombait à 40 px
+            de large — sous le doigt. La gouttière disparaît et la grille
+            déborde un peu du rembourrage de la carte, ce qui rend les 44 px.
+            Au-delà de `md` la largeur n'a jamais manqué : la gouttière et les
+            marges y restent exactement ce qu'elles étaient. */}
+        <div className="-mx-2 grid grid-cols-7 gap-0 md:mx-0 md:gap-1">
           {weekdays.map((w) => (
             <div
               key={w}

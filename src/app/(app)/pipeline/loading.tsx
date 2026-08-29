@@ -18,7 +18,9 @@ export default function PipelineLoading() {
       </div>
 
       {/* ── Colonnes ── */}
-      <div className="flex h-[calc(100dvh-19.5rem)] min-h-80 gap-3 overflow-hidden px-4 pb-2 md:h-[calc(100dvh-10rem)] md:gap-4 md:px-8">
+      {/* Même hauteur que le tableau réel (20rem sous `md`) : la silhouette
+          ne doit pas être d'un demi-rem plus haute que ce qui la remplace. */}
+      <div className="flex h-[calc(100dvh-20rem)] min-h-80 gap-3 overflow-hidden px-4 pb-2 md:h-[calc(100dvh-10rem)] md:gap-4 md:px-8">
         {[0, 1, 2, 3].map((i) => (
           <div
             key={i}

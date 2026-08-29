@@ -108,7 +108,7 @@ export function AttentionList({
           // lien en calque, actions au-dessus.
           <li
             key={row.id}
-            className="relative flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50"
+            className="relative flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50 max-md:flex-col max-md:items-stretch max-md:gap-2"
           >
             <Link
               href={row.clientId ? `/clients/${row.clientId}` : "/conversations"}
@@ -123,8 +123,20 @@ export function AttentionList({
                   téléphone. */}
               <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
                 {reason !== "" ? (
-                  <Badge variant="outline" className="gap-1 font-normal" style={lookTint(look)}>
-                    {tc.has(reasonKey as never) ? tc(reasonKey as never) : reason}
+                  // Un motif long (« Demande de parler à un humain ») dépassait
+                  // sa colonne et glissait SOUS le bouton opaque de droite : le
+                  // lecteur voyait une phrase coupée net, sans même les points
+                  // de suspension qui l'auraient prévenu. Sous md la pastille
+                  // accepte de rétrécir et tronque proprement ; au-delà elle
+                  // reste `shrink-0` comme toute pastille, donc intacte.
+                  <Badge
+                    variant="outline"
+                    className="gap-1 font-normal max-md:min-w-0 max-md:shrink"
+                    style={lookTint(look)}
+                  >
+                    <span className="truncate">
+                      {tc.has(reasonKey as never) ? tc(reasonKey as never) : reason}
+                    </span>
                   </Badge>
                 ) : null}
                 {showMasked ? (
@@ -144,10 +156,21 @@ export function AttentionList({
                 ) : null}
               </p>
             </div>
+            {/* Sur un téléphone ce bouton prenait 126 px des 358 disponibles —
+                un tiers de la ligne pour un geste secondaire, au détriment du
+                nom et du motif.
+
+                Il a d'abord été réduit à son seul pictogramme, ce que la règle
+                11 refuse : « une icône DOUBLE un libellé, elle ne le remplace
+                pas », et un `sr-only` ne sauve que le lecteur d'écran — pas
+                celui qui regarde une coche carrée en se demandant ce qu'elle
+                fait. Le bouton descend donc SOUS la ligne, pleine largeur, où
+                il a la place de dire son nom. Au-delà de md, la rangée reprend
+                sa disposition d'avant, bouton compris. */}
             <Button
               variant="outline"
               size="sm"
-              className="relative z-10 min-h-11 shrink-0 md:min-h-8"
+              className="relative z-10 min-h-11 shrink-0 max-md:w-full max-md:justify-center md:min-h-8"
               disabled={pending}
               onClick={() => markHandled(row.id)}
             >
@@ -160,7 +183,15 @@ export function AttentionList({
         // Ce qui n'est pas montré doit rester ATTEIGNABLE et compté juste —
         // sinon la carte laisse croire que la liste est finie.
         <li className="pt-1 text-xs text-muted-foreground">
-          <Link href="/conversations" className="hover:underline">
+          {/* Atteignable veut dire ATTEIGNABLE AU POUCE : en texte de 12 px ce
+              lien ne faisait que 16 px de haut. Sous md il devient une bande
+              de 44 px sur toute la largeur ; au-delà, `md:inline` lui rend sa
+              nature de mot dans une phrase (une boîte en ligne ignore
+              `min-height`, le grand écran ne bouge donc pas d'un pixel). */}
+          <Link
+            href="/conversations"
+            className="flex min-h-11 items-center hover:underline md:inline md:min-h-0"
+          >
             {t("attention.more", { count: hidden })}
           </Link>
         </li>

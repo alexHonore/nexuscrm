@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { emitDataChange } from "@/lib/live";
+import { cn } from "@/lib/utils";
 import type { FilterOption } from "./clients-filters";
 
 const NONE = "none";
@@ -57,6 +58,15 @@ export function AddClientDialog({
   const [sourceId, setSourceId] = useState(NONE);
   const [assignedToId, setAssignedToId] = useState(NONE);
   const [notes, setNotes] = useState("");
+
+  /**
+   * Le gabarit de champ, copié de `client-info-form.tsx`.
+   *
+   * La hauteur de base d'un `Input` et d'un `SelectTrigger` est 32 px : huit
+   * cibles de 32 px empilées, c'est une fiche qu'on ne crée pas depuis un
+   * cellulaire. Le `md:` rend au bureau sa densité au pixel près.
+   */
+  const fieldClass = "min-h-11 md:min-h-8";
 
   const withNone = (options: FilterOption[]): FilterOption[] => [
     { value: NONE, label: t("list.unassigned") },
@@ -147,6 +157,7 @@ export function AddClientDialog({
             <Label htmlFor="new-fullName">{t("fields.fullName")}</Label>
             <Input
               id="new-fullName"
+              className={fieldClass}
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               required
@@ -157,6 +168,7 @@ export function AddClientDialog({
             <Label htmlFor="new-phone">{t("fields.phone")}</Label>
             <Input
               id="new-phone"
+              className={fieldClass}
               type="tel"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
@@ -165,11 +177,22 @@ export function AddClientDialog({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="new-email">{t("fields.email")}</Label>
-            <Input id="new-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Input
+              id="new-email"
+              className={fieldClass}
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="new-city">{t("fields.city")}</Label>
-            <Input id="new-city" value={city} onChange={(e) => setCity(e.target.value)} />
+            <Input
+              id="new-city"
+              className={fieldClass}
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+            />
           </div>
           <div className="space-y-1.5">
             <Label>{t("fields.language")}</Label>
@@ -178,7 +201,7 @@ export function AddClientDialog({
               value={language}
               onValueChange={(v) => setLanguage(v as "fr" | "en")}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className={cn("w-full", fieldClass)}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -197,7 +220,7 @@ export function AddClientDialog({
               value={categoryId}
               onValueChange={(v) => setCategoryId(v ?? NONE)}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className={cn("w-full", fieldClass)}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -216,7 +239,7 @@ export function AddClientDialog({
               value={sourceId}
               onValueChange={(v) => setSourceId(v ?? NONE)}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className={cn("w-full", fieldClass)}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -235,7 +258,7 @@ export function AddClientDialog({
               value={assignedToId}
               onValueChange={(v) => setAssignedToId(v ?? NONE)}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className={cn("w-full", fieldClass)}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

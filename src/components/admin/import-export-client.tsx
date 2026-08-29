@@ -387,7 +387,7 @@ export function ImportCard({
         value={mapping[field] ?? null}
         onValueChange={(v) => setMapping((m) => ({ ...m, [field]: v === null ? undefined : String(v) }))}
       >
-        <SelectTrigger className="w-full" size="sm">
+        <SelectTrigger className="min-h-11 w-full md:min-h-0" size="sm">
           <SelectValue placeholder="—" />
         </SelectTrigger>
         <SelectContent>
@@ -415,7 +415,7 @@ export function ImportCard({
         value={value}
         onValueChange={(v) => onChange(v === null ? null : String(v))}
       >
-        <SelectTrigger className="w-full" size="sm">
+        <SelectTrigger className="min-h-11 w-full md:min-h-0" size="sm">
           <SelectValue placeholder="—" />
         </SelectTrigger>
         <SelectContent>
@@ -769,7 +769,7 @@ export function ExportCard({
         value={value}
         onValueChange={(v) => onChange(v === null ? null : String(v))}
       >
-        <SelectTrigger className="w-full" size="sm">
+        <SelectTrigger className="min-h-11 w-full md:min-h-0" size="sm">
           <SelectValue placeholder={t("importExport.all")} />
         </SelectTrigger>
         <SelectContent>

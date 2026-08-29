@@ -292,7 +292,11 @@ export function PipelineBoard({
   return (
     <section
       aria-label={t("board.label")}
-      className="flex h-[calc(100dvh-19.5rem)] min-h-80 snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-4 px-4 pb-2 md:h-[calc(100dvh-10rem)] md:snap-none md:gap-4 md:scroll-px-8 md:px-8"
+      // 20rem, pas 19,5 : la demi-rem manquante laissait la PAGE elle-même
+      // défiler de cinq pixels sous un carrousel qui, lui, défile déjà. Deux
+      // défilements imbriqués qui se disputent le même pouce, ça se sent. La
+      // hauteur de `md` ne bouge pas — le poste de travail n'a pas ce problème.
+      className="flex h-[calc(100dvh-20rem)] min-h-80 snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-4 px-4 pb-2 md:h-[calc(100dvh-10rem)] md:snap-none md:gap-4 md:scroll-px-8 md:px-8"
     >
       {columns.map((column) => {
         const key = columnKey(column.id);

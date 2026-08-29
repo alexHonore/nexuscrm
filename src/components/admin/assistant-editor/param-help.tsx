@@ -53,7 +53,7 @@ export function ParamHelp({ path }: { path: string }) {
           <Button
             variant="ghost"
             size="icon"
-            className="size-6 text-muted-foreground"
+            className="size-11 text-muted-foreground md:size-6"
             aria-label={`${t("editor.help.show")} — ${doc.label}`}
           />
         }

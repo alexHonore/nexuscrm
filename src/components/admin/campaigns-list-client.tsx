@@ -168,9 +168,13 @@ export function CampaignsListClient({
                 <CardContent className="flex items-start gap-3 p-4">
                   <div className="min-w-0 flex-1 space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
+                      {/* Le nom EST le lien vers la campagne : sur téléphone
+                          il se prend au pouce, donc on lui donne les 44 px
+                          réglementaires sans toucher au rendu du bureau, où il
+                          redevient un mot souligné dans une ligne de texte. */}
                       <Link
                         href={`/admin/campaigns/${item.id}`}
-                        className="font-medium hover:underline"
+                        className="inline-flex min-h-11 items-center font-medium hover:underline md:inline md:min-h-0"
                       >
                         {item.name}
                       </Link>

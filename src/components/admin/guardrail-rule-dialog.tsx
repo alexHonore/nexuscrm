@@ -154,7 +154,7 @@ export function KindHelp({ kind }: { kind: GuardrailKind }) {
           <Button
             variant="ghost"
             size="icon"
-            className="size-6 text-muted-foreground"
+            className="size-11 text-muted-foreground md:size-6"
             aria-label={`${t("guardrails.help")} — ${text.label}`}
           />
         }

@@ -360,7 +360,7 @@ export function ConsumptionSections({
               <Button
                 size="sm"
                 variant="outline"
-                className="h-9"
+                className="h-11 md:h-9"
                 disabled={savingRate || rate.trim() === ""}
                 onClick={() => void saveRate()}
               >

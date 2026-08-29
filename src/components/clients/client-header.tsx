@@ -271,7 +271,7 @@ export function ClientHeader({
                     {categories.map((c) => (
                       <DropdownMenuItem
                         key={c.id}
-                        className="min-h-10"
+                        className="min-h-11 md:min-h-10"
                         onClick={() => changeCategory(c.id)}
                       >
                         <span
@@ -282,7 +282,7 @@ export function ClientHeader({
                         {categoryName(c)}
                       </DropdownMenuItem>
                     ))}
-                    <DropdownMenuItem className="min-h-10" onClick={() => changeCategory(null)}>
+                    <DropdownMenuItem className="min-h-11 md:min-h-10" onClick={() => changeCategory(null)}>
                       <span aria-hidden className="size-2.5 rounded-full bg-muted-foreground/40" />
                       {t("detail.noCategory")}
                     </DropdownMenuItem>
@@ -315,6 +315,20 @@ export function ClientHeader({
                 >
                   <EyeOffIcon aria-hidden className="size-3" />
                   {t("access.masked")}
+                </span>
+              ) : null}
+              {/* La raison du masque, ÉCRITE sur téléphone.
+                  Elle ne vivait que dans le `title=` de la pastille — une
+                  infobulle qui demande un curseur, donc invisible là où le
+                  téléphoniste travaille. Depuis que les rôles se règlent, un
+                  numéro masqué est courant : sans cette phrase, « on ne vous
+                  le montre pas » se lit « il n'y a pas de numéro ». Le
+                  `w-full` lui donne sa propre ligne dans la rangée qui passe
+                  à la ligne ; `md:hidden` la retire de l'écran large, où
+                  l'infobulle fait le travail. */}
+              {contactMasked ? (
+                <span className="w-full text-xs leading-snug text-muted-foreground md:hidden">
+                  {t("access.maskedHint")}
                 </span>
               ) : null}
               {client.email ? (

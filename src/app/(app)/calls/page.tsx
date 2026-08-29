@@ -345,7 +345,11 @@ export default async function MyCallsPage({
         {stats.map((s) => (
           <Card key={s.label} size="sm" className="shadow-xs">
             <CardContent className="flex flex-col gap-2">
-              <div className="flex items-center gap-2">
+              {/* Sous 640 px le libellé passe SOUS la pastille : à côté d'elle
+                  il ne reste qu'une quarantaine de pixels, et « aujourd'hui »
+                  — un mot qu'on ne coupe pas — débordait de la carte, que son
+                  `overflow-hidden` tranchait en plein milieu. */}
+              <div className="flex items-center gap-2 max-sm:flex-wrap">
                 <span
                   aria-hidden
                   className={`flex size-8 shrink-0 items-center justify-center rounded-md ${s.chip}`}

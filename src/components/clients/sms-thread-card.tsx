@@ -341,7 +341,15 @@ export function SmsThreadCard({
      * pas seulement au-dessus du champ de saisie.
      */
     <Card
-      className="border-l-4 shadow-xs"
+      /*
+       * `overflow-visible` sur téléphone n'est pas une coquetterie : la carte
+       * rogne ses enfants par défaut, et un parent qui rogne fait de la carte
+       * le « conteneur de défilement » le plus proche — ce qui rend
+       * `position: sticky` totalement inopérant à l'intérieur. Sans cette
+       * ligne, la zone de rédaction collante plus bas ne collerait à rien.
+       * Au-delà de md, la carte retrouve exactement son rognage d'origine.
+       */
+      className="border-l-4 shadow-xs max-md:overflow-visible"
       style={{
         borderLeftColor: SMS.color,
         borderColor: `color-mix(in srgb, ${SMS.color} 35%, transparent)`,
@@ -405,7 +413,7 @@ export function SmsThreadCard({
               <HandIcon /> {t("ai.confirmPause")}
             </Button>
             <Button variant="ghost" size="sm" className="min-h-11 md:min-h-8" disabled={pending} onClick={() => setPausePrompt(null)}>
-              {tCommon("cancel")}
+              {tCommon("actions.cancel")}
             </Button>
           </div>
         ) : null}
@@ -517,7 +525,22 @@ export function SmsThreadCard({
             {thread.hasActiveNumber ? t("thread.start") : t("thread.noNumber")}
           </p>
         ) : (
-          <div ref={scrollRef} className="max-h-96 space-y-3 overflow-y-auto pr-1">
+          /*
+           * Sur écran large, le fil vit dans sa propre fenêtre de 24 rem : la
+           * fiche entière tient à l'œil et le fil se parcourt sans emporter
+           * la page.
+           * Sur téléphone, cette même fenêtre devenait une meurtrière — un
+           * cadre de 384 px, sous une barre de navigation, dans lequel il
+           * fallait faire défiler un fil avec le pouce SANS faire défiler la
+           * page. Deux défilements imbriqués sur un écran de 360 px : le
+           * doigt ne sait plus lequel il commande. On rend donc le fil à la
+           * page, et c'est la zone de rédaction (collante, plus bas) qui
+           * garde sa place à l'écran.
+           */
+          <div
+            ref={scrollRef}
+            className="max-h-96 space-y-3 overflow-y-auto pr-1 max-md:max-h-none max-md:overflow-y-visible"
+          >
             {rows.map((message) => (
               <MessageBubble
                 key={message.id}
@@ -570,54 +593,91 @@ export function SmsThreadCard({
         {/* Écrire est un droit à part : sans lui le fil se LIT (l'assistant
             continue de travailler), il ne s'écrit pas. */}
         {canReply ? (
-          <div
-            className="space-y-1.5 rounded-lg border-2 p-3"
-            style={{
-              borderColor: `color-mix(in srgb, ${SMS.color} 40%, transparent)`,
-              backgroundColor: `color-mix(in srgb, ${SMS.color} 6%, transparent)`,
-            }}
-          >
-            {/* Le destinataire est toujours visible : c'est ce qui distingue le
-                plus sûrement une note interne (personne) d'un SMS (quelqu'un). */}
-            <p
-              className="flex flex-wrap items-center gap-1.5 text-xs font-medium"
-              style={{ color: SMS.color }}
-            >
-              <SmartphoneIcon className="size-3.5" />
-              {t("thread.sendsTo", { name: thread.clientName, phone: phoneLabel })}
-            </p>
-            <Textarea
-              rows={2}
-              value={body}
-              disabled={blocked}
-              placeholder={t("thread.placeholder")}
-              onChange={(e) => setBody(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  send();
-                }
+          /*
+           * La zone de rédaction n'est PLUS collante sur téléphone.
+
+           *
+           * Elle l'a été : posée à 8,5 rem du bas, elle flottait au MILIEU de
+           * l'écran d'un téléphone de 740 px, avec près de 100 px de vide en
+           * dessous, et elle coupait en deux la bulle du message qu'on venait
+           * de lire. La distance était celle que la coquille réserve à sa
+           * barre — mais une barre collante DOIT toucher le bord qu'elle
+           * longe, sinon elle n'est qu'un bloc opaque garé en travers.
+           *
+           * L'historique n'a plus son propre défileur (voir plus haut) : la
+           * carte se lit donc d'un seul mouvement et la rédaction arrive à sa
+           * fin, là où on l'attend. Le `pb` garde le dernier bouton au-dessus
+           * de la barre de navigation basse.
+           */
+          <div className="max-md:-mx-4 max-md:border-t max-md:bg-card max-md:px-4 max-md:pt-3 max-md:pb-[calc(1rem+env(safe-area-inset-bottom))]">
+            <div
+              className="space-y-1.5 rounded-lg border-2 p-3"
+              style={{
+                borderColor: `color-mix(in srgb, ${SMS.color} 40%, transparent)`,
+                backgroundColor: `color-mix(in srgb, ${SMS.color} 6%, transparent)`,
               }}
-            />
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-muted-foreground">
-                {body.trim() === ""
-                  ? t("thread.hint")
-                  : // Le nombre de segments décide du coût réel de l'envoi.
-                    t("thread.segments", { chars: analysis.units, segments: analysis.segments })}
-              </p>
-              <Button
-                size="sm"
-                className="min-h-11 text-white md:min-h-8"
-                // Le bouton qui envoie VRAIMENT porte la couleur du canal ; tous
-                // les autres boutons de la fiche sont bleus.
-                style={{ backgroundColor: SMS.color }}
-                disabled={pending || blocked || body.trim() === ""}
-                onClick={send}
+            >
+              {/* Le destinataire est toujours visible : c'est ce qui distingue le
+                  plus sûrement une note interne (personne) d'un SMS (quelqu'un). */}
+              <p
+                className="flex flex-wrap items-center gap-1.5 text-xs font-medium"
+                style={{ color: SMS.color }}
               >
-                <SendIcon />
-                {pending ? t("thread.sending") : t("thread.send")}
-              </Button>
+                <SmartphoneIcon className="size-3.5" />
+                {t("thread.sendsTo", { name: thread.clientName, phone: phoneLabel })}
+              </p>
+              {/* `field-sizing-content` fait grandir le champ avec le texte —
+                  excellent au fil de la page, ruineux dans une barre collée en
+                  bas : un long message finirait par manger l'écran entier. On
+                  le plafonne donc à 8 rem sur téléphone, et il défile alors
+                  LUI-MÊME, ce qui est le seul défilement imbriqué légitime
+                  ici : celui de ce qu'on est en train d'écrire. */}
+              <Textarea
+                rows={2}
+                value={body}
+                disabled={blocked}
+                placeholder={t("thread.placeholder")}
+                className="max-md:max-h-32"
+                onChange={(e) => setBody(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    send();
+                  }
+                }}
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  {body.trim() === "" ? (
+                    /* « Cmd/Ctrl + Entrée » est un raccourci qui n'existe PAS
+                       sur un clavier de téléphone : l'écrire là-bas, c'était
+                       promettre un chemin introuvable pendant que le seul vrai
+                       chemin — le bouton — se faisait discret. Chaque appareil
+                       lit donc la phrase qui est vraie chez lui. */
+                    <>
+                      <span className="hidden max-md:inline">{t("thread.hintTouch")}</span>
+                      <span className="max-md:hidden">{t("thread.hint")}</span>
+                    </>
+                  ) : (
+                    // Le nombre de segments décide du coût réel de l'envoi.
+                    t("thread.segments", { chars: analysis.units, segments: analysis.segments })
+                  )}
+                </p>
+                <Button
+                  size="sm"
+                  // Pleine largeur sur téléphone : le geste qui ENVOIE hors de
+                  // l'application ne se vise pas au coin de l'écran.
+                  className="min-h-11 text-white md:min-h-8 max-md:w-full"
+                  // Le bouton qui envoie VRAIMENT porte la couleur du canal ; tous
+                  // les autres boutons de la fiche sont bleus.
+                  style={{ backgroundColor: SMS.color }}
+                  disabled={pending || blocked || body.trim() === ""}
+                  onClick={send}
+                >
+                  <SendIcon />
+                  {pending ? t("thread.sending") : t("thread.send")}
+                </Button>
+              </div>
             </div>
           </div>
         ) : null}

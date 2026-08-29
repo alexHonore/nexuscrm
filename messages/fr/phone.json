@@ -1,6 +1,7 @@
 {
   "fab": {
-    "open": "Ouvrir le téléphone"
+    "open": "Ouvrir le téléphone",
+    "openWithStatus": "{action} — {status}"
   },
   "status": {
     "registered": "Ligne prête",

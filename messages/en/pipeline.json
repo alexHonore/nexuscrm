@@ -15,6 +15,7 @@
     "open": "Open profile",
     "call": "Call",
     "moveTo": "Move to",
+    "currentColumn": "Current column",
     "doNotCall": "Do not call",
     "moved": "Client moved to {category}",
     "moveFailed": "The move failed. Please try again."

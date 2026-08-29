@@ -11,6 +11,7 @@
     "send": "Envoyer",
     "sending": "Envoi…",
     "hint": "Cmd/Ctrl + Entrée pour envoyer",
+    "hintTouch": "Touchez « Envoyer » pour l'expédier.",
     "segments": "{chars} caractères · {segments} segment(s)",
     "you": "Vous",
     "assistant": "Assistant",

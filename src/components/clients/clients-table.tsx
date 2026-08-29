@@ -516,7 +516,7 @@ export function ClientsTable({
       {categories.map((c) => (
         <DropdownMenuItem
           key={c.id}
-          className="min-h-10"
+          className="min-h-11 md:min-h-10"
           disabled={c.id === item.categoryId}
           onClick={() =>
             runRow(() => setClientCategoryAction(item.id, c.id), t("detail.categoryUpdated"))
@@ -528,7 +528,7 @@ export function ClientsTable({
       ))}
       <DropdownMenuSeparator />
       <DropdownMenuItem
-        className="min-h-10"
+        className="min-h-11 md:min-h-10"
         disabled={item.categoryId === null}
         onClick={() =>
           runRow(() => setClientCategoryAction(item.id, null), t("detail.categoryUpdated"))
@@ -545,7 +545,7 @@ export function ClientsTable({
       {sources.map((s) => (
         <DropdownMenuItem
           key={s.value}
-          className="min-h-10"
+          className="min-h-11 md:min-h-10"
           disabled={String(item.sourceId ?? "") === s.value}
           onClick={() =>
             runRow(() => setClientSourceAction(item.id, Number(s.value)), t("detail.sourceUpdated"))
@@ -559,7 +559,7 @@ export function ClientsTable({
       ))}
       <DropdownMenuSeparator />
       <DropdownMenuItem
-        className="min-h-10"
+        className="min-h-11 md:min-h-10"
         disabled={item.sourceId === null}
         onClick={() => runRow(() => setClientSourceAction(item.id, null), t("detail.sourceUpdated"))}
       >
@@ -573,7 +573,7 @@ export function ClientsTable({
       {users.map((u) => (
         <DropdownMenuItem
           key={u.value}
-          className="min-h-10"
+          className="min-h-11 md:min-h-10"
           disabled={item.assignedToId === u.value}
           onClick={() => runRow(() => assignClientAction(item.id, u.value), t("assign.success"))}
         >
@@ -582,7 +582,7 @@ export function ClientsTable({
       ))}
       <DropdownMenuSeparator />
       <DropdownMenuItem
-        className="min-h-10"
+        className="min-h-11 md:min-h-10"
         disabled={item.assignedToId === null}
         onClick={() => runRow(() => assignClientAction(item.id, null), t("assign.success"))}
       >
@@ -847,6 +847,14 @@ export function ClientsTable({
                   {t("table.createdShort", { date: day(item.createdAt) })}
                 </span>
               </span>
+              {/* Cette liste de cartes EST la vue tableau sur téléphone, et
+                  le `title=` de la pastille « Masqué » n'y apparaît jamais :
+                  une infobulle attend un curseur. On écrit donc la raison. */}
+              {item.contactHidden ? (
+                <span className="mt-0.5 block text-[10px] leading-snug text-muted-foreground">
+                  {t("access.maskedHint")}
+                </span>
+              ) : null}
             </Link>
           </li>
         ))}
@@ -875,7 +883,7 @@ export function ClientsTable({
                   {users.map((u) => (
                     <DropdownMenuItem
                       key={u.value}
-                      className="min-h-10"
+                      className="min-h-11 md:min-h-10"
                       onClick={() => runBulk((ids) => bulkAssignClientsAction(ids, u.value), "bulk.assigned")}
                     >
                       {u.label}
@@ -883,7 +891,7 @@ export function ClientsTable({
                   ))}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    className="min-h-10"
+                    className="min-h-11 md:min-h-10"
                     onClick={() => runBulk((ids) => bulkAssignClientsAction(ids, null), "bulk.assigned")}
                   >
                     {t("list.unassigned")}
@@ -908,7 +916,7 @@ export function ClientsTable({
                   {campaigns.map((c) => (
                     <DropdownMenuItem
                       key={c.value}
-                      className="min-h-10"
+                      className="min-h-11 md:min-h-10"
                       onClick={() => enrollSelection(c.value, c.label)}
                     >
                       {c.label}
@@ -930,7 +938,7 @@ export function ClientsTable({
                   {categories.map((c) => (
                     <DropdownMenuItem
                       key={c.id}
-                      className="min-h-10"
+                      className="min-h-11 md:min-h-10"
                       onClick={() =>
                         runBulk((ids) => bulkSetClientsCategoryAction(ids, c.id), "bulk.categorized")
                       }
@@ -945,7 +953,7 @@ export function ClientsTable({
                   ))}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    className="min-h-10"
+                    className="min-h-11 md:min-h-10"
                     onClick={() =>
                       runBulk((ids) => bulkSetClientsCategoryAction(ids, null), "bulk.categorized")
                     }
@@ -969,7 +977,7 @@ export function ClientsTable({
                   {sources.map((s) => (
                     <DropdownMenuItem
                       key={s.value}
-                      className="min-h-10"
+                      className="min-h-11 md:min-h-10"
                       onClick={() =>
                         runBulk(
                           (ids) => bulkSetClientsSourceAction(ids, Number(s.value)),
@@ -989,7 +997,7 @@ export function ClientsTable({
                   ))}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    className="min-h-10"
+                    className="min-h-11 md:min-h-10"
                     onClick={() =>
                       runBulk((ids) => bulkSetClientsSourceAction(ids, null), "bulk.sourced")
                     }

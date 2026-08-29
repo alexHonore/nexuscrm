@@ -40,7 +40,7 @@ export function CopyButton({
       type="button"
       variant={variant}
       size={size}
-      className={cn("min-h-8", className)}
+      className={cn("min-h-11 md:min-h-8", className)}
       onClick={onCopy}
       aria-label={label ?? t("copy")}
     >

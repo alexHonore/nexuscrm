@@ -13,11 +13,12 @@ import {
   PhoneIcon,
   PhoneOffIcon,
   UserIcon,
+  XIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useTelephony } from "@/components/telephony/telephony-context";
 import {
   DropdownMenu,
@@ -29,6 +30,15 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { formatPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 import {
@@ -48,6 +58,28 @@ function useMounted(): boolean {
   return useSyncExternalStore(
     emptySubscribe,
     () => true,
+    () => false,
+  );
+}
+
+/**
+ * Sous le point de rupture `md` — c'est-à-dire : au pouce.
+ *
+ * Le repli serveur vaut FAUX à dessein. Le poste de travail garde exactement
+ * le menu qu'il a toujours eu (sous-menu survolable), et rien ne clignote à
+ * l'hydratation : le contenu du menu n'existe dans le document qu'une fois
+ * ouvert, bien après le montage.
+ */
+const NARROW_QUERY = "(max-width: 767.98px)";
+
+function useNarrowViewport(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const mql = window.matchMedia(NARROW_QUERY);
+      mql.addEventListener("change", onChange);
+      return () => mql.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(NARROW_QUERY).matches,
     () => false,
   );
 }
@@ -106,10 +138,15 @@ export function PipelineClientCard({
   // Le vocabulaire de l'ACCÈS vit chez les fiches : « Masqué » y est écrit une
   // seule fois, pour la fiche comme pour cette carte.
   const ta = useTranslations("clients");
+  // « Fermer » est un mot commun : il ne se réécrit pas chez le pipeline.
+  const tc = useTranslations("common");
   const locale = useLocale();
   const dfnsLocale = locale === "en" ? enUS : fr;
   const router = useRouter();
   const { dial, ready } = useTelephony();
+  const narrow = useNarrowViewport();
+  /** Feuille des destinations — le « Déplacer vers » du pouce. */
+  const [moveOpen, setMoveOpen] = useState(false);
 
   // Ce qu'on peut composer : le numéro reçu, s'il a été envoyé. Une constante
   // plutôt que `card.phone` relu dans le gestionnaire — c'est elle qui garantit
@@ -185,31 +222,102 @@ export function PipelineClientCard({
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuSeparator />
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger className="min-h-11">
+            {/* Deux gestes pour une même intention. Au poste de travail, le
+                sous-menu se survole et s'ouvre à côté du curseur : rien n'y
+                change. Au pouce, ce même sous-menu s'ouvrait où il pouvait —
+                collé au bas de l'écran sur un grand téléphone, projeté tout
+                en haut sur un petit — et n'offrait que huit rangées pour
+                quatorze colonnes. Une feuille à plat, ancrée sous la main,
+                dit la même chose sans demander de viser deux fois. */}
+            {narrow ? (
+              <DropdownMenuItem className="min-h-11" onClick={() => setMoveOpen(true)}>
                 <ArrowRightLeftIcon />
                 {t("card.moveTo")}
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="min-w-44">
-                {targets.map((target) => (
-                  <DropdownMenuItem
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger className="min-h-11">
+                  <ArrowRightLeftIcon />
+                  {t("card.moveTo")}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="min-w-44">
+                  {targets.map((target) => (
+                    <DropdownMenuItem
+                      key={columnKey(target.id)}
+                      className="min-h-11"
+                      disabled={target.id === columnId}
+                      onClick={() => onMove(card.id, target.id)}
+                    >
+                      <span
+                        aria-hidden
+                        className="size-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: target.color }}
+                      />
+                      <span className="truncate">{target.name}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Hors du menu : la feuille lui survit, sinon elle disparaîtrait avec
+            lui à l'instant même où elle s'ouvre. Fermée, elle ne rend rien. */}
+        <Sheet open={moveOpen} onOpenChange={setMoveOpen}>
+          <SheetContent
+            side="bottom"
+            // La croix maison remplace celle du primitif : la sienne mesure
+            // 28 px, et cette feuille-ci ne s'ouvre QUE sous le pouce.
+            showCloseButton={false}
+            className="max-h-[85dvh] gap-0 rounded-t-2xl pb-[calc(1rem+env(safe-area-inset-bottom))]"
+          >
+            <SheetClose
+              render={<Button variant="ghost" size="icon" className="absolute top-2 right-2 size-11" />}
+            >
+              <XIcon />
+              <span className="sr-only">{tc("actions.close")}</span>
+            </SheetClose>
+            <SheetHeader className="pr-14 pb-2">
+              <SheetTitle>{t("card.moveTo")}</SheetTitle>
+              <SheetDescription className="truncate">{card.fullName}</SheetDescription>
+            </SheetHeader>
+            <div className="min-h-0 overflow-y-auto px-2 pb-1">
+              {targets.map((target) => {
+                const current = target.id === columnId;
+                return (
+                  <button
                     key={columnKey(target.id)}
-                    className="min-h-11"
-                    disabled={target.id === columnId}
-                    onClick={() => onMove(card.id, target.id)}
+                    type="button"
+                    disabled={current}
+                    aria-current={current ? "true" : undefined}
+                    onClick={() => {
+                      setMoveOpen(false);
+                      onMove(card.id, target.id);
+                    }}
+                    className="flex min-h-12 w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors active:bg-muted disabled:opacity-55"
                   >
                     <span
                       aria-hidden
-                      className="size-2.5 shrink-0 rounded-full"
+                      className="size-3 shrink-0 rounded-full"
                       style={{ backgroundColor: target.color }}
                     />
-                    <span className="truncate">{target.name}</span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          </DropdownMenuContent>
-        </DropdownMenu>
+                    <span className="min-w-0 flex-1 truncate">{target.name}</span>
+                    {/* La colonne d'origine reste dans la liste, dite par un
+                        mot : la retirer ferait bouger les rangées d'une fiche
+                        à l'autre, et la couleur seule ne dirait pas pourquoi
+                        celle-là ne répond pas. */}
+                    {current ? (
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {t("card.currentColumn")}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
 
       {card.phone ? (

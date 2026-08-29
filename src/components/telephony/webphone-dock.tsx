@@ -26,6 +26,7 @@ import {
   PhoneOff,
   Play,
   RotateCw,
+  TriangleAlert,
   Volume2,
 } from "lucide-react";
 import Link from "next/link";
@@ -79,6 +80,17 @@ import {
 const TZ = "America/Toronto";
 /** Au-dessus de la nav basse mobile (h-14) + safe area. */
 const ABOVE_NAV = "bottom-[calc(4.5rem+env(safe-area-inset-bottom))]";
+/**
+ * Juste AU-DESSUS du bouton d'appel : 4,5 rem de barre basse + 3,5 rem de
+ * bouton + une respiration.
+ *
+ * La première version disait « juste sous le bouton » et valait 1,25 rem — ce
+ * qui la posait EN PLEIN DANS la barre de navigation, par-dessus « Rendez-vous »
+ * et « Plus ». Le commentaire affirmait le contraire de ce que faisait le
+ * calcul ; seule la mesure l'a montré. Les trois valeurs bougent ensemble,
+ * d'où leur voisinage ici.
+ */
+const ABOVE_FAB = "bottom-[calc(8.5rem+env(safe-area-inset-bottom))]";
 
 const DIAL_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"] as const;
 
@@ -305,6 +317,7 @@ function DialFab({ onOpenPanel }: { onOpenPanel: () => void }) {
   if (tel.callState !== "idle" || tel.incomingCall) return null;
 
   const statusLabel = t(`status.${tel.registration}`);
+  const lineDown = tel.registration !== "registered";
 
   return (
     <>
@@ -313,7 +326,18 @@ function DialFab({ onOpenPanel }: { onOpenPanel: () => void }) {
           render={
             <Button
               onClick={() => (isDesktopViewport() ? onOpenPanel() : setOpen(true))}
-              aria-label={t("fab.open")}
+              // L'état de la ligne entre dans le nom du bouton. Il ne vivait que
+              // dans l'infobulle et dans la couleur d'une pastille de 12 px : sur
+              // un écran tactile, l'infobulle ne s'ouvre jamais (le doigt lance le
+              // clavier) et la pastille est `aria-hidden`. Le téléphoniste ne
+              // pouvait donc pas savoir si sa ligne était branchée — l'état qui
+              // décide si les appels arrivent.
+              //
+              // La phrase entière vient des messages : un tiret cadratin collé
+              // entre deux `t()` est du texte d'interface écrit en code, et la
+              // ponctuation qui sépare deux idées n'est pas la même dans toutes
+              // les langues.
+              aria-label={t("fab.openWithStatus", { action: t("fab.open"), status: statusLabel })}
               className={cn(
                 "fixed right-4 z-40 size-14 rounded-full shadow-lg transition-all hover:scale-105 hover:shadow-xl active:scale-95 md:right-6 md:bottom-6",
                 ABOVE_NAV,
@@ -332,6 +356,30 @@ function DialFab({ onOpenPanel }: { onOpenPanel: () => void }) {
         </TooltipTrigger>
         <TooltipContent side="left">{statusLabel}</TooltipContent>
       </Tooltip>
+
+      {/*
+        Et, quand la ligne n'est PAS prête, un libellé qu'on lit.
+
+        `md:hidden` : sur grand écran l'infobulle fonctionne (il y a une souris)
+        et le socle affiche déjà l'état en toutes lettres — rien ne change là-bas.
+        Sur téléphone, la couleur portait le sens toute seule, ce que la règle 11
+        interdit ; surtout, une ligne tombée est silencieuse et le téléphoniste
+        attend des appels qui ne viendront pas.
+      */}
+      {lineDown ? (
+        <div
+          role="status"
+          className={cn(
+            "pointer-events-none fixed right-4 z-40 max-w-[60vw] rounded-full border bg-background/95 px-3 py-1.5 text-xs font-medium shadow-md backdrop-blur md:hidden",
+            ABOVE_FAB,
+          )}
+        >
+          <span className="flex items-center gap-1.5">
+            <TriangleAlert aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{statusLabel}</span>
+          </span>
+        </div>
+      ) : null}
 
       {/* Mobile : clavier en feuille basse (pouces d'abord) */}
       <Sheet open={open} onOpenChange={setOpen}>

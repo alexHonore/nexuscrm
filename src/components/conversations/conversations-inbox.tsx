@@ -497,8 +497,19 @@ export function ConversationsInbox({
     <div className="space-y-4">
       {health ? <HealthStrip health={health} /> : null}
 
+      {/*
+        Le rail des vues. Sur écran large il tient sur une ligne et ne bouge
+        pas.
+        Sur téléphone il débordait : « File d'envoi » se coupait net au bord
+        droit, et « Refus », « Toutes » et « Les miennes » n'existaient plus —
+        un rail qui défile sans le DIRE est un rail qu'on ne fait pas défiler.
+        On l'empile donc plutôt que de le couper : les six comptes se lisent
+        d'un coup d'œil, et « 6 à traiter » est précisément le chiffre pour
+        lequel on ouvre cet écran. Trois lignes de pastilles coûtent moins que
+        deux vues invisibles.
+      */}
       <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
-        <div className="flex w-max items-center gap-2">
+        <div className="flex w-max items-center gap-2 max-md:w-full max-md:flex-wrap">
           {tabs.map((key) => (
             <Button
               key={key}
@@ -524,7 +535,11 @@ export function ConversationsInbox({
               </Badge>
             </Button>
           ))}
-          <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden />
+          {/* Le trait qui sépare les VUES du filtre « les miennes ». Empilé,
+              il tomberait en bout de ligne comme une poussière : sur
+              téléphone, la pastille grise du filtre suffit à le distinguer
+              des onglets. */}
+          <span className="mx-1 h-5 w-px shrink-0 bg-border max-md:hidden" aria-hidden />
           <Button
             variant={mineOnly ? "secondary" : "ghost"}
             size="sm"

@@ -1031,8 +1031,14 @@ export function ClientsWorkspace({
             isDetail && "hidden md:flex",
           )}
         >
-          {/* Sticky header — top-[52px] tucks it right under the 53px mobile app bar. */}
-          <div className="sticky top-[52px] z-20 border-b bg-background/95 px-3 pb-2 pt-3 backdrop-blur md:static md:bg-background">
+          {/* En-tête collant, calé SOUS la barre d'application mobile.
+              Le 52 px d'avant venait d'une barre qui n'existe plus : la vraie
+              mesure 65 px (10 px de haut, 44 px de rangée, 10 px de bas, 1 px
+              de filet) et le champ de recherche glissait de 13 px derrière le
+              verre dépoli. L'encoche s'ajoute par-dessus, comme dans la barre
+              elle-même. Sur écran large la colonne redevient `static` : ce
+              `top` n'y sert plus à rien. */}
+          <div className="sticky top-[calc(env(safe-area-inset-top)+65px)] z-20 border-b bg-background/95 px-3 pb-2 pt-3 backdrop-blur md:static md:bg-background">
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
                 <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -1066,7 +1072,12 @@ export function ClientsWorkspace({
                 </PopoverTrigger>
                 <PopoverContent
                   align="end"
-                  className="max-h-[min(70vh,36rem)] w-80 gap-3.5 overflow-y-auto p-3.5"
+                  /* `dvh` et non `vh` : sur mobile `vh` mesure le GRAND viewport,
+                     celui d'avant la barre d'URL — le panneau se prolongeait
+                     alors sous le chrome du navigateur, dernier filtre
+                     inatteignable. Sur écran large le plafond reste 36rem, le
+                     minimum ne bouge pas. */
+                  className="max-h-[min(70dvh,36rem)] w-80 gap-3.5 overflow-y-auto p-3.5"
                 >
                   {/* Tri — accessible aussi en vue fiches, pas seulement via
                       les en-têtes du tableau. */}
@@ -1393,6 +1404,16 @@ export function ClientsWorkspace({
                             )}
                             {item.city ? <span className="truncate">{item.city}</span> : null}
                           </span>
+                          {/* Le POURQUOI du masque, écrit. Il vivait dans un
+                              `title=` — c'est-à-dire nulle part sur un écran
+                              tactile, où il n'y a pas de curseur à poser. Sur
+                              téléphone la phrase s'affiche ; sur écran large
+                              l'infobulle suffit et la ligne reste dense. */}
+                          {item.contactHidden ? (
+                            <span className="mt-0.5 block text-[10px] leading-snug text-muted-foreground md:hidden">
+                              {t("access.maskedHint")}
+                            </span>
+                          ) : null}
                         </span>
                         {item.nextFollowupAt ? (
                           <span

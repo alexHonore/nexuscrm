@@ -585,7 +585,7 @@ export function BillingClient() {
             type="button"
             variant={preset === days ? "default" : "outline"}
             size="sm"
-            className="min-h-11 md:min-h-8"
+            className="min-h-11 min-w-11 md:min-h-8 md:min-w-0"
             onClick={() => applyPreset(days)}
             disabled={loading}
           >

@@ -73,7 +73,7 @@ export function AnalyticsFilters({
               type="button"
               size="sm"
               variant={preset === p && !showCustom ? "secondary" : "ghost"}
-              className="h-10 min-w-14 md:h-7"
+              className="h-11 min-w-14 md:h-7"
               aria-pressed={preset === p && !showCustom}
               onClick={() => selectPreset(p)}
             >
@@ -84,7 +84,7 @@ export function AnalyticsFilters({
             type="button"
             size="sm"
             variant={preset === "custom" || showCustom ? "secondary" : "ghost"}
-            className="h-10 md:h-7"
+            className="h-11 md:h-7"
             aria-pressed={preset === "custom" || showCustom}
             onClick={() => setShowCustom((v) => !v)}
           >
@@ -100,7 +100,7 @@ export function AnalyticsFilters({
         >
           <SelectTrigger
             aria-label={t("period.user")}
-            className="h-11 min-w-44 md:h-8"
+            className="min-h-11 min-w-44 md:min-h-0"
           >
             <SelectValue />
           </SelectTrigger>

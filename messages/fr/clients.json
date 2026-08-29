@@ -62,6 +62,7 @@
     "previous": "Précédent",
     "next": "Suivant",
     "backToList": "Retour à la liste",
+    "back": "Retour",
     "position": "{position} / {total}"
   },
   "empty": {

@@ -118,7 +118,7 @@ export function WebhookKeysCard({
             void patchKey(key.id, { defaults: { ...key.defaults, [field]: parsed } });
           }}
         >
-          <SelectTrigger className="w-full" size="sm">
+          <SelectTrigger className="min-h-11 w-full md:min-h-0" size="sm">
             <SelectValue placeholder="—" />
           </SelectTrigger>
           <SelectContent>

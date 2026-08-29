@@ -92,7 +92,7 @@ export function CallsFilters({
           value={userId ?? ALL}
           onValueChange={(value) => apply({ user: value === ALL ? null : String(value) })}
         >
-          <SelectTrigger aria-label={t("period.user")} className="h-11 min-w-40 md:h-8">
+          <SelectTrigger aria-label={t("period.user")} className="min-h-11 min-w-40 md:min-h-0">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -115,7 +115,7 @@ export function CallsFilters({
             })
           }
         >
-          <SelectTrigger aria-label={t("callsPage.direction")} className="h-11 min-w-32 md:h-8">
+          <SelectTrigger aria-label={t("callsPage.direction")} className="min-h-11 min-w-32 md:min-h-0">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -134,7 +134,7 @@ export function CallsFilters({
             })
           }
         >
-          <SelectTrigger aria-label={t("callsPage.status")} className="h-11 min-w-32 md:h-8">
+          <SelectTrigger aria-label={t("callsPage.status")} className="min-h-11 min-w-32 md:min-h-0">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -148,7 +148,7 @@ export function CallsFilters({
           value={disposition ?? ALL}
           onValueChange={(value) => apply({ dispo: value === ALL ? null : String(value) })}
         >
-          <SelectTrigger aria-label={t("callsPage.disposition")} className="h-11 min-w-40 md:h-8">
+          <SelectTrigger aria-label={t("callsPage.disposition")} className="min-h-11 min-w-40 md:min-h-0">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

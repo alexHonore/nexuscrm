@@ -96,10 +96,10 @@ export function ClientHistory({
       <CardContent>
         <Tabs defaultValue="calls">
           <TabsList className="w-full sm:w-auto">
-            <TabsTrigger value="calls" className="min-h-9">
+            <TabsTrigger value="calls" className="min-h-11 md:min-h-9">
               {t("history.calls")} ({calls.length})
             </TabsTrigger>
-            <TabsTrigger value="appointments" className="min-h-9">
+            <TabsTrigger value="appointments" className="min-h-11 md:min-h-9">
               {t("history.appointments")} ({appointments.length})
             </TabsTrigger>
           </TabsList>
@@ -162,7 +162,7 @@ export function ClientHistory({
                           href={c.recordingUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="mt-1 inline-flex min-h-8 items-center gap-1 rounded-full border px-2.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                          className="mt-1 inline-flex min-h-11 items-center gap-1 rounded-full border px-2.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10 md:min-h-8"
                         >
                           <Mic2Icon className="size-3.5" />
                           {t("history.recording")}

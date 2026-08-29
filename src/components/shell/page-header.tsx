@@ -42,7 +42,20 @@ export function PageHeader({
         )}
         {subtitle ? <p className="text-sm text-muted-foreground">{subtitle}</p> : null}
       </div>
-      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+      {/*
+        Sur téléphone, les actions prennent TOUTE une ligne, donc elles passent
+        sous le titre au lieu de le comprimer.
+
+        Le conteneur enveloppe déjà (`flex-wrap`), mais le bloc du titre est en
+        `flex-1` : sa base vaut zéro, alors il rétrécit jusqu'à se chevaucher
+        avec les actions plutôt que de les renvoyer à la ligne. Une base de
+        100 % sur les ACTIONS force ce retour — l'icône et le titre gardent
+        leur ligne, les boutons prennent la suivante. `md:w-auto` rend au
+        bureau la mise en page d'avant, où tout tient sur une seule ligne.
+      */}
+      {actions ? (
+        <div className="flex w-full shrink-0 items-center gap-2 md:w-auto">{actions}</div>
+      ) : null}
     </div>
   );
 }

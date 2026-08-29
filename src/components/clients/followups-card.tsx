@@ -355,11 +355,20 @@ export function FollowupsCard({
                 maxLength={1000}
               />
             </div>
+            {/* Planifier un rappel est un geste D'APRÈS-APPEL, fait le
+                téléphone à la main : deux boutons de 32 px au bas d'une
+                boîte de dialogue n'y suffisent pas. Le bureau garde les
+                siens. */}
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11 md:min-h-8"
+                onClick={() => setCreateOpen(false)}
+              >
                 {t("followups.cancel")}
               </Button>
-              <Button type="submit" disabled={pending}>
+              <Button type="submit" className="min-h-11 md:min-h-8" disabled={pending}>
                 {t("followups.create")}
               </Button>
             </DialogFooter>
@@ -382,10 +391,15 @@ export function FollowupsCard({
           >
             {dateTimeFields}
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setEditId(null)}>
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11 md:min-h-8"
+                onClick={() => setEditId(null)}
+              >
                 {t("followups.cancel")}
               </Button>
-              <Button type="submit" disabled={pending}>
+              <Button type="submit" className="min-h-11 md:min-h-8" disabled={pending}>
                 {t("followups.editDue")}
               </Button>
             </DialogFooter>

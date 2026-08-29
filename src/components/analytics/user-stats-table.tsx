@@ -196,7 +196,7 @@ export function UserStatsTable({ rows }: { rows: UserStatsRow[] }) {
               setSortDir(key === "name" ? "asc" : "desc");
             }}
           >
-            <SelectTrigger aria-label={t("table.sortBy")} className="h-11 min-w-40">
+            <SelectTrigger aria-label={t("table.sortBy")} className="min-h-11 min-w-40 md:min-h-0">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

@@ -257,7 +257,7 @@ function DocHelp({ look, text }: { look: Look; text: RoleDocText | undefined }) 
           <Button
             variant="ghost"
             size="icon"
-            className="size-8 shrink-0 text-muted-foreground"
+            className="size-11 shrink-0 text-muted-foreground md:size-8"
             aria-label={text.label}
           />
         }
@@ -659,7 +659,7 @@ function RoleEditor({
                     // sinon on cherche le geste manquant.
                     disabled={role.builtin || busy}
                     aria-label={tc("actions.delete")}
-                    className="min-h-11 text-destructive md:min-h-8"
+                    className="min-h-11 min-w-11 text-destructive md:min-h-8 md:min-w-0"
                   />
                 }
               >
@@ -819,7 +819,7 @@ function LookPicker({
       value={value}
       onValueChange={(next) => onChange(String(next))}
     >
-      <SelectTrigger id={id} className="h-11 w-full md:h-8">
+      <SelectTrigger id={id} className="min-h-11 w-full md:min-h-0">
         <LookGlyph look={roleLook(value)} className="size-3.5" />
         <SelectValue />
       </SelectTrigger>
@@ -912,7 +912,7 @@ function CreateRoleDialog({
               value={draft.basedOn}
               onValueChange={(next) => setDraft({ ...draft, basedOn: String(next) })}
             >
-              <SelectTrigger id="create-role-based" className="h-11 w-full md:h-9">
+              <SelectTrigger id="create-role-based" className="min-h-11 w-full md:min-h-0">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

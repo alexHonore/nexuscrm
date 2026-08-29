@@ -355,7 +355,7 @@ function RuleDeleteButton({ rule }: { rule: GuardrailRuleDto }) {
             variant="ghost"
             size="sm"
             aria-label={t("guardrails.deleteRule")}
-            className="min-h-11 text-destructive md:min-h-8"
+            className="min-h-11 min-w-11 text-destructive md:min-h-8 md:min-w-0"
           />
         }
       >
@@ -606,7 +606,7 @@ function FixtureDeleteButton({ fixture }: { fixture: GuardrailFixtureDto }) {
             variant="ghost"
             size="sm"
             aria-label={t("guardrails.fixtures.delete")}
-            className="min-h-11 text-destructive md:min-h-8"
+            className="min-h-11 min-w-11 text-destructive md:min-h-8 md:min-w-0"
           />
         }
       >
