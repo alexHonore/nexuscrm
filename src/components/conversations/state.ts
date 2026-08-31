@@ -46,10 +46,28 @@ export const ENGINE_REASONS = [
 export const REFUSED_REASONS = ["hard_refusal", "optout", "closed_not_interested"] as const;
 
 /**
- * Conclu sans refus : l'objectif est atteint, ou la personne n'était pas dans
- * la cible. Rien à faire, rien de fâcheux.
+ * Le motif écrit par le bouton « Clore » de la boîte — le SEUL de tous les
+ * motifs qu'aucune machine n'écrit jamais.
+ *
+ * Un fil « entre vos mains » n'avait aucune sortie : sa pastille est déjà
+ * tombée (rien à « marquer traité »), et « rendre à l'IA » n'existe pas quand
+ * aucun assistant ne tient le fil. La section grossissait donc sans fin. Clore
+ * ne fait taire personne : le prochain message du client réécrit
+ * `attentionReason` (« Nouveau message », voir `sms-server/inbound.ts`) et
+ * ramène le fil dans « à traiter ».
  */
-export const CONCLUDED_REASONS = ["closed_goal_reached", "closed_disqualified"] as const;
+export const HUMAN_CLOSED_REASON = "closed_by_human";
+
+/**
+ * Conclu sans refus : l'objectif est atteint, la personne n'était pas dans la
+ * cible — ou un humain a décidé que le fil était fini. Rien à faire, rien de
+ * fâcheux.
+ */
+export const CONCLUDED_REASONS = [
+  "closed_goal_reached",
+  "closed_disqualified",
+  HUMAN_CLOSED_REASON,
+] as const;
 
 /**
  * Le verdict est rendu — quelle qu'en soit la couleur. Il n'y a RIEN à
@@ -81,6 +99,34 @@ export function attentionKindOf(reason: string): AttentionKind {
   if (ENGINE.has(reason)) return "engine";
   return "reply";
 }
+
+/**
+ * Un texto SORTANT qui n'a pas atteint le client — la matière de la vue
+ * « Échecs », et la bulle rouge du fil (`sms-thread-card`). Une seule liste
+ * pour les deux : deux définitions du mot « échec » finiraient par afficher
+ * deux nombres différents du même fait.
+ *
+ * Une ANNULATION n'en fait pas partie : un envoi retenu à la main est une
+ * décision, pas une panne. « unknown » (délai réseau, Twilio a peut-être
+ * livré) y est, lui : personne ne sait si le client l'a reçu, et c'est
+ * exactement ce qu'un écran d'échecs doit montrer.
+ */
+export const FAILED_SEND_STATUSES = ["failed", "undelivered", "skipped", "unknown"] as const;
+
+/**
+ * Plus large d'un cran : tout sortant qui n'a PAS atteint le client, panne ou
+ * pas — la matière de la vue « Échecs ».
+ *
+ * `dry_run` s'y ajoute parce qu'en mode essai rien ne part, et qu'un écran
+ * annonçant « aucun envoi perdu » pendant qu'aucun message ne sort est le pire
+ * mensonge que cette vue puisse faire. Ce n'est pas une panne — la carte le dit
+ * en toutes lettres (« Simulation (mode essai) ») — mais c'est bien un client
+ * qui n'a rien reçu. Même choix que `NEVER_LEFT_STATUSES` de
+ * `src/lib/deliverability/status-classes.ts`, pour la même raison.
+ *
+ * En mode réel, aucune rangée ne porte ce statut : la vue est identique.
+ */
+export const UNREACHED_SEND_STATUSES = [...FAILED_SEND_STATUSES, "dry_run"] as const;
 
 /**
  * Les cinq états exclusifs d'un fil — voir `CONVERSATION_STATE_LOOK`.

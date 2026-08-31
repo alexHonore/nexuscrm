@@ -3,10 +3,16 @@ import { MessageCircle } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import {
   ConversationsInbox,
+  type FailedMessage,
   type InboxRow,
   type QueueItem,
 } from "@/components/conversations/conversations-inbox";
-import { deedOf, CONVERSATION_DEEDS, type ConversationDeed } from "@/components/conversations/state";
+import {
+  deedOf,
+  CONVERSATION_DEEDS,
+  UNREACHED_SEND_STATUSES,
+  type ConversationDeed,
+} from "@/components/conversations/state";
 import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/db";
 import { categories, clients, users } from "@/db/schema";
@@ -48,6 +54,9 @@ import { DEFAULT_QUIET_HOURS, isWithinSendWindow } from "@/lib/sms/quiet-hours";
  * numéro et la conversation du client d'un collègue : la fiche est visible
  * (pour ne pas la rappeler), son contenu ne l'est pas.
  */
+/** Combien d'envois perdus la vue « Échecs » dessine — elle DIT ce qu'elle coupe. */
+const FAILURES_SHOWN = 100;
+
 export default async function ConversationsPage() {
   const actor = await requirePerm("conversations.view");
   const t = await getTranslations("conversations");
@@ -171,6 +180,73 @@ export default async function ConversationsPage() {
       [...list].sort((a, b) => (deedRank.get(a) ?? 0) - (deedRank.get(b) ?? 0)),
     );
   }
+
+  // ── Échecs : les textos qui ne sont PAS arrivés ──────────────────────────
+  // Des MESSAGES, pas des fils : trois échecs sur la même fiche sont trois
+  // lignes, parce que c'est le nombre d'envois perdus qu'on vient chercher.
+  //
+  // Pas de garde `admin.settings` ici, contrairement à la file d'envoi : un
+  // texto perdu vers SON client est le travail d'un téléphoniste, pas la
+  // conduite du moteur — et la pastille « Envoi en échec » lui est déjà visible
+  // dans « à traiter ». La visibilité des FICHES borne la liste, comme partout.
+  const failuresWhere = await withVisibility(
+    actor,
+    and(
+      eq(messages.direction, "out"),
+      // Le statut dit l'échec ; `skipReason` dit qu'il n'est jamais parti — un
+      // message peut porter le second sans que le premier soit encore écrit
+      // (le répartiteur pose la rangée AVANT d'appeler Twilio).
+      or(inArray(messages.status, [...UNREACHED_SEND_STATUSES]), isNotNull(messages.skipReason)),
+    ),
+  );
+  const failureRows = await db
+    .select({
+      id: messages.id,
+      clientId: conversations.clientId,
+      clientName: clients.fullName,
+      clientPhone: conversations.clientPhone,
+      holderId: clients.assignedToId,
+      at: messages.createdAt,
+      body: messages.body,
+      status: messages.status,
+      errorCode: messages.errorCode,
+      skipReason: messages.skipReason,
+      source: messages.source,
+    })
+    .from(messages)
+    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+    .leftJoin(clients, eq(clients.id, conversations.clientId))
+    .where(failuresWhere)
+    .orderBy(desc(messages.createdAt))
+    .limit(FAILURES_SHOWN);
+
+  // Le COMPTE réel, la liste ne portant que les plus récents : une pastille qui
+  // affiche son propre plafond jurerait qu'il n'y a jamais eu plus de cent
+  // envois perdus.
+  const [failuresTotalRow] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(messages)
+    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+    .leftJoin(clients, eq(clients.id, conversations.clientId))
+    .where(failuresWhere);
+
+  const failures: FailedMessage[] = failureRows.map((r) => {
+    const open = grantsOfHolder(r.holderId);
+    return {
+      id: r.id,
+      clientId: r.clientId,
+      clientName: r.clientName ?? (open.contact ? r.clientPhone : tAccess("access.masked")),
+      at: r.at.toISOString(),
+      // Le TEXTE du message est de la conversation : il suit la case `history`,
+      // comme le dernier message d'une carte de la boîte.
+      body: open.history ? r.body : null,
+      historyHidden: !open.history,
+      status: r.status,
+      errorCode: r.errorCode,
+      skipReason: r.skipReason,
+      source: r.source,
+    };
+  });
 
   // ── File d'envoi : qui va recevoir un texto, et quand ────────────────────
   // Trois sources, une seule ligne du temps : les envois déjà écrits qui
@@ -390,6 +466,8 @@ export default async function ConversationsPage() {
       <ConversationsInbox
         rows={items}
         queue={queue}
+        failures={failures}
+        failuresTotal={failuresTotalRow?.n ?? failures.length}
         currentUserId={actor.user.id}
         // Ce que ce regard peut FAIRE ici. L'écran s'en sert pour ne pas
         // promettre un geste que le serveur refusera — chaque action revérifie

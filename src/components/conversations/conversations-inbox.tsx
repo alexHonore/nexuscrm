@@ -24,6 +24,8 @@ import {
   assignConversationAction,
   cancelQueuedSmsAction,
   classifyConversationClientAction,
+  closeConversationAction,
+  closeHeldConversationsAction,
   handBackToAiAction,
   markConversationHandledAction,
   retryAiTurnAction,
@@ -43,10 +45,22 @@ import {
 import {
   attentionKindOf,
   conversationStateOf,
+  HUMAN_CLOSED_REASON,
   type ConversationDeed,
   type ConversationState,
 } from "@/components/conversations/state";
 import { RelativeTime } from "@/components/relative-time";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -121,6 +135,36 @@ export type QueueItem = {
   jobId: string | null;
 };
 
+/**
+ * Un texto SORTANT qui n'a pas atteint le client — la matière de la vue
+ * « Échecs ».
+ *
+ * C'est une ligne de MESSAGE, pas de fil : le même client peut en compter
+ * trois, et regrouper par fil cacherait justement ce qu'on vient voir. La
+ * raison est toujours dite — refus de l'opérateur (`errorCode`), ou message
+ * jamais parti (`skipReason`) : « mis en file » puis plus rien est la pire
+ * réponse qu'on puisse faire à un téléphoniste.
+ */
+export type FailedMessage = {
+  id: string;
+  clientId: string | null;
+  clientName: string;
+  /** ISO — quand l'envoi a été tenté. */
+  at: string;
+  /** Le texte — `null` quand la case `history` est fermée sur cette fiche. */
+  body: string | null;
+  /** Fil fermé sur cette fiche : le texte n'est même pas parti au navigateur. */
+  historyHidden?: boolean;
+  /** failed | undelivered | skipped | unknown — vocabulaire `thread.status.*`. */
+  status: string | null;
+  /** Code Twilio (30007 « filtré par l'opérateur », 21610 « désabonné »…). */
+  errorCode: number | null;
+  /** Pourquoi il n'est jamais PARTI (kill_switch, suppressed, invalid_to…). */
+  skipReason: string | null;
+  /** opener | ladder | agent | human | system */
+  source: string | null;
+};
+
 export type EngineHealth = {
   killSwitch: boolean;
   mode: "live" | "sandbox" | "dry_run";
@@ -131,7 +175,7 @@ export type EngineHealth = {
 };
 
 /**
- * Les CINQ vues (demandes d'Alex, 2026-08-25/26) :
+ * Les SIX vues (demandes d'Alex, 2026-08-25/26, 2026-08-30) :
  *
  *  · « À traiter » — tout ce qui repose sur un humain : les fils qui
  *    réclament une décision ET ceux qu'un humain tient déjà en main.
@@ -139,12 +183,24 @@ export type EngineHealth = {
  *    arrivée. Rien à faire, mais on veut le VOIR.
  *  · « File d'envoi » — qui va recevoir un texto, et quand : envois écrits
  *    en attente de leur heure, réponses en préparation, relances planifiées.
- *  · « Refus » — les non explicites (refus ferme, pas intéressé, STOP).
+ *  · « Échecs » — les textos qui ne sont PAS arrivés. Seule vue faite de
+ *    messages et non de fils : trois échecs sur la même fiche sont trois
+ *    lignes, parce que c'est le nombre d'envois perdus qu'on vient chercher.
+ *  · « Refus » — les non explicites, en deux sections : les DÉSABONNÉS (STOP,
+ *    la porte fermée par la loi) et les refus de vive voix, qui ne sont pas
+ *    la même chose et n'appellent pas les mêmes gestes.
  *  · « Toutes » — chaque fil, RANGÉ par situation, avec un en-tête par
  *    groupe — pas une pile plate à déchiffrer.
  */
-type Tab = "attention" | "waiting" | "queue" | "refused" | "all";
-const TABS: Tab[] = ["attention", "waiting", "queue", "refused", "all"];
+type Tab = "attention" | "waiting" | "queue" | "failed" | "refused" | "all";
+const TABS: Tab[] = ["attention", "waiting", "queue", "failed", "refused", "all"];
+
+/**
+ * Les vues faites de MESSAGES et non de fils : « les miennes » (qui filtre sur
+ * le titulaire d'un fil) n'y veut rien dire, et un bouton qui ne fait rien est
+ * pire qu'un bouton absent.
+ */
+const THREADLESS_TABS: Tab[] = ["queue", "failed"];
 
 /**
  * Ce que CE regard peut faire ici — un droit par geste, plus deux rôles en dur.
@@ -196,8 +252,11 @@ const NO_ABILITIES: InboxAbilities = {
   replay: false,
 };
 
-/** Quels états chaque vue montre. `all` les montre tous, en sections ; `queue` a sa propre matière. */
-const TAB_STATES: Record<Exclude<Tab, "all" | "queue">, ConversationState[]> = {
+/**
+ * Quels états chaque vue montre. `all` les montre tous, en sections ; `queue`
+ * et `failed` ont leur propre matière (des envois, pas des fils).
+ */
+const TAB_STATES: Record<Exclude<Tab, "all" | "queue" | "failed">, ConversationState[]> = {
   attention: ["attention", "human"],
   waiting: ["ai"],
   refused: ["refused"],
@@ -223,6 +282,13 @@ const DEED_LOOK: Record<ConversationDeed, Look> = {
 };
 
 /**
+ * Le pictogramme de « clore » est celui du motif que le bouton ÉCRIT
+ * (`closed_by_human`), et non un second choisi ici : le geste et la pastille
+ * qu'il laisse derrière lui doivent être la même image.
+ */
+const CLOSE_LOOK = ATTENTION_LOOK[HUMAN_CLOSED_REASON];
+
+/**
  * Boîte de réception.
  *
  * Une seule règle d'architecture : un fil est TOUJOURS dans exactement un
@@ -236,6 +302,8 @@ const DEED_LOOK: Record<ConversationDeed, Look> = {
 export function ConversationsInbox({
   rows,
   queue = [],
+  failures = [],
+  failuresTotal,
   categories = [],
   currentUserId,
   health,
@@ -245,6 +313,14 @@ export function ConversationsInbox({
   rows: InboxRow[];
   /** La file d'envoi — les textos à venir (voir `QueueItem`). */
   queue?: QueueItem[];
+  /** Les textos qui ne sont pas arrivés (voir `FailedMessage`). */
+  failures?: FailedMessage[];
+  /**
+   * Combien il y en a EN TOUT — la liste est bornée aux plus récents. Sans ce
+   * nombre, la pastille affichait le plafond et jurait que 100 était le compte
+   * des envois perdus. Non dit vaut « rien de caché ».
+   */
+  failuresTotal?: number;
   currentUserId: string;
   /** `null` sans le droit `admin.settings` : la donnée n'est pas envoyée. */
   health: EngineHealth | null;
@@ -307,17 +383,35 @@ export function ConversationsInbox({
     () => ({
       attention: byState.attention.length + byState.human.length,
       waiting: byState.ai.length,
-      // La file ignore « les miennes » : un envoi programmé n'est à personne.
+      // La file et les échecs ignorent « les miennes » : un envoi programmé
+      // n'est à personne, et un envoi perdu n'appartient plus à personne.
       queue: queue.length,
+      failed: failuresTotal ?? failures.length,
       refused: byState.refused.length,
       all: base.length,
     }),
-    [byState, base, queue],
+    [byState, base, queue, failures, failuresTotal],
   );
-  const mineCount = useMemo(
-    () => rows.filter((r) => r.assignedToId === currentUserId).length,
-    [rows, currentUserId],
-  );
+
+  /**
+   * Combien de fils de CETTE vue vous reviennent.
+   *
+   * Le compte était global : le rail affichait « Les miennes · 12 » au-dessus
+   * d'un onglet « Refus » qui n'en contenait qu'un — et une fois le filtre
+   * pressé, la liste se vidait sous une pastille qui promettait douze. Une
+   * pastille de filtre annonce ce que le filtre va LAISSER, sinon elle ne
+   * répond à aucune question. Elle se lit donc dans l'univers de la vue
+   * ouverte, exactement comme les comptes des onglets.
+   */
+  const mineCount = useMemo(() => {
+    if (THREADLESS_TABS.includes(tab)) return 0;
+    const shown = new Set<ConversationState>(
+      tab === "all" ? ALL_SECTIONS : TAB_STATES[tab as Exclude<Tab, "all" | "queue" | "failed">],
+    );
+    return rows.filter(
+      (r) => r.assignedToId === currentUserId && shown.has(conversationStateOf(r)),
+    ).length;
+  }, [rows, currentUserId, tab]);
 
   // Dans « à traiter », répondre et réparer ne sont pas le même métier.
   const replyRows = useMemo(
@@ -327,6 +421,37 @@ export function ConversationsInbox({
   const engineRows = useMemo(
     () => byState.attention.filter((r) => attentionKindOf(r.attentionReason ?? "") === "engine"),
     [byState],
+  );
+
+  /**
+   * Dans « Refus », un DÉSABONNEMENT n'est pas un « non merci ».
+   *
+   * Le premier est une porte fermée à clé — la loi interdit d'y frapper encore,
+   * et la table `suppressions` s'en charge sans nous demander notre avis. Le
+   * second est une conversation qui s'est mal terminée : elle peut se rouvrir
+   * dans six mois, par téléphone, par une autre campagne. Les mélanger dans une
+   * pile plate faisait perdre les premiers — et c'est la seule liste où l'on ne
+   * doit jamais se tromper.
+   */
+  const optoutRows = useMemo(
+    () => byState.refused.filter((r) => r.attentionReason === "optout"),
+    [byState],
+  );
+  const refusalRows = useMemo(
+    () => byState.refused.filter((r) => r.attentionReason !== "optout"),
+    [byState],
+  );
+
+  // Ce que « Tout clore » clora VRAIMENT : les DEUX questions, comme sur chaque
+  // carte — le droit du rôle (plafond) ET la case `sms` de la fiche (robinet).
+  // Le serveur revérifie ; ce compte sert à ne pas annoncer un nombre qu'on ne
+  // tiendra pas, et cette liste vide fait disparaître le bouton.
+  const closableHeld = useMemo(
+    () =>
+      abilities.control
+        ? byState.human.filter((r) => r.smsOpen !== false).map((r) => r.id)
+        : [],
+    [byState, abilities.control],
   );
 
   const act = (fn: () => Promise<boolean>) => {
@@ -369,6 +494,47 @@ export function ConversationsInbox({
       toast.success(t("inbox.handled"));
       return true;
     });
+
+  /**
+   * « Clore » — la sortie qui manquait à « Entre vos mains ».
+   *
+   * Ni « Marquer traité » (la pastille est déjà tombée) ni « Rendre à l'IA »
+   * (impossible sans assistant) ne vidaient cette section : elle grossissait
+   * sans fin. Clore ne réveille pas la machine — l'IA reste coupée — et ne fait
+   * taire personne : le prochain message du client ramène le fil ici.
+   */
+  const close = (row: InboxRow) =>
+    act(async () => {
+      const result = await closeConversationAction(row.id);
+      if (!result.ok) {
+        toast.error(t("error"));
+        // Rafraîchir quand même : si le fil n'était plus entre des mains
+        // humaines, l'écran doit montrer où il est passé.
+        return true;
+      }
+      toast.success(t("inbox.close.one"));
+      return true;
+    });
+
+  // « Tout clore » : le même geste sur la pile AFFICHÉE — « les miennes »
+  // compris. Vider ce qu'on voit et vider ce qui existe ne sont pas la même
+  // promesse, et c'est la première qu'on tient.
+  const [confirmCloseAll, setConfirmCloseAll] = useState(false);
+  const closeAll = () => {
+    if (closableHeld.length === 0) return;
+    act(async () => {
+      const result = await closeHeldConversationsAction(closableHeld);
+      setConfirmCloseAll(false);
+      if (!result.ok) {
+        toast.error(t("error"));
+        return true;
+      }
+      // Le compte rendu est celui des fils RÉELLEMENT clos, jamais celui des
+      // identifiants envoyés.
+      toast.success(t("inbox.close.done", { count: result.closed ?? 0 }));
+      return true;
+    });
+  };
 
   // « Rendre à l'IA » : l'assistant reprend le fil ET répond tout de suite à
   // l'entrant qui attend — la décision vaut traitement.
@@ -420,7 +586,15 @@ export function ConversationsInbox({
         }
       }
       if (row.assignedToId !== currentUserId) {
-        await assignConversationAction({ conversationId: row.id, userId: currentUserId });
+        const assigned = await assignConversationAction({
+          conversationId: row.id,
+          userId: currentUserId,
+        });
+        // Le fil peut REFUSER de changer de main (plafond de fiches atteint,
+        // verrou d'un collègue) sans que la prise de contrôle échoue. Le taire
+        // laissait croire que le fil était à soi : « les miennes » ne le
+        // montrait pas, et personne ne comprenait pourquoi.
+        if (!assigned.ok) toast.warning(t("inbox.notAssigned"));
       }
       emitDataChange("sms");
       if (row.clientId) router.push(`/clients/${row.clientId}`);
@@ -476,6 +650,7 @@ export function ConversationsInbox({
     currentUserId,
     pending,
     onHandle: handle,
+    onClose: close,
     onHandBack: handBack,
     onRetry: retry,
     onRespond: respond,
@@ -517,7 +692,15 @@ export function ConversationsInbox({
               size="sm"
               className="min-h-11 md:min-h-9"
               aria-pressed={tab === key}
-              onClick={() => setTab(key)}
+              onClick={() => {
+                setTab(key);
+                // La file et les échecs n'ont pas de titulaire : leur ouvrir
+                // l'écran décroche « les miennes ». Sinon le filtre restait
+                // allumé sans bouton pour le voir ni l'éteindre, et les
+                // pastilles des autres vues continuaient de rétrécir sans que
+                // rien à l'écran ne dise pourquoi.
+                if (THREADLESS_TABS.includes(key)) setMineOnly(false);
+              }}
             >
               {t(`inbox.tabs.${key}`)}
               <Badge
@@ -538,21 +721,29 @@ export function ConversationsInbox({
           {/* Le trait qui sépare les VUES du filtre « les miennes ». Empilé,
               il tomberait en bout de ligne comme une poussière : sur
               téléphone, la pastille grise du filtre suffit à le distinguer
-              des onglets. */}
-          <span className="mx-1 h-5 w-px shrink-0 bg-border max-md:hidden" aria-hidden />
-          <Button
-            variant={mineOnly ? "secondary" : "ghost"}
-            size="sm"
-            className="min-h-11 md:min-h-9"
-            aria-pressed={mineOnly}
-            onClick={() => setMineOnly((v) => !v)}
-          >
-            <UserRoundIcon aria-hidden />
-            {t("inbox.mine")}
-            <Badge variant="secondary" className="ml-1">
-              {mineCount}
-            </Badge>
-          </Button>
+              des onglets.
+
+              Le filtre disparaît sur les vues faites d'envois et non de fils
+              (file, échecs) : il n'y a personne à qui les attribuer, et le
+              bouton restait là, pressé, sans rien changer à l'écran. */}
+          {THREADLESS_TABS.includes(tab) ? null : (
+            <>
+              <span className="mx-1 h-5 w-px shrink-0 bg-border max-md:hidden" aria-hidden />
+              <Button
+                variant={mineOnly ? "secondary" : "ghost"}
+                size="sm"
+                className="min-h-11 md:min-h-9"
+                aria-pressed={mineOnly}
+                onClick={() => setMineOnly((v) => !v)}
+              >
+                <UserRoundIcon aria-hidden />
+                {t("inbox.mine")}
+                <Badge variant="secondary" className="ml-1">
+                  {mineCount}
+                </Badge>
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -560,7 +751,11 @@ export function ConversationsInbox({
         <EmptyState
           icon={<MessageCircleIcon />}
           title={t(`inbox.empty.${tab}.title`)}
-          hint={mineOnly ? t("inbox.empty.mine") : t(`inbox.empty.${tab}.desc`)}
+          hint={
+            mineOnly && !THREADLESS_TABS.includes(tab)
+              ? t("inbox.empty.mine")
+              : t(`inbox.empty.${tab}.desc`)
+          }
         />
       ) : tab === "attention" ? (
         <div className="space-y-5">
@@ -607,6 +802,41 @@ export function ConversationsInbox({
                 look={CONVERSATION_STATE_LOOK.human}
                 label={t("inbox.sections.held")}
                 count={byState.human.length}
+                action={
+                  closableHeld.length > 0 ? (
+                    <AlertDialog open={confirmCloseAll} onOpenChange={setConfirmCloseAll}>
+                      <AlertDialogTrigger
+                        render={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="relative z-10 min-h-11 md:min-h-8"
+                          />
+                        }
+                      >
+                        <CLOSE_LOOK.Icon aria-hidden />
+                        {t("inbox.close.all")}
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>{t("inbox.close.title")}</AlertDialogTitle>
+                          {/* Le nombre annoncé est celui des fils qu'on peut
+                              vraiment clore, pas celui de la section : la
+                              fiche d'un collègue reste fermée. */}
+                          <AlertDialogDescription>
+                            {t("inbox.close.body", { count: closableHeld.length })}
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>{t("inbox.close.cancel")}</AlertDialogCancel>
+                          <AlertDialogAction disabled={pending} onClick={closeAll}>
+                            {t("inbox.close.confirm")}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  ) : null
+                }
               />
               {renderRows(byState.human)}
             </section>
@@ -641,6 +871,45 @@ export function ConversationsInbox({
               dfnsLocale={dfnsLocale}
             />
           ))}
+        </div>
+      ) : tab === "failed" ? (
+        <div className="space-y-2">
+          {failures.map((item) => (
+            <FailureRowCard key={item.id} item={item} dfnsLocale={dfnsLocale} />
+          ))}
+          {/* Une liste tronquée qui ne le dit pas se lit comme une liste
+              complète — et « 100 échecs » au lieu de 4 000 est le genre de
+              chiffre sur lequel on prend une décision. */}
+          {counts.failed > failures.length ? (
+            <p className="pt-1 text-center text-xs text-muted-foreground">
+              {t("inbox.failedCap", { shown: failures.length, total: counts.failed })}
+            </p>
+          ) : null}
+        </div>
+      ) : tab === "refused" ? (
+        // Deux sections, pas une pile : un désabonnement ferme la porte à clé,
+        // un « non merci » la laisse entrebâillée.
+        <div className="space-y-5">
+          {optoutRows.length > 0 ? (
+            <section className="space-y-2">
+              <SectionHeader
+                look={ATTENTION_LOOK.optout}
+                label={t("inbox.sections.optout")}
+                count={optoutRows.length}
+              />
+              {renderRows(optoutRows)}
+            </section>
+          ) : null}
+          {refusalRows.length > 0 ? (
+            <section className="space-y-2">
+              <SectionHeader
+                look={CONVERSATION_STATE_LOOK.refused}
+                label={t("inbox.sections.refusal")}
+                count={refusalRows.length}
+              />
+              {renderRows(refusalRows)}
+            </section>
+          ) : null}
         </div>
       ) : tab === "all" ? (
         // « Toutes » n'est pas une pile plate : chaque situation a son
@@ -711,6 +980,7 @@ function InboxRowCard({
   currentUserId,
   pending,
   onHandle,
+  onClose,
   onHandBack,
   onRetry,
   onRespond,
@@ -725,6 +995,7 @@ function InboxRowCard({
   currentUserId: string;
   pending: boolean;
   onHandle: (row: InboxRow) => void;
+  onClose: (row: InboxRow) => void;
   onHandBack: (row: InboxRow) => void;
   onRetry: (row: InboxRow) => void;
   onRespond: (row: InboxRow) => void;
@@ -770,7 +1041,12 @@ function InboxRowCard({
   const showClassify =
     mayClassify && state === "human" && row.clientId !== null && categories.length > 0;
   const showDecide = mayControl && state === "attention";
-  const showFooter = row.assignedToName !== null || showHandBack || showClassify || showDecide;
+  // Clore est le geste des fils TENUS, et de ceux-là seulement : ailleurs, une
+  // pastille tombe (« marquer traité ») ou la machine reprend (« rendre à
+  // l'IA ») — clore n'y voudrait rien dire.
+  const showClose = mayControl && state === "human";
+  const showFooter =
+    row.assignedToName !== null || showHandBack || showClassify || showDecide || showClose;
 
   const speaker =
     row.lastDirection === "in"
@@ -943,6 +1219,20 @@ function InboxRowCard({
                 </SelectContent>
               </Select>
             ) : null}
+            {/* Un fil tenu doit pouvoir SORTIR de la pile. Sans ce bouton,
+                « Entre vos mains » n'avait aucune issue : sa pastille est déjà
+                tombée, et rendre la main exige un assistant. */}
+            {showClose ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="relative z-10 min-h-11 md:min-h-8"
+                disabled={pending}
+                onClick={() => onClose(row)}
+              >
+                <CLOSE_LOOK.Icon aria-hidden /> {t("inbox.actions.close")}
+              </Button>
+            ) : null}
             {showDecide ? (
               <>
                 <Button
@@ -1052,6 +1342,98 @@ function QueueRowCard({
               {t("thread.cancelQueued")}
             </Button>
           </div>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+/**
+ * Une ligne de la vue « Échecs » — un texto qui n'est pas arrivé.
+ *
+ * La règle de l'écran : ne jamais montrer un échec sans sa RAISON. Un refus de
+ * l'opérateur porte son code (30007 « filtré », 21610 « désabonné ») ; un
+ * message jamais parti porte son motif (interrupteur baissé, numéro désabonné,
+ * hors liste d'essai). « Mis en file » puis plus rien est exactement ce que
+ * cette vue existe pour ne plus laisser arriver.
+ *
+ * Le vocabulaire est celui du fil (`thread.status.*`, `thread.skip.*`) : le
+ * même mot pour le même fait, ici et sur la fiche.
+ */
+function FailureRowCard({
+  item,
+  dfnsLocale,
+}: {
+  item: FailedMessage;
+  dfnsLocale: typeof fr;
+}) {
+  const t = useTranslations("conversations");
+  // « Masqué » est écrit une seule fois, chez les fiches.
+  const tAccess = useTranslations("clients");
+  const look = ATTENTION_LOOK.send_failed;
+  // `skipReason` peut porter un détail après deux-points (« provider_rejected:
+  // … ») : le code seul a un libellé, le reste ne se traduit pas.
+  const skipCode = item.skipReason ? item.skipReason.split(":")[0] : null;
+
+  return (
+    <article className="relative flex items-start gap-3 rounded-xl border bg-card p-3 shadow-xs transition-colors md:p-4 hover:border-ring/60 hover:bg-accent/40">
+      {item.clientId ? (
+        <Link
+          href={`/clients/${item.clientId}`}
+          className="absolute inset-0 rounded-xl"
+          aria-label={`${t("inbox.open")} — ${item.clientName}`}
+        />
+      ) : null}
+
+      <LookIcon look={look} className="mt-0.5" />
+
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-sm font-semibold">{item.clientName}</span>
+          {item.status ? (
+            <Badge variant="outline" className="gap-1 font-normal" style={lookTint(look)}>
+              <look.Icon aria-hidden />
+              {t(`thread.status.${item.status}` as never)}
+            </Badge>
+          ) : null}
+          {item.source ? (
+            <span className="text-xs text-muted-foreground">
+              {t(`thread.source.${item.source}` as never)}
+            </span>
+          ) : null}
+          <span className="flex-1" />
+          <span className="text-xs whitespace-nowrap text-muted-foreground">
+            <RelativeTime date={item.at} locale={dfnsLocale} />
+          </span>
+        </div>
+
+        {item.body ? (
+          <p className="line-clamp-2 text-sm text-muted-foreground">« {item.body} »</p>
+        ) : item.historyHidden ? (
+          <p>
+            <span
+              title={tAccess("access.historyHidden")}
+              className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+            >
+              <EyeOffIcon aria-hidden className="size-3" />
+              {tAccess("access.masked")}
+            </span>
+          </p>
+        ) : null}
+
+        {skipCode ? (
+          <p className="text-xs font-medium text-destructive">
+            {t("thread.skippedLabel", {
+              reason: t.has(`thread.skip.${skipCode}`)
+                ? t(`thread.skip.${skipCode}` as never)
+                : skipCode,
+            })}
+          </p>
+        ) : null}
+        {item.errorCode ? (
+          <p className="text-xs font-medium text-destructive">
+            {t("thread.failedHint", { code: item.errorCode })}
+          </p>
         ) : null}
       </div>
     </article>

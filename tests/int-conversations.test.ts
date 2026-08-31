@@ -42,12 +42,17 @@ const {
   cancelOutboundSmsAction,
   cancelQueuedSmsAction,
   assignAssistantAction,
+  closeConversationAction,
+  closeHeldConversationsAction,
   sendManualSmsAction,
   setConversationAiAction,
   markConversationHandledAction,
   assignConversationAction,
   retryAiTurnAction,
 } = await import("@/app/(app)/conversations/actions");
+const { setUserRole } = await import("@/lib/permissions/server");
+const { OBSERVER_ROLE_ID } = await import("@/lib/permissions/defaults");
+const { processInboundSms } = await import("@/lib/sms-server/inbound");
 const { seedGuardrailDefaults } = await import("@/lib/guardrails/store");
 
 /** Consentement SMS exprès au dossier — sans lui, un envoi à la main est refusé. */
@@ -80,12 +85,15 @@ async function loginAs(user: { id: string; role: string; tokenVersion: number } 
 let caller: Awaited<ReturnType<typeof makeUser>>;
 let admin: Awaited<ReturnType<typeof makeUser>>;
 let numberId: string;
+let numberE164: string;
 
 beforeEach(async () => {
   await resetDb();
   caller = await makeUser({ role: "caller", name: "Téléphoniste" });
   admin = await makeUser({ role: "admin", name: "Admin" });
-  numberId = (await makeSmsNumber()).id;
+  const number = await makeSmsNumber();
+  numberId = number.id;
+  numberE164 = number.e164;
   await loginAs(caller);
 });
 
@@ -645,5 +653,147 @@ describe("envoi manuel — garde-fous de la revue", () => {
     // Retirer l'assistant.
     expect(await assignAssistantAction({ conversationId: thread.id, assistantId: null })).toEqual({ ok: true, id: thread.id });
     expect((await testDb.query.conversations.findFirst({ where: eq(conversations.id, thread.id) }))!.activeAssistantId).toBeNull();
+  });
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+/**
+ * Clore un fil — la SORTIE de « Entre vos mains ».
+ *
+ * Cette section grossissait sans fin : sa pastille est déjà tombée (rien à
+ * « marquer traité ») et rendre la main exige un assistant. Ce que « clore »
+ * doit garantir, et que l'écran ne montre pas : la machine ne se réveille pas,
+ * personne n'est réduit au silence, et un identifiant deviné n'ouvre rien.
+ */
+describe("clore un fil tenu", () => {
+  /** Un fil « entre vos mains » : IA coupée, plus aucune pastille. */
+  async function heldThread(clientId: string, phone: string) {
+    return makeConversation({
+      clientId,
+      clientPhone: phone,
+      smsNumberId: numberId,
+      aiEnabled: false,
+      pausedById: caller.id,
+      pauseReason: "manual",
+      needsAttention: false,
+    });
+  }
+
+  it("le fil sort de la pile SANS que la machine reprenne la parole", async () => {
+    const client = await makeClient({ assignedToId: caller.id });
+    const thread = await heldThread(client.id, client.phone);
+
+    expect((await closeConversationAction(thread.id)).ok).toBe(true);
+
+    const row = await testDb.query.conversations.findFirst({
+      where: eq(conversations.id, thread.id),
+    });
+    expect(row!.attentionReason).toBe("closed_by_human");
+    expect(row!.needsAttention).toBe(false);
+    // L'IA reste COUPÉE : on ne remet pas un robot aux commandes d'un fil qu'un
+    // humain avait pris — clore n'est pas rendre la main.
+    expect(row!.aiEnabled).toBe(false);
+    // Et rien n'est mis en file : clore n'envoie aucun message.
+    expect(await testDb.select().from(scheduledJobs)).toHaveLength(0);
+  });
+
+  it("un fil que l'IA mène ne se clôt pas par ce bouton", async () => {
+    // L'invariant : clore est le geste des fils TENUS. Sinon un clic périmé,
+    // parti d'un onglet ouvert depuis une heure, closait un fil que
+    // l'assistant venait de reprendre — et l'écran mentait dans les deux sens.
+    const client = await makeClient({ assignedToId: caller.id });
+    const thread = await makeConversation({
+      clientId: client.id,
+      clientPhone: client.phone,
+      smsNumberId: numberId,
+    });
+
+    expect(await closeConversationAction(thread.id)).toEqual({ ok: false, error: "invalid" });
+    const row = await testDb.query.conversations.findFirst({
+      where: eq(conversations.id, thread.id),
+    });
+    expect(row!.attentionReason).toBeNull();
+  });
+
+  it("clore ne fait taire personne : le client qui réécrit revient en tête", async () => {
+    // C'est la promesse de tout le geste. Sans elle, « clore » serait un
+    // enterrement — et un lead enterré ne se rattrape pas.
+    const client = await makeClient({ assignedToId: caller.id });
+    const thread = await heldThread(client.id, client.phone);
+    await closeConversationAction(thread.id);
+
+    await processInboundSms({
+      messageSid: "SM_reveil",
+      from: client.phone,
+      to: numberE164,
+      body: "Finalement, on peut se parler?",
+    });
+
+    const row = await testDb.query.conversations.findFirst({
+      where: eq(conversations.id, thread.id),
+    });
+    expect(row!.needsAttention).toBe(true);
+    expect(row!.attentionReason).toBe("inbound");
+  });
+
+  it("l'observateur ne clôt rien", async () => {
+    const client = await makeClient({ assignedToId: caller.id });
+    const thread = await heldThread(client.id, client.phone);
+
+    const stagiaire = await makeUser({ role: "caller", name: "Stagiaire" });
+    await setUserRole(stagiaire.id, OBSERVER_ROLE_ID);
+    await loginAs({ ...stagiaire, role: "caller" });
+
+    expect(await closeConversationAction(thread.id)).toEqual({ ok: false, error: "forbidden" });
+    expect(await closeHeldConversationsAction([thread.id])).toEqual({
+      ok: false,
+      error: "forbidden",
+    });
+  });
+
+  it("« tout clore » ne clôt que ce qu'on a le droit de clore, et le DIT", async () => {
+    // Le droit du rôle est le plafond, la case `sms` de la fiche le robinet :
+    // la fiche prise par un collègue est visible (pour ne pas la rappeler) et
+    // muette. Annoncer « 3 fils clos » sur 2 fermetures serait un mensonge.
+    const colleague = await makeUser({ role: "caller", name: "Collègue" });
+    const mine1 = await makeClient({ assignedToId: caller.id });
+    const mine2 = await makeClient({ assignedToId: caller.id });
+    const theirs = await makeClient({ assignedToId: colleague.id });
+
+    const t1 = await heldThread(mine1.id, mine1.phone);
+    const t2 = await heldThread(mine2.id, mine2.phone);
+    const t3 = await heldThread(theirs.id, theirs.phone);
+
+    const result = await closeHeldConversationsAction([t1.id, t2.id, t3.id]);
+    expect(result).toEqual({ ok: true, closed: 2 });
+
+    const rows = await testDb.select().from(conversations);
+    const closed = rows.filter((r) => r.attentionReason === "closed_by_human").map((r) => r.id);
+    expect(closed.sort()).toEqual([t1.id, t2.id].sort());
+    // Le fil du collègue n'a pas bougé d'un pouce.
+    expect(rows.find((r) => r.id === t3.id)!.attentionReason).toBeNull();
+  });
+
+  it("clore deux fois ne compte pas deux fois — le verdict est déjà rendu", async () => {
+    // Deux téléphonistes pressent « Tout clore » sur la même pile, ou un
+    // double-clic passe. Sans le troisième test de `HELD` (aucun verdict
+    // rendu), la seconde passe rematchait les mêmes fils : le toast annonçait
+    // « 2 fils clos » pour des fils déjà clos, et le journal d'audit écrivait
+    // une seconde ligne avec les mêmes identifiants.
+    const client = await makeClient({ assignedToId: caller.id });
+    const thread = await heldThread(client.id, client.phone);
+
+    expect(await closeHeldConversationsAction([thread.id])).toEqual({ ok: true, closed: 1 });
+    expect(await closeHeldConversationsAction([thread.id])).toEqual({ ok: true, closed: 0 });
+    expect(await closeConversationAction(thread.id)).toEqual({ ok: false, error: "invalid" });
+  });
+
+  it("une liste vide ou un identifiant qui n'en est pas un est refusé", async () => {
+    expect(await closeHeldConversationsAction([])).toEqual({ ok: false, error: "invalid" });
+    expect(await closeHeldConversationsAction(["pas-un-uuid"])).toEqual({
+      ok: false,
+      error: "invalid",
+    });
   });
 });

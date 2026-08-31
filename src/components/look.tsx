@@ -9,6 +9,7 @@ import {
   CalendarCheckIcon,
   CalendarClockIcon,
   CalendarXIcon,
+  CheckCheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
@@ -530,6 +531,8 @@ export const ATTENTION_LOOK: Record<string, Look> = {
   // Terminé — le verdict est rendu.
   closed_goal_reached: { color: "#10B981", Icon: TargetIcon },
   closed_disqualified: { color: TONE.raw, Icon: CircleSlashIcon },
+  // Le seul verdict qu'aucune machine ne rend : un humain a clos le fil.
+  closed_by_human: { color: TONE.raw, Icon: CheckCheckIcon },
   closed_not_interested: { color: TONE.raw, Icon: CircleXIcon },
   hard_refusal: { color: TONE.raw, Icon: MessageSquareXIcon },
   optout: { color: "#EF4444", Icon: XOctagonIcon },

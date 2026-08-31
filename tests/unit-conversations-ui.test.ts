@@ -15,6 +15,7 @@ import commonFr from "../messages/fr/common.json";
 import type { SmsThreadData } from "@/components/clients/sms-thread-card";
 import type {
   EngineHealth,
+  FailedMessage,
   InboxAbilities,
   InboxRow,
   QueueItem,
@@ -30,6 +31,8 @@ vi.mock("@/app/(app)/conversations/actions", () => ({
   sendManualSmsAction: vi.fn(),
   setConversationAiAction: vi.fn(),
   markConversationHandledAction: vi.fn(),
+  closeConversationAction: vi.fn(),
+  closeHeldConversationsAction: vi.fn(),
   assignConversationAction: vi.fn(),
   handBackToAiAction: vi.fn(),
   retryAiTurnAction: vi.fn(),
@@ -966,5 +969,262 @@ describe("envois en file, envois non partis, assistant du fil", () => {
       }),
     );
     expect(html).not.toContain("Aucun (un humain répond)");
+  });
+});
+
+/**
+ * Le nombre affiché dans la pastille du filtre « les miennes » — c'est la
+ * PROMESSE du bouton : ce qui restera si on le presse.
+ */
+function minePastille(html: string): number | null {
+  const m = html.match(/Les miennes<span[^>]*>(\d+)<\/span>/);
+  return m ? Number(m[1]) : null;
+}
+
+/** Un fil désabonné (STOP) : la porte fermée à clé, pas un « non merci ». */
+const OPTOUT_ROW: InboxRow = {
+  ...REFUSED_ROW,
+  id: "c7",
+  clientId: "bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc",
+  clientName: "Sylvie Gagnon",
+  attentionReason: "optout",
+  lastBody: "STOP",
+  lastDirection: "in",
+};
+
+/** Deux envois perdus : l'un refusé par l'opérateur, l'autre jamais parti. */
+const FAILURES: FailedMessage[] = [
+  {
+    id: "f1",
+    clientId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+    clientName: "Nathalie Côté",
+    at: "2026-08-29T18:00:00.000Z",
+    body: "Bonjour, toujours un projet?",
+    status: "failed",
+    errorCode: 30007,
+    skipReason: null,
+    source: "agent",
+  },
+  {
+    id: "f2",
+    clientId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+    clientName: "Julie Desrosiers",
+    at: "2026-08-29T17:00:00.000Z",
+    body: "Je vous relance en septembre.",
+    status: "skipped",
+    errorCode: null,
+    skipReason: "kill_switch",
+    source: "ladder",
+  },
+];
+
+describe("clore un fil, et vider « entre vos mains »", () => {
+  it("chaque fil tenu offre une SORTIE, et la pile entière aussi", () => {
+    // Sans ce geste, « Entre vos mains » n'avait aucune issue : sa pastille est
+    // déjà tombée (rien à « marquer traité »), et « rendre à l'IA » n'existe
+    // pas quand aucun assistant ne tient le fil.
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        abilities: WORKER,
+        rows: [HELD_ROW],
+        currentUserId: "me",
+        health: null,
+      }),
+    );
+    expect(html).toContain("Entre vos mains");
+    expect(html).toContain("Clore");
+    expect(html).toContain("Tout clore");
+  });
+
+  it("sans le droit de conduire le fil, ni l'un ni l'autre", () => {
+    // « Clore » et « Tout clore » sont DEUX assertions : le libellé du bouton
+    // groupé porte un c minuscule, et chercher « Clore » seul le laissait
+    // passer — le test portait son propre nom en faux.
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        abilities: { ...WORKER, control: false },
+        rows: [HELD_ROW],
+        currentUserId: "me",
+        health: null,
+      }),
+    );
+    expect(html).toContain("Entre vos mains");
+    expect(html).not.toContain("Clore");
+    expect(html).not.toContain("Tout clore");
+  });
+
+  it("case `sms` fermée sur la fiche : le fil se voit, il ne se clôt pas", () => {
+    // Le droit du rôle est le plafond, la case de la fiche le robinet. Offrir
+    // le bouton serait promettre un geste que le serveur refuse.
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        abilities: WORKER,
+        rows: [{ ...HELD_ROW, smsOpen: false }],
+        currentUserId: "me",
+        health: null,
+      }),
+    );
+    expect(html).toContain("François Pelletier");
+    expect(html).not.toContain("Clore");
+    expect(html).not.toContain("Tout clore");
+  });
+});
+
+describe("« les miennes » dit la vérité sur la vue ouverte", () => {
+  const MINE_ATTENTION: InboxRow = {
+    ...ROWS[0],
+    id: "n1",
+    assignedToId: "me",
+    assignedToName: "Moi",
+  };
+  const MINE_ATTENTION_2: InboxRow = { ...MINE_ATTENTION, id: "n2" };
+  const MINE_REFUSED: InboxRow = {
+    ...REFUSED_ROW,
+    id: "n3",
+    assignedToId: "me",
+    assignedToName: "Moi",
+  };
+  const ROWS_MINE = [MINE_ATTENTION, MINE_ATTENTION_2, MINE_REFUSED];
+
+  it("la pastille compte dans l'univers de la vue, pas dans le tout", () => {
+    // Elle annonçait 3 au-dessus d'un onglet « Refus » qui n'en gardait qu'un :
+    // une pastille de filtre promet ce que le filtre LAISSE.
+    const attention = wrap(
+      createElement(ConversationsInbox, {
+        abilities: WORKER,
+        rows: ROWS_MINE,
+        currentUserId: "me",
+        health: null,
+      }),
+    );
+    expect(minePastille(attention)).toBe(2);
+
+    const refused = wrap(
+      createElement(ConversationsInbox, {
+        abilities: WORKER,
+        rows: ROWS_MINE,
+        currentUserId: "me",
+        health: null,
+        initialTab: "refused",
+      }),
+    );
+    expect(minePastille(refused)).toBe(1);
+  });
+
+  it("ouvrir une vue sans titulaire DÉCROCHE le filtre au lieu de le cacher", () => {
+    // Un filtre encore actif dont le bouton a disparu rétrécissait les
+    // pastilles des autres vues sans que rien à l'écran ne dise pourquoi — et
+    // sans moyen de l'éteindre depuis cet onglet.
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        abilities: ALL,
+        rows: ROWS_MINE,
+        failures: FAILURES,
+        currentUserId: "me",
+        health: HEALTH,
+        initialTab: "failed",
+      }),
+    );
+    // Le message de vide ne parle jamais d'un filtre qui ne s'applique pas ici
+    // (le décrochage au clic, lui, se vérifie dans le navigateur : un rendu
+    // statique n'appuie sur rien).
+    expect(html).not.toContain("Aucun fil ne vous est attribué");
+    expect(html).toContain("Échecs");
+  });
+
+  it("le filtre disparaît là où rien n'est à personne (file, échecs)", () => {
+    // Un envoi programmé et un envoi perdu n'ont pas de titulaire : le bouton
+    // restait là, pressé, sans rien changer à l'écran.
+    const failed = wrap(
+      createElement(ConversationsInbox, {
+        abilities: ALL,
+        rows: ROWS_MINE,
+        failures: FAILURES,
+        currentUserId: "me",
+        health: HEALTH,
+        initialTab: "failed",
+      }),
+    );
+    expect(failed).not.toContain("Les miennes");
+
+    const queue = wrap(
+      createElement(ConversationsInbox, {
+        abilities: ALL,
+        rows: ROWS_MINE,
+        currentUserId: "me",
+        health: HEALTH,
+        initialTab: "queue",
+      }),
+    );
+    expect(queue).not.toContain("Les miennes");
+  });
+});
+
+describe("désabonnés et envois perdus ont leur place", () => {
+  it("« Refus » sépare la porte fermée à clé du « non merci »", () => {
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        abilities: WORKER,
+        rows: [REFUSED_ROW, OPTOUT_ROW],
+        currentUserId: "me",
+        health: null,
+        initialTab: "refused",
+      }),
+    );
+    expect(html).toContain("Désabonnés (STOP)");
+    expect(html).toContain("Sylvie Gagnon");
+    expect(html).toContain("Refus de vive voix");
+    expect(html).toContain("Robert Bouchard");
+  });
+
+  it("la vue « Échecs » ne montre jamais un envoi perdu sans sa RAISON", () => {
+    // « Mis en file » puis plus rien est la pire réponse possible pour un
+    // téléphoniste : le code de l'opérateur et le motif du non-départ sont dits.
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        abilities: WORKER,
+        rows: [],
+        failures: FAILURES,
+        currentUserId: "me",
+        health: null,
+        initialTab: "failed",
+      }),
+    );
+    expect(html).toContain("Nathalie Côté");
+    expect(html).toContain("Code 30007");
+    expect(html).toContain("Julie Desrosiers");
+    expect(html).toContain("arrêt baissé");
+  });
+
+  it("une liste tronquée le DIT — sinon 100 se lit comme le total", () => {
+    // « 100 échecs » au lieu de 4 000 est exactement le genre de chiffre sur
+    // lequel on prend une décision.
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        abilities: WORKER,
+        rows: [],
+        failures: FAILURES,
+        failuresTotal: 4012,
+        currentUserId: "me",
+        health: null,
+        initialTab: "failed",
+      }),
+    );
+    expect(html).toContain("4012");
+    expect(html).toContain("au total");
+  });
+
+  it("aucun envoi perdu : on le DIT, on ne laisse pas un écran vide", () => {
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        abilities: WORKER,
+        rows: [],
+        failures: [],
+        currentUserId: "me",
+        health: null,
+        initialTab: "failed",
+      }),
+    );
+    expect(html).toContain("Aucun envoi perdu");
   });
 });

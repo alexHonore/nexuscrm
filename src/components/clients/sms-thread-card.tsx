@@ -22,6 +22,7 @@ import {
   sendManualSmsAction,
   setConversationAiAction,
 } from "@/app/(app)/conversations/actions";
+import { FAILED_SEND_STATUSES } from "@/components/conversations/state";
 import { RelativeTime } from "@/components/relative-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -700,11 +701,9 @@ function MessageBubble({
 }) {
   const t = useTranslations("conversations");
   const outbound = message.direction === "out";
-  const failed =
-    message.status === "failed" ||
-    message.status === "undelivered" ||
-    message.status === "skipped" ||
-    message.status === "unknown";
+  // La MÊME liste que la vue « Échecs » de la boîte : une bulle rouge ici et
+  // une ligne là-bas doivent parler du même fait.
+  const failed = (FAILED_SEND_STATUSES as readonly string[]).includes(message.status ?? "");
   const cancelled = message.status === "cancelled";
   const skipCode = message.skipReason ? message.skipReason.split(":")[0] : null;
   // Encore en file : la seule fenêtre où « annuler » veut dire quelque chose.

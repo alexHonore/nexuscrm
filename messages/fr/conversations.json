@@ -83,6 +83,7 @@
       "attention": "À traiter",
       "waiting": "En attente du client",
       "queue": "File d'envoi",
+      "failed": "Échecs",
       "refused": "Refus",
       "all": "Toutes"
     },
@@ -99,7 +100,9 @@
     "sections": {
       "reply": "Le client attend une réponse",
       "engine": "Pannes techniques",
-      "held": "Entre vos mains"
+      "held": "Entre vos mains",
+      "optout": "Désabonnés (STOP)",
+      "refusal": "Refus de vive voix"
     },
     "from": {
       "client": "Client",
@@ -130,7 +133,8 @@
       "handBack": "Rendre à l'IA",
       "retry": "Réessayer",
       "respond": "Je réponds",
-      "classify": "Classer"
+      "classify": "Classer",
+      "close": "Clore"
     },
     "handedBack": "L'assistant reprend le fil",
     "retried": "Le tour repart — l'assistant réessaie tout de suite",
@@ -147,6 +151,10 @@
       "queue": {
         "title": "Rien en file",
         "desc": "Aucun envoi programmé, aucune réponse en préparation, aucune relance planifiée."
+      },
+      "failed": {
+        "title": "Aucun envoi perdu",
+        "desc": "Tout ce qui est parti est arrivé — ou attend encore son heure dans la file."
       },
       "refused": {
         "title": "Aucun refus",
@@ -177,12 +185,24 @@
       "closed_goal_reached": "Clos : objectif atteint",
       "closed_disqualified": "Clos : non qualifié",
       "closed_not_interested": "Clos : pas intéressé",
+      "closed_by_human": "Clos à la main",
       "truncated": "Réponse coupée par le modèle",
       "content_filter": "Réponse filtrée par le fournisseur"
     },
     "assignToMe": "Me l'attribuer",
+    "failedCap": "Les {shown} plus récents — {total} au total.",
+    "notAssigned": "Le fil ne vous a pas été attribué — vous pouvez répondre quand même.",
     "markHandled": "Marquer traité",
     "handled": "Conversation traitée",
+    "close": {
+      "all": "Tout clore",
+      "one": "Fil clos",
+      "title": "Clore les fils entre vos mains ?",
+      "body": "{count, plural, one {# fil sortira de « à traiter ». L'assistant reste en pause : personne n'écrira à sa place, et le prochain message du client le ramène ici.} other {# fils sortiront de « à traiter ». L'assistant reste en pause : personne n'écrira à leur place, et le prochain message du client les ramène ici.}}",
+      "cancel": "Annuler",
+      "confirm": "Tout clore",
+      "done": "{count, plural, =0 {Aucun fil clos — ils ont changé d'état entre-temps} one {# fil clos} other {# fils clos}}"
+    },
     "open": "Ouvrir la fiche",
     "replay": {
       "button": "Reprendre après une panne",
@@ -205,9 +225,9 @@
       "open": "Fenêtre d'envoi ouverte",
       "closed": "Hors heures de politesse"
     },
-    "queue": "{count} en file",
-    "failed": "{count} en échec",
-    "suppressed": "{count} désabonnés"
+    "queue": "{count, plural, one {# tâche en file} other {# tâches en file}}",
+    "failed": "{count, plural, one {# tâche en échec} other {# tâches en échec}}",
+    "suppressed": "{count, plural, one {# désabonné} other {# désabonnés}}"
   },
   "error": "Une erreur est survenue",
   "assistant": {

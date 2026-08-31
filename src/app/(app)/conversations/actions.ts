@@ -1,8 +1,9 @@
 "use server";
 
-import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { HUMAN_CLOSED_REASON } from "@/components/conversations/state";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
 import {
@@ -15,12 +16,16 @@ import {
 } from "@/db/schema-sms";
 import { UNDELIVERED_STATUSES } from "@/lib/agent/runtime";
 import { logAudit } from "@/lib/audit";
+import { noVerdictCondition } from "@/lib/conversations/attention";
+import { bucketFor, grantsFor } from "@/lib/permissions/access";
 import type { Grants } from "@/lib/permissions/catalog";
 import {
   type Actor,
   currentActor,
   guardClient,
+  loadDirectory,
   verifyAssignment,
+  withVisibility,
 } from "@/lib/permissions/server";
 import { cancelPendingJobs, enqueueJob } from "@/lib/jobs/queue";
 import { kickDispatch } from "@/lib/jobs/kick";
@@ -62,7 +67,7 @@ import { setClientCategoryAction } from "../clients/actions";
  */
 
 export type SmsActionResult =
-  | { ok: true; id?: string; relaunched?: boolean }
+  | { ok: true; id?: string; relaunched?: boolean; closed?: number }
   | {
       ok: false;
       error:
@@ -666,6 +671,153 @@ export async function markConversationHandledAction(
 
   revalidateFor(seen.thread.clientId);
   return { ok: true, id: conversationId };
+}
+
+/**
+ * La condition « ENTRE VOS MAINS », écrite une fois.
+ *
+ * Un fil est entre les mains d'un humain quand l'IA y est coupée, qu'aucune
+ * pastille ne réclame plus personne, ET qu'aucun verdict n'a été rendu — les
+ * TROIS tests de `conversationStateOf` pour l'état `human`, pas deux. Le
+ * troisième n'est pas décoratif : sans lui, un fil déjà clos redevenait
+ * clorable, et « Tout clore » deux fois de suite annonçait deux fois le même
+ * nombre en écrivant deux fois la même ligne au journal d'audit.
+ *
+ * Posée dans le `where` de la mise à jour, elle fait qu'un fil rendu à l'IA
+ * (ou redevenu « à traiter », ou déjà clos) pendant qu'un onglet dormait n'est
+ * pas clos par un clic périmé — il est simplement sauté, et le compte rendu le
+ * dit.
+ */
+const HELD = and(
+  eq(conversations.aiEnabled, false),
+  eq(conversations.needsAttention, false),
+  noVerdictCondition(),
+);
+
+/**
+ * « Clore » — le fil sort de « à traiter », un humain ayant décidé qu'il était
+ * fini.
+ *
+ * C'est la sortie qui manquait à la section « Entre vos mains ». Les deux
+ * gestes voisins n'y répondaient pas : « Marquer traité » ne retire qu'une
+ * pastille déjà tombée, et « Rendre à l'IA » n'existe pas quand aucun
+ * assistant ne tient le fil — la section grossissait donc sans fin.
+ *
+ * Clore n'est ni supprimer, ni faire taire :
+ *  · l'IA reste COUPÉE (on ne remet pas une machine aux commandes d'un fil
+ *    qu'un humain avait pris) — donc rien ne partira tout seul ;
+ *  · le fil reste lisible sous « Toutes », section « Conclues » ;
+ *  · le prochain message du client réécrit `attentionReason` (« Nouveau
+ *    message ») et le ramène dans « à traiter ».
+ *
+ * Même porte que les autres commandes du fil : le droit `conversations.control`
+ * comme plafond, la case `sms` de la fiche comme robinet — décider que
+ * personne ne répond plus à ce client-là, c'est prendre la parole sur lui.
+ */
+export async function closeConversationAction(conversationId: string): Promise<SmsActionResult> {
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("conversations.control")) return FORBIDDEN;
+  if (!z.uuid().safeParse(conversationId).success) return INVALID;
+
+  const seen = await threadFor(actor, conversationId, "sms");
+  if (!seen) return NOT_FOUND;
+
+  const rows = await db
+    .update(conversations)
+    .set({ needsAttention: false, attentionReason: HUMAN_CLOSED_REASON })
+    .where(and(eq(conversations.id, conversationId), HELD))
+    .returning({ id: conversations.id });
+  // Zéro rangée = le fil n'est plus entre des mains humaines. On ne prétend pas
+  // l'avoir clos : l'écran rafraîchira et montrera où il est passé.
+  if (rows.length === 0) return INVALID;
+
+  await logAudit({
+    userId: actor.user.id,
+    action: "conversation.close",
+    entity: "conversation",
+    entityId: conversationId,
+    detail: { reason: HUMAN_CLOSED_REASON },
+  });
+
+  revalidateFor(seen.thread.clientId);
+  return { ok: true, id: conversationId, closed: 1 };
+}
+
+/** La boîte ne charge pas plus de 200 fils (voir la page) — la vider non plus. */
+const MAX_BULK_CLOSE = 200;
+
+/**
+ * « Tout clore » — le même geste, sur la pile entière.
+ *
+ * L'écran envoie les identifiants qu'il MONTRE (le filtre « les miennes »
+ * compris) : vider ce qu'on voit et vider ce qui existe ne sont pas la même
+ * promesse, et c'est la première qu'on tient ici.
+ *
+ * Le serveur ne fait confiance à aucun de ces identifiants. Il refait les trois
+ * questions de la matrice — la fiche est-elle visible pour ce regard
+ * (`withVisibility`), sa case `sms` est-elle ouverte, le fil est-il vraiment
+ * entre des mains humaines (`HELD`) — et ne clôt que ce qui passe les trois.
+ * Le compte rendu est celui des fils RÉELLEMENT clos, jamais celui des
+ * identifiants reçus : un « 12 fils clos » sur 9 fermetures serait un mensonge.
+ */
+export async function closeHeldConversationsAction(
+  conversationIds: string[],
+): Promise<SmsActionResult> {
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("conversations.control")) return FORBIDDEN;
+
+  const parsed = z.array(z.uuid()).min(1).max(MAX_BULK_CLOSE).safeParse(conversationIds);
+  if (!parsed.success) return INVALID;
+  const ids = [...new Set(parsed.data)];
+
+  // Les fils vus par CE regard, et le détenteur de la fiche derrière chacun.
+  const threads = await db
+    .select({ id: conversations.id, holderId: clients.assignedToId })
+    .from(conversations)
+    .innerJoin(clients, eq(clients.id, conversations.clientId))
+    .where(await withVisibility(actor, and(inArray(conversations.id, ids), HELD)));
+  if (threads.length === 0) return { ok: true, closed: 0 };
+
+  // La case `sms` de CHAQUE fiche. Elle ne dépend que du détenteur : on la
+  // résout une fois par détenteur, pas une fois par fil.
+  const { cfg, roleOf } = await loadDirectory();
+  const smsOpen = new Map<string, boolean>();
+  const mayWrite = (assignedToId: string | null): boolean => {
+    const key = assignedToId ?? "";
+    const hit = smsOpen.get(key);
+    if (hit !== undefined) return hit;
+    const holder = assignedToId ? (roleOf.get(assignedToId) ?? null) : null;
+    const open = grantsFor(
+      cfg,
+      actor.role,
+      bucketFor(actor.user.id, { assignedToId }, holder),
+    ).sms;
+    smsOpen.set(key, open);
+    return open;
+  };
+  const closable = threads.filter((t) => mayWrite(t.holderId)).map((t) => t.id);
+  if (closable.length === 0) return { ok: true, closed: 0 };
+
+  const closed = await db
+    .update(conversations)
+    .set({ needsAttention: false, attentionReason: HUMAN_CLOSED_REASON })
+    .where(and(inArray(conversations.id, closable), HELD))
+    .returning({ id: conversations.id, clientId: conversations.clientId });
+
+  await logAudit({
+    userId: actor.user.id,
+    action: "conversation.close_bulk",
+    entity: "conversation",
+    detail: { count: closed.length, asked: ids.length, ids: closed.map((c) => c.id) },
+  });
+
+  for (const clientId of new Set(closed.map((c) => c.clientId))) {
+    revalidatePath(`/clients/${clientId}`);
+  }
+  revalidatePath("/conversations");
+  return { ok: true, closed: closed.length };
 }
 
 /**

@@ -19,6 +19,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { db } from "@/db";
 import { appointments, calls, clients, followups, users } from "@/db/schema";
 import { conversations } from "@/db/schema-sms";
+import { needsHumanCondition } from "@/lib/conversations/attention";
 import { bucketFor, grantsFor } from "@/lib/permissions/access";
 import type { Grants } from "@/lib/permissions/catalog";
 import { loadDirectory, requireActor, scopeFor, withVisibility } from "@/lib/permissions/server";
@@ -114,10 +115,16 @@ export default async function DashboardPage() {
   // Les fils que l'assistant SMS a rendus à un humain — un fil PARLE d'une
   // fiche, il disparaît avec elle. Qui voit toute l'équipe voit tous les fils ;
   // les autres n'ont que ceux qui leur sont assignés, comme leurs suivis.
+  //
+  // Un VERDICT n'est pas du travail : `needsHumanCondition()` écarte les fils
+  // clos, refusés et désabonnés, que le moteur laisse pourtant « signalés »
+  // pour dater leur verdict. Sans elle, le tableau de bord annonçait cinq fils
+  // là où la boîte de réception en montrait trois — et proposait de
+  // « reprendre » un désabonnement.
   const attentionWhere = await withVisibility(
     actor,
     and(
-      eq(conversations.needsAttention, true),
+      needsHumanCondition(),
       ...(seesEveryone ? [] : [eq(conversations.assignedToId, user.id)]),
     ),
   );

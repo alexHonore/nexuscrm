@@ -88,6 +88,10 @@
         "title": "No reply awaited",
         "desc": "The assistant has no message left unanswered."
       },
+      "failed": {
+        "title": "No lost send",
+        "desc": "Everything that left arrived — or is still waiting its turn in the queue."
+      },
       "refused": {
         "title": "No refusals",
         "desc": "Hard refusals, \"not interested\" and unsubscribes will land here."
@@ -121,12 +125,24 @@
       "closed_goal_reached": "Closed: goal reached",
       "closed_disqualified": "Closed: not qualified",
       "closed_not_interested": "Closed: not interested",
+      "closed_by_human": "Closed by hand",
       "truncated": "Reply cut off by the model",
       "content_filter": "Reply filtered by the provider"
     },
     "assignToMe": "Assign to me",
+    "failedCap": "The {shown} most recent — {total} in all.",
+    "notAssigned": "The thread was not assigned to you — you can still reply.",
     "markHandled": "Mark handled",
     "handled": "Conversation handled",
+    "close": {
+      "all": "Close all",
+      "one": "Thread closed",
+      "title": "Close the threads in your hands?",
+      "body": "{count, plural, one {# thread leaves \"to handle\". The assistant stays paused: nobody writes in its place, and the client's next message brings it back here.} other {# threads leave \"to handle\". The assistant stays paused: nobody writes in their place, and the client's next message brings them back here.}}",
+      "cancel": "Cancel",
+      "confirm": "Close all",
+      "done": "{count, plural, =0 {No thread closed — they changed state in the meantime} one {# thread closed} other {# threads closed}}"
+    },
     "open": "Open the client",
     "replay": {
       "button": "Resume after an outage",
@@ -137,13 +153,16 @@
       "waiting": "Awaiting client",
       "refused": "Refusals",
       "all": "All",
-      "queue": "Send queue"
+      "queue": "Send queue",
+      "failed": "Failures"
     },
     "mine": "Mine",
     "sections": {
       "reply": "The client is waiting for a reply",
       "engine": "Technical failures",
-      "held": "In your hands"
+      "held": "In your hands",
+      "optout": "Unsubscribed (STOP)",
+      "refusal": "Spoken refusals"
     },
     "from": {
       "client": "Client",
@@ -166,7 +185,8 @@
       "handBack": "Hand back to AI",
       "respond": "I'll reply",
       "retry": "Try again",
-      "classify": "Classify"
+      "classify": "Classify",
+      "close": "Close"
     },
     "handedBack": "The assistant takes the thread back",
     "retried": "The turn is back in flight — the assistant retries right away",
@@ -205,9 +225,9 @@
       "open": "Send window open",
       "closed": "Outside quiet hours"
     },
-    "queue": "{count} queued",
-    "failed": "{count} failed",
-    "suppressed": "{count} unsubscribed"
+    "queue": "{count, plural, one {# queued task} other {# queued tasks}}",
+    "failed": "{count, plural, one {# failed task} other {# failed tasks}}",
+    "suppressed": "{count, plural, one {# unsubscribed number} other {# unsubscribed numbers}}"
   },
   "error": "Something went wrong",
   "assistant": {
