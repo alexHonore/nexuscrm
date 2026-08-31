@@ -1228,3 +1228,82 @@ describe("désabonnés et envois perdus ont leur place", () => {
     expect(html).toContain("Aucun envoi perdu");
   });
 });
+
+describe("la carte montre ce qu'on avait dit avant la réponse du client", () => {
+  /** Le client a répondu à une ouverture de campagne. */
+  const REPLIED: InboxRow = {
+    ...ROWS[0],
+    id: "p1",
+    lastBody: "Oui toujours!",
+    lastDirection: "in",
+    lastSource: "human",
+    previousBody: "Bonjour, un projet immobilier en vue?",
+    previousSource: "opener",
+  };
+
+  it("« Oui toujours! » ne veut rien dire sans la question — elle est là", () => {
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        abilities: WORKER,
+        rows: [REPLIED],
+        currentUserId: "me",
+        health: null,
+      }),
+    );
+    expect(html).toContain("Bonjour, un projet immobilier en vue?");
+    expect(html).toContain("Oui toujours!");
+    // Et QUI l'avait écrit, avec le même vocabulaire que la ligne du dessous.
+    expect(html).toContain("Campagne");
+  });
+
+  it("quand c'est NOUS qui avons parlé en dernier, pas de contexte", () => {
+    // Deux phrases de suite du même côté se lisent comme un bégaiement, pas
+    // comme un échange.
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        abilities: WORKER,
+        rows: [
+          {
+            ...REPLIED,
+            lastBody: "Parfait, je vous propose jeudi 14 h.",
+            lastDirection: "out",
+            lastSource: "agent",
+          },
+        ],
+        currentUserId: "me",
+        health: null,
+      }),
+    );
+    expect(html).toContain("Parfait, je vous propose jeudi 14 h.");
+    expect(html).not.toContain("Bonjour, un projet immobilier en vue?");
+  });
+
+  it("fil fermé sur la fiche : ni le dernier message, ni celui d'avant", () => {
+    // Le serveur ne les envoie pas ; la carte ne doit pas en laisser filtrer un
+    // par une porte de service.
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        abilities: WORKER,
+        rows: [{ ...REPLIED, lastBody: null, previousBody: null, historyHidden: true }],
+        currentUserId: "me",
+        health: null,
+      }),
+    );
+    expect(html).not.toContain("Bonjour, un projet immobilier en vue?");
+    expect(html).not.toContain("Oui toujours!");
+  });
+
+  it("un producteur qui ignore ce champ continue d'afficher sa carte", () => {
+    // Le champ est arrivé après coup : non dit vaut « pas de contexte ».
+    const html = wrap(
+      createElement(ConversationsInbox, {
+        abilities: WORKER,
+        rows: [ROWS[0]],
+        currentUserId: "me",
+        health: null,
+      }),
+    );
+    // (sous-chaîne sans apostrophe : le rendu HTML les échappe en &#x27;)
+    expect(html).toContain("Je préfère parler à quelqu");
+  });
+});

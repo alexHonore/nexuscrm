@@ -26,6 +26,7 @@ import {
   scheduledJobs,
   suppressions,
 } from "@/db/schema-sms";
+import { previousOutboundByConversation } from "@/lib/conversations/thread-preview";
 import { bucketFor, grantsFor } from "@/lib/permissions/access";
 import type { Grants } from "@/lib/permissions/catalog";
 import { loadDirectory, requirePerm, withVisibility } from "@/lib/permissions/server";
@@ -92,6 +93,10 @@ export default async function ConversationsPage() {
     or(eq(conversations.needsAttention, true), isNotNull(lastMessage.at)),
   );
 
+  // Ce qu'on avait envoyé AVANT la dernière réponse du client — le contexte
+  // sans lequel « Oui toujours! » ne veut rien dire (voir le module).
+  const previousOutbound = previousOutboundByConversation();
+
   const rows = await db
     .select({
       id: conversations.id,
@@ -112,12 +117,15 @@ export default async function ConversationsPage() {
       lastDirection: lastMessage.direction,
       lastSource: lastMessage.source,
       lastAt: lastMessage.at,
+      previousBody: previousOutbound.body,
+      previousSource: previousOutbound.source,
     })
     .from(conversations)
     .leftJoin(clients, eq(clients.id, conversations.clientId))
     .leftJoin(users, eq(users.id, conversations.assignedToId))
     .leftJoin(assistants, eq(assistants.id, conversations.activeAssistantId))
     .leftJoin(lastMessage, eq(lastMessage.conversationId, conversations.id))
+    .leftJoin(previousOutbound, eq(previousOutbound.conversationId, conversations.id))
     .where(threadsWhere)
     .orderBy(desc(conversations.needsAttention), desc(lastMessage.at))
     .limit(200);
@@ -443,6 +451,11 @@ export default async function ConversationsPage() {
       // ce qu'il faut pour que la rangée EXISTE — un nom, un état, une heure.
       did: open.history ? (deedsByConversation.get(r.id) ?? []) : [],
       lastBody: open.history ? (r.lastBody ?? null) : null,
+      // Le message précédent est de la CONVERSATION : il suit la case
+      // `history`, exactement comme le dernier. Ce qu'on n'envoie pas ne peut
+      // pas fuir par le HTML.
+      previousBody: open.history ? (r.previousBody ?? null) : null,
+      previousSource: open.history ? (r.previousSource ?? null) : null,
       historyHidden: !open.history,
       lastDirection: r.lastDirection === "in" || r.lastDirection === "out" ? r.lastDirection : null,
       lastSource: r.lastSource ?? null,

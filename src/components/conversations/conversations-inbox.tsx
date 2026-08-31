@@ -105,6 +105,18 @@ export type InboxRow = {
   /** Ce que l'assistant a FAIT (rendez-vous, classement, rappel…) — sa conclusion visible. */
   did: ConversationDeed[];
   lastBody: string | null;
+  /**
+   * Ce que NOUS avions envoyé juste avant la dernière réponse du client — la
+   * question dont on lisait la réponse seule.
+   *
+   * Optionnel, comme les cases arrivées après coup : un producteur écrit avant
+   * ce champ continue de compiler, et il compile du bon côté — non dit vaut
+   * « pas de contexte », donc la ligne ne s'affiche pas. Absent aussi quand la
+   * case `history` de la fiche est fermée.
+   */
+  previousBody?: string | null;
+  /** opener | ladder | agent | human | system — qui avait écrit ce message-là. */
+  previousSource?: string | null;
   /** QUI a parlé en dernier : sans ça, impossible de savoir si on attend le client ou s'il nous attend. */
   lastDirection: "in" | "out" | null;
   lastSource: string | null;
@@ -1048,16 +1060,31 @@ function InboxRowCard({
   const showFooter =
     row.assignedToName !== null || showHandBack || showClassify || showDecide || showClose;
 
-  const speaker =
-    row.lastDirection === "in"
+  // Qui a écrit un message — la MÊME règle pour le dernier et pour celui qui
+  // le précède, sinon les deux lignes d'une même carte nommeraient
+  // différemment le même assistant.
+  const speakerOf = (direction: "in" | "out" | null, source: string | null) =>
+    direction === "in"
       ? t("inbox.from.client")
-      : row.lastSource === "agent"
+      : source === "agent"
         ? t("inbox.from.assistant")
-        : row.lastSource === "opener" || row.lastSource === "ladder"
+        : source === "opener" || source === "ladder"
           ? t("inbox.from.campaign")
-          : row.lastSource === "system"
+          : source === "system"
             ? t("inbox.from.system")
             : t("inbox.from.team");
+
+  const speaker = speakerOf(row.lastDirection, row.lastSource);
+
+  /**
+   * La ligne de contexte : ce qu'on avait envoyé avant que le client réponde.
+   *
+   * Elle ne s'affiche QUE si le client a parlé en dernier. Quand c'est nous,
+   * la carte alignerait deux phrases de suite du même côté — le contexte se
+   * lit alors comme un bégaiement, pas comme un échange.
+   */
+  const previous =
+    row.lastDirection === "in" && row.previousBody ? row.previousBody : null;
 
   return (
     <article
@@ -1117,6 +1144,18 @@ function InboxRowCard({
             </span>
           ) : null}
         </div>
+
+        {/* Ce qu'on avait dit, puis ce qu'il a répondu — dans cet ordre, parce
+            que c'est celui de la conversation. Plus petit et effacé : c'est le
+            décor, la réplique du client reste le sujet. */}
+        {previous ? (
+          <p className="line-clamp-1 text-xs text-muted-foreground">
+            <span className="font-medium">
+              {speakerOf("out", row.previousSource ?? null)}&nbsp;:{" "}
+            </span>
+            {previous}
+          </p>
+        ) : null}
 
         {row.lastBody ? (
           <p className="line-clamp-2 text-sm">
