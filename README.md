@@ -100,3 +100,4 @@ Doublons dédupliqués par numéro de téléphone ; chaque lead crée une notifi
 | `pnpm db:studio` | explorateur de base Drizzle Studio |
 
 Conventions de code : voir `AGENTS.md`.
+Tester, abandonner une branche, mettre en ligne : voir `WORKFLOW.md`.

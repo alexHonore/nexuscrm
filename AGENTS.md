@@ -70,6 +70,9 @@ pnpm db:push && pnpm db:seed                     # schéma + admin/catégories
 pnpm dev
 ```
 
+Le rituel complet — brancher, tester, abandonner, mettre en ligne (`main` EST la
+production) — est dans `WORKFLOW.md`.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
