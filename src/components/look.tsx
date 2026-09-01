@@ -2,6 +2,7 @@ import {
   ActivityIcon,
   ArchiveIcon,
   BadgeQuestionMarkIcon,
+  BanIcon,
   BookOpenTextIcon,
   BotIcon,
   BotOffIcon,
@@ -22,10 +23,12 @@ import {
   CpuIcon,
   EyeIcon,
   FileCheckIcon,
+  FileWarningIcon,
   FilterIcon,
   FilterXIcon,
   FlaskConicalIcon,
   FolderTreeIcon,
+  GaugeIcon,
   HandIcon,
   HourglassIcon,
   IdCardIcon,
@@ -50,6 +53,7 @@ import {
   PauseIcon,
   PencilLineIcon,
   PhoneCallIcon,
+  PhoneOffIcon,
   PlayIcon,
   PowerIcon,
   QuoteIcon,
@@ -61,12 +65,14 @@ import {
   ScissorsIcon,
   ScrollTextIcon,
   ServerCogIcon,
+  ServerCrashIcon,
   SearchCheckIcon,
   SendIcon,
   ShieldCheckIcon,
   ShieldIcon,
   ShieldQuestionMarkIcon,
   ShieldXIcon,
+  SignalZeroIcon,
   SignpostIcon,
   SlidersHorizontalIcon,
   SmartphoneIcon,
@@ -85,6 +91,7 @@ import {
   ZapIcon,
   type LucideIcon,
 } from "lucide-react";
+import type { ErrorFamily } from "@/lib/deliverability/error-classes";
 import type { GuardrailKind } from "@/lib/guardrails/types";
 import { cn } from "@/lib/utils";
 
@@ -536,6 +543,51 @@ export const ATTENTION_LOOK: Record<string, Look> = {
   closed_not_interested: { color: TONE.raw, Icon: CircleXIcon },
   hard_refusal: { color: TONE.raw, Icon: MessageSquareXIcon },
   optout: { color: "#EF4444", Icon: XOctagonIcon },
+};
+
+/**
+ * POURQUOI un texto n'est pas arrivé — les dix familles d'erreur de Twilio
+ * (`ERROR_FAMILIES`), telles qu'elles se portent sur une rangée d'échec.
+ *
+ * La vue « Échecs » disait « Ce message n'est pas parti. Code 30007. » Personne
+ * dans le bureau ne lit un nombre à cinq chiffres : on rappelait la personne
+ * pour lui demander si elle avait reçu le texto — précisément le travail que ce
+ * CRM devait épargner. Le mot vient du catalogue
+ * (`@/lib/deliverability/error-text`) ; c'est ICI que vit son image.
+ *
+ * La couleur ne dit pas la gravité — tout est déjà rouge sur cet écran, la
+ * rangée entière est un échec. Elle dit CE QU'ON PEUT EN FAIRE, en quatre
+ * lectures, et c'est la seule question qu'on se pose devant la liste :
+ *
+ *  · rouge — rien ne passera en l'état : le contenu est filtré, la ligne est
+ *    fermée, ou le numéro n'existe pas. Il faut changer quelque chose (le
+ *    texte, le téléphone de la fiche) avant de renvoyer.
+ *  · ambre — ça repassera : le combiné n'a pas répondu, la file sature, Twilio
+ *    a trébuché. « Réessayer » plus tard est exactement le bon geste.
+ *  · violet — NOTRE machine : compte, numéro expéditeur ou campagne A2P mal
+ *    inscrits chez Twilio. Le destinataire n'y est pour rien, et aucun renvoi
+ *    n'y changera quoi que ce soit tant que la paperasse n'est pas faite.
+ *  · gris — on ne sait pas : l'opérateur a refusé sans motif, ou le code est
+ *    trop neuf pour le catalogue.
+ *
+ * Aucune teinte neuve, et surtout pas le violet réservé du canal SMS : le
+ * pictogramme identifie la famille, la couleur ne fait que la ranger.
+ */
+export const FAILURE_FAMILY_LOOK: Record<ErrorFamily, Look> = {
+  // Rien ne passera en l'état.
+  filtered: { color: SEVERITY_LOOK.block.color, Icon: FilterXIcon },
+  blocked: { color: SEVERITY_LOOK.block.color, Icon: BanIcon },
+  invalid: { color: SEVERITY_LOOK.block.color, Icon: PhoneOffIcon },
+  // Ça repassera tout seul, ou au prochain essai.
+  unreachable: { color: TONE.scrutiny, Icon: SignalZeroIcon },
+  throughput: { color: TONE.scrutiny, Icon: GaugeIcon },
+  platform: { color: TONE.scrutiny, Icon: ServerCrashIcon },
+  // Notre paperasse chez Twilio — le destinataire n'y est pour rien.
+  registration: { color: TONE.machinery, Icon: IdCardIcon },
+  content: { color: TONE.machinery, Icon: FileWarningIcon },
+  // On ne sait pas.
+  carrier_other: { color: TONE.raw, Icon: RadioTowerIcon },
+  other: { color: TONE.raw, Icon: CircleHelpIcon },
 };
 
 /**

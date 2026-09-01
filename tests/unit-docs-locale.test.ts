@@ -18,6 +18,14 @@
 import { describe, expect, it } from "vitest";
 import { CAMPAIGN_FIELD_DOCS, campaignFieldText } from "@/lib/campaigns/docs";
 import { CAMPAIGN_FIELD_TEXT_EN } from "@/lib/campaigns/docs.en";
+import { ERROR_FAMILIES, KNOWN_ERROR_CODES } from "@/lib/deliverability/error-classes";
+import {
+  ERROR_TEXT,
+  FAMILY_TEXT,
+  errorCodeText,
+  errorFamilyText,
+} from "@/lib/deliverability/error-text";
+import { ERROR_TEXT_EN, FAMILY_TEXT_EN } from "@/lib/deliverability/error-text.en";
 import { paramDocText, resolveParamDoc } from "@/lib/docs/locale";
 import { PARAM_DOCS } from "@/lib/docs/params";
 import { PARAM_DOCS_EN } from "@/lib/docs/params.en";
@@ -197,5 +205,98 @@ describe("champs de campagne — parité fr/en", () => {
     const known = new Set(CAMPAIGN_FIELD_DOCS.map((d) => d.path));
     const orphans = Object.keys(CAMPAIGN_FIELD_TEXT_EN).filter((p) => !known.has(p));
     expect(orphans, `Traductions orphelines : ${orphans.join(", ")}`).toEqual([]);
+  });
+});
+
+/**
+ * Codes d'erreur Twilio — parité fr/en.
+ *
+ * Ce catalogue-ci se lit dans une CONVERSATION, pas dans un tableau de bord :
+ * c'est ce que la téléphoniste voit sous un message qui n'est pas parti. Un
+ * code sans phrase la renvoie à « 30007 » tout court, et un code sans
+ * traduction renvoie l'administrateur anglophone au même endroit — dans les
+ * deux cas, la rangée d'échec a l'air d'une rangée normale.
+ */
+describe("codes d'erreur Twilio — parité fr/en", () => {
+  it("CHAQUE code catalogué a une phrase en français", () => {
+    const missing = KNOWN_ERROR_CODES.filter((code) => !ERROR_TEXT[code]);
+    expect(
+      missing,
+      `Codes sans texte dans src/lib/deliverability/error-text.ts :\n  ${missing.join("\n  ")}`,
+    ).toEqual([]);
+  });
+
+  it("CHAQUE phrase française a sa traduction anglaise", () => {
+    const missing = Object.keys(ERROR_TEXT).filter((code) => !ERROR_TEXT_EN[Number(code)]);
+    expect(
+      missing,
+      `Codes sans traduction dans src/lib/deliverability/error-text.en.ts :\n  ${missing.join("\n  ")}`,
+    ).toEqual([]);
+  });
+
+  it("aucune traduction ne pointe vers un code disparu du catalogue", () => {
+    const orphans = Object.keys(ERROR_TEXT_EN).filter((code) => !ERROR_TEXT[Number(code)]);
+    expect(orphans, `Traductions orphelines : ${orphans.join(", ")}`).toEqual([]);
+  });
+
+  it("chaque famille est nommée dans les deux langues", () => {
+    for (const family of ERROR_FAMILIES) {
+      expect(FAMILY_TEXT[family], `famille « ${family} » sans texte français`).toBeDefined();
+      expect(FAMILY_TEXT_EN[family], `famille « ${family} » non traduite`).toBeDefined();
+      for (const locale of ["fr", "en"] as const) {
+        const text = errorFamilyText(family, locale);
+        expect(text.label.trim().length, `${family}.label (${locale})`).toBeGreaterThan(0);
+        expect(text.why.trim().length, `${family}.why (${locale})`).toBeGreaterThan(20);
+      }
+      expect(looksFrench(errorFamilyText(family, "en").label), `${family}.label`).toBe(false);
+      expect(looksFrench(errorFamilyText(family, "en").why), `${family}.why`).toBe(false);
+    }
+  });
+
+  it("le texte anglais est en ANGLAIS", () => {
+    const french: string[] = [];
+    for (const code of KNOWN_ERROR_CODES) {
+      const text = errorCodeText(code, "en");
+      if (looksFrench(text.label)) french.push(`${code}.label`);
+      if (looksFrench(text.why)) french.push(`${code}.why`);
+    }
+    expect(french, `Texte encore français :\n  ${french.join("\n  ")}`).toEqual([]);
+  });
+
+  it("le libellé tient dans une pastille, la raison tient en une phrase", () => {
+    for (const code of KNOWN_ERROR_CODES) {
+      for (const locale of ["fr", "en"] as const) {
+        const text = errorCodeText(code, locale);
+        expect(text.label.trim().length, `${code}.label (${locale})`).toBeGreaterThan(0);
+        expect(text.label.length, `${code}.label (${locale}) est trop long`).toBeLessThan(34);
+        expect(text.why.trim().length, `${code}.why (${locale})`).toBeGreaterThan(20);
+      }
+    }
+  });
+
+  it("le français reste la source : il est rendu tel quel", () => {
+    for (const code of KNOWN_ERROR_CODES) {
+      const text = errorCodeText(code, "fr");
+      expect(text.label).toBe(ERROR_TEXT[code].label);
+      expect(text.why).toBe(ERROR_TEXT[code].why);
+    }
+  });
+
+  it("un code absent ou inconnu retombe sur sa FAMILLE, jamais sur du vide", () => {
+    // Une rangée d'échec muette se lit comme une rangée sans échec : c'est la
+    // seule chose que cet écran n'a pas le droit de faire.
+    for (const absent of [null, undefined, 0, -1]) {
+      const text = errorCodeText(absent, "fr");
+      expect(text.code).toBeNull();
+      expect(text.family).toBe("other");
+      expect(text.label).toBe(FAMILY_TEXT.other.label);
+      expect(text.doc.length).toBeGreaterThan(0);
+    }
+    // Un code que Twilio ajoutera demain : nommé par sa famille, et toujours
+    // cliquable vers sa page de doc.
+    const future = errorCodeText(39999, "en");
+    expect(future.code).toBe(39999);
+    expect(future.label).toBe(FAMILY_TEXT_EN.other.label);
+    expect(future.doc).toContain("39999");
   });
 });

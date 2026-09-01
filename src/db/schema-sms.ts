@@ -201,6 +201,16 @@ export const messages = pgTable(
     latencyMs: integer("latency_ms"),
     /** Inbound only: set when the agent runtime has consumed this message as a turn. */
     processedAt: timestamp("processed_at", { withTimezone: true }),
+    /**
+     * Échec ÉCARTÉ de la vue « Échecs » — la rangée reste dans le fil du
+     * client et continue de compter dans la délivrabilité. « Retirer » range
+     * l'écran, il ne détruit rien : sans cette colonne, la seule façon de
+     * faire disparaître un envoi perdu d'une vue qu'on relit chaque matin
+     * était de l'effacer pour de bon, et avec lui la preuve de la panne.
+     */
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
+    /** Qui l'a écarté — pour qu'on sache à qui demander pourquoi. */
+    dismissedById: uuid("dismissed_by_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -208,6 +218,12 @@ export const messages = pgTable(
     index("messages_unprocessed_in_idx")
       .on(t.conversationId)
       .where(sql`${t.processedAt} is null and ${t.direction} = 'in'`),
+    // La vue « Échecs » balaie tous les sortants non écartés, du plus récent au
+    // plus ancien : sans index partiel, elle relit la table entière à chaque
+    // ouverture — et c'est l'écran qu'on ouvre le plus souvent.
+    index("messages_failed_out_idx")
+      .on(t.createdAt)
+      .where(sql`${t.dismissedAt} is null and ${t.direction} = 'out'`),
   ],
 );
 

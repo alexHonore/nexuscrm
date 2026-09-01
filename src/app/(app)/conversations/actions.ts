@@ -3,7 +3,7 @@
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { HUMAN_CLOSED_REASON } from "@/components/conversations/state";
+import { HUMAN_CLOSED_REASON, UNREACHED_SEND_STATUSES } from "@/components/conversations/state";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
 import {
@@ -942,6 +942,268 @@ export async function cancelOutboundSmsAction(messageId: string): Promise<SmsAct
     entity: "conversation",
     entityId: message.conversationId,
     detail: { messageId, source: message.source },
+  });
+
+  revalidateFor(seen.thread.clientId);
+  return { ok: true, id: messageId };
+}
+
+/**
+ * La MÊME définition d'« il n'est pas arrivé » que la vue « Échecs » et que la
+ * bulle rouge du fil. Deux listes finiraient par offrir « Réessayer » sur un
+ * message livré, ou par le refuser sur un message perdu.
+ */
+const UNREACHED = new Set<string>(UNREACHED_SEND_STATUSES);
+
+/** Le motif de pastille que « Réessayer l'envoi » répare — et le seul. */
+const SEND_FAILED_REASON = "send_failed";
+
+/**
+ * « Réessayer l'envoi » — renvoyer un texto qui n'a jamais atteint le client.
+ *
+ * Le geste n'existe que parce qu'on corrige la fiche AVANT de le presser : on
+ * lit « Numéro inexistant · code 30005 » dans les Échecs, on va rectifier le
+ * téléphone du contact, puis on revient. D'où la seule chose qui compte ici :
+ * la destination est relue sur `clients.phone` tel qu'il est MAINTENANT, jamais
+ * reprise du `to` de l'ancien job. Rejouer la charge d'origine renverrait
+ * fidèlement le message au numéro qui vient d'échouer — donc pour rien, et
+ * c'est vrai de tous les codes qu'on propose quand même de réessayer (filtré,
+ * désabonné, inexistant).
+ *
+ * Écrire à un client reste écrire à un client : `conversations.reply` comme
+ * plafond, la case `sms` de la fiche comme robinet. Ce n'est qu'une variante de
+ * l'envoi manuel — le texte est déjà rédigé, voilà toute la différence. Le
+ * renvoi part donc comme un envoi HUMAIN (`source: "human"`, `automated:
+ * false`) : c'est une personne qui a décidé, à cette heure-ci, que ce message
+ * devait repartir ; ni les heures de politesse ni la pause IA n'ont à trancher
+ * pour elle.
+ *
+ * La rangée en échec, elle, n'est pas touchée : elle EST la preuve que la
+ * première tentative a échoué et la délivrabilité la compte toujours. Elle est
+ * seulement ÉCARTÉE de la vue « Échecs », dans la même transaction que la mise
+ * en file — l'écran ne doit pas continuer de réclamer un geste qu'on vient de
+ * faire, et il doit continuer de le réclamer si la mise en file échoue.
+ */
+export async function retryFailedSmsAction(messageId: string): Promise<SmsActionResult> {
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("conversations.reply")) return FORBIDDEN;
+  if (!z.uuid().safeParse(messageId).success) return INVALID;
+
+  const message = await db.query.messages.findFirst({ where: eq(messages.id, messageId) });
+  if (!message) return NOT_FOUND;
+  if (message.direction !== "out") return INVALID;
+
+  // Le fil d'origine décide de l'accès, et une fiche cachée répond
+  // « introuvable » : connaître l'identifiant d'un message ne doit pas suffire
+  // à faire partir un texto vers une fiche qu'on ne voit pas.
+  const seen = await threadFor(actor, message.conversationId, "sms");
+  if (!seen) return NOT_FOUND;
+  const origin = seen.thread;
+
+  // Refuser de « réessayer » un message ARRIVÉ : ce bouton fait relire un texte
+  // à une vraie personne. Aux statuts d'échec s'ajoute le motif de saut — un
+  // envoi retenu par une garde (interrupteur, plafond du jour) ne porte pas de
+  // statut d'échec, mais il n'est jamais parti non plus.
+  const unreached = UNREACHED.has(message.status ?? "") || Boolean(message.skipReason);
+  if (!unreached) return INVALID;
+
+  // Déjà écarté : ou bien ce renvoi a DÉJÀ été fait, ou bien quelqu'un a retiré
+  // la rangée. Dans les deux cas l'écran qui l'affiche encore est périmé, et on
+  // répond « introuvable » — le mot qui fait rafraîchir la boîte au lieu
+  // d'expédier un second texto. Le vrai verrou est plus bas, dans la
+  // transaction ; celui-ci épargne le travail au cas ordinaire.
+  if (message.dismissedAt) return NOT_FOUND;
+
+  const client = await db.query.clients.findFirst({ where: eq(clients.id, origin.clientId) });
+  if (!client) return NOT_FOUND;
+  // Le numéro d'AUJOURD'HUI. Sans lui, il n'y a rien à réessayer : on le dit
+  // plutôt que de mettre en file un envoi sans destination.
+  const phone = client.phone;
+  if (!phone) return INVALID;
+
+  // Le désabonnement est absolu — même à la main, même après correction du
+  // numéro. Vérifié ici en plus du garde d'envoi : refuser dans l'écran vaut
+  // mieux que mettre en file un message qui sera jeté sans que personne ne le
+  // voie.
+  const suppressed = await db.query.suppressions.findFirst({
+    where: (s, { eq: e }) => e(s.phoneE164, phone),
+  });
+  if (suppressed) return { ok: false, error: "suppressed" };
+
+  // Le fil qui parle à ce numéro-LÀ — pas forcément celui de l'échec. Si le
+  // téléphone de la fiche a été corrigé, l'ancien fil s'adresse à l'ancien
+  // numéro et la réponse du client n'y reviendrait jamais (les entrants sont
+  // rattachés par `clientPhone`). Même résolution que l'envoi manuel, pour que
+  // les deux gestes ne créent jamais deux fils concurrents.
+  const existing = await db.query.conversations.findFirst({
+    where: eq(conversations.clientPhone, phone),
+    orderBy: [desc(conversations.lastInboundAt), desc(conversations.createdAt)],
+  });
+  const number = existing
+    ? await db.query.smsNumbers.findFirst({ where: eq(smsNumbers.id, existing.smsNumberId) })
+    : // Aucun fil pour ce numéro : on garde l'EXPÉDITEUR du fil d'origine tant
+      // qu'il est actif — le contact a déjà reçu de lui, changer d'expéditeur
+      // sans raison ferait passer le renvoi pour un inconnu.
+      ((await db.query.smsNumbers.findFirst({
+        where: and(eq(smsNumbers.id, origin.smsNumberId), eq(smsNumbers.active, true)),
+      })) ?? (await db.query.smsNumbers.findFirst({ where: eq(smsNumbers.active, true) })));
+  if (!number) return { ok: false, error: "noNumber" };
+
+  const targetId = await db.transaction(async (tx) => {
+    // ── LE VERROU, et il vient en premier ────────────────────────────────
+    // Cette rangée est le JETON du geste : `where dismissedAt is null` ne le
+    // rend qu'une fois, et seul celui qui l'obtient a le droit de mettre en
+    // file. Sans lui, deux téléphonistes devant la même rangée — ou un onglet
+    // resté ouvert derrière un autre, ou un cellulaire dont la réponse s'est
+    // perdue et qu'on represse — expédient DEUX textos identiques au même
+    // contact, facturés deux fois, et sur un fil de campagne c'est exactement
+    // ce qui fait répondre STOP.
+    //
+    // Aucune autre garde ne ferme cette porte : l'index unique `messages.job_id`
+    // n'empêche qu'une reprise du MÊME job de rappeler Twilio, et deux jobs sont
+    // deux textos. `disabled={pending}` ne protège que l'onglet qui a cliqué.
+    //
+    // Écarter DANS la transaction du renvoi tient l'autre bout : si la mise en
+    // file est annulée, l'échec reste affiché. L'inverse — un écran vidé sans
+    // renvoi — serait la seule panne que personne ne rattraperait, puisque plus
+    // rien ne la montrerait. La rangée, elle, reste dans le fil du client.
+    const claimed = await tx
+      .update(messages)
+      .set({ dismissedAt: new Date(), dismissedById: actor.user.id })
+      .where(and(eq(messages.id, messageId), isNull(messages.dismissedAt)))
+      .returning({ id: messages.id });
+    if (claimed.length === 0) return null;
+
+    await tx
+      .insert(conversations)
+      .values({ clientId: client.id, clientPhone: phone, smsNumberId: number.id })
+      .onConflictDoNothing();
+    const thread = await tx.query.conversations.findFirst({
+      where: and(eq(conversations.clientPhone, phone), eq(conversations.smsNumberId, number.id)),
+    });
+    if (!thread) throw new Error("conversation_upsert_failed");
+
+    await enqueueJob(
+      {
+        type: "send_sms",
+        runAt: new Date(),
+        payload: {
+          conversationId: thread.id,
+          to: phone,
+          body: message.body,
+          source: "human",
+          automated: false,
+          aiGenerated: false,
+          sentById: actor.user.id,
+        },
+        // Aucune clé de dédoublonnage, à dessein : une clé stable ferait
+        // ABSORBER le renvoi par le job vivant qui vient d'échouer — le bouton
+        // ne ferait rien en annonçant le contraire. Ce qui empêche le double
+        // envoi n'est pas ici mais plus haut : le jeton `dismissedAt`, qui ne
+        // se prend qu'une fois.
+      },
+      tx,
+    );
+
+    // La pastille que CE geste répare, et elle seule : on ne retire pas un
+    // « Nouveau message » qui attend encore un humain sous prétexte qu'un vieil
+    // envoi vient de repartir. Si le renvoi échoue à son tour, le job la
+    // remettra.
+    await tx
+      .update(conversations)
+      .set({ needsAttention: false, attentionReason: null })
+      .where(
+        and(
+          inArray(conversations.id, [...new Set([origin.id, thread.id])]),
+          eq(conversations.attentionReason, SEND_FAILED_REASON),
+        ),
+      );
+
+    return thread.id;
+  });
+
+  // Le jeton était déjà pris : quelqu'un d'autre a renvoyé ce texto pendant
+  // qu'on regardait la rangée. « Introuvable » fait rafraîchir l'écran, qui
+  // cessera de proposer un geste déjà fait — et rien n'est journalisé ni mis en
+  // file, puisque rien n'a eu lieu.
+  if (!targetId) return NOT_FOUND;
+
+  await logAudit({
+    userId: actor.user.id,
+    action: "sms.retry_send",
+    entity: "conversation",
+    entityId: targetId,
+    detail: { messageId, clientId: client.id },
+  });
+  // Chemin rapide : le renvoi part dans les secondes, sans attendre le cron.
+  kickDispatch();
+  revalidateFor(client.id);
+  return { ok: true, id: targetId };
+}
+
+/**
+ * « Retirer » — l'échec sort de la vue, et RIEN n'est détruit.
+ *
+ * Ce que ce bouton ne fait pas mérite d'être écrit en toutes lettres, parce que
+ * son libellé laisse craindre le contraire : le message reste dans le fil du
+ * client, il compte toujours dans /admin/deliverability, son code d'erreur et
+ * son texte sont intacts. On range un écran qu'on relit chaque matin, on
+ * n'efface pas la preuve d'une panne — c'est précisément pour cela que
+ * « Retirer » existe plutôt qu'une suppression : sans cette colonne, la seule
+ * façon de faire disparaître un envoi perdu de la vue était de l'effacer pour
+ * de bon, et avec lui ce qu'il apprenait sur la délivrabilité.
+ *
+ * C'est ARCHIVER, de la même nature que « Marquer traité » : l'échec quitte la
+ * vue de TOUT LE MONDE, pas seulement celle de qui a cliqué. D'où
+ * `conversations.control` et non `conversations.reply` — décider que plus
+ * personne n'a à regarder cet envoi perdu n'est pas une décision privée. Et
+ * par-dessus, la case `sms` de la fiche : ce qu'on range est ce qui a été dit,
+ * ou n'a pas pu l'être, à ce client-là.
+ *
+ * Idempotent : retirer deux fois (deux onglets, un clic répété) répond « fait »
+ * sans réécrire qui l'a écarté ni quand.
+ */
+export async function dismissFailedSmsAction(messageId: string): Promise<SmsActionResult> {
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("conversations.control")) return FORBIDDEN;
+  if (!z.uuid().safeParse(messageId).success) return INVALID;
+
+  const message = await db.query.messages.findFirst({ where: eq(messages.id, messageId) });
+  if (!message) return NOT_FOUND;
+  if (message.direction !== "out") return INVALID;
+
+  const seen = await threadFor(actor, message.conversationId, "sms");
+  if (!seen) return NOT_FOUND;
+
+  // Déjà écarté : c'est fait, et on ne réécrit pas la signature du premier.
+  // Jugé AVANT la question de l'échec, parce qu'un statut peut changer après
+  // coup (une réconciliation Twilio qui repasse « unknown » en « delivered ») —
+  // un geste déjà accompli ne doit pas se mettre à répondre « impossible ».
+  if (message.dismissedAt) return { ok: true, id: messageId };
+
+  // On n'écarte que ce que la vue MONTRE. Écarter un message livré n'aurait
+  // aucun effet visible et laisserait une colonne qui ment sur ce qu'elle dit.
+  const unreached = UNREACHED.has(message.status ?? "") || Boolean(message.skipReason);
+  if (!unreached) return INVALID;
+
+  await db
+    .update(messages)
+    .set({ dismissedAt: new Date(), dismissedById: actor.user.id })
+    .where(and(eq(messages.id, messageId), isNull(messages.dismissedAt)));
+
+  await logAudit({
+    userId: actor.user.id,
+    action: "sms.dismiss_failure",
+    entity: "conversation",
+    entityId: message.conversationId,
+    detail: {
+      messageId,
+      clientId: seen.thread.clientId,
+      status: message.status,
+      errorCode: message.errorCode,
+    },
   });
 
   revalidateFor(seen.thread.clientId);

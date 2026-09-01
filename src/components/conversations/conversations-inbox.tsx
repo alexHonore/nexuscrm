@@ -6,6 +6,7 @@ import {
   BotIcon,
   CheckIcon,
   EyeOffIcon,
+  ListXIcon,
   MessageCircleIcon,
   MoonIcon,
   PencilLineIcon,
@@ -26,15 +27,18 @@ import {
   classifyConversationClientAction,
   closeConversationAction,
   closeHeldConversationsAction,
+  dismissFailedSmsAction,
   handBackToAiAction,
   markConversationHandledAction,
   retryAiTurnAction,
+  retryFailedSmsAction,
   setConversationAiAction,
 } from "@/app/(app)/conversations/actions";
 import {
   ATTENTION_KIND_LOOK,
   ATTENTION_LOOK,
   CONVERSATION_STATE_LOOK,
+  FAILURE_FAMILY_LOOK,
   QUEUE_KIND_LOOK,
   TOOL_LOOK,
   LookGlyph,
@@ -70,6 +74,8 @@ import {
   SelectItem,
   SelectTrigger,
 } from "@/components/ui/select";
+import { errorCodeText } from "@/lib/deliverability/error-text";
+import { docLocale } from "@/lib/docs/types";
 import { emitDataChange, useDataChange, useVisiblePolling } from "@/lib/live";
 import { cn } from "@/lib/utils";
 
@@ -175,6 +181,18 @@ export type FailedMessage = {
   skipReason: string | null;
   /** opener | ladder | agent | human | system */
   source: string | null;
+  /**
+   * Cases de la fiche derrière cet envoi, pour ce regard (le serveur revérifie
+   * les deux) : `sms` commande ce qui PART vers ce client — réessayer et
+   * retirer —, `category` range sa fiche depuis la rangée.
+   *
+   * Optionnelles, comme sur `InboxRow` et pour la même raison : non dit vaut
+   * OUVERT, afin qu'une rangée construite avant ces champs n'apparaisse pas
+   * amputée de ses trois boutons. Cacher un bouton ne garde rien de toute
+   * façon — le serveur refuse (règle 1).
+   */
+  smsOpen?: boolean;
+  categoryOpen?: boolean;
 };
 
 export type EngineHealth = {
@@ -484,10 +502,10 @@ export function ConversationsInbox({
    * C'est le « terminer la campagne » qu'on cherche ici, et c'est pour ça que
    * ce geste-là est le bon plutôt qu'un retrait manuel campagne par campagne.
    */
-  const classify = (row: InboxRow, categoryId: number) =>
+  const classifyClient = (clientId: string | null, categoryId: number) =>
     act(async () => {
-      if (!row.clientId) return false;
-      const result = await classifyConversationClientAction(row.clientId, categoryId);
+      if (!clientId) return false;
+      const result = await classifyConversationClientAction(clientId, categoryId);
       if (!result.ok) {
         toast.error(t("error"));
         return false;
@@ -495,6 +513,10 @@ export function ConversationsInbox({
       toast.success(t("inbox.classified"));
       return true;
     });
+
+  // Le même geste depuis une carte de fil ou depuis une rangée d'échec : les
+  // deux ne connaissent qu'une fiche, et c'est tout ce que l'action demande.
+  const classify = (row: InboxRow, categoryId: number) => classifyClient(row.clientId, categoryId);
 
   const handle = (row: InboxRow) =>
     act(async () => {
@@ -629,6 +651,65 @@ export function ConversationsInbox({
       return true;
     });
   };
+
+  /**
+   * Renvoyer un texto perdu — offert sur CHAQUE échec, sans exception.
+   *
+   * Y compris sur un 30007 (filtré), un 21610 (désabonné) ou un 30005 (numéro
+   * inexistant), dont le catalogue dit pourtant qu'ils échoueront encore.
+   * C'est la demande d'Alex, et sa raison est la bonne : entre les deux
+   * tentatives, quelqu'un a pu CORRIGER la fiche — un chiffre manquant dans le
+   * téléphone, un fixe remplacé par le cellulaire. L'action serveur résout donc
+   * la destination sur `clients.phone` d'AUJOURD'HUI, jamais sur le `to` du
+   * message d'origine : rejouer le payload renverrait au mauvais numéro celui
+   * qui vient précisément d'être corrigé.
+   *
+   * Le seul mur qui ne se corrige pas est le désabonnement : il se dit en
+   * toutes lettres plutôt que de mettre en file un envoi qui sera jeté.
+   */
+  const retrySend = (item: FailedMessage) =>
+    act(async () => {
+      const result = await retryFailedSmsAction(item.id);
+      if (!result.ok) {
+        // Les deux murs qui ont un NOM se nomment. « Une erreur est survenue »
+        // sur une absence de numéro expéditeur envoie chercher la panne du
+        // mauvais côté : la téléphoniste represse le bouton sur les autres
+        // lignes, obtient le même mot, et conclut que la fonction est cassée —
+        // alors qu'il suffisait de rouvrir un numéro dans /admin/sms-numbers.
+        toast.error(
+          result.error === "suppressed"
+            ? t("inbox.retrySuppressed")
+            : result.error === "noNumber"
+              ? t("thread.noNumber")
+              : t("error"),
+        );
+        // Rafraîchir quand même : « introuvable » veut dire que la rangée n'est
+        // plus à nous, et l'écran doit cesser de la montrer.
+        return result.error === "notFound";
+      }
+      toast.success(t("inbox.retryQueued"));
+      return true;
+    });
+
+  /**
+   * « Retirer » ÉCARTE l'échec de cette vue — il ne détruit rien.
+   *
+   * Le message reste dans le fil du client et continue de compter dans
+   * /admin/deliverability : ce bouton range un écran de travail, il ne réécrit
+   * pas l'histoire. Sans lui, la vue « Échecs » ne se vidait jamais — un envoi
+   * perdu qu'on a traité au téléphone y restait pour toujours, et une liste
+   * qu'on ne peut pas finir cesse d'être regardée.
+   */
+  const dismissFailure = (item: FailedMessage) =>
+    act(async () => {
+      const result = await dismissFailedSmsAction(item.id);
+      if (!result.ok) {
+        toast.error(t("error"));
+        return result.error === "notFound";
+      }
+      toast.success(t("inbox.removed"));
+      return true;
+    });
 
   // Après une panne de modèle, les tours morts ne repartent pas seuls : ce
   // bouton rejoue tout ce qui peut l'être (réponses, ouvertures de campagne,
@@ -887,7 +968,19 @@ export function ConversationsInbox({
       ) : tab === "failed" ? (
         <div className="space-y-2">
           {failures.map((item) => (
-            <FailureRowCard key={item.id} item={item} dfnsLocale={dfnsLocale} />
+            <FailureRowCard
+              key={item.id}
+              item={item}
+              pending={pending}
+              canRetry={abilities.reply}
+              canDismiss={abilities.control}
+              canClassify={abilities.classify}
+              categories={categories}
+              onRetry={retrySend}
+              onDismiss={dismissFailure}
+              onClassify={classifyClient}
+              dfnsLocale={dfnsLocale}
+            />
           ))}
           {/* Une liste tronquée qui ne le dit pas se lit comme une liste
               complète — et « 100 échecs » au lieu de 4 000 est le genre de
@@ -1145,6 +1238,18 @@ function InboxRowCard({
           ) : null}
         </div>
 
+        {/* « Pannes techniques » ne disait que le nom de la panne : « Juge
+            indisponible » au-dessus d'un bouton « Réessayer », et personne ne
+            savait si le client avait reçu quelque chose, ni ce que le bouton
+            allait tenter. Une ligne suffit à répondre aux deux. `t.has()` parce
+            que le moteur inventera d'autres motifs : sans lui, le motif de
+            demain s'afficherait en clé brute — pire qu'une ligne absente. */}
+        {isEngine && row.attentionReason && t.has(`inbox.reasonHint.${row.attentionReason}`) ? (
+          <p className="text-xs text-muted-foreground">
+            {t(`inbox.reasonHint.${row.attentionReason}` as never)}
+          </p>
+        ) : null}
+
         {/* Ce qu'on avait dit, puis ce qu'il a répondu — dans cet ordre, parce
             que c'est celui de la conversation. Plus petit et effacé : c'est le
             décor, la réplique du client reste le sujet. */}
@@ -1390,29 +1495,79 @@ function QueueRowCard({
 /**
  * Une ligne de la vue « Échecs » — un texto qui n'est pas arrivé.
  *
- * La règle de l'écran : ne jamais montrer un échec sans sa RAISON. Un refus de
- * l'opérateur porte son code (30007 « filtré », 21610 « désabonné ») ; un
- * message jamais parti porte son motif (interrupteur baissé, numéro désabonné,
- * hors liste d'essai). « Mis en file » puis plus rien est exactement ce que
- * cette vue existe pour ne plus laisser arriver.
+ * La règle de l'écran : ne jamais montrer un échec sans sa RAISON, en mots. La
+ * rangée finissait sur « Ce message n'est pas parti. Code 30007. » — un nombre
+ * à cinq chiffres que personne dans le bureau ne sait lire. Faute de savoir si
+ * c'était le téléphone, l'opérateur ou le texte, on rappelait le contact pour
+ * lui demander s'il avait reçu le texto : exactement le travail que ce CRM
+ * devait épargner. Elle dit maintenant CE QUI s'est passé (« Filtré par
+ * l'opérateur », « Numéro injoignable »), ce que ça veut dire, PUIS le code —
+ * qui garde sa place parce que c'est lui, et lui seul, que le support Twilio
+ * demande.
  *
- * Le vocabulaire est celui du fil (`thread.status.*`, `thread.skip.*`) : le
- * même mot pour le même fait, ici et sur la fiche.
+ * Les mots viennent du catalogue partagé (`errorCodeText`), les mêmes que sur
+ * la bulle rouge de la fiche client : deux vocabulaires pour un même code
+ * finiraient par décrire deux pannes différentes.
+ *
+ * Un message qui n'est jamais PARTI n'a pas de code Twilio — il n'a même pas
+ * atteint Twilio. Il garde son motif (`thread.skip.*`, interrupteur baissé,
+ * hors liste d'essai), et surtout aucune pastille de famille : une famille sans
+ * code derrière elle serait une devinette présentée comme un diagnostic.
+ *
+ * Et trois gestes, sur place : renvoyer, ranger la fiche, écarter la rangée.
  */
 function FailureRowCard({
   item,
+  pending,
+  canRetry,
+  canDismiss,
+  canClassify,
+  categories,
+  onRetry,
+  onDismiss,
+  onClassify,
   dfnsLocale,
 }: {
   item: FailedMessage;
+  pending: boolean;
+  /** Renvoyer, c'est écrire au client — `conversations.reply`. */
+  canRetry: boolean;
+  /** Écarter la rangée, c'est conduire le fil — `conversations.control`. */
+  canDismiss: boolean;
+  /** Ranger la fiche depuis la rangée — `clients.category`. */
+  canClassify: boolean;
+  categories: { id: number; label: string }[];
+  onRetry: (item: FailedMessage) => void;
+  onDismiss: (item: FailedMessage) => void;
+  onClassify: (clientId: string | null, categoryId: number) => void;
   dfnsLocale: typeof fr;
 }) {
   const t = useTranslations("conversations");
   // « Masqué » est écrit une seule fois, chez les fiches.
   const tAccess = useTranslations("clients");
+  // La langue de l'ÉCRAN, jamais celle de l'assistant (règles 2 et 14) : rien
+  // de ce texte n'entre dans un prompt ni dans un SMS.
+  const locale = useLocale();
   const look = ATTENTION_LOOK.send_failed;
   // `skipReason` peut porter un détail après deux-points (« provider_rejected:
   // … ») : le code seul a un libellé, le reste ne se traduit pas.
   const skipCode = item.skipReason ? item.skipReason.split(":")[0] : null;
+  // `errorCodeText()` ne lève jamais et remplit toujours ses deux champs, même
+  // sur un code que Twilio vient d'inventer : une rangée d'échec muette se lit
+  // comme une rangée sans problème.
+  const failure = item.errorCode ? errorCodeText(item.errorCode, docLocale(locale)) : null;
+  const familyLook = failure ? FAILURE_FAMILY_LOOK[failure.family] : null;
+
+  // Les trois gestes réellement offerts sur CETTE rangée. Le droit du rôle est
+  // le plafond, la case de la fiche le robinet — et cacher un bouton ne garde
+  // rien : chaque action serveur revérifie les deux, et répond « introuvable »
+  // sur une fiche qu'on n'a pas le droit de voir (règle 1). Ce filtre évite
+  // seulement de promettre un geste qui sera refusé.
+  const maySend = item.smsOpen !== false;
+  const showRetry = canRetry && maySend && item.clientId !== null;
+  const showClassify =
+    canClassify && item.categoryOpen !== false && item.clientId !== null && categories.length > 0;
+  const showDismiss = canDismiss && maySend;
 
   return (
     <article className="relative flex items-start gap-3 rounded-xl border bg-card p-3 shadow-xs transition-colors md:p-4 hover:border-ring/60 hover:bg-accent/40">
@@ -1433,6 +1588,15 @@ function FailureRowCard({
             <Badge variant="outline" className="gap-1 font-normal" style={lookTint(look)}>
               <look.Icon aria-hidden />
               {t(`thread.status.${item.status}` as never)}
+            </Badge>
+          ) : null}
+          {/* CE QUI s'est passé, à côté de CE QUE ça a donné : « Non livré »
+              dit le sort du message, « Filtré par l'opérateur » dit la cause —
+              et c'est la cause qu'on vient chercher ici. */}
+          {failure && familyLook ? (
+            <Badge variant="outline" className="gap-1 font-normal" style={lookTint(familyLook)}>
+              <familyLook.Icon aria-hidden />
+              {failure.label}
             </Badge>
           ) : null}
           {item.source ? (
@@ -1469,10 +1633,73 @@ function FailureRowCard({
             })}
           </p>
         ) : null}
-        {item.errorCode ? (
-          <p className="text-xs font-medium text-destructive">
-            {t("thread.failedHint", { code: item.errorCode })}
+
+        {/* Ce que l'échec veut dire pour la personne qui appelle — une phrase,
+            puis le code. Le nombre reste visible parce que c'est lui qu'on
+            donne au support Twilio ; il ne porte simplement plus le sens tout
+            seul. */}
+        {failure && item.errorCode ? (
+          <p className="text-xs text-muted-foreground">
+            {failure.why}{" "}
+            <span className="whitespace-nowrap">
+              · {t("thread.code", { code: item.errorCode })}
+            </span>
           </p>
+        ) : null}
+
+        {/* Les trois gestes de la rangée. Renvoyer d'abord — c'est pour ça
+            qu'on ouvre cette vue —, puis ranger la fiche quand la réponse est
+            « il n'est plus joignable », puis écarter la ligne une fois l'échec
+            traité. */}
+        {showRetry || showClassify || showDismiss ? (
+          <div className="flex flex-wrap items-center gap-2 pt-0.5">
+            <span className="flex-1" />
+            {showRetry ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="relative z-10 min-h-11 md:min-h-8"
+                disabled={pending}
+                onClick={() => onRetry(item)}
+              >
+                <RotateCcwIcon aria-hidden /> {t("inbox.actions.retrySend")}
+              </Button>
+            ) : null}
+            {showClassify ? (
+              <Select
+                items={categories.map((c) => ({ value: String(c.id), label: c.label }))}
+                value=""
+                onValueChange={(v) => onClassify(item.clientId, Number(v))}
+                disabled={pending}
+              >
+                <SelectTrigger
+                  className="relative z-10 min-h-11 w-auto md:min-h-8"
+                  aria-label={t("inbox.actions.classify")}
+                >
+                  <TagIcon aria-hidden />
+                  <span>{t("inbox.actions.classify")}</span>
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
+            {showDismiss ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="relative z-10 min-h-11 md:min-h-8"
+                disabled={pending}
+                onClick={() => onDismiss(item)}
+              >
+                <ListXIcon aria-hidden /> {t("inbox.actions.remove")}
+              </Button>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </article>

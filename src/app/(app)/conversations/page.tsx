@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { MessageCircle } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import {
@@ -197,10 +197,18 @@ export default async function ConversationsPage() {
   // texto perdu vers SON client est le travail d'un téléphoniste, pas la
   // conduite du moteur — et la pastille « Envoi en échec » lui est déjà visible
   // dans « à traiter ». La visibilité des FICHES borne la liste, comme partout.
+  //
+  // « Retirer » ÉCARTE l'échec de cette vue — il ne détruit rien : la rangée
+  // reste dans le fil du client et dans /admin/deliverability. La condition est
+  // donc écrite UNE fois et partagée par la liste et par le compte : deux
+  // requêtes qui décrivent le même ensemble avec deux textes différents
+  // finissent par diverger, et la pastille annoncerait des échecs que la liste
+  // en dessous ne montre plus.
   const failuresWhere = await withVisibility(
     actor,
     and(
       eq(messages.direction, "out"),
+      isNull(messages.dismissedAt),
       // Le statut dit l'échec ; `skipReason` dit qu'il n'est jamais parti — un
       // message peut porter le second sans que le premier soit encore écrit
       // (le répartiteur pose la rangée AVANT d'appeler Twilio).
@@ -253,6 +261,13 @@ export default async function ConversationsPage() {
       errorCode: r.errorCode,
       skipReason: r.skipReason,
       source: r.source,
+      // Une rangée d'échec porte maintenant des GESTES, fiche par fiche :
+      // réessayer et retirer touchent à ce qu'on envoie à ce client (case
+      // `sms`), « Classer » range le pipeline (case `category`). Le serveur
+      // revérifie les deux — ceci évite d'offrir un bouton qui répondra
+      // « introuvable ».
+      smsOpen: open.sms,
+      categoryOpen: open.category,
     };
   });
 

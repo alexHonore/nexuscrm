@@ -44,6 +44,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { errorCodeText } from "@/lib/deliverability/error-text";
+import { docLocale } from "@/lib/docs/types";
 import { formatPhone } from "@/lib/phone";
 import { analyzeSms } from "@/lib/sms/segments";
 import { emitDataChange, useDataChange, useVisiblePolling } from "@/lib/live";
@@ -700,12 +702,26 @@ function MessageBubble({
   busy: boolean;
 }) {
   const t = useTranslations("conversations");
+  const locale = useLocale();
   const outbound = message.direction === "out";
   // La MÊME liste que la vue « Échecs » de la boîte : une bulle rouge ici et
   // une ligne là-bas doivent parler du même fait.
   const failed = (FAILED_SEND_STATUSES as readonly string[]).includes(message.status ?? "");
   const cancelled = message.status === "cancelled";
   const skipCode = message.skipReason ? message.skipReason.split(":")[0] : null;
+  /*
+   * Et le même CATALOGUE, pour la même raison. Cette bulle disait « Ce message
+   * n'est pas parti. Code 30007. » — un nombre que personne dans le bureau ne
+   * sait lire, sur le seul écran où l'on constate l'échec en même temps qu'on
+   * voit le contact. Faute de savoir si c'était le téléphone, l'opérateur ou le
+   * texte, on rappelait la personne pour lui demander si elle avait reçu le
+   * texto : exactement le travail que ce CRM devait épargner.
+   * `errorCodeText()` ne lève jamais et remplit toujours ses deux champs, même
+   * sur un code que Twilio vient d'inventer — une bulle rouge muette se lirait
+   * comme une bulle sans problème.
+   */
+  const errorCode = failed ? message.errorCode : null;
+  const failure = errorCode ? errorCodeText(errorCode, docLocale(locale)) : null;
   // Encore en file : la seule fenêtre où « annuler » veut dire quelque chose.
   const cancellable =
     onCancel !== null &&
@@ -749,10 +765,19 @@ function MessageBubble({
         ) : null}
       </p>
 
-      {failed && message.errorCode ? (
-        <p className="px-1 text-[11px] font-medium text-destructive">
-          {t("thread.failedHint", { code: message.errorCode })}
-        </p>
+      {/* L'échec, en mots : ce qui a cassé, puis ce que ça veut dire pour la
+          personne qui appelle. Le code garde sa place à la fin — c'est lui, et
+          lui seul, qu'on donne au support Twilio — mais il ne porte plus le
+          sens tout seul. Bridé à la largeur de la bulle : une phrase pleine
+          largeur sous une bulle de 85 % déformerait le fil à chaque échec. */}
+      {errorCode && failure ? (
+        <div className="max-w-[85%] space-y-0.5 px-1">
+          <p className="text-[11px] font-medium text-destructive">{failure.label}</p>
+          <p className="text-[10px] text-muted-foreground">
+            {failure.why}{" "}
+            <span className="whitespace-nowrap">· {t("thread.code", { code: errorCode })}</span>
+          </p>
+        </div>
       ) : null}
       {/* Non envoyé : la RAISON est dite. « Message mis en file » puis plus
           rien était la pire réponse possible pour un téléphoniste. */}

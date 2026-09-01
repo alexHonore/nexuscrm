@@ -40,6 +40,7 @@
       "skipped": "Not sent"
     },
     "failedHint": "This message did not go out. Code {code}.",
+    "code": "Code {code}",
     "noNumber": "No active SMS number is configured.",
     "suppressed": "This number unsubscribed: nothing more can be sent to it.",
     "sent": "Message queued",
@@ -55,6 +56,7 @@
       "invalid_to": "invalid number",
       "provider_rejected": "rejected by Twilio",
       "transport_error": "timeout or network — Twilio may have accepted",
+      "twilio_message_not_found": "unknown to Twilio — its fate will never be confirmed",
       "not_sent": "not sent"
     },
     "queued": "Queued — leaves {when}",
@@ -129,6 +131,15 @@
       "truncated": "Reply cut off by the model",
       "content_filter": "Reply filtered by the provider"
     },
+    "reasonHint": {
+      "llm_error": "The model provider did not answer: nothing went out and the client saw nothing. \"Try again\" replays the turn as it was.",
+      "no_text": "The assistant finished its turn without writing a line. \"Try again\" gives it another chance; if it happens again, reply yourself.",
+      "blocked_output": "A guardrail blocked the draft, even rewritten: nothing went out. \"Try again\" asks for another turn — otherwise write the reply by hand.",
+      "guardrail_unavailable": "The guardrail judge was unreachable, and nothing goes out without its verdict. The failure is on our side: \"Try again\" is enough once it answers.",
+      "send_failed": "The assistant had its reply; the carrier refused it. The exact code and the button to send it again are in the \"Failures\" tab.",
+      "truncated": "The model cut its reply mid-sentence: a truncated SMS never goes out. \"Try again\" asks for a complete one.",
+      "content_filter": "The provider filtered the reply before we ever saw it: nothing went out. \"Try again\" starts over; if the filter holds, reply yourself."
+    },
     "assignToMe": "Assign to me",
     "failedCap": "The {shown} most recent — {total} in all.",
     "notAssigned": "The thread was not assigned to you — you can still reply.",
@@ -185,12 +196,17 @@
       "handBack": "Hand back to AI",
       "respond": "I'll reply",
       "retry": "Try again",
+      "retrySend": "Send again",
       "classify": "Classify",
-      "close": "Close"
+      "close": "Close",
+      "remove": "Dismiss"
     },
     "handedBack": "The assistant takes the thread back",
     "retried": "The turn is back in flight — the assistant retries right away",
     "retriedNothing": "Nothing to relaunch — the flag was cleared",
+    "removed": "Failure dismissed — the message stays in the client's thread and still counts towards deliverability",
+    "retryQueued": "Resend queued — it will go to the number currently on the client's file",
+    "retrySuppressed": "This number unsubscribed: nothing can go out to it any more, not even by hand",
     "did": {
       "booked": "Meeting booked",
       "categorized": "Client categorized",

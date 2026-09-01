@@ -40,6 +40,7 @@
       "skipped": "Non envoyé"
     },
     "failedHint": "Ce message n'est pas parti. Code {code}.",
+    "code": "Code {code}",
     "noNumber": "Aucun numéro SMS actif n'est configuré.",
     "suppressed": "Ce numéro s'est désabonné : plus aucun message ne peut lui être envoyé.",
     "sent": "Message mis en file",
@@ -55,6 +56,7 @@
       "invalid_to": "numéro invalide",
       "provider_rejected": "refusé par Twilio",
       "transport_error": "délai ou réseau — Twilio a peut-être accepté",
+      "twilio_message_not_found": "inconnu chez Twilio — son sort ne sera jamais confirmé",
       "not_sent": "non envoyé"
     },
     "queued": "En file — part {when}",
@@ -132,13 +134,18 @@
     "actions": {
       "handBack": "Rendre à l'IA",
       "retry": "Réessayer",
+      "retrySend": "Réessayer l'envoi",
       "respond": "Je réponds",
       "classify": "Classer",
-      "close": "Clore"
+      "close": "Clore",
+      "remove": "Retirer"
     },
     "handedBack": "L'assistant reprend le fil",
     "retried": "Le tour repart — l'assistant réessaie tout de suite",
     "retriedNothing": "Rien à relancer — la pastille est retirée",
+    "removed": "Échec retiré de la vue — le message reste dans le fil du client et compte toujours dans la délivrabilité",
+    "retryQueued": "Renvoi mis en file — il partira au numéro inscrit sur la fiche en ce moment",
+    "retrySuppressed": "Ce numéro s'est désabonné : plus rien ne peut lui partir, même à la main",
     "empty": {
       "attention": {
         "title": "Rien à traiter",
@@ -188,6 +195,15 @@
       "closed_by_human": "Clos à la main",
       "truncated": "Réponse coupée par le modèle",
       "content_filter": "Réponse filtrée par le fournisseur"
+    },
+    "reasonHint": {
+      "llm_error": "Le fournisseur du modèle n'a pas répondu : rien n'est parti et le client n'a rien vu. « Réessayer » rejoue le tour tel quel.",
+      "no_text": "L'assistant a fini son tour sans écrire une ligne. « Réessayer » lui redonne sa chance ; s'il recommence, répondez vous-même.",
+      "blocked_output": "Un garde-fou a bloqué le brouillon, même réécrit : rien n'est parti. « Réessayer » redemande un tour — sinon, écrivez la réponse à la main.",
+      "guardrail_unavailable": "Le juge des garde-fous était injoignable et, par sécurité, rien ne part sans son verdict. La panne est de notre côté : « Réessayer » suffit dès qu'il répond.",
+      "send_failed": "L'assistant avait sa réponse, le transport l'a refusée. Le code exact et le bouton pour renvoyer sont dans l'onglet « Échecs ».",
+      "truncated": "Le modèle a coupé sa réponse en plein milieu : un SMS tronqué ne part pas. « Réessayer » en redemande une entière.",
+      "content_filter": "Le fournisseur a filtré la réponse avant qu'on la voie : rien n'est parti. « Réessayer » repart de zéro ; si le filtre insiste, répondez vous-même."
     },
     "assignToMe": "Me l'attribuer",
     "failedCap": "Les {shown} plus récents — {total} au total.",

@@ -21,6 +21,7 @@ import {
   testDb,
 } from "./helpers/db";
 import { assistants, consents, conversations, messages, promptCores, scheduledJobs, smsNumbers, suppressions } from "@/db/schema-sms";
+import { auditLogs, clients } from "@/db/schema";
 
 const ctx = vi.hoisted(() => ({ cookies: new Map<string, string>() }));
 
@@ -49,9 +50,14 @@ const {
   markConversationHandledAction,
   assignConversationAction,
   retryAiTurnAction,
+  retryFailedSmsAction,
+  dismissFailedSmsAction,
 } = await import("@/app/(app)/conversations/actions");
 const { setUserRole } = await import("@/lib/permissions/server");
-const { OBSERVER_ROLE_ID } = await import("@/lib/permissions/defaults");
+const { CALLER_ROLE_ID, OBSERVER_ROLE_ID, defaultPermissionsConfig } = await import(
+  "@/lib/permissions/defaults"
+);
+const { setSetting } = await import("@/lib/settings");
 const { processInboundSms } = await import("@/lib/sms-server/inbound");
 const { seedGuardrailDefaults } = await import("@/lib/guardrails/store");
 
@@ -795,5 +801,287 @@ describe("clore un fil tenu", () => {
       ok: false,
       error: "invalid",
     });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+/**
+ * Un envoi PERDU — les deux boutons de la vue « Échecs ».
+ *
+ * Ces deux gestes n'avaient aucun test, et ce sont les deux plus chers du
+ * module : l'un envoie un vrai texto à une vraie personne, l'autre écrit dans
+ * une colonne qui n'existait pas hier.
+ *
+ * Ce que l'écran ne montre pas, et qu'il faut donc prouver ici :
+ *
+ *  · « Réessayer » relit `clients.phone` TEL QU'IL EST — parce que le geste
+ *    n'a de sens qu'après avoir corrigé le numéro de la fiche. Rejouer la
+ *    charge de l'ancien job renverrait fidèlement le message au numéro qui
+ *    vient d'échouer, et le bouton mentirait à chaque clic.
+ *  · « Retirer » range un écran, il n'efface rien : la rangée reste dans le
+ *    fil du client, avec son texte, son statut et son code — c'est elle, la
+ *    preuve de la panne que la délivrabilité compte encore.
+ *  · Les deux n'ouvrent PAS la même porte (règle 1) : écrire est
+ *    `conversations.reply`, archiver pour tout le monde est
+ *    `conversations.control`. Et sur une fiche qu'on ne voit pas, la réponse
+ *    est « introuvable » — un « interdit » confirmerait qu'elle existe.
+ */
+describe("un envoi perdu : réessayer, retirer", () => {
+  /**
+   * La rangée que la vue « Échecs » montre. Par défaut `30005` (numéro
+   * inexistant) : le code qui donne tout son sens au bouton, puisqu'on va
+   * rectifier le téléphone avant de le presser.
+   */
+  async function failedSend(
+    overrides: {
+      phone?: string;
+      status?: string;
+      errorCode?: number | null;
+      assignedToId?: string;
+    } = {},
+  ) {
+    const client = await makeClient({
+      phone: overrides.phone ?? "+15145550140",
+      assignedToId: overrides.assignedToId ?? null,
+    });
+    const thread = await makeConversation({
+      clientId: client.id,
+      clientPhone: client.phone,
+      smsNumberId: numberId,
+      needsAttention: true,
+      attentionReason: "send_failed",
+    });
+    const [message] = await testDb
+      .insert(messages)
+      .values({
+        conversationId: thread.id,
+        direction: "out",
+        body: "Bonjour, ici Alex — on se parle demain?",
+        source: "human",
+        status: overrides.status ?? "undelivered",
+        errorCode: overrides.errorCode === undefined ? 30005 : overrides.errorCode,
+      })
+      .returning();
+    return { client, thread, message };
+  }
+
+  const sendJobs = async () =>
+    (await testDb.select().from(scheduledJobs)).filter((j) => j.type === "send_sms");
+
+  /**
+   * Le rôle téléphoniste, MOINS un droit. Rien ne prouve que deux boutons
+   * voisins d'une même carte ouvrent deux portes différentes tant qu'un rôle
+   * ne porte pas l'une sans l'autre.
+   */
+  async function callerWithout(
+    missing: "conversations.reply" | "conversations.control",
+  ): Promise<void> {
+    const cfg = defaultPermissionsConfig();
+    await setSetting("permissions", {
+      ...cfg,
+      roles: cfg.roles.map((r) =>
+        r.id === CALLER_ROLE_ID ? { ...r, perms: { ...r.perms, [missing]: false } } : r,
+      ),
+    });
+  }
+
+  it("le renvoi part au numéro CORRIGÉ, jamais à celui qui vient d'échouer", async () => {
+    // LE test de toute la fonctionnalité. On lit « Numéro inexistant · code
+    // 30005 » dans les Échecs, on va rectifier le téléphone du contact, on
+    // revient presser le bouton. Si la destination était reprise du `to` de
+    // l'ancien job, le texto repartirait vers le numéro mort — pour rien, et
+    // sans que personne ne s'en aperçoive avant le prochain échec.
+    const { client, thread, message } = await failedSend({ phone: "+15145550140" });
+    await testDb
+      .update(clients)
+      .set({ phone: "+15145550141" })
+      .where(eq(clients.id, client.id));
+
+    const result = await retryFailedSmsAction(message.id);
+    expect(result.ok).toBe(true);
+
+    const jobs = await sendJobs();
+    expect(jobs).toHaveLength(1);
+    const payload = jobs[0].payload as {
+      conversationId: string;
+      to: string;
+      body: string;
+      source: string;
+      automated: boolean;
+      aiGenerated: boolean;
+      sentById: string;
+    };
+    expect(payload.to).toBe("+15145550141");
+    expect(payload.body).toBe("Bonjour, ici Alex — on se parle demain?");
+    // Un renvoi est un envoi HUMAIN : c'est une personne qui a décidé, à cette
+    // heure-ci, que ce message devait repartir. Ni les heures de politesse ni
+    // la pause IA n'ont à trancher pour elle — d'où `automated: false`.
+    expect(payload.source).toBe("human");
+    expect(payload.automated).toBe(false);
+    expect(payload.aiGenerated).toBe(false);
+    expect(payload.sentById).toBe(caller.id);
+
+    // Et le fil visé est celui qui parle au NOUVEAU numéro : les entrants sont
+    // rattachés par `clientPhone`, une réponse au vieux fil ne reviendrait
+    // jamais.
+    expect(result.ok && result.id).not.toBe(thread.id);
+    const target = await testDb.query.conversations.findFirst({
+      where: eq(conversations.id, payload.conversationId),
+    });
+    expect(target!.clientPhone).toBe("+15145550141");
+    expect(target!.clientId).toBe(client.id);
+  });
+
+  it("l'échec sort de la vue mais RESTE la preuve : texte, statut et code intacts", async () => {
+    const { message } = await failedSend({ phone: "+15145550143" });
+
+    expect((await retryFailedSmsAction(message.id)).ok).toBe(true);
+
+    const [row] = await testDb.select().from(messages).where(eq(messages.id, message.id));
+    // Écarté — l'écran ne doit pas continuer de réclamer un geste qu'on vient
+    // de faire…
+    expect(row.dismissedAt).not.toBeNull();
+    expect(row.dismissedById).toBe(caller.id);
+    // …et rien d'autre n'a bougé : /admin/deliverability compte toujours cet
+    // envoi perdu, et le fil du client le montre toujours.
+    expect(row.body).toBe(message.body);
+    expect(row.status).toBe("undelivered");
+    expect(row.errorCode).toBe(30005);
+  });
+
+  it("deux renvois sur la même rangée ne font QU'UN texto", async () => {
+    // Le doublon que cette garde existe pour empêcher : deux téléphonistes
+    // devant la même rangée (la vue « Échecs » est partagée), un onglet resté
+    // ouvert derrière un autre, ou un cellulaire dont la réponse s'est perdue
+    // et qu'on represse. Sans le jeton `dismissedAt`, chacun mettait son job en
+    // file : le contact recevait deux fois le même texto, facturé deux fois —
+    // et sur un fil de campagne, c'est ce qui fait répondre STOP.
+    const { message } = await failedSend({ phone: "+15145550146" });
+
+    const first = await retryFailedSmsAction(message.id);
+    expect(first.ok).toBe(true);
+
+    // Le second arrive sur une vue périmée. « Introuvable » est le mot juste :
+    // c'est celui qui fait rafraîchir la boîte au lieu d'expédier.
+    expect(await retryFailedSmsAction(message.id)).toEqual({ ok: false, error: "notFound" });
+    expect(await sendJobs()).toHaveLength(1);
+
+    // Et la signature du premier n'a pas été réécrite par le second.
+    const [row] = await testDb.select().from(messages).where(eq(messages.id, message.id));
+    expect(row.dismissedById).toBe(caller.id);
+  });
+
+  it("une rangée déjà RETIRÉE ne se réessaie plus", async () => {
+    // « Retirer » puis « Réessayer » depuis un onglet qui n'a pas vu le
+    // retrait : la rangée n'est plus dans la vue, le geste n'a plus d'objet.
+    const { message } = await failedSend({ phone: "+15145550147" });
+
+    expect((await dismissFailedSmsAction(message.id)).ok).toBe(true);
+    expect(await retryFailedSmsAction(message.id)).toEqual({ ok: false, error: "notFound" });
+    expect(await sendJobs()).toHaveLength(0);
+  });
+
+  it("un numéro désabonné est refusé, et RIEN n'est mis en file", async () => {
+    // Le désabonnement est absolu (règle 12) : même à la main, même après
+    // correction du numéro, même si le bouton s'affiche.
+    const { client, message } = await failedSend({ phone: "+15145550144" });
+    await testDb.insert(suppressions).values({ phoneE164: client.phone, reason: "sms_stop" });
+
+    expect(await retryFailedSmsAction(message.id)).toEqual({ ok: false, error: "suppressed" });
+    expect(await sendJobs()).toHaveLength(0);
+    // L'échec reste affiché : rien n'a été fait, l'écran ne doit pas prétendre
+    // le contraire.
+    const [row] = await testDb.select().from(messages).where(eq(messages.id, message.id));
+    expect(row.dismissedAt).toBeNull();
+  });
+
+  it("un message LIVRÉ ne se réessaie pas — il ferait relire un texte à une vraie personne", async () => {
+    const { message } = await failedSend({
+      phone: "+15145550145",
+      status: "delivered",
+      errorCode: null,
+    });
+
+    expect(await retryFailedSmsAction(message.id)).toEqual({ ok: false, error: "invalid" });
+    expect(await sendJobs()).toHaveLength(0);
+  });
+
+  it("« Retirer » écarte sans détruire, et deux clics ne font qu'un geste", async () => {
+    const { thread, message } = await failedSend({ phone: "+15145550146" });
+
+    expect(await dismissFailedSmsAction(message.id)).toEqual({ ok: true, id: message.id });
+    const [first] = await testDb.select().from(messages).where(eq(messages.id, message.id));
+    expect(first.dismissedAt).not.toBeNull();
+    expect(first.dismissedById).toBe(caller.id);
+    const signature = first.dismissedAt!.getTime();
+
+    // Deuxième onglet, ou clic répété : « fait », sans réécrire QUI a écarté ni
+    // QUAND — sinon la colonne mentirait sur le geste qu'elle date.
+    expect(await dismissFailedSmsAction(message.id)).toEqual({ ok: true, id: message.id });
+    const [again] = await testDb.select().from(messages).where(eq(messages.id, message.id));
+    expect(again.dismissedAt!.getTime()).toBe(signature);
+    expect(again.dismissedById).toBe(caller.id);
+
+    // Une seule ligne au journal : deux clics ne sont pas deux décisions.
+    const written = (await testDb.select().from(auditLogs)).filter(
+      (a) => a.action === "sms.dismiss_failure",
+    );
+    expect(written).toHaveLength(1);
+
+    // Et le message est TOUJOURS dans le fil du client. C'est tout l'intérêt
+    // de la colonne : sans elle, faire disparaître un envoi perdu de l'écran
+    // qu'on relit chaque matin obligeait à l'effacer pour de bon.
+    const inThread = await testDb
+      .select()
+      .from(messages)
+      .where(eq(messages.conversationId, thread.id));
+    expect(inThread).toHaveLength(1);
+    expect(inThread[0].body).toBe(message.body);
+    expect(inThread[0].status).toBe("undelivered");
+    expect(inThread[0].errorCode).toBe(30005);
+  });
+
+  it("sans le droit d'ÉCRIRE, on ne réessaie pas — même en gardant le droit de retirer", async () => {
+    const { message } = await failedSend({ phone: "+15145550147" });
+    await callerWithout("conversations.reply");
+
+    expect(await retryFailedSmsAction(message.id)).toEqual({ ok: false, error: "forbidden" });
+    expect(await sendJobs()).toHaveLength(0);
+    // Le voisin, lui, reste ouvert : les deux boutons ne partagent pas leur
+    // porte.
+    expect(await dismissFailedSmsAction(message.id)).toEqual({ ok: true, id: message.id });
+  });
+
+  it("sans le droit de COMMANDER, on ne retire pas — même en gardant le droit d'écrire", async () => {
+    // Retirer, c'est archiver : l'échec quitte la vue de TOUT LE MONDE. Ce
+    // n'est pas une décision privée, d'où `conversations.control`.
+    const { message } = await failedSend({ phone: "+15145550148" });
+    await callerWithout("conversations.control");
+
+    expect(await dismissFailedSmsAction(message.id)).toEqual({ ok: false, error: "forbidden" });
+    const [row] = await testDb.select().from(messages).where(eq(messages.id, message.id));
+    expect(row.dismissedAt).toBeNull();
+  });
+
+  it("un échec sur une fiche INVISIBLE répond « introuvable », jamais « interdit »", async () => {
+    // Règle 1 : un refus confirmerait l'existence de ce que le réglage cache.
+    // Une fiche prise par le courtier n'existe pas pour un téléphoniste — ni en
+    // liste, ni par l'URL, ni par l'identifiant d'un de ses messages.
+    const { message } = await failedSend({ phone: "+15145550149", assignedToId: admin.id });
+
+    expect(await retryFailedSmsAction(message.id)).toEqual({ ok: false, error: "notFound" });
+    expect(await dismissFailedSmsAction(message.id)).toEqual({ ok: false, error: "notFound" });
+    expect(await sendJobs()).toHaveLength(0);
+    const [row] = await testDb.select().from(messages).where(eq(messages.id, message.id));
+    expect(row.dismissedAt).toBeNull();
+  });
+
+  it("sans session, ni renvoi ni retrait", async () => {
+    const { message } = await failedSend({ phone: "+15145550150" });
+    await loginAs(null);
+
+    expect(await retryFailedSmsAction(message.id)).toEqual({ ok: false, error: "forbidden" });
+    expect(await dismissFailedSmsAction(message.id)).toEqual({ ok: false, error: "forbidden" });
+    expect(await sendJobs()).toHaveLength(0);
   });
 });
