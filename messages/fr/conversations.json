@@ -89,6 +89,7 @@
       "jobs": "Tâches du moteur",
       "blocked": "Numéros bloqués",
       "refused": "Refus",
+      "archived": "Archivées",
       "all": "Toutes"
     },
     "queue": {
@@ -173,6 +174,8 @@
       "respond": "Je réponds",
       "classify": "Classer",
       "close": "Clore",
+      "archive": "Archiver",
+      "unarchive": "Sortir de l'archive",
       "remove": "Retirer"
     },
     "handedBack": "L'assistant reprend le fil",
@@ -209,6 +212,10 @@
       "refused": {
         "title": "Aucun refus",
         "desc": "Les refus fermes, « pas intéressé » et désabonnements se rangeront ici."
+      },
+      "archived": {
+        "title": "Aucune conversation archivée",
+        "desc": "Rien n'a encore été rangé ici. Archivez un fil éteint pour qu'il cesse d'encombrer les listes — il en ressortira tout seul si le client réécrit."
       },
       "all": {
         "title": "Aucune conversation",
@@ -253,6 +260,18 @@
     "notAssigned": "Le fil ne vous a pas été attribué — vous pouvez répondre quand même.",
     "markHandled": "Marquer traité",
     "handled": "Conversation traitée",
+    "archived": "Fil archivé — il quitte les listes de toute l'équipe",
+    "unarchived": "Fil sorti de l'archive — il revient dans les listes",
+    "archivedAt": "Archivée",
+    "archiveHint": "Archiver range le fil hors des listes de toute l'équipe, sans rien envoyer ni rien effacer : la conversation reste entière sur la fiche. Et le prochain message du client le ramène dans « À traiter ».",
+    "archivedCap": "Les {shown} plus récentes — {total} au total.",
+    "archive": {
+      "all": "Tout archiver",
+      "title": "Archiver ces fils ?",
+      "body": "{count, plural, one {# fil quittera les listes de toute l'équipe. Rien n'est envoyé, rien n'est effacé : la conversation reste entière sur la fiche, et le prochain message du client la ramène dans « À traiter ».} other {# fils quitteront les listes de toute l'équipe. Rien n'est envoyé, rien n'est effacé : les conversations restent entières sur les fiches, et le prochain message du client les ramène dans « À traiter ».}}",
+      "confirm": "Tout archiver",
+      "done": "{count, plural, =0 {Aucun fil archivé — ils ont changé d'état entre-temps} one {# fil archivé} other {# fils archivés}}"
+    },
     "close": {
       "all": "Tout clore",
       "one": "Fil clos",

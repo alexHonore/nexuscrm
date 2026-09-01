@@ -23,6 +23,8 @@ import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
+  archiveConversationAction,
+  archiveConversationsAction,
   assignConversationAction,
   cancelQueuedSmsAction,
   classifyConversationClientAction,
@@ -37,8 +39,10 @@ import {
   retryAiTurnAction,
   retryFailedSmsAction,
   setConversationAiAction,
+  unarchiveConversationAction,
 } from "@/app/(app)/conversations/actions";
 import {
+  ARCHIVE_LOOK,
   ATTENTION_KIND_LOOK,
   ATTENTION_LOOK,
   CONVERSATION_STATE_LOOK,
@@ -134,6 +138,18 @@ export type InboxRow = {
   lastDirection: "in" | "out" | null;
   lastSource: string | null;
   lastAt: string | null;
+  /**
+   * ISO quand le fil a été RANGÉ hors des listes — null tant qu'il y est.
+   *
+   * Un fil archivé n'est pas un fil clos : « Clore » rend un verdict (« c'est
+   * fini »), archiver ne dit rien du tout de la conversation — il la range.
+   * D'où un champ à part plutôt qu'un motif de plus : les deux gestes peuvent
+   * valoir ensemble, et seul celui-ci se défait.
+   *
+   * Optionnel comme ses voisins arrivés après coup : non dit vaut « dans la
+   * boucle », ce qui est l'état de tous les fils d'avant cette colonne.
+   */
+  archivedAt?: string | null;
 };
 
 /**
@@ -304,6 +320,7 @@ type Tab =
   | "jobs"
   | "blocked"
   | "refused"
+  | "archived"
   | "all";
 const TABS: Tab[] = [
   "attention",
@@ -313,6 +330,7 @@ const TABS: Tab[] = [
   "jobs",
   "blocked",
   "refused",
+  "archived",
   "all",
 ];
 
@@ -334,7 +352,7 @@ const THREADLESS_TABS: Tab[] = ["queue", "failed", "jobs", "blocked"];
 const ENGINE_TABS: Tab[] = ["queue", "jobs", "blocked"];
 
 /** Les vues faites de FILS — les seules où « les miennes » et les états ont un sens. */
-type ThreadTab = Exclude<Tab, "all" | "queue" | "failed" | "jobs" | "blocked">;
+type ThreadTab = Exclude<Tab, "all" | "queue" | "failed" | "jobs" | "blocked" | "archived">;
 
 /**
  * Ce que CE regard peut faire ici — un droit par geste, plus deux rôles en dur.
@@ -439,6 +457,8 @@ export function ConversationsInbox({
   queue = [],
   failures = [],
   failuresTotal,
+  archived = [],
+  archivedTotal,
   jobs = [],
   jobsTotal,
   blocked = [],
@@ -459,6 +479,12 @@ export function ConversationsInbox({
    * des envois perdus. Non dit vaut « rien de caché ».
    */
   failuresTotal?: number;
+  /**
+   * Les fils RANGÉS — la matière de « Archivées ». Bornée aux plus récemment
+   * archivées, avec son compte réel à part.
+   */
+  archived?: InboxRow[];
+  archivedTotal?: number;
   /** Les tâches que le moteur a abandonnées (voir `FailedJob`). */
   jobs?: FailedJob[];
   /**
@@ -557,9 +583,12 @@ export function ConversationsInbox({
       // rangée par téléphone, la table est petite par construction).
       blocked: blocked.length,
       refused: byState.refused.length,
+      // L'archive ne se filtre pas par « les miennes » : on y range des fils
+      // éteints, pas du travail à répartir.
+      archived: archivedTotal ?? archived.length,
       all: base.length,
     }),
-    [byState, base, queue, failures, failuresTotal, jobs, jobsTotal, blocked],
+    [byState, base, queue, failures, failuresTotal, jobs, jobsTotal, blocked, archived, archivedTotal],
   );
 
   /**
@@ -619,6 +648,21 @@ export function ConversationsInbox({
     () =>
       abilities.control
         ? byState.human.filter((r) => r.smsOpen !== false).map((r) => r.id)
+        : [],
+    [byState, abilities.control],
+  );
+
+  /**
+   * Les refus qu'on peut VRAIMENT ranger — la case `sms` de chaque fiche.
+   *
+   * Même discipline que `closableHeld` : promettre « Tout archiver » sur une
+   * pile dont la moitié sera refusée par le serveur ferait mentir le compte
+   * annoncé dans la confirmation.
+   */
+  const archivableRefused = useMemo(
+    () =>
+      abilities.control
+        ? byState.refused.filter((r) => r.smsOpen !== false && !r.archivedAt).map((r) => r.id)
         : [],
     [byState, abilities.control],
   );
@@ -688,6 +732,61 @@ export function ConversationsInbox({
       toast.success(t("inbox.close.one"));
       return true;
     });
+
+  /**
+   * « Archiver » — le fil quitte les listes, et RIEN d'autre.
+   *
+   * Ce n'est ni « Marquer traité » (qui ne retire qu'une pastille) ni « Clore »
+   * (qui rend un verdict) : archiver ne dit rien de la conversation, il la
+   * RANGE. Sans ce troisième geste, un fil éteint — un refus encaissé, un
+   * objectif atteint, un numéro qui ne répondra plus — restait à jamais dans
+   * « Toutes », et la boucle qu'on relit chaque matin ne se vidait jamais.
+   *
+   * La promesse qui rend le bouton sûr à presser, et qu'il faut répéter partout
+   * où il apparaît : le prochain message du client SORT le fil de l'archive
+   * (voir `sms-server/inbound.ts`, dans le même `.set()` que la pastille « à
+   * traiter »). On range du silence, jamais quelqu'un qui parle encore.
+   */
+  const archive = (row: InboxRow) =>
+    act(async () => {
+      const result = await archiveConversationAction(row.id);
+      if (!result.ok) {
+        toast.error(t("error"));
+        // « Introuvable » : le fil a changé de main, l'écran est périmé.
+        return result.error === "notFound";
+      }
+      toast.success(t("inbox.archived"));
+      return true;
+    });
+
+  const unarchive = (row: InboxRow) =>
+    act(async () => {
+      const result = await unarchiveConversationAction(row.id);
+      if (!result.ok) {
+        toast.error(t("error"));
+        return result.error === "notFound";
+      }
+      toast.success(t("inbox.unarchived"));
+      return true;
+    });
+
+  // « Tout archiver » : la pile AFFICHÉE de la vue ouverte — « les miennes »
+  // compris. Vider ce qu'on voit et vider ce qui existe ne sont pas la même
+  // promesse, et c'est la première qu'on tient.
+  const [confirmArchiveAll, setConfirmArchiveAll] = useState(false);
+  const archiveAll = (ids: string[]) => {
+    if (ids.length === 0) return;
+    act(async () => {
+      const result = await archiveConversationsAction(ids);
+      setConfirmArchiveAll(false);
+      if (!result.ok) {
+        toast.error(t("error"));
+        return true;
+      }
+      toast.success(t("inbox.archive.done", { count: result.closed ?? 0 }));
+      return true;
+    });
+  };
 
   // « Tout clore » : le même geste sur la pile AFFICHÉE — « les miennes »
   // compris. Vider ce qu'on voit et vider ce qui existe ne sont pas la même
@@ -987,6 +1086,8 @@ export function ConversationsInbox({
     onRetry: retry,
     onRespond: respond,
     onClassify: classify,
+    onArchive: archive,
+    onUnarchive: unarchive,
     canControl: abilities.control,
     canClassify: abilities.classify,
     categories,
@@ -1301,10 +1402,69 @@ export function ConversationsInbox({
             />
           ))}
         </div>
+      ) : tab === "archived" ? (
+        <div className="space-y-2">
+          {/* Ce que « Archiver » fait, dit une fois en haut de la vue plutôt
+              que répété sur chaque carte : personne ne presse un bouton dont
+              il ignore s'il détruit quelque chose. */}
+          <p className="rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            {t("inbox.archiveHint")}
+          </p>
+          {archived.map((row) => (
+            <InboxRowCard
+              key={row.id}
+              row={row}
+              state={conversationStateOf(row)}
+              {...rowProps}
+            />
+          ))}
+          {counts.archived > archived.length ? (
+            <p className="pt-1 text-center text-xs text-muted-foreground">
+              {t("inbox.archivedCap", { shown: archived.length, total: counts.archived })}
+            </p>
+          ) : null}
+        </div>
       ) : tab === "refused" ? (
         // Deux sections, pas une pile : un désabonnement ferme la porte à clé,
         // un « non merci » la laisse entrebâillée.
         <div className="space-y-5">
+          {/* Vider les refus d'un geste. C'est ICI que le bouton a le plus de
+              sens et le moins de risque : un désabonnement et un « pas
+              intéressé » sont exactement les fils qui ne réécriront jamais —
+              donc ceux qui encombrent pour toujours. Volontairement ABSENT de
+              « Toutes », où un archivage de masse emporterait des fils encore
+              vivants. */}
+          {abilities.control && archivableRefused.length > 0 ? (
+            <div className="flex justify-end">
+              <AlertDialog open={confirmArchiveAll} onOpenChange={setConfirmArchiveAll}>
+                <AlertDialogTrigger
+                  render={<Button variant="outline" size="sm" className="min-h-11 md:min-h-8" />}
+                >
+                  <ARCHIVE_LOOK.Icon aria-hidden />
+                  {t("inbox.archive.all")}
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t("inbox.archive.title")}</AlertDialogTitle>
+                    {/* Le nombre annoncé est celui des fils qu'on peut vraiment
+                        ranger — la fiche d'un collègue reste fermée. */}
+                    <AlertDialogDescription>
+                      {t("inbox.archive.body", { count: archivableRefused.length })}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t("inbox.close.cancel")}</AlertDialogCancel>
+                    <AlertDialogAction
+                      disabled={pending}
+                      onClick={() => archiveAll(archivableRefused)}
+                    >
+                      {t("inbox.archive.confirm")}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          ) : null}
           {optoutRows.length > 0 ? (
             <section className="space-y-2">
               <SectionHeader
@@ -1400,6 +1560,8 @@ function InboxRowCard({
   onRetry,
   onRespond,
   onClassify,
+  onArchive,
+  onUnarchive,
   canControl,
   canClassify,
   categories,
@@ -1415,6 +1577,9 @@ function InboxRowCard({
   onRetry: (row: InboxRow) => void;
   onRespond: (row: InboxRow) => void;
   onClassify: (row: InboxRow, categoryId: number) => void;
+  /** Ranger le fil hors des listes, ou l'en sortir (`conversations.control`). */
+  onArchive: (row: InboxRow) => void;
+  onUnarchive: (row: InboxRow) => void;
   /** Reprendre le fil, le rendre à l'IA, le marquer traité (`conversations.control`). */
   canControl: boolean;
   /** Ranger la fiche depuis la carte (`clients.category`). */
@@ -1460,8 +1625,26 @@ function InboxRowCard({
   // pastille tombe (« marquer traité ») ou la machine reprend (« rendre à
   // l'IA ») — clore n'y voudrait rien dire.
   const showClose = mayControl && state === "human";
+  // Un fil DÉJÀ rangé n'offre qu'une chose : en sortir. Les autres gestes
+  // (répondre, classer, clore) appartiennent à la boucle, et ce fil n'y est
+  // plus — les proposer ici ferait de l'archive une deuxième boîte de travail.
+  const isArchived = Boolean(row.archivedAt);
+  const showUnarchive = mayControl && isArchived;
+  /**
+   * « Archiver » est offert PARTOUT sauf sur un fil déjà rangé : un fil éteint
+   * peut l'être dans n'importe quelle vue (un refus dans « Refus », un objectif
+   * atteint dans « Toutes », un fil qu'on tient dans « À traiter »), et devoir
+   * d'abord le clore pour pouvoir le ranger serait un détour sans raison.
+   */
+  const showArchive = mayControl && !isArchived;
   const showFooter =
-    row.assignedToName !== null || showHandBack || showClassify || showDecide || showClose;
+    row.assignedToName !== null ||
+    showHandBack ||
+    showClassify ||
+    showDecide ||
+    showClose ||
+    showArchive ||
+    showUnarchive;
 
   // Qui a écrit un message — la MÊME règle pour le dernier et pour celui qui
   // le précède, sinon les deux lignes d'une même carte nommeraient
@@ -1557,6 +1740,15 @@ function InboxRowCard({
         {isEngine && row.attentionReason && t.has(`inbox.reasonHint.${row.attentionReason}`) ? (
           <p className="text-xs text-muted-foreground">
             {t(`inbox.reasonHint.${row.attentionReason}` as never)}
+          </p>
+        ) : null}
+
+        {/* Depuis quand ce fil est rangé. Sans la date, l'archive devient un
+            sac : on ne sait plus si on y a mis ce fil hier ou l'an dernier. */}
+        {row.archivedAt ? (
+          <p className="text-xs text-muted-foreground">
+            {t("inbox.archivedAt")}{" "}
+            <RelativeTime date={row.archivedAt} locale={dfnsLocale} />
           </p>
         ) : null}
 
@@ -1708,6 +1900,32 @@ function InboxRowCard({
                   <CheckIcon aria-hidden /> {t("inbox.markHandled")}
                 </Button>
               </>
+            ) : null}
+            {/* Ranger le fil hors des listes — le geste qui manquait pour que
+                la boucle se vide un jour. Discret (fantôme) : c'est du
+                rangement, pas une décision sur le client. */}
+            {showArchive ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="relative z-10 min-h-11 md:min-h-8"
+                disabled={pending}
+                title={t("inbox.archiveHint")}
+                onClick={() => onArchive(row)}
+              >
+                <ARCHIVE_LOOK.Icon aria-hidden /> {t("inbox.actions.archive")}
+              </Button>
+            ) : null}
+            {showUnarchive ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="relative z-10 min-h-11 md:min-h-8"
+                disabled={pending}
+                onClick={() => onUnarchive(row)}
+              >
+                <RotateCcwIcon aria-hidden /> {t("inbox.actions.unarchive")}
+              </Button>
             ) : null}
           </div>
         ) : null}

@@ -50,6 +50,9 @@ const {
   markConversationHandledAction,
   assignConversationAction,
   retryAiTurnAction,
+  unarchiveConversationAction,
+  archiveConversationAction,
+  archiveConversationsAction,
   dismissAllFailedJobsAction,
   dismissFailedJobAction,
   liftSuppressionAction,
@@ -1240,5 +1243,111 @@ describe("une tâche du moteur morte : l'abandonner", () => {
     expect(await dismissAllFailedJobsAction()).toEqual({ ok: false, error: "forbidden" });
     const [row] = await testDb.select().from(scheduledJobs).where(eq(scheduledJobs.id, job.id));
     expect(row.status).toBe("failed");
+  });
+});
+
+describe("archiver un fil : le ranger hors des listes", () => {
+  async function thread(overrides: { assignedToId?: string } = {}) {
+    const client = await makeClient({ assignedToId: overrides.assignedToId ?? null });
+    const conv = await makeConversation({
+      clientId: client.id,
+      clientPhone: client.phone,
+      smsNumberId: numberId,
+    });
+    return { client, conv };
+  }
+
+  it("ranger un fil ne l'efface pas : la conversation reste entière", async () => {
+    const { conv } = await thread();
+
+    expect((await archiveConversationAction(conv.id)).ok).toBe(true);
+
+    const [row] = await testDb.select().from(conversations).where(eq(conversations.id, conv.id));
+    expect(row.archivedAt).not.toBeNull();
+    expect(row.archivedById).toBe(caller.id);
+    // Archiver ne rend AUCUN verdict : contrairement à « Clore », le motif ne
+    // bouge pas. Ranger n'est pas conclure.
+    expect(row.attentionReason).toBe(conv.attentionReason ?? null);
+  });
+
+  it("LA garantie : le prochain message du client SORT le fil de l'archive", async () => {
+    // C'est ce qui rend le bouton sûr à presser. Sans ça, ranger un fil éteint
+    // le rendrait sourd pour toujours, et la personne qui rappelle six mois
+    // plus tard écrirait à un écran que plus personne ne regarde.
+    const { client, conv } = await thread();
+    expect((await archiveConversationAction(conv.id)).ok).toBe(true);
+
+    await processInboundSms({
+      from: client.phone,
+      to: numberE164,
+      body: "Finalement oui, ça m'intéresse",
+      messageSid: "SM_archive_retour",
+    });
+
+    const [row] = await testDb.select().from(conversations).where(eq(conversations.id, conv.id));
+    expect(row.archivedAt).toBeNull();
+    expect(row.archivedById).toBeNull();
+    // Et il revient là où on le verra : « à traiter », pas dans un limbe.
+    expect(row.needsAttention).toBe(true);
+    expect(row.attentionReason).toBe("inbound");
+  });
+
+  it("« Sortir de l'archive » remet le fil dans les listes", async () => {
+    const { conv } = await thread();
+    expect((await archiveConversationAction(conv.id)).ok).toBe(true);
+    expect((await unarchiveConversationAction(conv.id)).ok).toBe(true);
+
+    const [row] = await testDb.select().from(conversations).where(eq(conversations.id, conv.id));
+    expect(row.archivedAt).toBeNull();
+    expect(row.archivedById).toBeNull();
+  });
+
+  it("archiver deux fois ne réécrit pas la signature du premier", async () => {
+    const { conv } = await thread();
+    expect((await archiveConversationAction(conv.id)).ok).toBe(true);
+    const [first] = await testDb.select().from(conversations).where(eq(conversations.id, conv.id));
+
+    expect((await archiveConversationAction(conv.id)).ok).toBe(true);
+    const [again] = await testDb.select().from(conversations).where(eq(conversations.id, conv.id));
+    expect(again.archivedAt!.getTime()).toBe(first.archivedAt!.getTime());
+    expect(again.archivedById).toBe(first.archivedById);
+  });
+
+  it("« Tout archiver » ne range que les fils qu'on a le droit de ranger", async () => {
+    // La fiche du courtier est INVISIBLE pour un téléphoniste : son fil doit
+    // sortir du lot sans que rien ne le nomme (règle 1).
+    const mine = await thread();
+    const his = await thread({ assignedToId: admin.id });
+
+    const result = await archiveConversationsAction([mine.conv.id, his.conv.id]);
+    expect(result.ok).toBe(true);
+    // Le compte rendu dit ce qui a RÉELLEMENT été rangé, jamais ce qu'on a demandé.
+    expect(result.ok && result.closed).toBe(1);
+
+    const [ok1] = await testDb
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, mine.conv.id));
+    const [untouched] = await testDb
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, his.conv.id));
+    expect(ok1.archivedAt).not.toBeNull();
+    expect(untouched.archivedAt).toBeNull();
+  });
+
+  it("une fiche INVISIBLE répond « introuvable », jamais « interdit »", async () => {
+    const { conv } = await thread({ assignedToId: admin.id });
+
+    expect(await archiveConversationAction(conv.id)).toEqual({ ok: false, error: "notFound" });
+    expect(await unarchiveConversationAction(conv.id)).toEqual({ ok: false, error: "notFound" });
+  });
+
+  it("sans session, rien ne se range", async () => {
+    const { conv } = await thread();
+    await loginAs(null);
+
+    expect(await archiveConversationAction(conv.id)).toEqual({ ok: false, error: "forbidden" });
+    expect(await unarchiveConversationAction(conv.id)).toEqual({ ok: false, error: "forbidden" });
   });
 });

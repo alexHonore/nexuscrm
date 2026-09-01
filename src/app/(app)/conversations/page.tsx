@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { MessageCircle } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import {
@@ -56,6 +56,11 @@ import { DEFAULT_QUIET_HOURS, isWithinSendWindow } from "@/lib/sms/quiet-hours";
  * cette seconde question, un téléphoniste lisait dans sa propre boîte le
  * numéro et la conversation du client d'un collègue : la fiche est visible
  * (pour ne pas la rappeler), son contenu ne l'est pas.
+ *
+ * Un fil ARCHIVÉ quitte cette boucle et TOUS les comptes qui en descendent :
+ * l'écran ne montre pas ce qu'il ne compte pas, et ne compte pas ce qu'il ne
+ * montre pas. Rien n'est détruit — l'onglet « Archivées » les garde entiers, et
+ * le prochain message du client ramène le fil ici de lui-même.
  */
 /** Combien d'envois perdus la vue « Échecs » dessine — elle DIT ce qu'elle coupe. */
 const FAILURES_SHOWN = 100;
@@ -66,6 +71,14 @@ const FAILURES_SHOWN = 100;
  * pannes — et c'est précisément le nombre que la bande d'état annonce.
  */
 const JOBS_SHOWN = 100;
+/**
+ * Et pour l'ARCHIVE : un fil rangé ne cesse pas d'exister, il cesse d'être
+ * demandé. La vue montre les plus récemment archivés, et le compte réel voyage
+ * à part (`archivedTotal`) — une pile qui s'arrête à cent sans le dire ferait
+ * croire qu'on a tout retrouvé, et c'est justement là qu'on cherche le fil
+ * archivé par erreur.
+ */
+const ARCHIVED_SHOWN = 100;
 
 export default async function ConversationsPage() {
   const actor = await requirePerm("conversations.view");
@@ -97,47 +110,139 @@ export default async function ConversationsPage() {
   // Les fils sans aucun message n'ont rien à traiter (ils encombreraient la
   // liste sans jamais rien demander), et ceux dont la fiche échappe à ce regard
   // n'existent pas pour lui — la jointure sur `clients` porte la visibilité.
+  //
+  // Les fils ARCHIVÉS sortent ICI, dans la condition partagée, et jamais au
+  // dessin : tout ce que l'écran annonce à côté de la boucle — la pastille
+  // « à traiter », le compte de chaque onglet, l'ordre des cartes — se dérive
+  // de ces rangées-là. Les écarter plus loin laisserait des chiffres qui
+  // parlent encore de fils que plus personne ne voit, et « Archiver »
+  // paraîtrait cassé au moment même où il vient de faire exactement son
+  // travail.
   const threadsWhere = await withVisibility(
     actor,
-    or(eq(conversations.needsAttention, true), isNotNull(lastMessage.at)),
+    and(
+      isNull(conversations.archivedAt),
+      or(eq(conversations.needsAttention, true), isNotNull(lastMessage.at)),
+    ),
   );
+
+  // L'archive : la même liste prise par l'autre bout. Aucune condition sur les
+  // messages — ce qu'on a rangé doit pouvoir se retrouver, fût-ce un fil resté
+  // muet ; c'est la seule vue où il existe encore.
+  const archivedWhere = await withVisibility(actor, isNotNull(conversations.archivedAt));
 
   // Ce qu'on avait envoyé AVANT la dernière réponse du client — le contexte
   // sans lequel « Oui toujours! » ne veut rien dire (voir le module).
   const previousOutbound = previousOutboundByConversation();
 
-  const rows = await db
-    .select({
-      id: conversations.id,
-      clientId: conversations.clientId,
-      clientName: clients.fullName,
-      clientPhone: conversations.clientPhone,
-      needsAttention: conversations.needsAttention,
-      attentionReason: conversations.attentionReason,
-      aiEnabled: conversations.aiEnabled,
-      assignedToId: conversations.assignedToId,
-      assignedToName: users.name,
-      assistantName: assistants.name,
-      lastInboundAt: conversations.lastInboundAt,
-      // Le DÉTENTEUR de la fiche : c'est lui, et lui seul, qui décide du
-      // compartiment — donc de ce que cette rangée a le droit d'emporter.
-      holderId: clients.assignedToId,
-      lastBody: lastMessage.body,
-      lastDirection: lastMessage.direction,
-      lastSource: lastMessage.source,
-      lastAt: lastMessage.at,
-      previousBody: previousOutbound.body,
-      previousSource: previousOutbound.source,
-    })
-    .from(conversations)
-    .leftJoin(clients, eq(clients.id, conversations.clientId))
-    .leftJoin(users, eq(users.id, conversations.assignedToId))
-    .leftJoin(assistants, eq(assistants.id, conversations.activeAssistantId))
-    .leftJoin(lastMessage, eq(lastMessage.conversationId, conversations.id))
-    .leftJoin(previousOutbound, eq(previousOutbound.conversationId, conversations.id))
-    .where(threadsWhere)
-    .orderBy(desc(conversations.needsAttention), desc(lastMessage.at))
-    .limit(200);
+  // ── Une carte de la boîte, en colonnes ───────────────────────────────────
+  // La boucle et l'archive dessinent la MÊME carte : elles tirent donc la même
+  // liste de colonnes, écrite une seule fois. Deux requêtes qui décrivent la
+  // même rangée avec deux listes de colonnes finissent par ne plus montrer la
+  // même chose selon l'onglet où on la regarde.
+  const threadColumns = {
+    id: conversations.id,
+    clientId: conversations.clientId,
+    clientName: clients.fullName,
+    clientPhone: conversations.clientPhone,
+    needsAttention: conversations.needsAttention,
+    attentionReason: conversations.attentionReason,
+    aiEnabled: conversations.aiEnabled,
+    assignedToId: conversations.assignedToId,
+    assignedToName: users.name,
+    assistantName: assistants.name,
+    lastInboundAt: conversations.lastInboundAt,
+    // QUAND le fil a été rangé : c'est ce que la carte archivée date, et la
+    // seule chose qui distingue les deux listes une fois dessinées.
+    archivedAt: conversations.archivedAt,
+    // Le DÉTENTEUR de la fiche : c'est lui, et lui seul, qui décide du
+    // compartiment — donc de ce que cette rangée a le droit d'emporter.
+    holderId: clients.assignedToId,
+    lastBody: lastMessage.body,
+    lastDirection: lastMessage.direction,
+    lastSource: lastMessage.source,
+    lastAt: lastMessage.at,
+  };
+
+  /** La requête complète, contexte compris — elle sert aussi de source au type. */
+  const threadsWithContext = (where: SQL | undefined, order: SQL[], limit: number) =>
+    db
+      .select({
+        ...threadColumns,
+        previousBody: previousOutbound.body,
+        previousSource: previousOutbound.source,
+      })
+      .from(conversations)
+      .leftJoin(clients, eq(clients.id, conversations.clientId))
+      .leftJoin(users, eq(users.id, conversations.assignedToId))
+      .leftJoin(assistants, eq(assistants.id, conversations.activeAssistantId))
+      .leftJoin(lastMessage, eq(lastMessage.conversationId, conversations.id))
+      .leftJoin(previousOutbound, eq(previousOutbound.conversationId, conversations.id))
+      .where(where)
+      .orderBy(...order)
+      .limit(limit);
+
+  /**
+   * La rangée que les deux listes rendent. Le contexte y est déclaré NULLABLE :
+   * drizzle type une colonne de sous-requête comme toujours présente, alors que
+   * la jointure est GAUCHE — un fil sans message précédent en revient vide, et
+   * l'archive n'en demande pas du tout. Mieux vaut le dire ici que le découvrir
+   * au dessin.
+   */
+  type ThreadRow = Omit<
+    Awaited<ReturnType<typeof threadsWithContext>>[number],
+    "previousBody" | "previousSource"
+  > & { previousBody: string | null; previousSource: string | null };
+
+  /**
+   * Une liste de fils : `where` la borne, `order` la trie, `limit` la coupe.
+   *
+   * `context` dit si on paie « ce qu'on avait envoyé avant la réponse » — deux
+   * passes groupées de plus sur `messages`, à CHAQUE ouverture de la page. La
+   * boucle les paie : c'est là qu'on répond, et « Oui toujours! » ne veut rien
+   * dire sans la question qui l'a provoqué. L'archive ne les paie pas : on n'y
+   * compose rien, on y cherche un fil à ressortir. Les deux colonnes existent
+   * quand même, vides — la carte est la même des deux côtés, elle n'a
+   * simplement rien à citer.
+   */
+  const threadList = async (
+    where: SQL | undefined,
+    order: SQL[],
+    limit: number,
+    context: boolean,
+  ): Promise<ThreadRow[]> => {
+    if (context) return threadsWithContext(where, order, limit);
+    const plain = await db
+      .select(threadColumns)
+      .from(conversations)
+      .leftJoin(clients, eq(clients.id, conversations.clientId))
+      .leftJoin(users, eq(users.id, conversations.assignedToId))
+      .leftJoin(assistants, eq(assistants.id, conversations.activeAssistantId))
+      .leftJoin(lastMessage, eq(lastMessage.conversationId, conversations.id))
+      .where(where)
+      .orderBy(...order)
+      .limit(limit);
+    return plain.map((r) => ({ ...r, previousBody: null, previousSource: null }));
+  };
+
+  // Les deux listes et le COMPTE réel de l'archive en un seul aller-retour : la
+  // page en fait déjà beaucoup, et ces trois lectures ne se doivent rien.
+  //
+  // Le compte est sa propre requête, comme pour les échecs, et il porte la
+  // MÊME condition (`archivedWhere`, visibilité comprise, règle 13) : une
+  // pastille qui afficherait la longueur de la liste jurerait qu'il n'y a
+  // jamais eu plus de cent fils rangés.
+  const [rows, archivedRows, [archivedTotalRow]] = await Promise.all([
+    threadList(threadsWhere, [desc(conversations.needsAttention), desc(lastMessage.at)], 200, true),
+    // Le plus récemment rangé d'abord : ce qu'on vient chercher dans une
+    // archive, c'est presque toujours ce qu'on vient d'y mettre par erreur.
+    threadList(archivedWhere, [desc(conversations.archivedAt)], ARCHIVED_SHOWN, false),
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(conversations)
+      .leftJoin(clients, eq(clients.id, conversations.clientId))
+      .where(archivedWhere),
+  ]);
 
   // ── Ce que chaque rangée a le droit d'emporter ───────────────────────────
   // Le compartiment ne dépend que du DÉTENTEUR de la fiche : on le résout une
@@ -163,7 +268,14 @@ export default async function ConversationsPage() {
   // « Rendez-vous réservé », « fiche classée » : c'est l'historique de la
   // fiche. On ne le DEMANDE donc que pour les fils dont la case `history` est
   // ouverte — ce qu'on ne charge pas ne peut pas partir dans le HTML.
-  const historyIds = rows.filter((r) => grantsOfHolder(r.holderId).history).map((r) => r.id);
+  //
+  // Les fils ARCHIVÉS entrent dans la MÊME question : c'est un seul `in (…)`,
+  // donc pas un aller-retour de plus — et une carte archivée sans son
+  // « Rendez-vous réservé » laisserait croire qu'il ne s'est rien passé sur ce
+  // fil, alors que c'est précisément ce qu'on relit quand on rouvre l'archive.
+  const historyIds = [...rows, ...archivedRows]
+    .filter((r) => grantsOfHolder(r.holderId).history)
+    .map((r) => r.id);
   const deedsByConversation = new Map<string, ConversationDeed[]>();
   if (historyIds.length > 0) {
     const eventRows = await db
@@ -592,7 +704,10 @@ export default async function ConversationsPage() {
     label: locale === "en" ? c.nameEn : c.nameFr,
   }));
 
-  const items: InboxRow[] = rows.map((r) => {
+  // La MÊME carte des deux côtés : la boucle et l'archive ne se distinguent que
+  // par `archivedAt`. Une rangée traduite deux fois finirait par se fermer d'un
+  // côté et pas de l'autre — l'archive deviendrait la porte de service.
+  const toInboxRow = (r: ThreadRow): InboxRow => {
     const open = grantsOfHolder(r.holderId);
     return {
       id: r.id,
@@ -622,6 +737,10 @@ export default async function ConversationsPage() {
       lastDirection: r.lastDirection === "in" || r.lastDirection === "out" ? r.lastDirection : null,
       lastSource: r.lastSource ?? null,
       lastAt: r.lastAt ? new Date(r.lastAt).toISOString() : null,
+      // Rangé ou non — un ÉTAT du fil, comme « à traiter », et pas un secret :
+      // il ne se ferme avec aucune case. C'est lui qui permet à l'écran de
+      // dater la carte archivée et d'offrir « Désarchiver » là, et seulement là.
+      archivedAt: r.archivedAt ? r.archivedAt.toISOString() : null,
       // Les gestes de la carte, fiche par fiche : conduire l'assistant change
       // ce que le robot ENVERRA à ce client (case `sms`), ranger la fiche
       // touche au pipeline (case `category`). Le serveur revérifie les deux —
@@ -629,7 +748,10 @@ export default async function ConversationsPage() {
       smsOpen: open.sms,
       categoryOpen: open.category,
     };
-  });
+  };
+
+  const items: InboxRow[] = rows.map(toInboxRow);
+  const archived: InboxRow[] = archivedRows.map(toInboxRow);
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-5 p-4 pb-safe md:p-6">
@@ -643,6 +765,11 @@ export default async function ConversationsPage() {
         queue={queue}
         failures={failures}
         failuresTotal={failuresTotalRow?.n ?? failures.length}
+        archived={archived}
+        // Combien de fils sont rangés EN TOUT — même discipline que
+        // `failuresTotal` : la liste s'arrête aux plus récents, le compte dit
+        // ce qu'elle coupe. Sans lui, l'archive se lirait comme complète.
+        archivedTotal={archivedTotalRow?.n ?? archived.length}
         jobs={jobs}
         // Le MÊME compte que la bande d'état affiche : il est déjà calculé
         // pour elle, et deux requêtes qui comptent la même chose finissent par

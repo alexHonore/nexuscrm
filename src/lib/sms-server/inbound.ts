@@ -244,6 +244,15 @@ export async function processInboundSms(input: InboundSmsInput): Promise<Inbound
         lastInboundAt: sql`greatest(coalesce(${conversations.lastInboundAt}, ${receivedAt.toISOString()}::timestamptz), ${receivedAt.toISOString()}::timestamptz)`,
         needsAttention: true,
         attentionReason: optOut.optOut ? "optout" : "inbound",
+        // Un fil archivé ressort de l'archive DÈS QUE le client réécrit —
+        // c'est la promesse qui rend le bouton « Archiver » sûr à presser.
+        // Écrit ICI, dans le MÊME `.set()` que le marquage « à traiter » : un
+        // message ne peut pas atterrir dans un fil resté archivé. Sans ces
+        // deux nulls, ranger un fil éteint le rendait sourd pour toujours, et
+        // la personne qui rappelle six mois plus tard écrivait à un écran que
+        // plus personne ne regarde.
+        archivedAt: null,
+        archivedById: null,
         // Un STOP met aussi l'IA en pause sur ce fil : aucun tour ne doit
         // plus s'y déclencher, et le fil le dit.
         ...(optOut.optOut ? { aiEnabled: false, pauseReason: "optout" } : {}),

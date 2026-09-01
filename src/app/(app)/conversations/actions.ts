@@ -754,6 +754,32 @@ export async function closeConversationAction(conversationId: string): Promise<S
 const MAX_BULK_CLOSE = 200;
 
 /**
+ * La case `sms` de CHAQUE fiche, résolue une fois par DÉTENTEUR.
+ *
+ * Les gestes en masse posent la même troisième question que les gestes
+ * unitaires — la fiche derrière ce fil ouvre-t-elle sa case `sms` ? — mais sur
+ * deux cents fils d'un coup. La réponse ne dépend QUE du détenteur de la
+ * fiche : on la calcule une fois par détenteur, pas une fois par fil.
+ *
+ * Écrite ici une seule fois parce que deux copies finissent par diverger, et
+ * qu'un écart entre « Tout clore » et « Tout archiver » voudrait dire qu'un des
+ * deux gestes touche des fiches que l'autre protège.
+ */
+async function smsOpenByHolder(actor: Actor): Promise<(assignedToId: string | null) => boolean> {
+  const { cfg, roleOf } = await loadDirectory();
+  const smsOpen = new Map<string, boolean>();
+  return (assignedToId: string | null): boolean => {
+    const key = assignedToId ?? "";
+    const hit = smsOpen.get(key);
+    if (hit !== undefined) return hit;
+    const holder = assignedToId ? (roleOf.get(assignedToId) ?? null) : null;
+    const open = grantsFor(cfg, actor.role, bucketFor(actor.user.id, { assignedToId }, holder)).sms;
+    smsOpen.set(key, open);
+    return open;
+  };
+}
+
+/**
  * « Tout clore » — le même geste, sur la pile entière.
  *
  * L'écran envoie les identifiants qu'il MONTRE (le filtre « les miennes »
@@ -786,23 +812,8 @@ export async function closeHeldConversationsAction(
     .where(await withVisibility(actor, and(inArray(conversations.id, ids), HELD)));
   if (threads.length === 0) return { ok: true, closed: 0 };
 
-  // La case `sms` de CHAQUE fiche. Elle ne dépend que du détenteur : on la
-  // résout une fois par détenteur, pas une fois par fil.
-  const { cfg, roleOf } = await loadDirectory();
-  const smsOpen = new Map<string, boolean>();
-  const mayWrite = (assignedToId: string | null): boolean => {
-    const key = assignedToId ?? "";
-    const hit = smsOpen.get(key);
-    if (hit !== undefined) return hit;
-    const holder = assignedToId ? (roleOf.get(assignedToId) ?? null) : null;
-    const open = grantsFor(
-      cfg,
-      actor.role,
-      bucketFor(actor.user.id, { assignedToId }, holder),
-    ).sms;
-    smsOpen.set(key, open);
-    return open;
-  };
+  // La case `sms` de CHAQUE fiche, résolue une fois par détenteur.
+  const mayWrite = await smsOpenByHolder(actor);
   const closable = threads.filter((t) => mayWrite(t.holderId)).map((t) => t.id);
   if (closable.length === 0) return { ok: true, closed: 0 };
 
@@ -824,6 +835,219 @@ export async function closeHeldConversationsAction(
   }
   revalidatePath("/conversations");
   return { ok: true, closed: closed.length };
+}
+
+/**
+ * Ranger un fil fait tomber sa pastille — mais SANS effacer un verdict.
+ *
+ * Deux raisons de ne pas laisser une pastille allumée sous l'archive : le
+ * tableau de bord compte les fils « à reprendre » sans rien savoir de l'archive
+ * (`needsHumanCondition`), et annoncerait donc du travail que plus aucun écran
+ * ne montre — exactement la panne « cinq ici, trois là-bas » déjà réparée
+ * ailleurs ; et l'onglet « Archivées » afficherait des rangées qui crient
+ * encore « à traiter » alors qu'on vient de dire le contraire.
+ *
+ * Le MOTIF, lui, ne tombe que s'il n'est pas un verdict : « Conclue »,
+ * « Refusé », « Désabonné » sont la CONCLUSION du fil, pas une demande en
+ * attente. Les effacer ferait mentir la fiche du client et les sections de la
+ * boîte, alors qu'archiver ne prétend rien changer à ce qui s'est passé. La
+ * condition est celle de `noVerdictCondition()`, pour qu'il n'existe jamais
+ * deux définitions du mot « verdict ».
+ */
+const CLEAR_REASON_UNLESS_VERDICT = sql<
+  string | null
+>`case when ${noVerdictCondition()} then null else ${conversations.attentionReason} end`;
+
+/**
+ * « Archiver » — le fil sort des listes, et RIEN n'est effacé.
+ *
+ * Le geste que la boîte n'avait pas : les fils éteints (un contact qui n'a
+ * jamais répondu, une conclusion vieille de six semaines) restaient là pour
+ * toujours, et une liste qu'on ne peut pas finir cesse d'être regardée. Ce qui
+ * disparaît est l'ENTRÉE DE LISTE, pas la conversation : le fil reste entier
+ * sur la fiche du client, ses messages, son verdict et son historique intacts,
+ * et l'onglet « Archivées » le rend en un clic.
+ *
+ * ── La promesse, et il faut la lire avant de croire ce bouton dangereux ────
+ * Un fil archivé n'est PAS réduit au silence pour toujours : le prochain
+ * message du client remet `archivedAt` à null (voir `lib/sms-server/inbound.ts`)
+ * et le ramène dans « À traiter », pastille comprise. Rien d'archivé ne peut
+ * donc avaler un client vivant — c'est exactement ce que « Clore » promet déjà,
+ * et les deux gestes tiennent la même promesse pour que personne n'ait à se
+ * demander lequel est sûr.
+ *
+ * ── Ce n'est PAS un réglage d'affichage personnel ──────────────────────────
+ * Le fil quitte la boucle de TOUT LE MONDE, comme « Marquer traité » et
+ * « Clore » : deux colonnes sur la table, pas une préférence par personne.
+ * Décider que plus personne n'a à regarder la demande d'un client n'est pas une
+ * décision privée — et deux téléphonistes devant deux boîtes différentes
+ * finiraient par croire, chacun, que l'autre s'en occupe. D'où la même porte
+ * que ses voisins : le droit `conversations.control` comme plafond, la case
+ * `sms` de la fiche comme robinet.
+ *
+ * Idempotent : archiver deux fois (deux onglets, un clic répété) répond
+ * « fait » sans réécrire qui a rangé le fil ni quand — la signature du PREMIER
+ * est la seule qui veuille dire quelque chose six semaines plus tard.
+ */
+export async function archiveConversationAction(conversationId: string): Promise<SmsActionResult> {
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("conversations.control")) return FORBIDDEN;
+  if (!z.uuid().safeParse(conversationId).success) return INVALID;
+
+  const seen = await threadFor(actor, conversationId, "sms");
+  if (!seen) return NOT_FOUND;
+
+  // Déjà rangé : c'est fait, et on ne touche pas à la signature du premier.
+  if (seen.thread.archivedAt) return { ok: true, id: conversationId };
+
+  const [archived] = await db
+    .update(conversations)
+    .set({
+      archivedAt: new Date(),
+      archivedById: actor.user.id,
+      needsAttention: false,
+      attentionReason: CLEAR_REASON_UNLESS_VERDICT,
+    })
+    // La condition est REDITE ici et c'est elle qui tient : entre la lecture
+    // ci-dessus et cette ligne, un collègue a pu ranger le même fil.
+    .where(and(eq(conversations.id, conversationId), isNull(conversations.archivedAt)))
+    .returning({ id: conversations.id });
+  // Quelqu'un est passé avant nous : rien à journaliser, rien n'a eu lieu.
+  if (!archived) return { ok: true, id: conversationId };
+
+  await logAudit({
+    userId: actor.user.id,
+    action: "sms.archive",
+    entity: "conversation",
+    entityId: conversationId,
+    detail: { clientId: seen.thread.clientId },
+  });
+
+  revalidateFor(seen.thread.clientId);
+  return { ok: true, id: conversationId };
+}
+
+/**
+ * « Sortir de l'archive » — le fil revient dans les listes de tout le monde.
+ *
+ * Même porte que l'archivage, et pour la raison symétrique : remettre un fil
+ * dans la boucle de l'équipe est une décision aussi collective que l'en sortir.
+ * Un rôle qui peut ranger sans pouvoir dé-ranger (ou l'inverse) laisserait un
+ * geste sans retour.
+ *
+ * Ce qui revient est le fil TEL QU'IL A ÉTÉ RANGÉ : la pastille ne se rallume
+ * pas. Sortir un fil de l'archive n'invente aucune demande du client — seul un
+ * message de sa part le remet dans « À traiter », par le même chemin que
+ * l'archive automatique (`lib/sms-server/inbound.ts`). Un bouton qui
+ * ressusciterait une pastille à la place du client ferait réclamer du travail
+ * que personne n'a demandé.
+ *
+ * Idempotent, comme son jumeau : un fil déjà dans la boucle répond « fait ».
+ */
+export async function unarchiveConversationAction(
+  conversationId: string,
+): Promise<SmsActionResult> {
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("conversations.control")) return FORBIDDEN;
+  if (!z.uuid().safeParse(conversationId).success) return INVALID;
+
+  const seen = await threadFor(actor, conversationId, "sms");
+  if (!seen) return NOT_FOUND;
+
+  // Déjà dans la boucle : rien à défaire.
+  if (!seen.thread.archivedAt) return { ok: true, id: conversationId };
+
+  const [restored] = await db
+    .update(conversations)
+    .set({ archivedAt: null, archivedById: null })
+    .where(and(eq(conversations.id, conversationId), isNotNull(conversations.archivedAt)))
+    .returning({ id: conversations.id });
+  if (!restored) return { ok: true, id: conversationId };
+
+  await logAudit({
+    userId: actor.user.id,
+    action: "sms.unarchive",
+    entity: "conversation",
+    entityId: conversationId,
+    detail: { clientId: seen.thread.clientId, archivedAt: seen.thread.archivedAt.toISOString() },
+  });
+
+  revalidateFor(seen.thread.clientId);
+  return { ok: true, id: conversationId };
+}
+
+/**
+ * « Tout archiver » — le même rangement, sur la pile entière.
+ *
+ * Le jumeau de « Tout clore », et pour la même raison : ranger deux cents fils
+ * éteints un par un, personne ne le fera, et c'est ainsi qu'une boîte de
+ * réception devient du décor.
+ *
+ * L'écran envoie les identifiants qu'il MONTRE (filtres compris) : ranger ce
+ * qu'on voit et ranger ce qui existe ne sont pas la même promesse, et c'est la
+ * première qu'on tient ici.
+ *
+ * Le serveur ne fait confiance à aucun de ces identifiants. Il repose les trois
+ * questions — la fiche est-elle visible pour ce regard (`withVisibility`), sa
+ * case `sms` est-elle ouverte, le fil est-il encore dans la boucle
+ * (`archivedAt is null`) — et n'archive que ce qui passe les trois. Le compte
+ * rendu est celui des fils RÉELLEMENT rangés, jamais celui des identifiants
+ * reçus : un « 12 fils archivés » sur 9 rangements serait un mensonge, et
+ * renvoyer les fils déjà archivés d'un onglet périmé en gonflerait le nombre
+ * sans que rien ne bouge à l'écran.
+ */
+export async function archiveConversationsAction(ids: string[]): Promise<SmsActionResult> {
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("conversations.control")) return FORBIDDEN;
+
+  const parsed = z.array(z.uuid()).min(1).max(MAX_BULK_CLOSE).safeParse(ids);
+  if (!parsed.success) return INVALID;
+  const asked = [...new Set(parsed.data)];
+
+  // Les fils vus par CE regard, encore dans la boucle, et le détenteur de la
+  // fiche derrière chacun.
+  const threads = await db
+    .select({ id: conversations.id, holderId: clients.assignedToId })
+    .from(conversations)
+    .innerJoin(clients, eq(clients.id, conversations.clientId))
+    .where(
+      await withVisibility(
+        actor,
+        and(inArray(conversations.id, asked), isNull(conversations.archivedAt)),
+      ),
+    );
+  if (threads.length === 0) return { ok: true, closed: 0 };
+
+  const mayWrite = await smsOpenByHolder(actor);
+  const archivable = threads.filter((t) => mayWrite(t.holderId)).map((t) => t.id);
+  if (archivable.length === 0) return { ok: true, closed: 0 };
+
+  const archived = await db
+    .update(conversations)
+    .set({
+      archivedAt: new Date(),
+      archivedById: actor.user.id,
+      needsAttention: false,
+      attentionReason: CLEAR_REASON_UNLESS_VERDICT,
+    })
+    .where(and(inArray(conversations.id, archivable), isNull(conversations.archivedAt)))
+    .returning({ id: conversations.id, clientId: conversations.clientId });
+
+  await logAudit({
+    userId: actor.user.id,
+    action: "sms.archive_bulk",
+    entity: "conversation",
+    detail: { count: archived.length, asked: asked.length, ids: archived.map((c) => c.id) },
+  });
+
+  for (const clientId of new Set(archived.map((c) => c.clientId))) {
+    revalidatePath(`/clients/${clientId}`);
+  }
+  revalidatePath("/conversations");
+  return { ok: true, closed: archived.length };
 }
 
 /**

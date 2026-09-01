@@ -299,6 +299,20 @@ export const KNOWLEDGE_LOOK: Record<"fact" | "rule", Look> = {
  * pictogramme, doublé du libellé, qui distingue le prompt périmé de la suite
  * rouge.
  */
+/**
+ * RANGER un fil hors des listes — ni un verdict, ni une panne.
+ *
+ * « Clore » tranche (« c'est fini »), « Marquer traité » retire une pastille ;
+ * archiver ne dit RIEN de la conversation, il la met de côté. D'où le gris
+ * neutre de `TONE.raw` : la couleur ne doit pas suggérer un jugement là où il
+ * n'y en a aucun, et surtout pas emprunter le rouge des refus — un fil rangé
+ * n'est pas un fil perdu, il revient tout seul dès que le client réécrit.
+ *
+ * Même carton que `ASSISTANT_STATUS_LOOK.archived`, et c'est voulu : ranger un
+ * assistant et ranger un fil sont le même geste sur deux objets.
+ */
+export const ARCHIVE_LOOK: Look = { color: TONE.raw, Icon: ArchiveIcon };
+
 export const ASSISTANT_STATUS_LOOK: Record<string, Look> = {
   active: { color: "#10B981", Icon: PowerIcon },
   draft: { color: TONE.raw, Icon: PencilLineIcon },

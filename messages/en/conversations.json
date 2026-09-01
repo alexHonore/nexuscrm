@@ -98,6 +98,10 @@
         "title": "No refusals",
         "desc": "Hard refusals, \"not interested\" and unsubscribes will land here."
       },
+      "archived": {
+        "title": "No archived conversation",
+        "desc": "Nothing has been filed away yet. Archive a dead thread so it stops cluttering the lists — it comes back out on its own if the client writes again."
+      },
       "all": {
         "title": "No conversations",
         "desc": "SMS threads will appear here from the first message."
@@ -153,6 +157,18 @@
     "notAssigned": "The thread was not assigned to you — you can still reply.",
     "markHandled": "Mark handled",
     "handled": "Conversation handled",
+    "archived": "Thread archived — it leaves the lists for the whole team",
+    "unarchived": "Thread taken out of the archive — it is back in the lists",
+    "archivedAt": "Archived",
+    "archiveHint": "Archiving files the thread away from the whole team's lists, without sending anything and without erasing anything: the conversation stays whole on the client's file. And the client's next message brings it back to \"To handle\".",
+    "archivedCap": "The {shown} most recent — {total} in all.",
+    "archive": {
+      "all": "Archive all",
+      "title": "Archive these threads?",
+      "body": "{count, plural, one {# thread will leave the whole team's lists. Nothing is sent, nothing is erased: the conversation stays whole on the client's file, and the client's next message brings it back to \"To handle\".} other {# threads will leave the whole team's lists. Nothing is sent, nothing is erased: the conversations stay whole on the clients' files, and the client's next message brings them back to \"To handle\".}}",
+      "confirm": "Archive all",
+      "done": "{count, plural, =0 {No thread archived — they changed state in the meantime} one {# thread archived} other {# threads archived}}"
+    },
     "close": {
       "all": "Close all",
       "one": "Thread closed",
@@ -171,6 +187,7 @@
       "attention": "To handle",
       "waiting": "Awaiting client",
       "refused": "Refusals",
+      "archived": "Archived",
       "all": "All",
       "queue": "Send queue",
       "failed": "Failures",
@@ -209,6 +226,8 @@
       "retrySend": "Send again",
       "classify": "Classify",
       "close": "Close",
+      "archive": "Archive",
+      "unarchive": "Take out of the archive",
       "remove": "Dismiss"
     },
     "handedBack": "The assistant takes the thread back",

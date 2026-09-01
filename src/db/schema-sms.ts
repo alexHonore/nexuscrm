@@ -153,12 +153,40 @@ export const conversations = pgTable(
     attentionReason: text("attention_reason"),
     lastInboundAt: timestamp("last_inbound_at", { withTimezone: true }),
     lastOutboundAt: timestamp("last_outbound_at", { withTimezone: true }),
+    /**
+     * Fil ARCHIVÉ : il quitte la boucle de TOUT LE MONDE, sans rien effacer.
+     * Le fil reste entier sur la fiche du client — seules les listes cessent de
+     * le montrer. Sans cette colonne, la seule façon de sortir un fil éteint
+     * d'un écran qu'on relit chaque matin était de le clore encore une fois, ce
+     * qui ne le rangeait nulle part : la liste continuait de grossir jusqu'à ce
+     * que plus personne n'y cherche ce qui compte.
+     *
+     * Une colonne d'ÉQUIPE, pas un réglage par personne, exactement comme
+     * « Marquer traité » et « Clore » : faire taire la demande d'un client
+     * n'est pas une décision privée. Deux téléphonistes devant deux inbox
+     * différentes finissent par croire, chacun, que l'autre s'en occupe.
+     *
+     * Et rien d'archivé ne peut avaler un client vivant : le prochain SMS
+     * entrant remet cette colonne à null (voir lib/sms-server/inbound.ts) — le
+     * fil revient dans « à traiter » de lui-même.
+     */
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    /** Qui l'a archivé — pour qu'on sache à qui demander pourquoi. */
+    archivedById: uuid("archived_by_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("conversations_phone_number_uq").on(t.clientPhone, t.smsNumberId),
     index("conversations_client_idx").on(t.clientId),
     index("conversations_attention_idx").on(t.needsAttention),
+    // L'inbox — et TOUS les compteurs affichés à côté — écartent les fils
+    // archivés. Sans index partiel, chaque ouverture relit la table entière
+    // pour éliminer les fils rangés : l'archive ne fait que grossir avec les
+    // mois, et l'écran qu'on ouvre le plus souvent ne doit pas grossir avec
+    // elle.
+    index("conversations_active_idx")
+      .on(t.needsAttention)
+      .where(sql`${t.archivedAt} is null`),
   ],
 );
 
@@ -760,6 +788,7 @@ export const conversationsRelations = relations(conversations, ({ one, many }) =
   smsNumber: one(smsNumbers, { fields: [conversations.smsNumberId], references: [smsNumbers.id] }),
   pausedBy: one(users, { fields: [conversations.pausedById], references: [users.id] }),
   assignedTo: one(users, { fields: [conversations.assignedToId], references: [users.id] }),
+  archivedBy: one(users, { fields: [conversations.archivedById], references: [users.id] }),
   messages: many(messages),
 }));
 
