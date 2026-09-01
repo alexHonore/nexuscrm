@@ -1,6 +1,7 @@
 import {
   ActivityIcon,
   ArchiveIcon,
+  AudioLinesIcon,
   BadgeQuestionMarkIcon,
   BanIcon,
   BookOpenTextIcon,
@@ -604,6 +605,75 @@ export const QUEUE_KIND_LOOK: Record<"send" | "turn" | "touch", Look> = {
   send: { color: "#0EA5E9", Icon: SendIcon },
   turn: { color: TONE.machinery, Icon: SparklesIcon },
   touch: { color: "#3B82F6", Icon: MegaphoneIcon },
+};
+
+/**
+ * Les cinq types de tâche du MOTEUR, tels qu'ils se portent sur une tâche qui a
+ * définitivement échoué (`scheduled_jobs.status = 'failed'`).
+ *
+ * Le bandeau d'état annonçait « 175 tâches en échec » et ne menait nulle part :
+ * un nombre à trois chiffres, sans un écran pour dire de QUOI il s'agit. Or
+ * cinq travaux très différents se cachent derrière ce mot — une réponse
+ * d'assistant jamais écrite, un texto jamais parti, une note d'appel jamais
+ * rédigée — et on ne répare pas les trois de la même façon.
+ *
+ * Le couple est REPRIS de la file d'envoi (`QUEUE_KIND_LOOK`) quand le concept
+ * y existe déjà : la même tâche doit se reconnaître qu'elle attende son heure
+ * ou qu'elle ait échoué. La couleur ne dit pas la gravité — tout est en échec
+ * sur cet écran — elle dit CE QUE la tâche devait produire :
+ *
+ *  · cyan — un message précis, adressé à quelqu'un qu'on peut nommer ;
+ *  · bleu — une campagne qui avance d'un barreau ;
+ *  · violet — le modèle au travail (une réponse à composer, un enregistrement
+ *    à écouter). Le destinataire n'a rien vu passer, et rien ne partira tant
+ *    que le modèle n'a pas rendu son texte.
+ *
+ * `send_ladder` n'a pas encore de gestionnaire (phase 6 du moteur) : sa place
+ * est réservée ici pour qu'une rangée écrite par une version future ne
+ * retombe pas en pastille grise sans nom.
+ */
+export const JOB_TYPE_LOOK: Record<string, Look> = {
+  send_sms: { color: QUEUE_KIND_LOOK.send.color, Icon: SendIcon },
+  campaign_touch: { color: QUEUE_KIND_LOOK.touch.color, Icon: MegaphoneIcon },
+  // Le barreau d'échelle, distinct de la relance : même famille, l'ordonné en
+  // plus — c'est le rang qui le caractérise.
+  send_ladder: { color: QUEUE_KIND_LOOK.touch.color, Icon: ListOrderedIcon },
+  agent_turn: { color: QUEUE_KIND_LOOK.turn.color, Icon: SparklesIcon },
+  // La seule tâche qui ne parle pas SMS : le modèle écoute un enregistrement
+  // d'appel et en tire une note. Même violet — c'est le même modèle qui peine.
+  call_transcript: { color: QUEUE_KIND_LOOK.turn.color, Icon: AudioLinesIcon },
+};
+
+/**
+ * POURQUOI ce CRM ne peut plus texter un numéro — QUI a fermé la ligne.
+ *
+ * Le bandeau annonçait « 23 désabonnés », et le mot était faux pour dix-huit
+ * d'entre eux : ce n'est pas le contact qui s'est désabonné, c'est NOTRE moteur
+ * qui a supprimé le numéro pour toujours après un refus de l'opérateur (le code
+ * 30003 de Twilio veut dire « téléphone éteint » — voir la contradiction C7
+ * dans `@/lib/deliverability/error-classes`). Confondre les deux, c'est croire
+ * que vingt-trois personnes ont demandé qu'on les laisse tranquilles alors que
+ * cinq seulement l'ont fait.
+ *
+ * La couleur dit donc l'AUTORITÉ, la seule question qui décide si la rangée se
+ * lève ou non :
+ *
+ *  · rouge — LE CONTACT a tranché. Le STOP est absolu (règle 12) : rien dans
+ *    cet écran ne le lève, seul un START venant de lui rouvre la ligne. Même
+ *    octogone d'arrêt que `ATTENTION_LOOK.optout`, qui dit déjà ça partout
+ *    ailleurs dans l'application.
+ *  · violet — NOTRE MACHINE a tranché, et personne ne l'a décidé. La prise
+ *    débranchée plutôt que l'octogone : ce qu'on a débranché se rebranche.
+ *  · bleu — QUELQU'UN D'ICI l'a fait à la main. Le bleu de la parole et la main
+ *    de `CONVERSATION_STATE_LOOK.human` : une décision humaine, réversible.
+ */
+export const SUPPRESSION_LOOK: Record<string, Look> = {
+  sms_stop: { color: SEVERITY_LOOK.block.color, Icon: XOctagonIcon },
+  // Une plainte vient aussi du contact — elle se traite avec le même respect
+  // que le STOP, mais elle n'a pas sa force de loi : elle reste levable.
+  complaint: { color: SEVERITY_LOOK.block.color, Icon: MessageSquareWarningIcon },
+  carrier_error: { color: TONE.machinery, Icon: UnplugIcon },
+  manual: { color: TONE.speech, Icon: HandIcon },
 };
 
 /**

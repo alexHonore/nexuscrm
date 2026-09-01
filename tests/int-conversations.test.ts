@@ -50,6 +50,7 @@ const {
   markConversationHandledAction,
   assignConversationAction,
   retryAiTurnAction,
+  liftSuppressionAction,
   retryFailedSmsAction,
   dismissFailedSmsAction,
 } = await import("@/app/(app)/conversations/actions");
@@ -1083,5 +1084,80 @@ describe("un envoi perdu : réessayer, retirer", () => {
     expect(await retryFailedSmsAction(message.id)).toEqual({ ok: false, error: "forbidden" });
     expect(await dismissFailedSmsAction(message.id)).toEqual({ ok: false, error: "forbidden" });
     expect(await sendJobs()).toHaveLength(0);
+  });
+});
+
+describe("une ligne fermée : la rouvrir, ou pas", () => {
+  /**
+   * Dix-huit des vingt-trois numéros bloqués en production n'ont JAMAIS écrit
+   * STOP : c'est le moteur qui a fermé leur ligne après un refus de
+   * l'opérateur — le code 30003 veut dire « téléphone éteint ». D'où ce geste,
+   * et d'où la seule frontière qui compte ici.
+   */
+  async function blocked(reason: string, phone: string, note: string | null = null) {
+    await testDb.insert(suppressions).values({ phoneE164: phone, reason, note });
+    return phone;
+  }
+
+  it("un refus d'OPÉRATEUR se rétablit — c'est notre moteur qui avait tranché", async () => {
+    await loginAs(admin);
+    const phone = await blocked("carrier_error", "+15145550160", "code 30003");
+
+    expect((await liftSuppressionAction(phone)).ok).toBe(true);
+    const rows = await testDb.select().from(suppressions).where(eq(suppressions.phoneE164, phone));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("un STOP ne se lève JAMAIS, et la rangée SURVIT au refus", async () => {
+    // La garantie de la règle 12, et le test qui compte le plus de ce bloc :
+    // un STOP est la décision du contact, pas un réglage de l'exploitant. Seul
+    // un START venant de lui rouvre la ligne.
+    await loginAs(admin);
+    const phone = await blocked("sms_stop", "+15145550161");
+
+    expect(await liftSuppressionAction(phone)).toEqual({ ok: false, error: "stopIsAbsolute" });
+    const rows = await testDb.select().from(suppressions).where(eq(suppressions.phoneE164, phone));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].reason).toBe("sms_stop");
+  });
+
+  it("le motif et la note sont JOURNALISÉS — la rangée disparaît, la preuve non", async () => {
+    await loginAs(admin);
+    const phone = await blocked("carrier_error", "+15145550162", "code 30003");
+
+    expect((await liftSuppressionAction(phone)).ok).toBe(true);
+
+    const entries = (await testDb.select().from(auditLogs)).filter(
+      (a) => a.action === "sms.lift_suppression",
+    );
+    expect(entries).toHaveLength(1);
+    const detail = entries[0].detail as { reason?: string; note?: string | null };
+    // Sans ces deux champs, plus rien ne dirait CE QUI a été défait : la
+    // rangée qui les portait vient d'être supprimée.
+    expect(detail.reason).toBe("carrier_error");
+    expect(detail.note).toBe("code 30003");
+  });
+
+  it("un téléphoniste ne rouvre pas une ligne — c'est la conduite du moteur", async () => {
+    await loginAs(caller);
+    const phone = await blocked("carrier_error", "+15145550163");
+
+    expect(await liftSuppressionAction(phone)).toEqual({ ok: false, error: "forbidden" });
+    const rows = await testDb.select().from(suppressions).where(eq(suppressions.phoneE164, phone));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("un numéro qui n'est pas fermé répond « introuvable »", async () => {
+    await loginAs(admin);
+    expect(await liftSuppressionAction("+15145550164")).toEqual({ ok: false, error: "notFound" });
+  });
+
+  it("sans session, aucune ligne ne se rouvre", async () => {
+    const phone = await blocked("carrier_error", "+15145550165");
+    await loginAs(null);
+
+    expect(await liftSuppressionAction(phone)).toEqual({ ok: false, error: "forbidden" });
+    const rows = await testDb.select().from(suppressions).where(eq(suppressions.phoneE164, phone));
+    expect(rows).toHaveLength(1);
   });
 });

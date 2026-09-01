@@ -86,6 +86,8 @@
       "waiting": "En attente du client",
       "queue": "File d'envoi",
       "failed": "Échecs",
+      "jobs": "Tâches du moteur",
+      "blocked": "Numéros bloqués",
       "refused": "Refus",
       "all": "Toutes"
     },
@@ -97,6 +99,32 @@
       },
       "turnHint": "L'assistant compose sa réponse — le texte n'existe pas encore.",
       "touchHint": "{campaign} · barreau {step} — le texte sera rédigé à l'envoi."
+    },
+    "jobs": {
+      "type": {
+        "agent_turn": "Réponse de l'assistant",
+        "send_sms": "Envoi d'un SMS",
+        "campaign_touch": "Relance de campagne",
+        "call_transcript": "Note d'appel",
+        "send_ladder": "Envoi d'échelle"
+      },
+      "attempts": "{count, plural, one {# tentative} other {# tentatives}}",
+      "due": "Prévue {when}",
+      "error": "Erreur du moteur",
+      "cap": "Les {shown} plus récentes — {total} au total."
+    },
+    "blocked": {
+      "reason": {
+        "sms_stop": "STOP du contact",
+        "carrier_error": "Fermé par notre moteur",
+        "manual": "Bloqué à la main",
+        "complaint": "Plainte"
+      },
+      "stopHint": "Le contact a répondu STOP. Seul un START venant de lui rouvre la ligne — personne ici ne peut le faire à sa place.",
+      "engineHint": "Le contact n'a rien demandé : notre moteur a fermé la ligne après un refus de l'opérateur. Un téléphone éteint une seule fois suffit à en arriver là.",
+      "lift": "Rétablir",
+      "lifted": "Ligne rétablie — ce numéro peut de nouveau recevoir des SMS.",
+      "stopAbsolute": "Refusé : ce numéro a répondu STOP. Seul un START du contact rouvre la ligne."
     },
     "mine": "Les miennes",
     "sections": {
@@ -162,6 +190,14 @@
       "failed": {
         "title": "Aucun envoi perdu",
         "desc": "Tout ce qui est parti est arrivé — ou attend encore son heure dans la file."
+      },
+      "jobs": {
+        "title": "Aucune tâche en panne",
+        "desc": "Le moteur a mené à terme tout ce qu'on lui a confié. À ne pas confondre avec « Échecs », qui compte les messages refusés par l'opérateur — ici ce sont les travaux du moteur, et la plupart meurent avant qu'un seul mot soit écrit."
+      },
+      "blocked": {
+        "title": "Aucun numéro bloqué",
+        "desc": "Personne n'a répondu STOP, et aucune ligne n'a été fermée après un refus de l'opérateur."
       },
       "refused": {
         "title": "Aucun refus",
@@ -242,8 +278,11 @@
       "closed": "Hors heures de politesse"
     },
     "queue": "{count, plural, one {# tâche en file} other {# tâches en file}}",
-    "failed": "{count, plural, one {# tâche en échec} other {# tâches en échec}}",
-    "suppressed": "{count, plural, one {# désabonné} other {# désabonnés}}"
+    "failed": "{count, plural, one {# tâche du moteur en panne} other {# tâches du moteur en panne}}",
+    "suppressed": "{count, plural, one {# numéro bloqué} other {# numéros bloqués}}",
+    "seeQueue": "Voir la file d'envoi",
+    "seeJobs": "Voir les tâches en échec",
+    "seeBlocked": "Voir les numéros bloqués"
   },
   "error": "Une erreur est survenue",
   "assistant": {

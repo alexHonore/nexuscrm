@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { HUMAN_CLOSED_REASON, UNREACHED_SEND_STATUSES } from "@/components/conversations/state";
@@ -13,6 +13,7 @@ import {
   messages,
   scheduledJobs,
   smsNumbers,
+  suppressions,
 } from "@/db/schema-sms";
 import { UNDELIVERED_STATUSES } from "@/lib/agent/runtime";
 import { logAudit } from "@/lib/audit";
@@ -29,6 +30,8 @@ import {
 } from "@/lib/permissions/server";
 import { cancelPendingJobs, enqueueJob } from "@/lib/jobs/queue";
 import { kickDispatch } from "@/lib/jobs/kick";
+import { normalizePhone } from "@/lib/phone";
+import { detectOptOut } from "@/lib/sms/optout";
 import { analyzeSms } from "@/lib/sms/segments";
 import { setClientCategoryAction } from "../clients/actions";
 
@@ -77,7 +80,10 @@ export type SmsActionResult =
         | "suppressed"
         | "noNumber"
         | "alreadySent"
-        | "assistantUnavailable";
+        | "assistantUnavailable"
+        // Un STOP ne se lève pas depuis une interface (règle 12) : c'est le
+        // seul refus de ce fichier qui n'est pas une question de droits.
+        | "stopIsAbsolute";
     };
 
 const INVALID = { ok: false, error: "invalid" } as const;
@@ -1208,6 +1214,115 @@ export async function dismissFailedSmsAction(messageId: string): Promise<SmsActi
 
   revalidateFor(seen.thread.clientId);
   return { ok: true, id: messageId };
+}
+
+/**
+ * « Rétablir » — rouvrir une ligne que ce CRM s'était fermée à LUI-MÊME.
+ *
+ * La bande d'état annonçait « 23 désabonnés » et aucun écran ne les montrait.
+ * En production, cinq seulement avaient dit STOP : les dix-huit autres portent
+ * la raison `carrier_error`, écrite par NOTRE moteur après un refus de
+ * l'opérateur (`HARD_FAILURE_CODES`, dans `@/lib/sms/status`). Le code 30003 y
+ * figure, et 30003 veut dire « appareil éteint ou hors de portée » — la
+ * contradiction C7 de `@/lib/deliverability/error-classes` le dit depuis
+ * longtemps. Autrement dit : des gens dont le cellulaire était fermé UNE fois
+ * sont devenus injoignables pour toujours, sans que personne ne l'ait décidé.
+ * Cette action est la porte de sortie ; sans elle, la seule issue était
+ * d'effacer une rangée à la main dans la base de production.
+ *
+ * Ce qui ne se lève PAS : le STOP. La règle 12 le tient pour absolu, et seul
+ * un START venant du contact rouvre cette ligne-là. L'écran cache déjà le
+ * bouton sur ces rangées — mais un écran ne garde rien, et c'est la
+ * vérification d'ici qui tient, y compris devant un appel fabriqué à la main.
+ *
+ * La porte est `admin.settings`, le même droit que la bande d'état qui compte
+ * ces numéros : décider que cette entreprise peut de nouveau écrire à
+ * quelqu'un est une conduite de MOTEUR, pas un geste de fil. Et il n'y a pas
+ * de case de fiche à ouvrir en plus, parce qu'il n'y a pas de fiche : une
+ * suppression est une clé de TÉLÉPHONE, écrite pour survivre à l'effacement et
+ * à la ré-importation du client (voir le commentaire de la table). Un numéro
+ * masqué par la case « contact » ne fait donc pas l'aller-retour : normalisé,
+ * il ne correspond à aucune rangée et la réponse est « introuvable » — la
+ * bonne réponse, un « interdit » confirmerait ce que l'écran masque.
+ *
+ * ── Rétablir ne suffit pas à rendre la personne joignable ──────────────────
+ * Deux autres verrous vivent ailleurs, et cet écran n'y touche pas :
+ *  · `clients.doNotCall` — coché depuis la fiche, ou par une disposition
+ *    d'après-appel. Il vaut pour la voix, et pour le SMS dès qu'une campagne
+ *    coche `excludeDoNotCall` (vrai par défaut) : la fiche restera hors
+ *    campagne tant que la case est mise, ligne rétablie ou non. La décocher
+ *    est une décision de la FICHE — on ne bascule pas en silence, depuis la
+ *    boîte de réception, une case que quelqu'un a mise en raccrochant.
+ *  · l'interrupteur général d'envoi (`sms.killSwitch`), qui ne connaît ni les
+ *    numéros ni les fiches.
+ * Un envoi manuel et l'assistant, eux, repartent dès la rangée effacée.
+ */
+export async function liftSuppressionAction(phoneE164: string): Promise<SmsActionResult> {
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("admin.settings")) return FORBIDDEN;
+
+  // Règle 3 : rien n'entre dans un `where` sans passer par la normalisation.
+  // La clé de la table EST l'E.164 ; comparer la chaîne reçue telle quelle
+  // ferait échouer « (418) 476-1542 » sur une rangée qui existe pourtant.
+  const phone = normalizePhone(phoneE164);
+  if (!phone) return INVALID;
+
+  const row = await db.query.suppressions.findFirst({
+    where: eq(suppressions.phoneE164, phone),
+  });
+  // Rangée absente : ou bien elle vient d'être levée par quelqu'un d'autre, ou
+  // bien ce numéro n'a jamais été bloqué. Dans les deux cas l'écran est périmé.
+  if (!row) return NOT_FOUND;
+
+  if (row.reason === "sms_stop") return { ok: false, error: "stopIsAbsolute" };
+
+  // Un STOP peut se cacher DERRIÈRE une autre raison. `suppress()` écrit avec
+  // `onConflictDoNothing` : la PREMIÈRE raison consignée reste, donc un contact
+  // déjà supprimé pour `carrier_error` qui répond STOP ensuite laisse une
+  // rangée qui dit « carrier_error ». Lire la raison ne suffit donc pas à
+  // conclure que personne n'a rien demandé — on relit ce que le contact a
+  // vraiment écrit, avec la MÊME détection que le webhook entrant (mot-clé
+  // exact sur le message entier : « stop it please » n'en est pas un). L'écran
+  // ne peut pas deviner ce cas-là et proposera son bouton : c'est précisément
+  // pourquoi le refus existe et pourquoi son message parle du CONTACT, pas de
+  // la raison inscrite dans la rangée.
+  const inbound = await db
+    .select({ body: messages.body })
+    .from(messages)
+    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+    .where(and(eq(conversations.clientPhone, phone), eq(messages.direction, "in")));
+  if (inbound.some((m) => detectOptOut(m.body).optOut)) {
+    return { ok: false, error: "stopIsAbsolute" };
+  }
+
+  // La condition est REDITE dans le `where` de l'effacement, et c'est elle qui
+  // tient vraiment : entre la lecture ci-dessus et cette ligne, la rangée peut
+  // avoir changé de main. Aucun chemin de ce fichier ne peut effacer un STOP.
+  // `returning` sert au journal : la raison et la note (« code 30003 ») sont la
+  // seule preuve de ce qu'on défait, et elles partent avec la rangée.
+  const [lifted] = await db
+    .delete(suppressions)
+    .where(and(eq(suppressions.phoneE164, phone), ne(suppressions.reason, "sms_stop")))
+    .returning({ reason: suppressions.reason, note: suppressions.note });
+  // Zéro rangée effacée alors qu'on venait d'en lire une : quelqu'un est passé
+  // avant nous. On ne prétend pas avoir rétabli ce qu'un autre a rétabli.
+  if (!lifted) return NOT_FOUND;
+
+  await logAudit({
+    userId: actor.user.id,
+    action: "sms.lift_suppression",
+    entity: "suppression",
+    entityId: phone,
+    // Le numéro est écrit EN ENTIER, contrairement à `sms.carrier_suppression`
+    // qui le masque : là-bas, la rangée `suppressions` restait la référence.
+    // Ici, c'est justement cette rangée qu'on détruit — masquer ne protégerait
+    // personne et effacerait la trace de la ligne qu'on vient de rouvrir.
+    detail: { phoneE164: phone, reason: lifted.reason, note: lifted.note },
+  });
+
+  revalidatePath("/conversations");
+  return { ok: true };
 }
 
 /**

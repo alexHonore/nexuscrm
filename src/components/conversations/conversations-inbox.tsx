@@ -10,6 +10,7 @@ import {
   MessageCircleIcon,
   MoonIcon,
   PencilLineIcon,
+  PlugIcon,
   PowerOffIcon,
   RotateCcwIcon,
   SunIcon,
@@ -29,6 +30,7 @@ import {
   closeHeldConversationsAction,
   dismissFailedSmsAction,
   handBackToAiAction,
+  liftSuppressionAction,
   markConversationHandledAction,
   retryAiTurnAction,
   retryFailedSmsAction,
@@ -39,7 +41,9 @@ import {
   ATTENTION_LOOK,
   CONVERSATION_STATE_LOOK,
   FAILURE_FAMILY_LOOK,
+  JOB_TYPE_LOOK,
   QUEUE_KIND_LOOK,
+  SUPPRESSION_LOOK,
   TOOL_LOOK,
   LookGlyph,
   LookIcon,
@@ -77,6 +81,7 @@ import {
 import { errorCodeText } from "@/lib/deliverability/error-text";
 import { docLocale } from "@/lib/docs/types";
 import { emitDataChange, useDataChange, useVisiblePolling } from "@/lib/live";
+import { formatPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 
 export type InboxRow = {
@@ -195,6 +200,61 @@ export type FailedMessage = {
   categoryOpen?: boolean;
 };
 
+/**
+ * Une tâche du MOTEUR qui a définitivement échoué — `scheduled_jobs.status =
+ * 'failed'`.
+ *
+ * À ne PAS confondre avec `FailedMessage`, malgré le mot commun : là, un texto
+ * est parti et l'opérateur l'a refusé ; ici, rien n'est jamais parti — la tâche
+ * qui devait écrire la réponse, mettre l'envoi en file ou rédiger la note
+ * d'appel est morte avant. Le client n'a rien reçu et n'a rien vu passer.
+ */
+export type FailedJob = {
+  id: string;
+  /** agent_turn | send_sms | campaign_touch | call_transcript | send_ladder */
+  type: string;
+  /** ISO — quand la tâche a été créée. */
+  at: string;
+  /** ISO — l'heure pour laquelle elle était due. */
+  runAt: string;
+  attempts: number;
+  /** Le message d'erreur brut du moteur — jamais traduit, c'est une trace. */
+  lastError: string | null;
+  conversationId: string | null;
+  clientId: string | null;
+  /** Déjà masqué par le serveur quand la case « contact » est fermée. */
+  clientName: string | null;
+  /** Le fil existe ET ce regard peut le conduire : « Réessayer » n'a de sens que là. */
+  retryable: boolean;
+};
+
+/**
+ * Un numéro que ce CRM ne peut plus texter — une rangée de `suppressions`.
+ *
+ * La bande d'état les comptait (« 23 désabonnés ») sans qu'aucun écran ne les
+ * montre, et le mot « désabonné » était faux pour la plupart : en production,
+ * cinq viennent d'un STOP du contact, dix-huit d'un refus d'opérateur que NOTRE
+ * moteur a transformé en fermeture définitive. La rangée dit donc QUI a fermé
+ * la ligne avant de dire quoi que ce soit d'autre.
+ */
+export type BlockedNumber = {
+  /** E.164. Déjà masqué par le serveur quand la case « contact » est fermée. */
+  phone: string;
+  phoneHidden: boolean;
+  /** sms_stop | carrier_error | manual | complaint */
+  reason: string;
+  /** Le détail écrit à la fermeture — « code 30003 ». Jamais traduit. */
+  note: string | null;
+  at: string;
+  clientId: string | null;
+  clientName: string | null;
+  /**
+   * Faux pour 'sms_stop', et le serveur le revérifie : un STOP ne se lève
+   * jamais depuis cet écran (règle 12), seul un START du contact rouvre la ligne.
+   */
+  liftable: boolean;
+};
+
 export type EngineHealth = {
   killSwitch: boolean;
   mode: "live" | "sandbox" | "dry_run";
@@ -205,7 +265,7 @@ export type EngineHealth = {
 };
 
 /**
- * Les SIX vues (demandes d'Alex, 2026-08-25/26, 2026-08-30) :
+ * Les HUIT vues (demandes d'Alex, 2026-08-25/26, 2026-08-30, 2026-09-01) :
  *
  *  · « À traiter » — tout ce qui repose sur un humain : les fils qui
  *    réclament une décision ET ceux qu'un humain tient déjà en main.
@@ -216,21 +276,63 @@ export type EngineHealth = {
  *  · « Échecs » — les textos qui ne sont PAS arrivés. Seule vue faite de
  *    messages et non de fils : trois échecs sur la même fiche sont trois
  *    lignes, parce que c'est le nombre d'envois perdus qu'on vient chercher.
+ *  · « Tâches en échec » — ce que le MOTEUR a abandonné : une réponse jamais
+ *    écrite, un envoi jamais mis en file, une note d'appel jamais rédigée. Le
+ *    mot « échec » est le même que ci-dessus et la chose ne l'est pas — là un
+ *    texto est parti et l'opérateur l'a refusé, ici rien n'est jamais parti.
+ *    La bande d'état annonçait ce nombre (« 175 tâches en échec ») et il ne
+ *    menait NULLE PART : un chiffre qu'aucun écran ne montre ne se vérifie
+ *    pas, il s'endure.
+ *  · « Numéros bloqués » — les lignes que ce CRM ne peut plus texter, et
+ *    surtout QUI les a fermées. « 23 désabonnés » n'était vrai que pour cinq
+ *    d'entre eux ; les dix-huit autres ont été fermés par notre propre moteur
+ *    après un refus d'opérateur. Le second cas se rétablit d'ici, le premier
+ *    jamais (règle 12).
  *  · « Refus » — les non explicites, en deux sections : les DÉSABONNÉS (STOP,
  *    la porte fermée par la loi) et les refus de vive voix, qui ne sont pas
  *    la même chose et n'appellent pas les mêmes gestes.
  *  · « Toutes » — chaque fil, RANGÉ par situation, avec un en-tête par
  *    groupe — pas une pile plate à déchiffrer.
  */
-type Tab = "attention" | "waiting" | "queue" | "failed" | "refused" | "all";
-const TABS: Tab[] = ["attention", "waiting", "queue", "failed", "refused", "all"];
+type Tab =
+  | "attention"
+  | "waiting"
+  | "queue"
+  | "failed"
+  | "jobs"
+  | "blocked"
+  | "refused"
+  | "all";
+const TABS: Tab[] = [
+  "attention",
+  "waiting",
+  "queue",
+  "failed",
+  "jobs",
+  "blocked",
+  "refused",
+  "all",
+];
 
 /**
- * Les vues faites de MESSAGES et non de fils : « les miennes » (qui filtre sur
- * le titulaire d'un fil) n'y veut rien dire, et un bouton qui ne fait rien est
- * pire qu'un bouton absent.
+ * Les vues faites de MESSAGES, de TÂCHES ou de NUMÉROS — pas de fils :
+ * « les miennes » (qui filtre sur le titulaire d'un fil) n'y veut rien dire, et
+ * un bouton qui ne fait rien est pire qu'un bouton absent.
  */
-const THREADLESS_TABS: Tab[] = ["queue", "failed"];
+const THREADLESS_TABS: Tab[] = ["queue", "failed", "jobs", "blocked"];
+
+/**
+ * Les vues qui parlent du MOTEUR et non du travail d'un téléphoniste : ce qui
+ * attend son heure, ce qui est mort en route, à qui on ne peut plus écrire.
+ * Elles suivent le droit `admin.settings` (voir `InboxAbilities.engine`), comme
+ * la bande d'état qui en annonce les chiffres — le serveur ne calcule même pas
+ * ces listes pour les autres, et un onglet qui s'ouvre sur du vide est pire
+ * qu'un onglet absent.
+ */
+const ENGINE_TABS: Tab[] = ["queue", "jobs", "blocked"];
+
+/** Les vues faites de FILS — les seules où « les miennes » et les états ont un sens. */
+type ThreadTab = Exclude<Tab, "all" | "queue" | "failed" | "jobs" | "blocked">;
 
 /**
  * Ce que CE regard peut faire ici — un droit par geste, plus deux rôles en dur.
@@ -283,10 +385,11 @@ const NO_ABILITIES: InboxAbilities = {
 };
 
 /**
- * Quels états chaque vue montre. `all` les montre tous, en sections ; `queue`
- * et `failed` ont leur propre matière (des envois, pas des fils).
+ * Quels états chaque vue montre. `all` les montre tous, en sections ; les vues
+ * sans fil (`THREADLESS_TABS`) ont leur propre matière — des envois, des tâches
+ * du moteur, des numéros fermés.
  */
-const TAB_STATES: Record<Exclude<Tab, "all" | "queue" | "failed">, ConversationState[]> = {
+const TAB_STATES: Record<ThreadTab, ConversationState[]> = {
   attention: ["attention", "human"],
   waiting: ["ai"],
   refused: ["refused"],
@@ -334,6 +437,9 @@ export function ConversationsInbox({
   queue = [],
   failures = [],
   failuresTotal,
+  jobs = [],
+  jobsTotal,
+  blocked = [],
   categories = [],
   currentUserId,
   health,
@@ -351,6 +457,16 @@ export function ConversationsInbox({
    * des envois perdus. Non dit vaut « rien de caché ».
    */
   failuresTotal?: number;
+  /** Les tâches que le moteur a abandonnées (voir `FailedJob`). */
+  jobs?: FailedJob[];
+  /**
+   * Combien de tâches ont échoué EN TOUT — même discipline que `failuresTotal`,
+   * et le même chiffre que la bande d'état annonce. Une liste bornée à cent
+   * sous une pastille qui dit cent jurerait qu'il n'y en a jamais eu plus.
+   */
+  jobsTotal?: number;
+  /** Les numéros que ce CRM ne peut plus texter (voir `BlockedNumber`). */
+  blocked?: BlockedNumber[];
   currentUserId: string;
   /** `null` sans le droit `admin.settings` : la donnée n'est pas envoyée. */
   health: EngineHealth | null;
@@ -368,9 +484,21 @@ export function ConversationsInbox({
   // Un onglet qu'on n'a pas le droit d'ouvrir ne s'ouvre pas, même demandé par
   // la propriété : on retombe sur « à traiter ».
   const [tab, setTab] = useState<Tab>(
-    initialTab === "queue" && !abilities.engine ? "attention" : initialTab,
+    ENGINE_TABS.includes(initialTab) && !abilities.engine ? "attention" : initialTab,
   );
   const [mineOnly, setMineOnly] = useState(false);
+
+  /**
+   * Changer de vue — depuis le rail des onglets comme depuis la bande d'état.
+   *
+   * Le décrochage de « les miennes » vit ICI et pas dans le bouton : la bande
+   * d'état ouvre les mêmes vues, et un filtre resté allumé sans bouton pour le
+   * voir ni l'éteindre est exactement le défaut qu'on avait corrigé au rail.
+   */
+  const openTab = (key: Tab) => {
+    setTab(key);
+    if (THREADLESS_TABS.includes(key)) setMineOnly(false);
+  };
 
   useDataChange(["sms"], () => router.refresh());
   useVisiblePolling(POLL_MS, () => router.refresh());
@@ -383,11 +511,13 @@ export function ConversationsInbox({
     [rows, mineOnly, currentUserId],
   );
 
-  // Les onglets suivent les droits : la file d'envoi n'existe que pour qui
-  // conduit le moteur — sans elle, l'onglet s'ouvrirait sur du vide.
-  const tabs = useMemo(() => TABS.filter((k) => k !== "queue" || abilities.engine), [
-    abilities.engine,
-  ]);
+  // Les onglets suivent les droits : la file d'envoi, les tâches mortes et les
+  // numéros fermés n'existent que pour qui conduit le moteur — sans eux, les
+  // onglets s'ouvriraient sur du vide.
+  const tabs = useMemo(
+    () => TABS.filter((k) => !ENGINE_TABS.includes(k) || abilities.engine),
+    [abilities.engine],
+  );
 
   const byState = useMemo(() => {
     const groups: Record<ConversationState, InboxRow[]> = {
@@ -417,10 +547,17 @@ export function ConversationsInbox({
       // n'est à personne, et un envoi perdu n'appartient plus à personne.
       queue: queue.length,
       failed: failuresTotal ?? failures.length,
+      // Le compte des tâches mortes est celui de TOUTES, pas des cent
+      // dessinées : c'est le chiffre de la bande d'état, et c'est sur lui
+      // qu'on décide s'il faut rejouer quelque chose.
+      jobs: jobsTotal ?? jobs.length,
+      // Les numéros fermés ne sont pas bornés : la liste EST le compte (une
+      // rangée par téléphone, la table est petite par construction).
+      blocked: blocked.length,
       refused: byState.refused.length,
       all: base.length,
     }),
-    [byState, base, queue, failures, failuresTotal],
+    [byState, base, queue, failures, failuresTotal, jobs, jobsTotal, blocked],
   );
 
   /**
@@ -436,7 +573,7 @@ export function ConversationsInbox({
   const mineCount = useMemo(() => {
     if (THREADLESS_TABS.includes(tab)) return 0;
     const shown = new Set<ConversationState>(
-      tab === "all" ? ALL_SECTIONS : TAB_STATES[tab as Exclude<Tab, "all" | "queue" | "failed">],
+      tab === "all" ? ALL_SECTIONS : TAB_STATES[tab as ThreadTab],
     );
     return rows.filter(
       (r) => r.assignedToId === currentUserId && shown.has(conversationStateOf(r)),
@@ -588,9 +725,14 @@ export function ConversationsInbox({
   // « Réessayer » : rejouer le tour d'UN fil en panne — entrants rouverts,
   // ouverture de campagne remise en file, IA remise en selle. Le toast dit
   // honnêtement si quelque chose est reparti.
-  const retry = (row: InboxRow) =>
+  //
+  // Le geste ne connaît que le FIL, jamais la carte d'où l'on part : la même
+  // panne se répare depuis la boîte (une rangée d'attention) ou depuis les
+  // tâches mortes (le `agent_turn` qui n'a jamais rendu son texte). Deux
+  // chemins vers une seule action, et donc un seul comportement à tenir.
+  const retryTurn = (conversationId: string) =>
     act(async () => {
-      const result = await retryAiTurnAction(row.id);
+      const result = await retryAiTurnAction(conversationId);
       if (!result.ok) {
         toast.error(
           result.error === "assistantUnavailable" ? t("thread.assistantUnavailable") : t("error"),
@@ -601,6 +743,9 @@ export function ConversationsInbox({
       else toast.info(t("inbox.retriedNothing"));
       return true;
     });
+
+  /** Le même geste depuis une carte de fil — elle ne connaît que sa rangée. */
+  const retry = (row: InboxRow) => retryTurn(row.id);
 
   // « Je réponds » : prendre le fil (IA coupée, fil attribué) et atterrir
   // directement dans la zone de rédaction de la fiche. La pastille « à
@@ -711,6 +856,58 @@ export function ConversationsInbox({
       return true;
     });
 
+  /**
+   * « Rétablir » — rouvrir une ligne que ce CRM s'était fermée à LUI-MÊME.
+   *
+   * Le refus qui compte est celui du serveur, pas la couleur de la rangée : une
+   * suppression écrite « carrier_error » peut cacher un STOP arrivé après coup
+   * (`suppress()` garde la PREMIÈRE raison), et l'action relit alors ce que le
+   * contact a vraiment écrit. D'où un message d'échec qui parle du CONTACT et
+   * non de la raison affichée — c'est le seul cas où l'écran a promis un geste
+   * de bonne foi et où le serveur a raison de le refuser.
+   */
+  const liftSuppression = (item: BlockedNumber) =>
+    act(async () => {
+      const result = await liftSuppressionAction(item.phone);
+      if (!result.ok) {
+        toast.error(
+          result.error === "stopIsAbsolute" ? t("inbox.blocked.stopAbsolute") : t("error"),
+        );
+        // « Introuvable » veut dire que la rangée a déjà été levée par
+        // quelqu'un d'autre : l'écran est périmé et doit cesser de la montrer.
+        return result.error === "notFound";
+      }
+      toast.success(t("inbox.blocked.lifted"));
+      return true;
+    });
+
+  /**
+   * Rejouer le fil derrière une TÂCHE morte.
+   *
+   * Le même geste que « Réessayer » sur une panne de la vue « à traiter », mais
+   * pris par l'autre bout : là-bas on part du fil, ici on part de la tâche qui
+   * l'a laissé sans réponse. C'est la même action serveur — deux façons
+   * d'atteindre une réparation ne doivent pas en être deux versions.
+   *
+   * N'a de sens que pour un tour d'assistant : un envoi mort se rejoue depuis
+   * « Échecs » (où le texte existe), et une note d'appel ne se rattrape pas
+   * d'ici. `item.retryable` porte déjà cette règle, case de la fiche comprise.
+   */
+  const retryJob = (item: FailedJob) =>
+    act(async () => {
+      if (!item.conversationId) return false;
+      const result = await retryAiTurnAction(item.conversationId);
+      if (!result.ok) {
+        toast.error(
+          result.error === "assistantUnavailable" ? t("thread.assistantUnavailable") : t("error"),
+        );
+        return false;
+      }
+      if (result.relaunched) toast.success(t("inbox.retried"));
+      else toast.info(t("inbox.retriedNothing"));
+      return true;
+    });
+
   // Après une panne de modèle, les tours morts ne repartent pas seuls : ce
   // bouton rejoue tout ce qui peut l'être (réponses, ouvertures de campagne,
   // entrants orphelins). Idempotent — le presser « pour rien » ne fait rien.
@@ -763,7 +960,7 @@ export function ConversationsInbox({
 
   return (
     <div className="space-y-4">
-      {health ? <HealthStrip health={health} /> : null}
+      {health ? <HealthStrip health={health} onSelectTab={openTab} /> : null}
 
       {/*
         Le rail des vues. Sur écran large il tient sur une ligne et ne bouge
@@ -990,6 +1187,40 @@ export function ConversationsInbox({
               {t("inbox.failedCap", { shown: failures.length, total: counts.failed })}
             </p>
           ) : null}
+        </div>
+      ) : tab === "jobs" ? (
+        <div className="space-y-2">
+          {jobs.map((item) => (
+            <FailedJobRowCard
+              key={item.id}
+              item={item}
+              pending={pending}
+              canRetry={abilities.control}
+              onRetry={retryJob}
+              dfnsLocale={dfnsLocale}
+            />
+          ))}
+          {/* Cent au plus, et le compte annoncé est celui de la bande d'état :
+              quand les deux diffèrent, c'est la bande qu'on a lue avant de
+              cliquer, et la liste doit dire pourquoi elle est plus courte. */}
+          {counts.jobs > jobs.length ? (
+            <p className="pt-1 text-center text-xs text-muted-foreground">
+              {t("inbox.jobs.cap", { shown: jobs.length, total: counts.jobs })}
+            </p>
+          ) : null}
+        </div>
+      ) : tab === "blocked" ? (
+        <div className="space-y-2">
+          {blocked.map((item) => (
+            <BlockedNumberRowCard
+              key={item.phone}
+              item={item}
+              pending={pending}
+              canLift={abilities.engine}
+              onLift={liftSuppression}
+              dfnsLocale={dfnsLocale}
+            />
+          ))}
         </div>
       ) : tab === "refused" ? (
         // Deux sections, pas une pile : un désabonnement ferme la porte à clé,
@@ -1706,7 +1937,269 @@ function FailureRowCard({
   );
 }
 
-function HealthStrip({ health }: { health: EngineHealth }) {
+/**
+ * Une ligne de la vue « Tâches en échec » — un travail que le moteur a
+ * définitivement abandonné.
+ *
+ * La bande d'état annonçait « 175 tâches en échec » et ne menait NULLE PART.
+ * Pire : le mot « échec » y désignait autre chose que dans l'onglet « Échecs »
+ * juste à côté, qui compte les textos refusés par l'opérateur. Deux nombres
+ * très différents (175 et 50) sous le même mot, et rien pour les départager —
+ * on finit par croire que quarante messages se sont évaporés.
+ *
+ * Une TÂCHE n'est pas un message : c'est le travail du moteur — composer une
+ * réponse, remettre un texto, rédiger une note d'appel. La plupart meurent
+ * AVANT qu'un seul mot soit écrit ; c'est pour ça qu'elles ne pouvaient pas
+ * figurer dans une liste d'envois perdus.
+ *
+ * `lastError` est rendu TEL QUEL : c'est la trace du moteur, celle qu'on colle
+ * dans une recherche. La traduire la rendrait introuvable le jour où on la
+ * cherche.
+ */
+function FailedJobRowCard({
+  item,
+  pending,
+  canRetry,
+  onRetry,
+  dfnsLocale,
+}: {
+  item: FailedJob;
+  pending: boolean;
+  /** Rejouer un tour remet l'assistant aux commandes — `conversations.control`. */
+  canRetry: boolean;
+  onRetry: (item: FailedJob) => void;
+  dfnsLocale: typeof fr;
+}) {
+  const t = useTranslations("conversations");
+  // Un type que le moteur inventera demain ne doit pas faire une pastille
+  // muette : la famille « panne » parle à sa place, et le type brut s'affiche.
+  const look = JOB_TYPE_LOOK[item.type] ?? ATTENTION_KIND_LOOK.engine;
+  const label = t.has(`inbox.jobs.type.${item.type}`)
+    ? t(`inbox.jobs.type.${item.type}` as never)
+    : item.type;
+  const showRetry = canRetry && item.retryable;
+
+  return (
+    <article className="relative flex items-start gap-3 rounded-xl border bg-card p-3 shadow-xs transition-colors md:p-4 hover:border-ring/60 hover:bg-accent/40">
+      {item.clientId ? (
+        <Link
+          href={`/clients/${item.clientId}`}
+          className="absolute inset-0 rounded-xl"
+          aria-label={`${t("inbox.open")} — ${item.clientName ?? label}`}
+        />
+      ) : null}
+
+      <LookIcon look={look} className="mt-0.5" />
+
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <Badge variant="outline" className="gap-1 font-normal" style={lookTint(look)}>
+            <look.Icon aria-hidden />
+            {label}
+          </Badge>
+          {/* Le nom quand la tâche parle d'une fiche, le mot du masque quand
+              elle en parle mais qu'elle échappe à ce regard, RIEN quand elle ne
+              nomme personne — un balayage d'enregistrement n'a pas de client. */}
+          {item.clientName ? (
+            <span className="truncate text-sm font-semibold">{item.clientName}</span>
+          ) : null}
+          <span className="flex-1" />
+          <span className="text-xs whitespace-nowrap text-muted-foreground">
+            <RelativeTime date={item.runAt} locale={dfnsLocale} />
+          </span>
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          {t("inbox.jobs.attempts", { count: item.attempts })}
+        </p>
+
+        {/* La trace brute. Bridée en largeur ET coupée à deux lignes : un
+            message d'erreur du moteur peut faire trois cents caractères, et
+            sur un téléphone il pousserait la carte hors de l'écran. */}
+        {item.lastError ? (
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium text-destructive">{t("inbox.jobs.error")}</p>
+            <p className="line-clamp-2 font-mono text-[11px] break-all text-muted-foreground">
+              {item.lastError}
+            </p>
+          </div>
+        ) : null}
+
+        {showRetry ? (
+          <div className="flex flex-wrap items-center gap-2 pt-0.5">
+            <span className="flex-1" />
+            <Button
+              variant="outline"
+              size="sm"
+              className="relative z-10 min-h-11 md:min-h-8"
+              disabled={pending}
+              onClick={() => onRetry(item)}
+            >
+              <RotateCcwIcon aria-hidden /> {t("inbox.actions.retry")}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+/**
+ * Une ligne de la vue « Numéros bloqués » — un numéro que ce CRM ne peut plus
+ * texter.
+ *
+ * La bande d'état disait « 23 désabonnés », et le mot était faux pour dix-huit
+ * d'entre eux. Cinq ont écrit STOP ; les dix-huit autres ont été fermés par
+ * NOTRE moteur après un refus de l'opérateur — et le code 30003, qui veut dire
+ * « téléphone éteint », suffit à en arriver là. Autrement dit : dix-huit
+ * personnes que personne n'a jamais décidé d'abandonner.
+ *
+ * D'où la seule distinction que cette carte doit rendre évidente — QUI a fermé
+ * la ligne :
+ *
+ *  · le CONTACT (STOP) — absolu (règle 12). Aucun bouton, pas même désactivé :
+ *    un bouton grisé invite au clic et n'explique rien. La phrase le dit.
+ *  · NOUS (refus d'opérateur, fermeture à la main) — ce qui a été décidé de ce
+ *    côté-ci se défait de ce côté-ci, et « Rétablir » est là pour ça.
+ *
+ * Le serveur revérifie : `liftSuppressionAction` refuse un STOP quoi qu'affiche
+ * l'écran.
+ */
+function BlockedNumberRowCard({
+  item,
+  pending,
+  canLift,
+  onLift,
+  dfnsLocale,
+}: {
+  item: BlockedNumber;
+  pending: boolean;
+  /** Rouvrir une ligne fermée est une conduite du moteur — `admin.settings`. */
+  canLift: boolean;
+  onLift: (item: BlockedNumber) => void;
+  dfnsLocale: typeof fr;
+}) {
+  const t = useTranslations("conversations");
+  const tAccess = useTranslations("clients");
+  // Un motif hors catalogue garde l'image générique de la ligne fermée plutôt
+  // que d'emprunter celle d'un autre motif : dire « bloqué à la main » d'une
+  // fermeture qu'on ne sait pas expliquer serait accuser quelqu'un.
+  const look = SUPPRESSION_LOOK[item.reason] ?? ATTENTION_LOOK.optout;
+  const label = t.has(`inbox.blocked.reason.${item.reason}`)
+    ? t(`inbox.blocked.reason.${item.reason}` as never)
+    : item.reason;
+  const isStop = item.reason === "sms_stop";
+  const showLift = canLift && item.liftable;
+
+  return (
+    <article className="relative flex items-start gap-3 rounded-xl border bg-card p-3 shadow-xs transition-colors md:p-4 hover:border-ring/60 hover:bg-accent/40">
+      {item.clientId ? (
+        <Link
+          href={`/clients/${item.clientId}`}
+          className="absolute inset-0 rounded-xl"
+          aria-label={`${t("inbox.open")} — ${item.clientName ?? item.phone}`}
+        />
+      ) : null}
+
+      <LookIcon look={look} className="mt-0.5" />
+
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {item.phoneHidden ? (
+            <span
+              title={tAccess("access.maskedHint")}
+              className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+            >
+              <EyeOffIcon aria-hidden className="size-3" />
+              {tAccess("access.masked")}
+            </span>
+          ) : (
+            <span className="text-sm font-semibold">{formatPhone(item.phone)}</span>
+          )}
+          {item.clientName ? (
+            <span className="truncate text-sm text-muted-foreground">{item.clientName}</span>
+          ) : null}
+          <Badge variant="outline" className="gap-1 font-normal" style={lookTint(look)}>
+            <look.Icon aria-hidden />
+            {label}
+          </Badge>
+          <span className="flex-1" />
+          <span className="text-xs whitespace-nowrap text-muted-foreground">
+            <RelativeTime date={item.at} locale={dfnsLocale} />
+          </span>
+        </div>
+
+        {/* La phrase qui dit QUI a fermé — et seulement quand on le sait. Un
+            blocage manuel ou une plainte portent déjà leur motif dans la
+            pastille ; leur coller l'explication du moteur mentirait. */}
+        {isStop ? (
+          <p className="text-xs text-muted-foreground">{t("inbox.blocked.stopHint")}</p>
+        ) : item.reason === "carrier_error" ? (
+          <p className="text-xs text-muted-foreground">{t("inbox.blocked.engineHint")}</p>
+        ) : null}
+
+        {/* Le détail écrit à la fermeture (« code 30003 ») : la trace, jamais
+            traduite — c'est elle qui permet de remonter au refus d'origine. */}
+        {item.note ? (
+          <p className="font-mono text-[11px] break-all text-muted-foreground">{item.note}</p>
+        ) : null}
+
+        {showLift ? (
+          <div className="flex flex-wrap items-center gap-2 pt-0.5">
+            <span className="flex-1" />
+            <Button
+              variant="outline"
+              size="sm"
+              className="relative z-10 min-h-11 md:min-h-8"
+              disabled={pending}
+              onClick={() => onLift(item)}
+            >
+              <PlugIcon aria-hidden /> {t("inbox.blocked.lift")}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+/**
+ * La bande d'état — et, depuis peu, la PORTE de ce qu'elle compte.
+ *
+ * Elle annonçait « 0 tâche en file · 175 tâches en échec · 23 désabonnés » sans
+ * qu'aucun de ces trois chiffres ne mène nulle part. Un nombre qu'on ne peut
+ * pas ouvrir ne se vérifie pas : il s'endure. Et deux d'entre eux étaient même
+ * trompeurs — « échec » ne voulait pas dire la même chose ici et dans l'onglet
+ * voisin, « désabonnés » nommait le contact alors que la machine avait tranché
+ * pour dix-huit d'entre eux.
+ *
+ * Chaque chiffre devient donc un vrai bouton vers sa liste. Il reste écrit
+ * comme du texte — c'est une bande, pas une barre d'outils — mais il se tabule,
+ * il s'annonce, et il offre au pouce les 44 px de la règle 6 sans grossir la
+ * ligne (le remplissage déborde sous la bande, invisible mais cliquable).
+ *
+ * Un compte à zéro n'est PAS un bouton : ouvrir une vue vide n'apprend rien.
+ */
+/**
+ * Un chiffre de la bande qui s'OUVRE.
+ *
+ * Il doit rester du texte à l'œil — une bande d'état pleine de liens se lirait
+ * comme un menu — et faire 44 px au pouce (règle 6). Le remplissage déborde
+ * donc de la ligne au lieu de la faire grandir : `-my-3.5 py-3.5` autour d'un
+ * texte de 16 px de haut donne exactement 44, sans déplacer un seul pixel de
+ * la bande.
+ */
+const STRIP_LINK =
+  "-my-3.5 -mx-1 rounded px-1 py-3.5 underline-offset-4 hover:underline " +
+  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
+
+function HealthStrip({
+  health,
+  onSelectTab,
+}: {
+  health: EngineHealth;
+  onSelectTab: (tab: Tab) => void;
+}) {
   const t = useTranslations("conversations");
   // Deux états méritent une ALERTE, pas une pastille : rien ne part, ou rien
   // ne part pour de vrai. Les confondre avec « 12 en file » serait les noyer.
@@ -1744,13 +2237,40 @@ function HealthStrip({ health }: { health: EngineHealth }) {
           )}
           {t(health.sendWindowOpen ? "health.quiet.open" : "health.quiet.closed")}
         </span>
-        <span>{t("health.queue", { count: health.queued })}</span>
+        {health.queued > 0 ? (
+          <button
+            type="button"
+            aria-label={t("health.seeQueue")}
+            onClick={() => onSelectTab("queue")}
+            className={STRIP_LINK}
+          >
+            {t("health.queue", { count: health.queued })}
+          </button>
+        ) : (
+          <span>{t("health.queue", { count: health.queued })}</span>
+        )}
         {health.failed > 0 ? (
-          <span className="font-medium text-destructive">
+          <button
+            type="button"
+            aria-label={t("health.seeJobs")}
+            onClick={() => onSelectTab("jobs")}
+            className={cn(STRIP_LINK, "font-medium text-destructive")}
+          >
             {t("health.failed", { count: health.failed })}
-          </span>
+          </button>
         ) : null}
-        <span>{t("health.suppressed", { count: health.suppressed })}</span>
+        {health.suppressed > 0 ? (
+          <button
+            type="button"
+            aria-label={t("health.seeBlocked")}
+            onClick={() => onSelectTab("blocked")}
+            className={STRIP_LINK}
+          >
+            {t("health.suppressed", { count: health.suppressed })}
+          </button>
+        ) : (
+          <span>{t("health.suppressed", { count: health.suppressed })}</span>
+        )}
       </div>
     </div>
   );

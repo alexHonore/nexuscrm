@@ -394,7 +394,7 @@ describe("boîte de réception", () => {
 
   it("§ un téléphoniste ne voit ni la santé du moteur ni la file d'envoi", () => {
     // La bande d'état et la file disent ce qui attend, ce qui a échoué et
-    // combien de numéros se sont désabonnés : la conduite de l'entreprise, pas
+    // combien de numéros sont bloqués : la conduite de l'entreprise, pas
     // le travail d'un téléphoniste. Le serveur ne les lui envoie pas
     // (`health: null`) — l'écran ne doit pas non plus lui offrir l'onglet.
     const html = wrap(
@@ -407,7 +407,7 @@ describe("boîte de réception", () => {
       }),
     );
     expect(html).not.toContain("File d'envoi".replace(/'/g, "&#x27;"));
-    expect(html).not.toContain("désabonnés");
+    expect(html).not.toContain("numéros bloqués");
     expect(html).not.toContain("en file");
     expect(html).not.toContain("en échec");
     // Son travail à lui, en revanche, est intact.
@@ -477,7 +477,7 @@ describe("boîte de réception", () => {
       }),
     );
     expect(html).toContain("File d'envoi".replace(/'/g, "&#x27;"));
-    expect(html).toContain("désabonnés");
+    expect(html).toContain("numéros bloqués");
   });
 
   it("l'interrupteur coupé est une ALERTE, pas une pastille", () => {

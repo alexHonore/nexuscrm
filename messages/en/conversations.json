@@ -106,6 +106,14 @@
       "queue": {
         "title": "Queue is empty",
         "desc": "No scheduled send, no reply in preparation, no planned follow-up."
+      },
+      "jobs": {
+        "title": "No crashed task",
+        "desc": "The engine carried through everything it was handed. Not to be confused with \"Failures\", which counts the messages the carrier refused — these are the engine's own jobs, and most die before a single word is written."
+      },
+      "blocked": {
+        "title": "No blocked number",
+        "desc": "Nobody replied STOP, and no line was closed after a carrier refusal."
       }
     },
     "reason": {
@@ -165,7 +173,9 @@
       "refused": "Refusals",
       "all": "All",
       "queue": "Send queue",
-      "failed": "Failures"
+      "failed": "Failures",
+      "jobs": "Engine tasks",
+      "blocked": "Blocked numbers"
     },
     "mine": "Mine",
     "sections": {
@@ -224,6 +234,32 @@
       "turnHint": "The assistant is composing its reply — the text does not exist yet.",
       "touchHint": "{campaign} · rung {step} — the text will be written at send time."
     },
+    "jobs": {
+      "type": {
+        "agent_turn": "Assistant reply",
+        "send_sms": "SMS send",
+        "campaign_touch": "Campaign follow-up",
+        "call_transcript": "Call note",
+        "send_ladder": "Ladder send"
+      },
+      "attempts": "{count, plural, one {# attempt} other {# attempts}}",
+      "due": "Due {when}",
+      "error": "Engine error",
+      "cap": "The {shown} most recent — {total} in all."
+    },
+    "blocked": {
+      "reason": {
+        "sms_stop": "STOP from the contact",
+        "carrier_error": "Closed by our engine",
+        "manual": "Blocked by hand",
+        "complaint": "Complaint"
+      },
+      "stopHint": "The contact replied STOP. Only a START from them reopens the line — nobody here can do it in their place.",
+      "engineHint": "The contact asked for nothing: our engine closed the line after a carrier refusal. A phone switched off once is enough to end up here.",
+      "lift": "Restore",
+      "lifted": "Line restored — this number can receive texts again.",
+      "stopAbsolute": "Refused: this number replied STOP. Only a START from the contact reopens the line."
+    },
     "classified": "Client classified."
   },
   "health": {
@@ -242,8 +278,11 @@
       "closed": "Outside quiet hours"
     },
     "queue": "{count, plural, one {# queued task} other {# queued tasks}}",
-    "failed": "{count, plural, one {# failed task} other {# failed tasks}}",
-    "suppressed": "{count, plural, one {# unsubscribed number} other {# unsubscribed numbers}}"
+    "failed": "{count, plural, one {# engine task crashed} other {# engine tasks crashed}}",
+    "suppressed": "{count, plural, one {# blocked number} other {# blocked numbers}}",
+    "seeQueue": "See the send queue",
+    "seeJobs": "See the failed tasks",
+    "seeBlocked": "See the blocked numbers"
   },
   "error": "Something went wrong",
   "assistant": {

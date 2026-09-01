@@ -3,6 +3,8 @@ import { MessageCircle } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import {
   ConversationsInbox,
+  type BlockedNumber,
+  type FailedJob,
   type FailedMessage,
   type InboxRow,
   type QueueItem,
@@ -57,6 +59,13 @@ import { DEFAULT_QUIET_HOURS, isWithinSendWindow } from "@/lib/sms/quiet-hours";
  */
 /** Combien d'envois perdus la vue « Échecs » dessine — elle DIT ce qu'elle coupe. */
 const FAILURES_SHOWN = 100;
+/**
+ * Même discipline pour les tâches mortes du MOTEUR : la liste est bornée aux
+ * plus récentes et le compte réel voyage à part (`jobsTotal`). Une liste qui
+ * s'arrête à cent sans le dire jurerait qu'il n'y a jamais eu plus de cent
+ * pannes — et c'est précisément le nombre que la bande d'état annonce.
+ */
+const JOBS_SHOWN = 100;
 
 export default async function ConversationsPage() {
   const actor = await requirePerm("conversations.view");
@@ -296,7 +305,7 @@ export default async function ConversationsPage() {
         ),
       )
     : undefined;
-  const [sendJobs, turnJobs, upcomingTouches] = canEngine
+  const [sendJobs, turnJobs, upcomingTouches, failedJobRows] = canEngine
     ? await Promise.all([
     db
       .select({ id: scheduledJobs.id, runAt: scheduledJobs.runAt, payload: scheduledJobs.payload })
@@ -325,13 +334,42 @@ export default async function ConversationsPage() {
       .where(touchesWhere)
       .orderBy(asc(campaignEnrollments.nextTouchAt))
       .limit(100),
+    // ── Ce que le moteur a définitivement ABANDONNÉ ──────────────────────
+    // La bande d'état annonce ce nombre depuis toujours (« 175 tâches en
+    // échec ») et il ne menait NULLE PART : un chiffre sans écran derrière
+    // ne se vérifie pas, il s'endure. La liste part d'ici, dans le même
+    // aller-retour que la file d'envoi — la page en fait déjà beaucoup.
+    //
+    // Pas de jointure sur les fiches : une tâche est une rangée du MOTEUR.
+    // Un balayage d'enregistrement ou un barreau de campagne ne cite aucun
+    // fil, et une panne qu'on cacherait faute de fiche resterait une panne.
+    //
+    // Tri par heure DUE décroissante : à l'abandon définitif, `failJob` ne
+    // retouche pas `run_at`, qui porte donc l'heure de la dernière
+    // tentative — « les échecs les plus récents d'abord », et l'index
+    // (statut, heure due) rend la coupe à cent gratuite.
+    db
+      .select({
+        id: scheduledJobs.id,
+        type: scheduledJobs.type,
+        at: scheduledJobs.createdAt,
+        runAt: scheduledJobs.runAt,
+        attempts: scheduledJobs.attempts,
+        lastError: scheduledJobs.lastError,
+        payload: scheduledJobs.payload,
+      })
+      .from(scheduledJobs)
+      .where(eq(scheduledJobs.status, "failed"))
+      .orderBy(desc(scheduledJobs.runAt))
+      .limit(JOBS_SHOWN),
       ])
-    : [[], [], []];
+    : [[], [], [], []];
 
-  // Les jobs ne portent qu'un conversationId : résoudre le client une fois.
+  // Les jobs ne portent qu'un conversationId : résoudre le client une fois —
+  // ceux qui attendent leur tour comme ceux qui ont échoué, en une requête.
   const jobConversationIds = [
     ...new Set(
-      [...sendJobs, ...turnJobs]
+      [...sendJobs, ...turnJobs, ...failedJobRows]
         .map((j) => (j.payload as { conversationId?: string }).conversationId)
         .filter((id): id is string => typeof id === "string"),
     ),
@@ -415,8 +453,52 @@ export default async function ConversationsPage() {
     ),
   ].sort((a, b) => Date.parse(a.when) - Date.parse(b.when));
 
+  // Une tâche morte ne DISPARAÎT pas quand sa fiche échappe à ce regard — au
+  // contraire de la file d'envoi juste au-dessus, qui montre le texte du
+  // message et n'a donc rien à dire sans lui. Ici le compte annoncé par la
+  // bande d'état est celui de TOUTES les tâches en échec : une liste qui en
+  // escamoterait la moitié sous ce total dirait le contraire de ce qu'elle
+  // montre (règle 13). La rangée reste donc, et c'est le NOM qui se ferme.
+  const jobs: FailedJob[] = failedJobRows.map((job): FailedJob => {
+    // `agent_turn` et `send_sms` portent le fil dans leur charge utile ;
+    // `campaign_touch` (une inscription) et `call_transcript` (un appel) n'en
+    // portent pas — ces tâches-là ne nomment personne, et c'est correct.
+    const wanted = (job.payload as { conversationId?: string }).conversationId ?? null;
+    // `threadById` est BORNÉ par la visibilité (requête ci-dessus) : un fil
+    // demandé qui n'en revient pas est un fil que ce regard ne tient pas.
+    const thread = wanted ? threadById.get(wanted) : undefined;
+    const open = thread ? grantsOfHolder(thread.holderId) : null;
+    return {
+      id: job.id,
+      type: job.type,
+      at: job.at.toISOString(),
+      runAt: job.runAt.toISOString(),
+      attempts: job.attempts,
+      // La trace du moteur, telle quelle : traduire un message d'erreur, c'est
+      // le rendre incherchable le jour où on le cherche.
+      lastError: job.lastError,
+      // Ni identifiant de fil ni identifiant de fiche quand la fiche est
+      // fermée : une poignée suffit à ouvrir ce que la matrice a clos.
+      conversationId: thread?.id ?? null,
+      clientId: thread?.clientId ?? null,
+      // Le nom : celui de la fiche quand ce regard la tient, le mot qui dit le
+      // masque quand un fil existe mais lui échappe, RIEN quand la tâche ne
+      // parle d'aucun fil — « masqué » sur une tâche sans fiche inventerait un
+      // secret là où il n'y a personne.
+      clientName: thread
+        ? (thread.clientName ?? (open?.contact ? thread.clientPhone : tAccess("access.masked")))
+        : wanted
+          ? tAccess("access.masked")
+          : null,
+      // « Réessayer » ne vaut que pour un tour d'agent dont le fil existe ET
+      // que ce regard a le droit de conduire (case `sms`, comme la vue des
+      // échecs d'envoi). Le reste offrirait un bouton qui répond « introuvable ».
+      retryable: job.type === "agent_turn" && thread !== undefined && (open?.sms ?? false),
+    };
+  });
+
   // ── Bande d'état ─────────────────────────────────────────────────────────
-  const [sendingAllowed, queueCounts, suppressedCount] = canEngine
+  const [sendingAllowed, queueCounts, blockedRows] = canEngine
     ? await Promise.all([
     // On réutilise la PORTE d'envoi plutôt que de relire la rangée ici : elle
     // échoue fermé sur un réglage illisible, et réécrire cette règle à côté la
@@ -429,9 +511,74 @@ export default async function ConversationsPage() {
         failed: sql<number>`(count(*) filter (where ${scheduledJobs.status} = 'failed'))::int`,
       })
       .from(scheduledJobs),
-    db.select({ n: sql<number>`count(*)::int` }).from(suppressions),
+    // ── Les lignes FERMÉES : ce CRM ne textera plus ces numéros ───────────
+    // La bande d'état comptait ces rangées (« 23 désabonnés ») sans que rien
+    // ne les montre. Or elles ne disent pas toutes la même chose : cinq
+    // viennent d'un STOP du contact, dix-huit d'un refus d'opérateur que
+    // NOTRE moteur a transformé en fermeture définitive. Un compte qui mêle
+    // les deux fait passer une décision de machine pour une décision humaine.
+    //
+    // Ni borne ni compte séparé, et c'est délibéré : `suppressions` a une
+    // rangée PAR NUMÉRO (le téléphone est la clé primaire), donc la table est
+    // petite par construction et cette lecture EST le compte de la bande.
+    // Le jour où il faudrait la borner, ce compte devrait redevenir sa propre
+    // requête — sinon la pastille afficherait son propre plafond.
+    //
+    // Jointure GAUCHE sur le numéro (E.164 des deux côtés, règle 3) : une
+    // suppression survit à la fiche (elle est justement là pour ça), et un
+    // numéro fermé sans fiche reste une ligne fermée qu'il faut voir.
+    db
+      .select({
+        phone: suppressions.phoneE164,
+        reason: suppressions.reason,
+        note: suppressions.note,
+        at: suppressions.createdAt,
+        clientId: clients.id,
+        clientName: clients.fullName,
+        holderId: clients.assignedToId,
+      })
+      .from(suppressions)
+      .leftJoin(clients, eq(clients.phone, suppressions.phoneE164))
+      .orderBy(desc(suppressions.createdAt)),
       ])
     : [false, [], []];
+
+  // Le compartiment décide ligne à ligne, comme au journal d'appels : un
+  // numéro que porte une fiche est une COORDONNÉE de cette fiche et se ferme
+  // avec elle ; un numéro que plus aucune fiche ne porte n'a rien à protéger.
+  // Confondre les deux ferait de cet écran un oracle — « ce numéro est-il chez
+  // vous? » se lit alors dans le masque lui-même.
+  const seenNumbers = new Set<string>();
+  const blocked: BlockedNumber[] = [];
+  for (const row of blockedRows) {
+    // Deux fiches peuvent porter le même numéro (un ménage, une réimportation)
+    // et la jointure rendrait alors deux rangées : la ligne fermée est UNE.
+    if (seenNumbers.has(row.phone)) continue;
+    seenNumbers.add(row.phone);
+    const open = row.clientId ? grantsOfHolder(row.holderId) : null;
+    const named = open?.visible ?? false;
+    const contact = open ? open.visible && open.contact : true;
+    blocked.push({
+      phone: contact ? row.phone : tAccess("access.masked"),
+      phoneHidden: !contact,
+      reason: row.reason,
+      // Le détail écrit à la fermeture (« code 30003 ») : la trace du moteur,
+      // jamais traduite — c'est elle qui dit QUI a fermé la ligne.
+      note: row.note,
+      at: row.at.toISOString(),
+      clientId: named ? row.clientId : null,
+      clientName: named ? row.clientName : null,
+      // Un STOP ne se lève JAMAIS d'ici (règle 12) : seul un START du contact
+      // rouvre sa ligne, et la rangée le DIT au lieu d'offrir un bouton mort.
+      // Le reste — un refus d'opérateur, une fermeture à la main — a été
+      // décidé de ce côté-ci et peut donc être défait de ce côté-ci.
+      //
+      // Numéro masqué, pas de « Rétablir » non plus : le geste se nomme par le
+      // numéro, et un bouton sans rien à nommer ne peut que répondre
+      // « introuvable ». Le serveur revérifie les deux, comme toujours.
+      liftable: row.reason !== "sms_stop" && contact,
+    });
+  }
 
   const locale = await getLocale();
   // Les catégories du pipeline — pour classer une fiche sans quitter la boîte.
@@ -496,6 +643,12 @@ export default async function ConversationsPage() {
         queue={queue}
         failures={failures}
         failuresTotal={failuresTotalRow?.n ?? failures.length}
+        jobs={jobs}
+        // Le MÊME compte que la bande d'état affiche : il est déjà calculé
+        // pour elle, et deux requêtes qui comptent la même chose finissent par
+        // ne plus dire pareil — c'est alors la pastille qu'on croit.
+        jobsTotal={queueCounts[0]?.failed ?? jobs.length}
+        blocked={blocked}
         currentUserId={actor.user.id}
         // Ce que ce regard peut FAIRE ici. L'écran s'en sert pour ne pas
         // promettre un geste que le serveur refusera — chaque action revérifie
@@ -521,7 +674,11 @@ export default async function ConversationsPage() {
                 sendWindowOpen: isWithinSendWindow(new Date(), DEFAULT_QUIET_HOURS),
                 queued: queueCounts[0]?.pending ?? 0,
                 failed: queueCounts[0]?.failed ?? 0,
-                suppressed: suppressedCount[0]?.n ?? 0,
+                // La liste des lignes fermées n'est pas bornée : elle EST le
+                // compte. Une pastille et sa liste tirées de deux lectures
+                // divergent tôt ou tard, et l'écran contredit alors le chiffre
+                // sur lequel on venait de cliquer.
+                suppressed: blocked.length,
               }
             : null
         }
