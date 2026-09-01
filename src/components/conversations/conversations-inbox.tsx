@@ -6,7 +6,6 @@ import {
   BotIcon,
   CheckIcon,
   EyeOffIcon,
-  ListXIcon,
   MessageCircleIcon,
   MoonIcon,
   PencilLineIcon,
@@ -20,11 +19,13 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
+  archiveAllSuppressionsAction,
   archiveConversationAction,
   archiveConversationsAction,
+  archiveSuppressionAction,
   assignConversationAction,
   cancelQueuedSmsAction,
   classifyConversationClientAction,
@@ -40,6 +41,9 @@ import {
   retryFailedSmsAction,
   setConversationAiAction,
   unarchiveConversationAction,
+  unarchiveFailedJobAction,
+  unarchiveFailedSmsAction,
+  unarchiveSuppressionAction,
 } from "@/app/(app)/conversations/actions";
 import {
   ARCHIVE_LOOK,
@@ -204,6 +208,8 @@ export type FailedMessage = {
   skipReason: string | null;
   /** opener | ladder | agent | human | system */
   source: string | null;
+  /** Déjà rangé — la vue des archives le montre, la liste par défaut non. */
+  archived?: boolean;
   /**
    * Cases de la fiche derrière cet envoi, pour ce regard (le serveur revérifie
    * les deux) : `sms` commande ce qui PART vers ce client — réessayer et
@@ -244,6 +250,8 @@ export type FailedJob = {
   clientName: string | null;
   /** Le fil existe ET ce regard peut le conduire : « Réessayer » n'a de sens que là. */
   retryable: boolean;
+  /** Déjà rangée — la vue des archives la montre, la liste par défaut non. */
+  archived?: boolean;
 };
 
 /**
@@ -271,6 +279,11 @@ export type BlockedNumber = {
    * jamais depuis cet écran (règle 12), seul un START du contact rouvre la ligne.
    */
   liftable: boolean;
+  /**
+   * Rangée hors de la liste — le blocage, lui, reste ENTIER. C'est l'inverse
+   * de `liftable` : archiver ne lève rien, ça range l'écran.
+   */
+  archived?: boolean;
 };
 
 export type EngineHealth = {
@@ -459,6 +472,7 @@ export function ConversationsInbox({
   failuresTotal,
   archived = [],
   archivedTotal,
+  showArchived = false,
   jobs = [],
   jobsTotal,
   blocked = [],
@@ -485,6 +499,12 @@ export function ConversationsInbox({
    */
   archived?: InboxRow[];
   archivedTotal?: number;
+  /**
+   * « Voir les archivées » — les trois vues machine (échecs, tâches, numéros)
+   * basculent ENSEMBLE, piloté par `?archived=1`. Dans l'URL et non dans un
+   * état local : un rechargement ramène là où on était.
+   */
+  showArchived?: boolean;
   /** Les tâches que le moteur a abandonnées (voir `FailedJob`). */
   jobs?: FailedJob[];
   /**
@@ -859,13 +879,15 @@ export function ConversationsInbox({
    */
   const dismissJob = (item: FailedJob) =>
     act(async () => {
-      const result = await dismissFailedJobAction(item.id);
+      const result = item.archived
+        ? await unarchiveFailedJobAction(item.id)
+        : await dismissFailedJobAction(item.id);
       if (!result.ok) {
         toast.error(t("error"));
         // « Introuvable » : la tâche a changé d'état, l'écran est périmé.
         return result.error === "notFound";
       }
-      toast.success(t("inbox.jobs.dismissed"));
+      toast.success(t(item.archived ? "inbox.jobs.unarchived" : "inbox.jobs.archived"));
       return true;
     });
 
@@ -881,7 +903,7 @@ export function ConversationsInbox({
         toast.error(t("error"));
         return true;
       }
-      toast.success(t("inbox.jobs.dismissAllDone", { count: result.closed ?? 0 }));
+      toast.success(t("inbox.jobs.archiveAllDone", { count: result.closed ?? 0 }));
       return true;
     });
 
@@ -988,12 +1010,16 @@ export function ConversationsInbox({
    */
   const dismissFailure = (item: FailedMessage) =>
     act(async () => {
-      const result = await dismissFailedSmsAction(item.id);
+      // Une bascule, pas deux boutons : la rangée sait déjà de quel côté elle
+      // est, et offrir « Archiver » sur une rangée archivée n'aurait aucun sens.
+      const result = item.archived
+        ? await unarchiveFailedSmsAction(item.id)
+        : await dismissFailedSmsAction(item.id);
       if (!result.ok) {
         toast.error(t("error"));
         return result.error === "notFound";
       }
-      toast.success(t("inbox.removed"));
+      toast.success(t(item.archived ? "inbox.failedUnarchived" : "inbox.failedArchived"));
       return true;
     });
 
@@ -1076,6 +1102,97 @@ export function ConversationsInbox({
       setReplaying(false);
     }
   };
+
+  /**
+   * Les numéros que CE mode montre. Le serveur envoie les deux ensembles (la
+   * table tient en vingt-trois lignes) et l'écran tranche : une seconde requête
+   * pour si peu coûterait un aller-retour de plus à une page déjà lourde.
+   */
+  const visibleBlocked = useMemo(
+    () => blocked.filter((b) => Boolean(b.archived) === showArchived),
+    [blocked, showArchived],
+  );
+
+  /**
+   * « Archiver » un numéro bloqué — et surtout PAS « Rétablir ».
+   *
+   * Les deux boutons sont voisins et font l'inverse l'un de l'autre : rétablir
+   * EFFACE la rangée et rouvre la ligne, archiver la GARDE entière et ne range
+   * que l'écran. C'est la seule sortie d'un STOP, que la règle 12 interdit de
+   * lever — sans ce geste, les cinq désabonnements restaient à l'écran pour
+   * toujours et on finissait par ne plus ouvrir la vue du tout.
+   */
+  const archiveBlocked = (item: BlockedNumber) =>
+    act(async () => {
+      const result = await archiveSuppressionAction(item.phone);
+      if (!result.ok) {
+        toast.error(t("error"));
+        return result.error === "notFound";
+      }
+      toast.success(t("inbox.blocked.archived"));
+      return true;
+    });
+
+  const unarchiveBlocked = (item: BlockedNumber) =>
+    act(async () => {
+      const result = await unarchiveSuppressionAction(item.phone);
+      if (!result.ok) {
+        toast.error(t("error"));
+        return result.error === "notFound";
+      }
+      toast.success(t("inbox.blocked.unarchived"));
+      return true;
+    });
+
+  const [confirmArchiveBlocked, setConfirmArchiveBlocked] = useState(false);
+  const archiveAllBlocked = () =>
+    act(async () => {
+      const result = await archiveAllSuppressionsAction();
+      setConfirmArchiveBlocked(false);
+      if (!result.ok) {
+        toast.error(t("error"));
+        return true;
+      }
+      toast.success(t("inbox.blocked.archiveAllDone", { count: result.closed ?? 0 }));
+      return true;
+    });
+
+  /**
+   * La bascule « voir les archivées ». Elle passe par l'URL (`?archived=1`)
+   * plutôt que par un état local : recharger la page, ou revenir en arrière,
+   * doit ramener là où on était — et une vue d'archives qu'on perd au moindre
+   * rafraîchissement ne sert à personne.
+   */
+  const toggleArchived = () => {
+    const next = new URLSearchParams(window.location.search);
+    if (showArchived) next.delete("archived");
+    else next.set("archived", "1");
+    const qs = next.toString();
+    router.push(qs ? `/conversations?${qs}` : "/conversations");
+  };
+
+  /** Le bandeau commun aux trois vues machine : ce que fait « Archiver », et la sortie. */
+  const archiveBar = (hint: string, action?: ReactNode) => (
+    <div className="space-y-2">
+      <p className="rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+        {hint}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant={showArchived ? "secondary" : "ghost"}
+          size="sm"
+          className="min-h-11 md:min-h-8"
+          aria-pressed={showArchived}
+          onClick={toggleArchived}
+        >
+          <ARCHIVE_LOOK.Icon aria-hidden />
+          {t(showArchived ? "inbox.hideArchived" : "inbox.showArchived")}
+        </Button>
+        <span className="flex-1" />
+        {action}
+      </div>
+    </div>
+  );
 
   const rowProps = {
     currentUserId,
@@ -1310,6 +1427,7 @@ export function ConversationsInbox({
         </div>
       ) : tab === "failed" ? (
         <div className="space-y-2">
+          {archiveBar(t("inbox.failedArchiveHint"))}
           {failures.map((item) => (
             <FailureRowCard
               key={item.id}
@@ -1339,35 +1457,36 @@ export function ConversationsInbox({
           {/* Vider la pile d'un geste. Sans lui, cent soixante-quatorze rangées
               d'une seule nuit de panne se retirent une par une — c'est-à-dire
               jamais, et le compteur reste faux pour toujours. */}
-          {abilities.engine && jobs.length > 0 ? (
-            <div className="flex justify-end pb-1">
+          {archiveBar(
+            t("inbox.jobs.archiveHint"),
+            abilities.engine && jobs.length > 0 && !showArchived ? (
               <AlertDialog open={confirmDismissJobs} onOpenChange={setConfirmDismissJobs}>
                 <AlertDialogTrigger
                   render={<Button variant="outline" size="sm" className="min-h-11 md:min-h-8" />}
                 >
-                  <ListXIcon aria-hidden />
-                  {t("inbox.jobs.dismissAll")}
+                  <ARCHIVE_LOOK.Icon aria-hidden />
+                  {t("inbox.actions.archiveAll")}
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>{t("inbox.jobs.dismissAllTitle")}</AlertDialogTitle>
+                    <AlertDialogTitle>{t("inbox.jobs.archiveAllTitle")}</AlertDialogTitle>
                     {/* Le nombre annoncé est celui de TOUTES les tâches en
                         panne, pas celui des cent dessinées : c'est sur lui que
                         le geste porte. */}
                     <AlertDialogDescription>
-                      {t("inbox.jobs.dismissAllBody", { count: counts.jobs })}
+                      {t("inbox.jobs.archiveAllBody", { count: counts.jobs })}
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>{t("inbox.close.cancel")}</AlertDialogCancel>
                     <AlertDialogAction disabled={pending} onClick={dismissAllJobs}>
-                      {t("inbox.jobs.dismissAllConfirm")}
+                      {t("inbox.actions.archiveAll")}
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
-            </div>
-          ) : null}
+            ) : null,
+          )}
           {jobs.map((item) => (
             <FailedJobRowCard
               key={item.id}
@@ -1391,13 +1510,42 @@ export function ConversationsInbox({
         </div>
       ) : tab === "blocked" ? (
         <div className="space-y-2">
-          {blocked.map((item) => (
+          {archiveBar(
+            t("inbox.blocked.archive"),
+            abilities.engine && visibleBlocked.length > 0 && !showArchived ? (
+              <AlertDialog open={confirmArchiveBlocked} onOpenChange={setConfirmArchiveBlocked}>
+                <AlertDialogTrigger
+                  render={<Button variant="outline" size="sm" className="min-h-11 md:min-h-8" />}
+                >
+                  <ARCHIVE_LOOK.Icon aria-hidden />
+                  {t("inbox.blocked.archiveAll")}
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t("inbox.blocked.archiveAllTitle")}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t("inbox.blocked.archiveAllBody", { count: visibleBlocked.length })}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t("inbox.close.cancel")}</AlertDialogCancel>
+                    <AlertDialogAction disabled={pending} onClick={archiveAllBlocked}>
+                      {t("inbox.blocked.archiveAll")}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : null,
+          )}
+          {visibleBlocked.map((item) => (
             <BlockedNumberRowCard
               key={item.phone}
               item={item}
               pending={pending}
               canLift={abilities.engine}
               onLift={liftSuppression}
+              onArchive={archiveBlocked}
+              onUnarchive={unarchiveBlocked}
               dfnsLocale={dfnsLocale}
             />
           ))}
@@ -2218,13 +2366,21 @@ function FailureRowCard({
             ) : null}
             {showDismiss ? (
               <Button
-                variant="ghost"
+                variant={item.archived ? "outline" : "ghost"}
                 size="sm"
                 className="relative z-10 min-h-11 md:min-h-8"
                 disabled={pending}
                 onClick={() => onDismiss(item)}
               >
-                <ListXIcon aria-hidden /> {t("inbox.actions.remove")}
+                {item.archived ? (
+                  <>
+                    <RotateCcwIcon aria-hidden /> {t("inbox.actions.unarchive")}
+                  </>
+                ) : (
+                  <>
+                    <ARCHIVE_LOOK.Icon aria-hidden /> {t("inbox.actions.archive")}
+                  </>
+                )}
               </Button>
             ) : null}
           </div>
@@ -2346,13 +2502,21 @@ function FailedJobRowCard({
                 sortie pour tout ce qui ne se rejoue pas. */}
             {canDismiss ? (
               <Button
-                variant="ghost"
+                variant={item.archived ? "outline" : "ghost"}
                 size="sm"
                 className="relative z-10 min-h-11 md:min-h-8"
                 disabled={pending}
                 onClick={() => onDismiss(item)}
               >
-                <ListXIcon aria-hidden /> {t("inbox.jobs.dismiss")}
+                {item.archived ? (
+                  <>
+                    <RotateCcwIcon aria-hidden /> {t("inbox.actions.unarchive")}
+                  </>
+                ) : (
+                  <>
+                    <ARCHIVE_LOOK.Icon aria-hidden /> {t("inbox.actions.archive")}
+                  </>
+                )}
               </Button>
             ) : null}
           </div>
@@ -2388,6 +2552,8 @@ function BlockedNumberRowCard({
   pending,
   canLift,
   onLift,
+  onArchive,
+  onUnarchive,
   dfnsLocale,
 }: {
   item: BlockedNumber;
@@ -2395,6 +2561,9 @@ function BlockedNumberRowCard({
   /** Rouvrir une ligne fermée est une conduite du moteur — `admin.settings`. */
   canLift: boolean;
   onLift: (item: BlockedNumber) => void;
+  /** Ranger la rangée SANS lever le blocage — l'inverse de `onLift`. */
+  onArchive: (item: BlockedNumber) => void;
+  onUnarchive: (item: BlockedNumber) => void;
   dfnsLocale: typeof fr;
 }) {
   const t = useTranslations("conversations");
@@ -2462,18 +2631,45 @@ function BlockedNumberRowCard({
           <p className="font-mono text-[11px] break-all text-muted-foreground">{item.note}</p>
         ) : null}
 
-        {showLift ? (
+        {showLift || canLift ? (
           <div className="flex flex-wrap items-center gap-2 pt-0.5">
             <span className="flex-1" />
-            <Button
-              variant="outline"
-              size="sm"
-              className="relative z-10 min-h-11 md:min-h-8"
-              disabled={pending}
-              onClick={() => onLift(item)}
-            >
-              <PlugIcon aria-hidden /> {t("inbox.blocked.lift")}
-            </Button>
+            {showLift ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="relative z-10 min-h-11 md:min-h-8"
+                disabled={pending}
+                onClick={() => onLift(item)}
+              >
+                <PlugIcon aria-hidden /> {t("inbox.blocked.lift")}
+              </Button>
+            ) : null}
+            {/* Ranger, sans rien lever. Offert sur TOUS les motifs, STOP
+                compris : c'est la seule sortie d'un désabonnement, que
+                personne ici n'a le droit de rétablir. */}
+            {canLift && !item.archived ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="relative z-10 min-h-11 md:min-h-8"
+                disabled={pending}
+                onClick={() => onArchive(item)}
+              >
+                <ARCHIVE_LOOK.Icon aria-hidden /> {t("inbox.actions.archive")}
+              </Button>
+            ) : null}
+            {canLift && item.archived ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="relative z-10 min-h-11 md:min-h-8"
+                disabled={pending}
+                onClick={() => onUnarchive(item)}
+              >
+                <RotateCcwIcon aria-hidden /> {t("inbox.actions.unarchive")}
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </div>

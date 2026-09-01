@@ -228,12 +228,16 @@
       "close": "Close",
       "archive": "Archive",
       "unarchive": "Take out of the archive",
-      "remove": "Dismiss"
+      "archiveAll": "Archive all"
     },
+    "showArchived": "See the archived",
+    "hideArchived": "Back to the list",
     "handedBack": "The assistant takes the thread back",
     "retried": "The turn is back in flight — the assistant retries right away",
     "retriedNothing": "Nothing to relaunch — the flag was cleared",
-    "removed": "Failure dismissed — the message stays in the client's thread and still counts towards deliverability",
+    "failedArchiveHint": "Archiving a lost text only takes it out of this list: the message stays whole in the client's thread and still counts on the Deliverability page. Nothing is sent again, nothing is erased.",
+    "failedArchived": "Failure archived — the message stays in the client's thread and still counts towards deliverability",
+    "failedUnarchived": "Failure taken out of the archive — it is back in the list",
     "retryQueued": "Resend queued — it will go to the number currently on the client's file",
     "retrySuppressed": "This number unsubscribed: nothing can go out to it any more, not even by hand",
     "did": {
@@ -265,13 +269,12 @@
       "due": "Due {when}",
       "error": "Engine error",
       "cap": "The {shown} most recent — {total} in all.",
-      "dismiss": "Give up",
-      "dismissed": "Task given up — it will not be replayed, and its trace stays in the database.",
-      "dismissAll": "Give up on all",
-      "dismissAllTitle": "Give up on every crashed task?",
-      "dismissAllBody": "{count, plural, one {# task will stop asking to be repaired. Nothing is replayed and nothing is erased: the row stays in the database with its error, it simply leaves the counter.} other {# tasks will stop asking to be repaired. Nothing is replayed and nothing is erased: the rows stay in the database with their errors, they simply leave the counter.}}",
-      "dismissAllConfirm": "Give up on all",
-      "dismissAllDone": "{count, plural, =0 {No task given up — they changed state in the meantime} one {# task given up} other {# tasks given up}}"
+      "archiveHint": "Archiving a crashed task takes it out of this list without replaying anything and without erasing anything: the row stays in the database with its error. The engine will never pick it up again on its own — if the work still has to happen, do it by hand.",
+      "archived": "Task archived — it will not be replayed, and its trace stays in the database.",
+      "unarchived": "Task taken out of the archive — it is back in the list, still without being replayed.",
+      "archiveAllTitle": "Archive every crashed task?",
+      "archiveAllBody": "{count, plural, one {# task will stop asking to be repaired. Nothing is replayed and nothing is erased: the row stays in the database with its error, it simply leaves the list and the counter.} other {# tasks will stop asking to be repaired. Nothing is replayed and nothing is erased: the rows stay in the database with their errors, they simply leave the list and the counter.}}",
+      "archiveAllDone": "{count, plural, =0 {No task archived — they changed state in the meantime} one {# task archived} other {# tasks archived}}"
     },
     "blocked": {
       "reason": {
@@ -284,7 +287,14 @@
       "engineHint": "The contact asked for nothing: our engine closed the line after a carrier refusal. A phone switched off once is enough to end up here.",
       "lift": "Restore",
       "lifted": "Line restored — this number can receive texts again.",
-      "stopAbsolute": "Refused: this number replied STOP. Only a START from the contact reopens the line."
+      "stopAbsolute": "Refused: this number replied STOP. Only a START from the contact reopens the line.",
+      "archive": "Archiving lifts NOTHING: the number stays blocked and nothing will go out to it any more — only the row leaves this list. It is the exact opposite of \"Restore\", which reopens the line. An archived STOP is still a STOP: filing it away is the only thing you can do with it, since nobody here may lift it.",
+      "archived": "Number archived — it leaves the list; the block stays fully in force.",
+      "unarchived": "Number taken out of the archive — it is back in the list, and its block never stopped.",
+      "archiveAll": "Archive all",
+      "archiveAllTitle": "Archive every blocked number?",
+      "archiveAllBody": "{count, plural, one {# number will leave this list. Its block stays FULLY in force: nothing will ever go out to it again, and an archived STOP is still a STOP. Archiving tidies the screen, it reopens no line.} other {# numbers will leave this list. Their blocks stay FULLY in force: nothing will ever go out to them again, and an archived STOP is still a STOP. Archiving tidies the screen, it reopens no line.}}",
+      "archiveAllDone": "{count, plural, =0 {No number archived — the list changed in the meantime} one {# number archived — its block stays in force} other {# numbers archived — their blocks stay in force}}"
     },
     "classified": "Client classified."
   },

@@ -109,6 +109,25 @@ export const suppressions = pgTable("suppressions", {
   /** sms_stop | carrier_error | manual | complaint */
   reason: text("reason").notNull(),
   note: text("note"),
+  /**
+   * Ligne fermée ÉCARTÉE de la vue « Numéros bloqués » — le blocage, lui, reste
+   * ENTIER. Archiver n'est PAS « Rétablir » : la rangée demeure, `reason` n'est
+   * pas touché, et plus jamais rien ne partira vers ce numéro. Les deux gestes
+   * sont opposés — le rétablissement SUPPRIME la rangée et rouvre la ligne,
+   * l'archivage ne range que l'écran. Un STOP archivé est toujours un STOP.
+   *
+   * Sans cette colonne, un STOP n'avait aucune sortie : la règle 12 interdit de
+   * le lever, donc les désabonnements s'empilaient à jamais dans le seul écran
+   * où l'on vient chercher les blocages du jour — et on finissait par ne plus
+   * l'ouvrir du tout.
+   *
+   * Aucun index, volontairement : la table porte UNE rangée par numéro et reste
+   * petite par construction. Un index partiel coûterait plus cher à tenir à
+   * chaque STOP entrant qu'il ne ferait gagner au balayage de la liste.
+   */
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  /** Qui l'a archivée — pour qu'on sache à qui demander pourquoi. */
+  archivedById: uuid("archived_by_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -781,6 +800,10 @@ export const smsNumbersRelations = relations(smsNumbers, ({ one, many }) => ({
 
 export const consentsRelations = relations(consents, ({ one }) => ({
   client: one(clients, { fields: [consents.clientId], references: [clients.id] }),
+}));
+
+export const suppressionsRelations = relations(suppressions, ({ one }) => ({
+  archivedBy: one(users, { fields: [suppressions.archivedById], references: [users.id] }),
 }));
 
 export const conversationsRelations = relations(conversations, ({ one, many }) => ({

@@ -51,7 +51,10 @@ const {
   assignConversationAction,
   retryAiTurnAction,
   unarchiveConversationAction,
+  unarchiveSuppressionAction,
+  archiveAllSuppressionsAction,
   archiveConversationAction,
+  archiveSuppressionAction,
   archiveConversationsAction,
   dismissAllFailedJobsAction,
   dismissFailedJobAction,
@@ -1349,5 +1352,93 @@ describe("archiver un fil : le ranger hors des listes", () => {
 
     expect(await archiveConversationAction(conv.id)).toEqual({ ok: false, error: "forbidden" });
     expect(await unarchiveConversationAction(conv.id)).toEqual({ ok: false, error: "forbidden" });
+  });
+});
+
+describe("archiver un numéro bloqué : ranger l'écran, jamais lever le blocage", () => {
+  async function blocked(reason: string, phone: string, note: string | null = null) {
+    await testDb.insert(suppressions).values({ phoneE164: phone, reason, note });
+    return phone;
+  }
+
+  it("LE test : un STOP archivé BLOQUE toujours", async () => {
+    // Toute la sécurité de ce bouton tient là. Il est voisin de « Rétablir »,
+    // qui fait l'inverse ; les confondre rouvrirait une ligne que la loi ferme.
+    await loginAs(admin);
+    const client = await makeClient({ phone: "+15145550170" });
+    await blocked("sms_stop", client.phone);
+
+    expect((await archiveSuppressionAction(client.phone)).ok).toBe(true);
+
+    // La rangée est TOUJOURS là, avec son motif intact…
+    const rows = await testDb
+      .select()
+      .from(suppressions)
+      .where(eq(suppressions.phoneE164, client.phone));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].reason).toBe("sms_stop");
+    expect(rows[0].archivedAt).not.toBeNull();
+
+    // …et l'envoi reste refusé, exactement comme avant l'archivage.
+    await loginAs(caller);
+    expect(await sendManualSmsAction({ clientId: client.id, body: "Allô?" })).toEqual({
+      ok: false,
+      error: "suppressed",
+    });
+  });
+
+  it("archiver un STOP est permis — c'est sa SEULE sortie", async () => {
+    // La règle 12 interdit de LEVER un désabonnement, pas de cesser de le
+    // regarder. Sans ce geste, ces rangées ne quittaient jamais l'écran.
+    await loginAs(admin);
+    const phone = await blocked("sms_stop", "+15145550171");
+
+    expect((await archiveSuppressionAction(phone)).ok).toBe(true);
+    // Et « Rétablir » le refuse toujours, archivé ou non.
+    expect(await liftSuppressionAction(phone)).toEqual({ ok: false, error: "stopIsAbsolute" });
+  });
+
+  it("sortir de l'archive remet la rangée dans la liste, sans rien changer d'autre", async () => {
+    await loginAs(admin);
+    const phone = await blocked("carrier_error", "+15145550172", "code 30003");
+    expect((await archiveSuppressionAction(phone)).ok).toBe(true);
+    expect((await unarchiveSuppressionAction(phone)).ok).toBe(true);
+
+    const [row] = await testDb
+      .select()
+      .from(suppressions)
+      .where(eq(suppressions.phoneE164, phone));
+    expect(row.archivedAt).toBeNull();
+    expect(row.reason).toBe("carrier_error");
+    expect(row.note).toBe("code 30003");
+  });
+
+  it("« Tout archiver » range tout et ne débloque personne", async () => {
+    await loginAs(admin);
+    await blocked("sms_stop", "+15145550173");
+    await blocked("carrier_error", "+15145550174");
+    await blocked("manual", "+15145550175");
+
+    const result = await archiveAllSuppressionsAction();
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.closed).toBe(3);
+
+    const rows = await testDb.select().from(suppressions);
+    // Aucune rangée perdue : archiver n'efface rien.
+    expect(rows).toHaveLength(3);
+    expect(rows.every((r) => r.archivedAt !== null)).toBe(true);
+  });
+
+  it("un téléphoniste ne range pas la liste des blocages", async () => {
+    await loginAs(caller);
+    const phone = await blocked("carrier_error", "+15145550176");
+
+    expect(await archiveSuppressionAction(phone)).toEqual({ ok: false, error: "forbidden" });
+    expect(await archiveAllSuppressionsAction()).toEqual({ ok: false, error: "forbidden" });
+    const [row] = await testDb
+      .select()
+      .from(suppressions)
+      .where(eq(suppressions.phoneE164, phone));
+    expect(row.archivedAt).toBeNull();
   });
 });

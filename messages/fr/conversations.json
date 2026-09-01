@@ -113,13 +113,12 @@
       "due": "Prévue {when}",
       "error": "Erreur du moteur",
       "cap": "Les {shown} plus récentes — {total} au total.",
-      "dismiss": "Abandonner",
-      "dismissed": "Tâche abandonnée — elle ne sera pas rejouée, et sa trace reste en base.",
-      "dismissAll": "Tout abandonner",
-      "dismissAllTitle": "Abandonner toutes les tâches en panne ?",
-      "dismissAllBody": "{count, plural, one {# tâche cessera de réclamer une réparation. Rien n'est rejoué et rien n'est effacé : la rangée reste en base avec son erreur, elle quitte simplement le compteur.} other {# tâches cesseront de réclamer une réparation. Rien n'est rejoué et rien n'est effacé : les rangées restent en base avec leur erreur, elles quittent simplement le compteur.}}",
-      "dismissAllConfirm": "Tout abandonner",
-      "dismissAllDone": "{count, plural, =0 {Aucune tâche abandonnée — elles ont changé d'état entre-temps} one {# tâche abandonnée} other {# tâches abandonnées}}"
+      "archiveHint": "Archiver une tâche en panne l'écarte de cette liste sans rien rejouer ni rien effacer : la rangée reste en base avec son erreur. Le moteur ne la reprendra jamais tout seul — si le travail doit encore se faire, refaites-le à la main.",
+      "archived": "Tâche archivée — elle ne sera pas rejouée, et sa trace reste en base.",
+      "unarchived": "Tâche sortie de l'archive — elle revient dans la liste, toujours sans être rejouée.",
+      "archiveAllTitle": "Archiver toutes les tâches en panne ?",
+      "archiveAllBody": "{count, plural, one {# tâche cessera de réclamer une réparation. Rien n'est rejoué et rien n'est effacé : la rangée reste en base avec son erreur, elle quitte simplement la liste et le compteur.} other {# tâches cesseront de réclamer une réparation. Rien n'est rejoué et rien n'est effacé : les rangées restent en base avec leur erreur, elles quittent simplement la liste et le compteur.}}",
+      "archiveAllDone": "{count, plural, =0 {Aucune tâche archivée — elles ont changé d'état entre-temps} one {# tâche archivée} other {# tâches archivées}}"
     },
     "blocked": {
       "reason": {
@@ -132,7 +131,14 @@
       "engineHint": "Le contact n'a rien demandé : notre moteur a fermé la ligne après un refus de l'opérateur. Un téléphone éteint une seule fois suffit à en arriver là.",
       "lift": "Rétablir",
       "lifted": "Ligne rétablie — ce numéro peut de nouveau recevoir des SMS.",
-      "stopAbsolute": "Refusé : ce numéro a répondu STOP. Seul un START du contact rouvre la ligne."
+      "stopAbsolute": "Refusé : ce numéro a répondu STOP. Seul un START du contact rouvre la ligne.",
+      "archive": "Archiver ne lève RIEN : le numéro reste bloqué et plus rien ne partira vers lui — seule la rangée quitte cette liste. C'est l'exact contraire de « Rétablir », qui rouvre la ligne. Un STOP archivé est toujours un STOP : l'archiver est la seule chose qu'on puisse en faire, puisque personne ici n'a le droit de le lever.",
+      "archived": "Numéro archivé — il quitte la liste, le blocage reste entier.",
+      "unarchived": "Numéro sorti de l'archive — il revient dans la liste, et son blocage n'a jamais cessé.",
+      "archiveAll": "Tout archiver",
+      "archiveAllTitle": "Archiver tous les numéros bloqués ?",
+      "archiveAllBody": "{count, plural, one {# numéro quittera cette liste. Son blocage reste ENTIER : rien ne repartira jamais vers lui, et un STOP archivé est toujours un STOP. Archiver range l'écran, ça ne rouvre aucune ligne.} other {# numéros quitteront cette liste. Leur blocage reste ENTIER : rien ne repartira jamais vers eux, et un STOP archivé est toujours un STOP. Archiver range l'écran, ça ne rouvre aucune ligne.}}",
+      "archiveAllDone": "{count, plural, =0 {Aucun numéro archivé — la liste a changé entre-temps} one {# numéro archivé — son blocage reste entier} other {# numéros archivés — leurs blocages restent entiers}}"
     },
     "mine": "Les miennes",
     "sections": {
@@ -176,12 +182,16 @@
       "close": "Clore",
       "archive": "Archiver",
       "unarchive": "Sortir de l'archive",
-      "remove": "Retirer"
+      "archiveAll": "Tout archiver"
     },
+    "showArchived": "Voir les archivées",
+    "hideArchived": "Revenir à la liste",
     "handedBack": "L'assistant reprend le fil",
     "retried": "Le tour repart — l'assistant réessaie tout de suite",
     "retriedNothing": "Rien à relancer — la pastille est retirée",
-    "removed": "Échec retiré de la vue — le message reste dans le fil du client et compte toujours dans la délivrabilité",
+    "failedArchiveHint": "Archiver un envoi perdu ne fait que le sortir de cette liste : le message reste entier dans le fil du client et continue de compter dans la page Délivrabilité. Rien n'est renvoyé, rien n'est effacé.",
+    "failedArchived": "Échec archivé — le message reste dans le fil du client et compte toujours dans la délivrabilité",
+    "failedUnarchived": "Échec sorti de l'archive — il revient dans la liste",
     "retryQueued": "Renvoi mis en file — il partira au numéro inscrit sur la fiche en ce moment",
     "retrySuppressed": "Ce numéro s'est désabonné : plus rien ne peut lui partir, même à la main",
     "empty": {

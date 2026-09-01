@@ -80,8 +80,26 @@ const JOBS_SHOWN = 100;
  */
 const ARCHIVED_SHOWN = 100;
 
-export default async function ConversationsPage() {
+export default async function ConversationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const actor = await requirePerm("conversations.view");
+  /**
+   * « Voir les archivées » — UN paramètre pour les trois vues machine.
+   *
+   * Dans l'URL et non dans un état de composant, pour deux raisons : un
+   * rechargement (ou le retour du navigateur) ramène là où on était, et la
+   * bascule ne coûte pas une deuxième requête permanente à la page — le mode
+   * par défaut ne lit QUE ce qu'il montre.
+   *
+   * Les trois listes basculent ENSEMBLE. Deux modes par vue donneraient huit
+   * combinaisons dont personne ne se souviendrait, et la question qu'on se pose
+   * est toujours la même : « qu'est-ce que j'ai rangé ? »
+   */
+  const sp = await searchParams;
+  const showArchived = sp.archived === "1";
   const t = await getTranslations("conversations");
   // « Masqué » est écrit une seule fois, chez les fiches.
   const tAccess = await getTranslations("clients");
@@ -329,7 +347,9 @@ export default async function ConversationsPage() {
     actor,
     and(
       eq(messages.direction, "out"),
-      isNull(messages.dismissedAt),
+      // Rangés OU non, jamais les deux mêlés : une liste qui mélange ce qu'on a
+      // traité et ce qui attend encore ne se travaille pas.
+      showArchived ? isNotNull(messages.dismissedAt) : isNull(messages.dismissedAt),
       // Le statut dit l'échec ; `skipReason` dit qu'il n'est jamais parti — un
       // message peut porter le second sans que le premier soit encore écrit
       // (le répartiteur pose la rangée AVANT d'appeler Twilio).
@@ -471,7 +491,17 @@ export default async function ConversationsPage() {
         payload: scheduledJobs.payload,
       })
       .from(scheduledJobs)
-      .where(eq(scheduledJobs.status, "failed"))
+      // ATTENTION au vocabulaire : « cancelled » n'est pas réservé à
+      // l'archivage. `cancelPendingJobs()` l'écrit aussi quand un humain annule
+      // un envoi encore EN FILE — donc la vue des archives contiendrait des
+      // travaux que personne n'a « rangés ». On la borne donc aux tâches qui
+      // ont d'abord ÉCHOUÉ : `last_error` n'est renseigné que par une tentative
+      // ratée, jamais par une annulation en file.
+      .where(
+        showArchived
+          ? and(eq(scheduledJobs.status, "cancelled"), isNotNull(scheduledJobs.lastError))
+          : eq(scheduledJobs.status, "failed"),
+      )
       .orderBy(desc(scheduledJobs.runAt))
       .limit(JOBS_SHOWN),
       ])
@@ -645,6 +675,7 @@ export default async function ConversationsPage() {
         reason: suppressions.reason,
         note: suppressions.note,
         at: suppressions.createdAt,
+        archivedAt: suppressions.archivedAt,
         clientId: clients.id,
         clientName: clients.fullName,
         holderId: clients.assignedToId,
@@ -689,6 +720,13 @@ export default async function ConversationsPage() {
       // numéro, et un bouton sans rien à nommer ne peut que répondre
       // « introuvable ». Le serveur revérifie les deux, comme toujours.
       liftable: row.reason !== "sms_stop" && contact,
+      // Rangée ou non. On envoie les DEUX ensembles et l'écran choisit : la
+      // table porte une rangée par numéro et reste minuscule, alors qu'une
+      // seconde requête par mode coûterait un aller-retour pour vingt-trois
+      // lignes. Le compte de la bande, lui, ne suit QUE le mode par défaut
+      // (voir plus bas) — sinon le chiffre sur lequel on clique et la liste où
+      // l'on atterrit ne diraient pas la même chose.
+      archived: row.archivedAt !== null,
     });
   }
 
@@ -805,7 +843,7 @@ export default async function ConversationsPage() {
                 // compte. Une pastille et sa liste tirées de deux lectures
                 // divergent tôt ou tard, et l'écran contredit alors le chiffre
                 // sur lequel on venait de cliquer.
-                suppressed: blocked.length,
+                suppressed: blocked.filter((b) => !b.archived).length,
               }
             : null
         }

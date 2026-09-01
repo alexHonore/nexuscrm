@@ -1639,6 +1639,257 @@ export async function liftSuppressionAction(phoneE164: string): Promise<SmsActio
 }
 
 /**
+ * Sortir un envoi perdu de l'archive — il revient dans « Échecs ».
+ *
+ * Le miroir exact de `dismissFailedSmsAction` : on remet la rangée dans la
+ * liste, sans rien renvoyer. Archiver n'ayant jamais rien détruit, revenir en
+ * arrière ne coûte rien non plus — c'est ce qui rend le geste sûr à presser.
+ */
+export async function unarchiveFailedSmsAction(messageId: string): Promise<SmsActionResult> {
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("conversations.control")) return FORBIDDEN;
+  if (!z.uuid().safeParse(messageId).success) return INVALID;
+
+  const message = await db.query.messages.findFirst({ where: eq(messages.id, messageId) });
+  if (!message) return NOT_FOUND;
+  const seen = await threadFor(actor, message.conversationId, "sms");
+  if (!seen) return NOT_FOUND;
+
+  await db
+    .update(messages)
+    .set({ dismissedAt: null, dismissedById: null })
+    .where(eq(messages.id, messageId));
+
+  await logAudit({
+    userId: actor.user.id,
+    action: "sms.unarchive_failure",
+    entity: "conversation",
+    entityId: message.conversationId,
+    detail: { messageId },
+  });
+
+  revalidateFor(seen.thread.clientId);
+  return { ok: true, id: messageId };
+}
+
+/**
+ * Sortir une tâche de l'archive — elle revient dans « Tâches du moteur ».
+ *
+ * Elle repasse en `failed`, l'état dans lequel le moteur l'avait laissée : on
+ * défait le rangement, on ne relance rien. Rejouer reste un geste à part
+ * (« Réessayer »), et c'est volontaire — sortir une tâche de l'archive pour
+ * la comprendre ne doit pas la remettre en marche par surprise.
+ *
+ * Borné aux tâches qui portent un `last_error` : « cancelled » est aussi écrit
+ * par `cancelPendingJobs()` quand un humain annule un envoi encore en file, et
+ * ressusciter CELLE-LÀ en « échec » serait inventer une panne qui n'a pas eu
+ * lieu.
+ */
+export async function unarchiveFailedJobAction(jobId: string): Promise<SmsActionResult> {
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("admin.settings")) return FORBIDDEN;
+  if (!z.uuid().safeParse(jobId).success) return INVALID;
+
+  const [restored] = await db
+    .update(scheduledJobs)
+    .set({ status: "failed" })
+    .where(
+      and(
+        eq(scheduledJobs.id, jobId),
+        eq(scheduledJobs.status, "cancelled"),
+        isNotNull(scheduledJobs.lastError),
+      ),
+    )
+    .returning({ id: scheduledJobs.id });
+  if (!restored) return NOT_FOUND;
+
+  await logAudit({
+    userId: actor.user.id,
+    action: "sms.unarchive_job",
+    entity: "job",
+    entityId: jobId,
+  });
+
+  revalidatePath("/conversations");
+  return { ok: true, id: jobId };
+}
+
+/**
+ * « Archiver » — la ligne bloquée sort de la vue, et le blocage RESTE ENTIER.
+ *
+ * Ce bouton est le voisin immédiat de « Rétablir » et fait exactement le
+ * CONTRAIRE : les confondre serait la panne la plus grave de cet écran.
+ *  · « Rétablir » EFFACE la rangée — le numéro peut de nouveau recevoir des SMS.
+ *  · « Archiver » GARDE la rangée, ne touche ni à `reason` ni à `note`, et ne
+ *    fait sortir que l'entrée de la liste. Plus rien ne partira jamais vers ce
+ *    numéro : un blocage archivé bloque toujours.
+ *
+ * ── Pourquoi archiver un STOP est permis, et pourquoi c'est tout l'intérêt ──
+ * La règle 12 interdit de LEVER un désabonnement ; elle n'oblige personne à le
+ * regarder tous les matins. Sans ce geste, les cinq STOP de la production
+ * n'avaient AUCUNE sortie : le seul bouton offert leur était refusé
+ * (`stopIsAbsolute`), et ils restaient pour toujours dans le seul écran où l'on
+ * vient chercher les blocages du jour — jusqu'à ce qu'on cesse de l'ouvrir. On
+ * les range donc sans rien lever, et `liftSuppressionAction` continue de les
+ * refuser, archivés ou non.
+ *
+ * Même porte que « Rétablir » : `admin.settings`. Une suppression est une clé de
+ * TÉLÉPHONE, pas une fiche — pas de case de fiche à ouvrir en plus, et aucun
+ * filtre de visibilité (règle 13, chemins machine).
+ *
+ * Idempotent : archiver deux fois (deux onglets, un clic répété) répond « fait »
+ * sans réécrire qui a rangé la ligne ni quand — la signature du PREMIER est la
+ * seule qui veuille dire quelque chose six semaines plus tard.
+ */
+export async function archiveSuppressionAction(phoneE164: string): Promise<SmsActionResult> {
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("admin.settings")) return FORBIDDEN;
+
+  // Règle 3 : rien n'entre dans un `where` sans passer par la normalisation. La
+  // clé de la table EST l'E.164 — « (418) 476-1542 » ne trouverait rien.
+  const phone = normalizePhone(phoneE164);
+  if (!phone) return INVALID;
+
+  const row = await db.query.suppressions.findFirst({
+    where: eq(suppressions.phoneE164, phone),
+  });
+  // Rangée absente : la ligne vient d'être rétablie par quelqu'un d'autre, ou ce
+  // numéro n'a jamais été bloqué. Dans les deux cas l'écran qui l'affiche encore
+  // est périmé, et « introuvable » est ce qui le fait se rafraîchir.
+  if (!row) return NOT_FOUND;
+  // Déjà rangée : c'est fait, et on ne touche pas à la signature du premier.
+  if (row.archivedAt) return { ok: true };
+
+  // Deux colonnes écrites, et deux seulement. `reason` et `note` restent
+  // intouchés : ils SONT le blocage et la preuve de son motif — les réécrire en
+  // croyant ne ranger qu'un écran ferait mentir la table sur ce qui a été
+  // décidé. La condition est REDITE dans le `where` et c'est elle qui tient :
+  // entre la lecture ci-dessus et cette ligne, un collègue a pu ranger la même
+  // rangée.
+  const [archived] = await db
+    .update(suppressions)
+    .set({ archivedAt: new Date(), archivedById: actor.user.id })
+    .where(and(eq(suppressions.phoneE164, phone), isNull(suppressions.archivedAt)))
+    .returning({ reason: suppressions.reason });
+  // Quelqu'un est passé avant nous : rien à journaliser, rien n'a eu lieu.
+  if (!archived) return { ok: true };
+
+  await logAudit({
+    userId: actor.user.id,
+    action: "sms.archive_suppression",
+    entity: "suppression",
+    entityId: phone,
+    // La rangée SURVIT, contrairement à « Rétablir » qui la détruit : elle reste
+    // la référence, et le journal n'a qu'à dire ce qu'on a rangé et pour quel
+    // motif la ligne était fermée.
+    detail: { reason: archived.reason },
+  });
+
+  revalidatePath("/conversations");
+  return { ok: true };
+}
+
+/**
+ * « Sortir de l'archive » — la ligne bloquée revient dans la liste.
+ *
+ * Le retour, sans lequel archiver ne serait que détruire en cachant : une
+ * rangée qu'aucun écran ne montre plus et qu'aucun geste ne ramène est une
+ * rangée perdue, et c'est justement ce qu'archiver promet de ne pas faire.
+ *
+ * Rien n'est « remis en force » ici, parce que rien n'avait cessé de l'être :
+ * pendant tout le séjour dans l'archive, le numéro était bloqué exactement comme
+ * avant. Ce geste ne rend donc pas la personne injoignable — elle l'était déjà —
+ * il rend seulement la ligne visible.
+ *
+ * Même porte que son jumeau : un rôle qui pourrait ranger sans pouvoir dé-ranger
+ * laisserait un geste sans retour. Idempotent, lui aussi.
+ */
+export async function unarchiveSuppressionAction(phoneE164: string): Promise<SmsActionResult> {
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("admin.settings")) return FORBIDDEN;
+
+  const phone = normalizePhone(phoneE164);
+  if (!phone) return INVALID;
+
+  const row = await db.query.suppressions.findFirst({
+    where: eq(suppressions.phoneE164, phone),
+  });
+  if (!row) return NOT_FOUND;
+  // Déjà dans la liste : rien à défaire.
+  if (!row.archivedAt) return { ok: true };
+
+  const [restored] = await db
+    .update(suppressions)
+    .set({ archivedAt: null, archivedById: null })
+    .where(and(eq(suppressions.phoneE164, phone), isNotNull(suppressions.archivedAt)))
+    .returning({ reason: suppressions.reason });
+  if (!restored) return { ok: true };
+
+  await logAudit({
+    userId: actor.user.id,
+    action: "sms.unarchive_suppression",
+    entity: "suppression",
+    entityId: phone,
+    detail: { reason: restored.reason, archivedAt: row.archivedAt.toISOString() },
+  });
+
+  revalidatePath("/conversations");
+  return { ok: true };
+}
+
+/**
+ * « Tout archiver » — le même rangement, sur la pile entière.
+ *
+ * Vingt-trois lignes bloquées ne se rangent pas une par une : personne ne le
+ * fera, et c'est ainsi qu'un écran devient du décor. Le geste porte donc sur
+ * TOUT ce qui est encore dans la liste, STOP compris — ils sont même la raison
+ * d'être du bouton, puisqu'ils ne peuvent en sortir par aucun autre chemin.
+ *
+ * Ici encore, aucun blocage n'est levé : la table garde ses rangées, ses
+ * raisons et ses notes. Ce qui se vide est la LISTE, pas le registre.
+ *
+ * Volontairement sans liste d'identifiants, comme « Tout abandonner » et
+ * contrairement à « Tout clore » : la vue n'est bornée par aucune visibilité de
+ * fiche (une suppression est une clé de téléphone), le nombre annoncé par la
+ * bande d'état est celui de TOUTES les lignes, et n'en ranger qu'une partie
+ * laisserait un compteur non nul sans que personne ne comprenne pourquoi.
+ *
+ * Le compte rendu est celui des lignes RÉELLEMENT rangées — jamais celui de ce
+ * qu'on croyait afficher : « 23 rangées » sur 5 archivages serait un mensonge.
+ */
+export async function archiveAllSuppressionsAction(): Promise<SmsActionResult> {
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("admin.settings")) return FORBIDDEN;
+
+  // `where archivedAt is null` porte l'idempotence : repasser sur une liste déjà
+  // vide n'écrase la signature de personne et annonce honnêtement zéro.
+  const archived = await db
+    .update(suppressions)
+    .set({ archivedAt: new Date(), archivedById: actor.user.id })
+    .where(isNull(suppressions.archivedAt))
+    .returning({ phoneE164: suppressions.phoneE164 });
+
+  await logAudit({
+    userId: actor.user.id,
+    action: "sms.archive_suppressions_bulk",
+    entity: "suppression",
+    // Les numéros EN ENTIER : la clé primaire de cette table est le téléphone,
+    // c'est donc l'équivalent exact des identifiants que journalisent les autres
+    // gestes en masse — sans eux, impossible de dire plus tard ce qui a été
+    // rangé ce jour-là.
+    detail: { count: archived.length, phones: archived.map((s) => s.phoneE164) },
+  });
+
+  revalidatePath("/conversations");
+  return { ok: true, closed: archived.length };
+}
+
+/**
  * Classer la fiche d'un fil — depuis la boîte de réception.
  *
  * Un simple relais vers l'action des fiches : la règle de classement (statut
