@@ -1196,7 +1196,7 @@ export function ClientsWorkspace({
             <div
               role="group"
               aria-label={t("list.filters.category")}
-              className="-mx-3 mt-2 flex gap-1.5 overflow-x-auto px-3 pb-0.5 [mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-16px),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="mt-2 flex flex-wrap gap-1.5"
             >
               <button
                 type="button"
@@ -1265,7 +1265,7 @@ export function ClientsWorkspace({
 
             {/* Rappel des filtres actifs (hors catégorie) : retrait en un geste. */}
             {activeFilterChips.length > 0 ? (
-              <div className="-mx-3 mt-1.5 flex gap-1.5 overflow-x-auto px-3 pb-0.5 [mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-16px),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {activeFilterChips.map((chip) => (
                   <button
                     key={chip.key}

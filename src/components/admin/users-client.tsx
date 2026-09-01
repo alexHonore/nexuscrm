@@ -571,7 +571,7 @@ export function UsersClient({
           <TableBody>
             {users.map((u) => (
               <TableRow key={u.id}>
-                <TableCell>
+                <TableCell className="max-w-40">
                   <div className="min-w-0">
                     <p className="truncate font-medium">
                       {u.name}

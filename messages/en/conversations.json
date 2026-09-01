@@ -245,7 +245,14 @@
       "attempts": "{count, plural, one {# attempt} other {# attempts}}",
       "due": "Due {when}",
       "error": "Engine error",
-      "cap": "The {shown} most recent — {total} in all."
+      "cap": "The {shown} most recent — {total} in all.",
+      "dismiss": "Give up",
+      "dismissed": "Task given up — it will not be replayed, and its trace stays in the database.",
+      "dismissAll": "Give up on all",
+      "dismissAllTitle": "Give up on every crashed task?",
+      "dismissAllBody": "{count, plural, one {# task will stop asking to be repaired. Nothing is replayed and nothing is erased: the row stays in the database with its error, it simply leaves the counter.} other {# tasks will stop asking to be repaired. Nothing is replayed and nothing is erased: the rows stay in the database with their errors, they simply leave the counter.}}",
+      "dismissAllConfirm": "Give up on all",
+      "dismissAllDone": "{count, plural, =0 {No task given up — they changed state in the meantime} one {# task given up} other {# tasks given up}}"
     },
     "blocked": {
       "reason": {

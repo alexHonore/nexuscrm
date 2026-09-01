@@ -28,6 +28,8 @@ import {
   classifyConversationClientAction,
   closeConversationAction,
   closeHeldConversationsAction,
+  dismissAllFailedJobsAction,
+  dismissFailedJobAction,
   dismissFailedSmsAction,
   handBackToAiAction,
   liftSuppressionAction,
@@ -744,6 +746,46 @@ export function ConversationsInbox({
       return true;
     });
 
+  /**
+   * « Abandonner » — la sortie qui manquait à cette vue.
+   *
+   * « Réessayer » n'existe que pour un tour d'assistant : tout le reste — une
+   * note d'appel coupée, un barreau dont l'inscription a disparu, et les cent
+   * soixante-quatorze tours morts d'une seule nuit de panne — n'avait AUCUNE
+   * issue. Une liste qu'on ne peut pas finir cesse d'être regardée, et son
+   * compteur finit par annoncer l'histoire ancienne comme une urgence.
+   *
+   * Ce bouton ne répare rien et n'efface rien : il dit « j'ai vu, on ne
+   * rejouera pas ». La rangée reste en base avec son message d'erreur.
+   */
+  const dismissJob = (item: FailedJob) =>
+    act(async () => {
+      const result = await dismissFailedJobAction(item.id);
+      if (!result.ok) {
+        toast.error(t("error"));
+        // « Introuvable » : la tâche a changé d'état, l'écran est périmé.
+        return result.error === "notFound";
+      }
+      toast.success(t("inbox.jobs.dismissed"));
+      return true;
+    });
+
+  // La même décision sur la pile ENTIÈRE — pas seulement les cent affichées :
+  // le nombre que la bande annonce est celui de toutes, et en laisser
+  // soixante-quatorze derrière serait incompréhensible.
+  const [confirmDismissJobs, setConfirmDismissJobs] = useState(false);
+  const dismissAllJobs = () =>
+    act(async () => {
+      const result = await dismissAllFailedJobsAction();
+      setConfirmDismissJobs(false);
+      if (!result.ok) {
+        toast.error(t("error"));
+        return true;
+      }
+      toast.success(t("inbox.jobs.dismissAllDone", { count: result.closed ?? 0 }));
+      return true;
+    });
+
   /** Le même geste depuis une carte de fil — elle ne connaît que sa rangée. */
   const retry = (row: InboxRow) => retryTurn(row.id);
 
@@ -963,18 +1005,21 @@ export function ConversationsInbox({
       {health ? <HealthStrip health={health} onSelectTab={openTab} /> : null}
 
       {/*
-        Le rail des vues. Sur écran large il tient sur une ligne et ne bouge
-        pas.
-        Sur téléphone il débordait : « File d'envoi » se coupait net au bord
-        droit, et « Refus », « Toutes » et « Les miennes » n'existaient plus —
-        un rail qui défile sans le DIRE est un rail qu'on ne fait pas défiler.
-        On l'empile donc plutôt que de le couper : les six comptes se lisent
-        d'un coup d'œil, et « 6 à traiter » est précisément le chiffre pour
-        lequel on ouvre cet écran. Trois lignes de pastilles coûtent moins que
-        deux vues invisibles.
+        Le rail des vues — il S'EMPILE, il ne défile jamais.
+
+        Un rail qui défile sans le DIRE est un rail qu'on ne fait pas défiler :
+        « Refus » et « Toutes » cessaient simplement d'exister pour qui ne
+        devinait pas qu'il fallait pousser la bande du doigt. C'était déjà le
+        raisonnement sur téléphone ; le passage de six à huit vues (« Tâches du
+        moteur », « Numéros bloqués ») l'a rendu vrai sur BUREAU aussi — les
+        huit pastilles dépassaient de 270 px la largeur du contenu, mesurés,
+        et les deux dernières disparaissaient derrière le bord.
+        Le retour à un simple `flex-wrap`, aux deux largeurs, règle les deux
+        cas d'un coup : deux lignes de pastilles coûtent moins que deux vues
+        invisibles, et il n'y a plus rien à faire défiler nulle part.
       */}
-      <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
-        <div className="flex w-max items-center gap-2 max-md:w-full max-md:flex-wrap">
+      <div>
+        <div className="flex w-full flex-wrap items-center gap-2">
           {tabs.map((key) => (
             <Button
               key={key}
@@ -1190,13 +1235,47 @@ export function ConversationsInbox({
         </div>
       ) : tab === "jobs" ? (
         <div className="space-y-2">
+          {/* Vider la pile d'un geste. Sans lui, cent soixante-quatorze rangées
+              d'une seule nuit de panne se retirent une par une — c'est-à-dire
+              jamais, et le compteur reste faux pour toujours. */}
+          {abilities.engine && jobs.length > 0 ? (
+            <div className="flex justify-end pb-1">
+              <AlertDialog open={confirmDismissJobs} onOpenChange={setConfirmDismissJobs}>
+                <AlertDialogTrigger
+                  render={<Button variant="outline" size="sm" className="min-h-11 md:min-h-8" />}
+                >
+                  <ListXIcon aria-hidden />
+                  {t("inbox.jobs.dismissAll")}
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t("inbox.jobs.dismissAllTitle")}</AlertDialogTitle>
+                    {/* Le nombre annoncé est celui de TOUTES les tâches en
+                        panne, pas celui des cent dessinées : c'est sur lui que
+                        le geste porte. */}
+                    <AlertDialogDescription>
+                      {t("inbox.jobs.dismissAllBody", { count: counts.jobs })}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t("inbox.close.cancel")}</AlertDialogCancel>
+                    <AlertDialogAction disabled={pending} onClick={dismissAllJobs}>
+                      {t("inbox.jobs.dismissAllConfirm")}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          ) : null}
           {jobs.map((item) => (
             <FailedJobRowCard
               key={item.id}
               item={item}
               pending={pending}
               canRetry={abilities.control}
+              canDismiss={abilities.engine}
               onRetry={retryJob}
+              onDismiss={dismissJob}
               dfnsLocale={dfnsLocale}
             />
           ))}
@@ -1960,14 +2039,19 @@ function FailedJobRowCard({
   item,
   pending,
   canRetry,
+  canDismiss,
   onRetry,
+  onDismiss,
   dfnsLocale,
 }: {
   item: FailedJob;
   pending: boolean;
   /** Rejouer un tour remet l'assistant aux commandes — `conversations.control`. */
   canRetry: boolean;
+  /** Abandonner une tâche est une conduite du moteur — `admin.settings`. */
+  canDismiss: boolean;
   onRetry: (item: FailedJob) => void;
+  onDismiss: (item: FailedJob) => void;
   dfnsLocale: typeof fr;
 }) {
   const t = useTranslations("conversations");
@@ -2025,18 +2109,34 @@ function FailedJobRowCard({
           </div>
         ) : null}
 
-        {showRetry ? (
+        {showRetry || canDismiss ? (
           <div className="flex flex-wrap items-center gap-2 pt-0.5">
             <span className="flex-1" />
-            <Button
-              variant="outline"
-              size="sm"
-              className="relative z-10 min-h-11 md:min-h-8"
-              disabled={pending}
-              onClick={() => onRetry(item)}
-            >
-              <RotateCcwIcon aria-hidden /> {t("inbox.actions.retry")}
-            </Button>
+            {showRetry ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="relative z-10 min-h-11 md:min-h-8"
+                disabled={pending}
+                onClick={() => onRetry(item)}
+              >
+                <RotateCcwIcon aria-hidden /> {t("inbox.actions.retry")}
+              </Button>
+            ) : null}
+            {/* « J'ai vu, on ne rejouera pas. » Rien n'est réparé, rien n'est
+                effacé — la tâche cesse simplement de réclamer. C'est la seule
+                sortie pour tout ce qui ne se rejoue pas. */}
+            {canDismiss ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="relative z-10 min-h-11 md:min-h-8"
+                disabled={pending}
+                onClick={() => onDismiss(item)}
+              >
+                <ListXIcon aria-hidden /> {t("inbox.jobs.dismiss")}
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </div>

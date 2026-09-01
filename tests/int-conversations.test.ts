@@ -50,6 +50,8 @@ const {
   markConversationHandledAction,
   assignConversationAction,
   retryAiTurnAction,
+  dismissAllFailedJobsAction,
+  dismissFailedJobAction,
   liftSuppressionAction,
   retryFailedSmsAction,
   dismissFailedSmsAction,
@@ -1159,5 +1161,84 @@ describe("une ligne fermée : la rouvrir, ou pas", () => {
     expect(await liftSuppressionAction(phone)).toEqual({ ok: false, error: "forbidden" });
     const rows = await testDb.select().from(suppressions).where(eq(suppressions.phoneE164, phone));
     expect(rows).toHaveLength(1);
+  });
+});
+
+describe("une tâche du moteur morte : l'abandonner", () => {
+  /** Une tâche définitivement tombée, comme les 174 d'une nuit de panne. */
+  async function deadJob(type = "agent_turn", err = "llm_provider_unconfigured: anthropic") {
+    const [job] = await testDb
+      .insert(scheduledJobs)
+      .values({
+        type,
+        runAt: new Date(),
+        payload: {},
+        status: "failed",
+        attempts: 3,
+        lastError: err,
+      })
+      .returning();
+    return job;
+  }
+
+  it("« Abandonner » ne rejoue rien et n'efface rien — la trace reste", async () => {
+    await loginAs(admin);
+    const job = await deadJob();
+
+    expect((await dismissFailedJobAction(job.id)).ok).toBe(true);
+
+    const [row] = await testDb.select().from(scheduledJobs).where(eq(scheduledJobs.id, job.id));
+    // La rangée SURVIT, avec son erreur : c'est ce qui permettra de comprendre
+    // plus tard ce qui est tombé cette nuit-là.
+    expect(row.status).toBe("cancelled");
+    expect(row.lastError).toBe("llm_provider_unconfigured: anthropic");
+    expect(row.attempts).toBe(3);
+  });
+
+  it("une tâche EN ATTENTE ne s'abandonne pas par ce chemin", async () => {
+    // Seul ce qui est définitivement tombé s'abandonne : annuler un envoi qui
+    // attend son heure est un autre geste, avec un autre bouton.
+    await loginAs(admin);
+    const [pendingJob] = await testDb
+      .insert(scheduledJobs)
+      .values({ type: "send_sms", runAt: new Date(), payload: {}, status: "pending" })
+      .returning();
+
+    expect(await dismissFailedJobAction(pendingJob.id)).toEqual({ ok: false, error: "notFound" });
+    const [row] = await testDb
+      .select()
+      .from(scheduledJobs)
+      .where(eq(scheduledJobs.id, pendingJob.id));
+    expect(row.status).toBe("pending");
+  });
+
+  it("« Tout abandonner » porte sur TOUTES les tâches tombées, et sur elles seules", async () => {
+    await loginAs(admin);
+    await deadJob("agent_turn");
+    await deadJob("call_transcript", "truncated");
+    const [alive] = await testDb
+      .insert(scheduledJobs)
+      .values({ type: "send_sms", runAt: new Date(), payload: {}, status: "pending" })
+      .returning();
+
+    const result = await dismissAllFailedJobsAction();
+    expect(result.ok).toBe(true);
+    // Le compte rendu dit ce qui a RÉELLEMENT été abandonné.
+    expect(result.ok && result.closed).toBe(2);
+
+    const rows = await testDb.select().from(scheduledJobs);
+    expect(rows.filter((r) => r.status === "failed")).toHaveLength(0);
+    // L'envoi qui attendait son heure n'a pas été touché.
+    expect(rows.find((r) => r.id === alive.id)!.status).toBe("pending");
+  });
+
+  it("un téléphoniste n'abandonne pas une tâche — c'est la conduite du moteur", async () => {
+    await loginAs(caller);
+    const job = await deadJob();
+
+    expect(await dismissFailedJobAction(job.id)).toEqual({ ok: false, error: "forbidden" });
+    expect(await dismissAllFailedJobsAction()).toEqual({ ok: false, error: "forbidden" });
+    const [row] = await testDb.select().from(scheduledJobs).where(eq(scheduledJobs.id, job.id));
+    expect(row.status).toBe("failed");
   });
 });

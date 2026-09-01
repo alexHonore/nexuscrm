@@ -1149,6 +1149,95 @@ export async function retryFailedSmsAction(messageId: string): Promise<SmsAction
 }
 
 /**
+ * « Abandonner » — cette tâche morte cesse de réclamer une réparation.
+ *
+ * La vue « Tâches du moteur » n'avait qu'une sortie : « Réessayer », et
+ * seulement pour un tour d'assistant. Tout le reste — une note d'appel coupée,
+ * un barreau de campagne dont l'inscription a disparu, et surtout les cent
+ * soixante-quatorze tours morts d'une panne de modèle du 25 août — restait là
+ * pour toujours. Une liste qu'on ne peut pas finir cesse d'être regardée, et le
+ * compteur de la bande d'état finit par annoncer l'histoire ancienne comme une
+ * urgence du jour.
+ *
+ * Ce que ce geste dit exactement : « j'ai vu, on ne rejouera pas ». La tâche
+ * passe de `failed` à `cancelled` — le vocabulaire que la file emploie déjà
+ * pour un travail qu'un humain a retiré (voir `cancelPendingJobs`). Elle n'est
+ * pas EFFACÉE : la rangée reste, avec sa charge utile et son message d'erreur,
+ * pour qui voudra comprendre plus tard ce qui est tombé cette nuit-là.
+ *
+ * `admin.settings`, comme la vue elle-même : une tâche est une rangée du
+ * MOTEUR, pas une fiche. Elle n'appartient à personne et ne se filtre pas par
+ * la visibilité (règle 13, chemins machine) — c'est justement pourquoi le droit
+ * qui l'ouvre est celui qui conduit le moteur, et pas celui qui répond aux
+ * clients.
+ */
+export async function dismissFailedJobAction(jobId: string): Promise<SmsActionResult> {
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("admin.settings")) return FORBIDDEN;
+  if (!z.uuid().safeParse(jobId).success) return INVALID;
+
+  // `where status = 'failed'` porte l'idempotence ET la garde : on n'annule pas
+  // un travail qui attend encore son heure ou qui tourne en ce moment — seul
+  // ce qui est DÉFINITIVEMENT tombé s'abandonne.
+  const [dropped] = await db
+    .update(scheduledJobs)
+    .set({ status: "cancelled" })
+    .where(and(eq(scheduledJobs.id, jobId), eq(scheduledJobs.status, "failed")))
+    .returning({ id: scheduledJobs.id, type: scheduledJobs.type });
+  if (!dropped) return NOT_FOUND;
+
+  await logAudit({
+    userId: actor.user.id,
+    action: "sms.dismiss_job",
+    entity: "job",
+    entityId: jobId,
+    detail: { type: dropped.type },
+  });
+
+  revalidatePath("/conversations");
+  return { ok: true, id: jobId };
+}
+
+/**
+ * « Tout abandonner » — la même décision, sur la pile entière.
+ *
+ * Cent soixante-quatorze rangées d'une seule nuit de panne ne se retirent pas
+ * une par une : personne ne le ferait, et c'est ainsi qu'un compteur devient
+ * du décor. Le geste porte donc sur TOUT ce qui est en échec, et le compte rendu
+ * dit ce qui a RÉELLEMENT été abandonné — jamais ce qu'on a demandé.
+ *
+ * Volontairement sans liste d'identifiants, contrairement à « Tout clore » :
+ * là-bas on ferme les fils AFFICHÉS (la vue est bornée par la visibilité des
+ * fiches, et vider ce qu'on voit est la promesse qu'on tient). Ici la liste est
+ * bornée aux cent plus récentes pour des raisons d'écran seulement, alors que
+ * le nombre annoncé par la bande est celui de TOUTES : n'abandonner que les
+ * cent affichées laisserait le compteur à soixante-quatorze sans que personne
+ * ne comprenne pourquoi.
+ */
+export async function dismissAllFailedJobsAction(): Promise<SmsActionResult> {
+  const actor = await currentActor();
+  if (!actor) return FORBIDDEN;
+  if (!actor.can("admin.settings")) return FORBIDDEN;
+
+  const dropped = await db
+    .update(scheduledJobs)
+    .set({ status: "cancelled" })
+    .where(eq(scheduledJobs.status, "failed"))
+    .returning({ id: scheduledJobs.id });
+
+  await logAudit({
+    userId: actor.user.id,
+    action: "sms.dismiss_jobs_bulk",
+    entity: "job",
+    detail: { count: dropped.length },
+  });
+
+  revalidatePath("/conversations");
+  return { ok: true, closed: dropped.length };
+}
+
+/**
  * « Retirer » — l'échec sort de la vue, et RIEN n'est détruit.
  *
  * Ce que ce bouton ne fait pas mérite d'être écrit en toutes lettres, parce que

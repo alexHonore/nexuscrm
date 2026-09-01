@@ -111,7 +111,14 @@
       "attempts": "{count, plural, one {# tentative} other {# tentatives}}",
       "due": "Prévue {when}",
       "error": "Erreur du moteur",
-      "cap": "Les {shown} plus récentes — {total} au total."
+      "cap": "Les {shown} plus récentes — {total} au total.",
+      "dismiss": "Abandonner",
+      "dismissed": "Tâche abandonnée — elle ne sera pas rejouée, et sa trace reste en base.",
+      "dismissAll": "Tout abandonner",
+      "dismissAllTitle": "Abandonner toutes les tâches en panne ?",
+      "dismissAllBody": "{count, plural, one {# tâche cessera de réclamer une réparation. Rien n'est rejoué et rien n'est effacé : la rangée reste en base avec son erreur, elle quitte simplement le compteur.} other {# tâches cesseront de réclamer une réparation. Rien n'est rejoué et rien n'est effacé : les rangées restent en base avec leur erreur, elles quittent simplement le compteur.}}",
+      "dismissAllConfirm": "Tout abandonner",
+      "dismissAllDone": "{count, plural, =0 {Aucune tâche abandonnée — elles ont changé d'état entre-temps} one {# tâche abandonnée} other {# tâches abandonnées}}"
     },
     "blocked": {
       "reason": {
