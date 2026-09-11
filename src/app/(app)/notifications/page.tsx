@@ -69,12 +69,28 @@ export default async function NotificationsPage({
       notifications,
       and(eq(notifications.userId, actor.user.id), isNull(notifications.readAt)),
     ),
-    db.query.notifications.findMany({
-      where,
-      orderBy: [desc(notifications.createdAt)],
-      limit: PAGE_SIZE,
-      offset: (page - 1) * PAGE_SIZE,
-    }),
+    // ⚠ PAS `db.query.notifications.findMany` ici : le constructeur relationnel
+    // réécrit CHAQUE colonne du fragment sql`` sur l'alias de la table racine
+    // (drizzle `mapColumnsInSQLToAlias`), y compris celles de `clients` — d'où
+    // « column notifications.assigned_to_id does not exist » en production dès
+    // qu'un rôle a une portée restreinte. `db.select()` rend le fragment tel
+    // quel ; les `db.$count` ci-dessus n'ont jamais souffert du problème parce
+    // qu'ils n'aliasent rien.
+    db
+      .select({
+        id: notifications.id,
+        type: notifications.type,
+        title: notifications.title,
+        body: notifications.body,
+        link: notifications.link,
+        readAt: notifications.readAt,
+        createdAt: notifications.createdAt,
+      })
+      .from(notifications)
+      .where(where)
+      .orderBy(desc(notifications.createdAt))
+      .limit(PAGE_SIZE)
+      .offset((page - 1) * PAGE_SIZE),
   ]);
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
