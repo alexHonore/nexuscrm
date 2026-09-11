@@ -138,11 +138,15 @@ const CYCLE_BUDGET_MS = Number(process.env.DISPATCH_BUDGET_MS ?? 240_000);
 const CLAIM_BATCH = 10;
 
 export async function runDispatchCycle(
-  opts: { limit?: number; now?: () => Date; reconcile?: boolean } = {},
+  opts: { limit?: number; now?: () => Date; reconcile?: boolean; budgetMs?: number } = {},
 ): Promise<DispatchCounts> {
   const now = opts.now ?? (() => new Date());
   const startedAt = Date.now();
-  const overBudget = () => Date.now() - startedAt > CYCLE_BUDGET_MS;
+  // Le chemin rapide (kickDispatch, dans le `after()` d'une requête humaine)
+  // se donne un budget bien plus court que le cron : il existe pour partir en
+  // secondes, pas pour vider la file.
+  const budgetMs = opts.budgetMs ?? CYCLE_BUDGET_MS;
+  const overBudget = () => Date.now() - startedAt > budgetMs;
   // The registry binds the cycle's clock so handlers stay injectable.
   const registry: Record<string, JobHandler> = {
     send_sms: (job) => handleSendSms(job, now),
@@ -210,8 +214,17 @@ export async function runDispatchCycle(
     });
     if (batch.length === 0) break;
     jobs.push(...batch);
-    for (const job of batch) await runOne(job);
-    if (batch.length < CLAIM_BATCH) break;
+    // Le budget se vérifie AUSSI entre deux jobs. Il ne l'était qu'au tour de
+    // boucle extérieur : un lot de dix tours d'agent réclamé d'un coup partait
+    // donc jusqu'au bout, et le `after()` d'une requête utilisateur tenait la
+    // fonction Vercel jusqu'à sa mort à 300 s (« Task timed out »). Les jobs
+    // laissés réclamés ne sont pas perdus : `requeueStaleJobs` les remet en
+    // file, exactement comme lorsque la fonction mourait.
+    for (const job of batch) {
+      if (overBudget()) break;
+      await runOne(job);
+    }
+    if (overBudget() || batch.length < CLAIM_BATCH) break;
   }
   counts.claimed = jobs.length;
   // Le battement est écrit APRÈS le travail : un cycle qui plante à la
