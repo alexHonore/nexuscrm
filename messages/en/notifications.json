@@ -33,6 +33,8 @@
     "smsHandoffBody": "{name}: the assistant is handing over to you ({reason}).",
     "smsBlockedTitle": "Assistant reply blocked",
     "smsBlockedBody": "{name}: a guardrail blocked the reply — the thread is waiting for a human.",
+    "smsUnsendableTitle": "Number cannot receive texts",
+    "smsUnsendableBody": "{name}: this number cannot receive any text. The assistant stopped before writing — open the record and fix the phone.",
     "smsErrorTitle": "Assistant failure",
     "smsErrorBody": "{name}: the model did not answer ({reason}) — the thread is waiting for a human.",
     "smsStoppedTitle": "Conversation stopped",

@@ -165,6 +165,29 @@ describe("envoi manuel", () => {
     expect(await testDb.select().from(scheduledJobs)).toHaveLength(0);
   });
 
+  it("un numéro qui ne peut RIEN recevoir est refusé AVANT la mise en file", async () => {
+    // Le geste utile est d'ouvrir la fiche, pas de retaper le message : le
+    // refus a donc son propre motif, et il arrive dans l'écran où la
+    // téléphoniste vient de taper — pas une minute plus tard, dans l'onglet
+    // « Échecs », sous la forme d'un code Twilio.
+    const client = await makeClient({ phone: "+4184761542" });
+
+    const result = await sendManualSmsAction({ clientId: client.id, body: "Allô?" });
+    expect(result).toEqual({ ok: false, error: "unsendable" });
+    expect(await testDb.select().from(scheduledJobs)).toHaveLength(0);
+  });
+
+  it("une fiche SANS téléphone ne dit plus « message invalide »", async () => {
+    // C'était `error: "invalid"`, qui affiche « Le message est invalide » : on
+    // envoyait retaper un texte qui n'avait rien de fautif.
+    const client = await makeClient({ phone: "" });
+    expect(await sendManualSmsAction({ clientId: client.id, body: "Allô?" })).toEqual({
+      ok: false,
+      error: "unsendable",
+    });
+    expect(await testDb.select().from(scheduledJobs)).toHaveLength(0);
+  });
+
   it("sans numéro SMS actif, le refus est explicite", async () => {
     await testDb.update(smsNumbers).set({ active: false });
     const client = await makeClient();

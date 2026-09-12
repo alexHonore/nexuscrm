@@ -25,7 +25,7 @@
  * DID devient la destination.
  */
 import { z } from "zod";
-import { normalizePhone } from "@/lib/phone";
+import { isE164, normalizePhone } from "@/lib/phone";
 /**
  * Le DID réduit à ses chiffres composables — le jumeau PUR de `didDigits` de
  * `src/lib/voipms.ts`, recopié plutôt qu'importé.
@@ -105,9 +105,6 @@ export type SimulRingDecision =
   | { status: "on"; cell: string }
   | { status: "skipped"; reason: SimulRingSkipReason };
 
-/** E.164 tel qu'on accepte de le composer : indicatif pays, 8 à 15 chiffres. */
-const E164_RE = /^\+[1-9]\d{7,14}$/;
-
 /**
  * Ce que la PERSONNE a accepté, déchiffré par l'appelant.
  *
@@ -145,7 +142,7 @@ export function resolveSimulRing(
   if (!line || !line.enabled) return { status: "skipped", reason: "line_off" };
   if (!reach || !reach.ringMobile) return { status: "skipped", reason: "not_consented" };
   const cell = normalizePhone(reach.cell ?? "");
-  if (!cell || !E164_RE.test(cell)) return { status: "skipped", reason: "no_cell" };
+  if (!cell || !isE164(cell)) return { status: "skipped", reason: "no_cell" };
   return { status: "on", cell };
 }
 

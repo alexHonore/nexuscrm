@@ -23,7 +23,7 @@ import { bodyForStep, ladderExhausted, nextTouchAt } from "@/lib/campaigns/ladde
 import { variantBody } from "@/lib/campaigns/variants";
 import { isWithinSendWindow, nextSendTime, type QuietHours } from "@/lib/sms/quiet-hours";
 import { resolveQuietHours } from "@/lib/assistants/quiet-hours";
-import { settingsSendGate } from "@/lib/sms-server";
+import { checkSmsDestination, settingsSendGate } from "@/lib/sms-server";
 
 /**
  * Envoi d'un barreau d'échelle.
@@ -163,6 +163,9 @@ export async function runTouch(enrollmentId: string, now = new Date()): Promise<
     // sur un réglage illisible, comme l'envoi lui-même.
     killSwitch: !(await settingsSendGate.isSendingAllowed()),
     suppressed: suppressedRow !== undefined,
+    // Relu à CHAQUE barreau : une fiche se corrige — et se casse — pendant les
+    // trois semaines d'une échelle.
+    sendablePhone: checkSmsDestination(client.phone).sendable,
     doNotCall: client.doNotCall,
     excludeDoNotCall: config.audience.excludeDoNotCall,
     aiEnabled: conversation?.aiEnabled ?? true,
@@ -384,6 +387,20 @@ async function handleRefusal(
       // Repousser re-présenterait l'inscription à chaque cycle, pour toujours.
       // Même statut et même motif que la libération immédiate — un barreau
       // rattrapé ici doit se lire comme celui qui a été libéré à temps.
+      return finish(enrollment.id, "excluded", refusal, result);
+    case "unsendable_phone":
+      // « Écartée », surtout pas « arrêtée ». Le compte des inscriptions
+      // arrêtées est lu comme le nombre de gens qui ont dit NON : y verser
+      // notre propre problème de saisie ferait annoncer « 200 refus » après
+      // une importation aux chiffres recollés. Un numéro que personne ne peut
+      // texter n'est le refus de personne — c'est la même famille que la fiche
+      // supprimée (`client_deleted`, plus haut) et que le retrait par
+      // l'administrateur.
+      //
+      // Et c'est réversible : corriger le téléphone puis « Relancer les
+      // terminées » remet l'inscription en vol au barreau où elle s'est
+      // arrêtée (`enrollmentReopenable`, qui accepte ce motif-ci et lui seul
+      // parmi les écartées). Le serveur revérifie le numéro à ce moment-là.
       return finish(enrollment.id, "excluded", refusal, result);
     case "suppressed":
     case "do_not_call":

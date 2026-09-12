@@ -23,7 +23,7 @@ function ready(overrides: Partial<PreflightFacts> = {}): PreflightFacts {
     hasWebhookSignatureSecret: true,
     activeNumberCount: 1,
     numbersWithoutMessagingService: 0,
-    quietHoursLabel: "9h-20h",
+    quietHoursLabel: "9h-20h", allowedRegionsLabel: "+1",
     appUrl: "https://crm.example.com",
     hasMessagingServiceEnv: true,
     activeAssistantCount: 1,

@@ -31,6 +31,7 @@ import {
 import { cancelPendingJobs, enqueueJob } from "@/lib/jobs/queue";
 import { kickDispatch } from "@/lib/jobs/kick";
 import { normalizePhone } from "@/lib/phone";
+import { checkSmsDestination } from "@/lib/sms-server";
 import { detectOptOut } from "@/lib/sms/optout";
 import { analyzeSms } from "@/lib/sms/segments";
 import { setClientCategoryAction } from "../clients/actions";
@@ -78,6 +79,12 @@ export type SmsActionResult =
         | "forbidden"
         | "notFound"
         | "suppressed"
+        /**
+         * Le numéro de la fiche ne peut rien recevoir (mal formé, pays non
+         * servi). Distinct de « invalid », qui parle du MESSAGE : ici le texte
+         * est bon, c'est le destinataire qui n'existe pas.
+         */
+        | "unsendable"
         | "noNumber"
         | "alreadySent"
         | "assistantUnavailable"
@@ -148,7 +155,16 @@ export async function sendManualSmsAction(input: {
     where: eq(clients.id, parsed.data.clientId),
   });
   if (!client) return NOT_FOUND;
-  if (!client.phone) return { ok: false, error: "invalid" };
+
+  // Le DESTINATAIRE, avant tout le reste — y compris avant « il n'y a pas de
+  // numéro », que ce verdict couvre (`no_phone`). C'était un `error: "invalid"`
+  // qui affichait « Le message est invalide » : la téléphoniste retapait un
+  // texte qui n'avait rien de fautif. Et un numéro que Twilio ne peut pas
+  // servir se dit TOUT DE SUITE, dans l'écran où le message vient d'être tapé —
+  // mis en file, il laissait « Message mis en file » puis une rangée rouge une
+  // minute plus tard, dans un onglet où personne ne regardait. La porte d'envoi
+  // rend le même verdict ; celle-ci ne fait que le rendre à temps.
+  if (!checkSmsDestination(client.phone).sendable) return { ok: false, error: "unsendable" };
 
   // La suppression est vérifiée ICI en plus du garde d'envoi : refuser dans
   // l'écran vaut mieux que mettre en file un message qui sera jeté sans que
@@ -1260,6 +1276,12 @@ export async function retryFailedSmsAction(messageId: string): Promise<SmsAction
     where: (s, { eq: e }) => e(s.phoneE164, phone),
   });
   if (suppressed) return { ok: false, error: "suppressed" };
+
+  // Renvoyer vers un numéro que Twilio ne peut pas servir, c'est refaire
+  // exactement l'échec qu'on regarde. Et c'est ici, sur l'écran des échecs,
+  // qu'on peut le dire au moment où le doigt appuie — l'écran voisin, lui,
+  // devra attendre la minute du répartiteur pour l'apprendre.
+  if (!checkSmsDestination(phone).sendable) return { ok: false, error: "unsendable" };
 
   // Le fil qui parle à ce numéro-LÀ — pas forcément celui de l'échec. Si le
   // téléphone de la fiche a été corrigé, l'ancien fil s'adresse à l'ancien

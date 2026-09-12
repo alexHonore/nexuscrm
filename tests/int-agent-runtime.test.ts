@@ -1904,3 +1904,118 @@ describe("outils de lecture (read_client / read_client_comments)", () => {
     void client;
   });
 });
+
+/**
+ * Le numéro du destinataire, jugé AVANT le premier appel au modèle.
+ *
+ * Le tour dépensait une demi-douzaine d'appels OpenRouter — classifieur,
+ * générateur, juges — pour un message que Twilio refusait ensuite d'un
+ * 21408 (« la région de ce numéro n'est pas activée sur le compte ») ou d'un
+ * 21211 (« numéro illisible »). Le fil finissait sur « Ce message n'est pas
+ * parti », et la facture du modèle était payée pour rien.
+ *
+ * Ces tests tiennent la promesse dans les deux sens : le modèle N'EST PAS
+ * appelé quand le numéro est mort, et il l'est toujours quand il ne l'est pas.
+ */
+describe("numéro non joignable — la porte d'avant le modèle", () => {
+  beforeEach(async () => {
+    await resetDb();
+    llm.calls = [];
+    llm.generatorText = "Parfait! Préférez-vous jeudi 14 h ou vendredi 18 h 30?";
+    llm.generatorToolCalls = [];
+    llm.generatorSequence = [];
+    llm.onGenerate = null;
+    llm.generatorError = null;
+    llm.truncated = false;
+    llm.unconfigured = [];
+    llm.classifierJson = '{"refusal":"none","qualification":{}}';
+    llm.judgeJson = '{"passed":true,"reason":"conforme"}';
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  /** Rebranche le fil sur un numéro que Twilio ne peut pas servir. */
+  async function withPhone(conversationId: string, clientId: string, phone: string) {
+    await testDb.update(conversations).set({ clientPhone: phone }).where(eq(conversations.id, conversationId));
+    await testDb.update(clients).set({ phone }).where(eq(clients.id, clientId));
+  }
+
+  it("un numéro que Twilio refuserait : AUCUN appel au modèle, rien en file", async () => {
+    const { conversation, client } = await scene();
+    // Le piège réel : un numéro de Québec tapé avec un « + » de trop. Twilio
+    // le lit comme un indicatif étranger et répond 21408 ; nous, on reconnaît
+    // le dix chiffres d'ici auquel il ne manque que son « 1 », et on envoie
+    // corriger la FICHE plutôt que la console Twilio.
+    await withPhone(conversation.id, client.id, "+4184761542");
+    await inbound(conversation.id, "Oui allo, je cherche à acheter");
+
+    const result = await runTurn(conversation.id);
+
+    expect(result.outcome).toBe("blocked");
+    expect(result.reason).toContain("invalid_nanp");
+    // LA promesse de ce fichier : pas un jeton d'OpenRouter dépensé.
+    expect(llm.calls).toHaveLength(0);
+    // Et rien à envoyer : le message n'a jamais été écrit.
+    expect(await jobsFor(conversation.id)).toHaveLength(0);
+  });
+
+  it("le fil le DIT : pastille, motif, trace, et un humain prévenu", async () => {
+    const { conversation, client } = await scene();
+    // Un vrai indicatif étranger, celui-là : le compte Twilio ne sert pas ce pays.
+    await withPhone(conversation.id, client.id, "+33612345678");
+    await inbound(conversation.id, "Bonjour");
+
+    await runTurn(conversation.id);
+
+    const [thread] = await testDb
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, conversation.id));
+    expect(thread.needsAttention).toBe(true);
+    expect(thread.attentionReason).toBe("unsendable_number");
+
+    const [trace] = await testDb.select().from(agentTurnTraces);
+    expect(trace.outcome).toBe("blocked");
+    // Un tour qui ne parle pas au modèle ne coûte rien, et la trace ne fait
+    // même pas semblant de compter : les colonnes d'usage restent vides.
+    expect(trace.tokensIn).toBeNull();
+    expect(trace.tokensOut).toBeNull();
+    expect(trace.costUsd).toBeNull();
+
+    expect(await eventsOf(conversation.id)).toContain("unsendable_number");
+
+    // La notification promise : sans elle, la fiche resterait muette et
+    // personne n'apprendrait qu'il y a un numéro à corriger.
+    const notes = await testDb.select().from(notifications);
+    expect(notes.length).toBeGreaterThan(0);
+    // Son PROPRE genre : « Assistant en panne — le modèle n'a pas répondu »
+    // aurait envoyé vérifier les crédits OpenRouter pour un téléphone mal saisi,
+    // et le modèle n'a justement pas été appelé.
+    expect(notes[0].type).toBe("sms_unsendable");
+  });
+
+  it("l'entrant est CONSOMMÉ : la file ne rejoue pas un refus définitif", async () => {
+    const { conversation, client } = await scene();
+    await withPhone(conversation.id, client.id, "+12345678");
+    await inbound(conversation.id, "Bonjour");
+
+    await runTurn(conversation.id);
+
+    const [msg] = await testDb.select().from(messages).where(eq(messages.direction, "in"));
+    expect(msg.processedAt).not.toBeNull();
+    // Rejouer le tour ne réveille personne une deuxième fois.
+    llm.calls = [];
+    const again = await runTurn(conversation.id);
+    expect(again.outcome).toBe("skipped_no_inbound");
+    expect(llm.calls).toHaveLength(0);
+  });
+
+  it("le numéro est bon : le modèle est bien appelé (contrôle négatif)", async () => {
+    const { conversation } = await scene();
+    await inbound(conversation.id, "Oui allo, je cherche à acheter");
+
+    const result = await runTurn(conversation.id);
+
+    expect(result.outcome).toBe("sent");
+    expect(llm.calls.length).toBeGreaterThan(0);
+  });
+});

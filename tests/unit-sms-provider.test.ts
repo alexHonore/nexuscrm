@@ -14,6 +14,7 @@ import {
   TwilioSendError,
   type SmsProviderDeps,
 } from "@/lib/sms/provider";
+import { DEFAULT_ALLOWED_REGIONS } from "@/lib/sms/destination";
 import type { Clock, Logger, SendGate, SendInput, SuppressionStore } from "@/lib/sms/types";
 import { noopLogger, systemClock } from "@/lib/sms/types";
 
@@ -56,6 +57,7 @@ function makeDeps(overrides: Partial<SmsProviderDeps> = {}) {
   const deps: SmsProviderDeps = {
     mode: "live",
     allowlist: [],
+    allowedRegions: DEFAULT_ALLOWED_REGIONS,
     transport,
     suppressions: makeSuppressions(false),
     gate: makeGate(true),
@@ -129,12 +131,53 @@ describe("createSmsProvider — gardes", () => {
 
     const result = await provider.send({ ...input, to: "5145551234" });
 
-    expect(result).toMatchObject({ sent: false, skippedReason: "invalid_to", mode: "live" });
+    // Le motif garde son nom ; ce qui suit les deux-points est un DÉTAIL de
+    // diagnostic (l'écran ne lit que la partie avant, `split(":")[0]`).
+    expect(result).toMatchObject({ sent: false, mode: "live" });
+    expect(result.skippedReason?.split(":")[0]).toBe("invalid_to");
     expect(result.encoding).toBe("GSM-7");
     expect(result.segments).toBe(1);
     expect(transportCalls).toHaveLength(0);
     expect(gate.isSendingAllowed).not.toHaveBeenCalled();
     expect(suppressions.isSuppressed).not.toHaveBeenCalled();
+  });
+
+  it("pays hors des régions permises → region_blocked, avant l'interrupteur", async () => {
+    // Le refus que Twilio rendait en 21408, rendu ici : rien n'a été facturé,
+    // et surtout aucun modèle n'a écrit le message qui aurait été jeté.
+    const gate = makeGate(true);
+    const suppressions = makeSuppressions(false);
+    const { deps, transportCalls } = makeDeps({ gate, suppressions });
+    const provider = createSmsProvider(deps);
+
+    const result = await provider.send({ ...input, to: "+33612345678" });
+
+    expect(result.sent).toBe(false);
+    expect(result.skippedReason?.split(":")[0]).toBe("region_blocked");
+    expect(transportCalls).toHaveLength(0);
+    expect(gate.isSendingAllowed).not.toHaveBeenCalled();
+    expect(suppressions.isSuppressed).not.toHaveBeenCalled();
+  });
+
+  it("une région ouverte explicitement passe jusqu'au transport", async () => {
+    const { deps, transportCalls } = makeDeps({ allowedRegions: ["1", "33"] });
+    const provider = createSmsProvider(deps);
+
+    const result = await provider.send({ ...input, to: "+33612345678" });
+
+    expect(result.sent).toBe(true);
+    expect(transportCalls).toHaveLength(1);
+  });
+
+  it("un +1 impossible → invalid_nanp : le huit chiffres qui passait avant", async () => {
+    const { deps, transportCalls } = makeDeps();
+    const provider = createSmsProvider(deps);
+
+    const result = await provider.send({ ...input, to: "+12345678" });
+
+    expect(result.sent).toBe(false);
+    expect(result.skippedReason?.split(":")[0]).toBe("invalid_nanp");
+    expect(transportCalls).toHaveLength(0);
   });
 
   it("interrupteur d'arrêt → kill_switch, avant même la liste de suppression", async () => {
@@ -341,6 +384,34 @@ describe("createTwilioTransport", () => {
       code: 21211,
       message: "twilio_send_failed: http 400 21211 Invalid 'To' Phone Number",
     });
+  });
+
+  it("le code Twilio ressort TOUJOURS en entier — chaîne comprise", async () => {
+    // Twilio écrit `code` tantôt en nombre, tantôt en chaîne. La colonne
+    // `messages.error_code` est un entier, et c'est ce code qui décide du mot
+    // affiché sur la rangée d'échec (« Pays désactivé » pour 21408) : le
+    // normaliser au bord évite que chaque consommateur le refasse à sa façon.
+    const { fetchFn } = makeFetch(400, JSON.stringify({ code: "21408", message: "geo" }));
+    const transport = createTwilioTransport({ ...cfg, fetchFn });
+    const err = await transport({ to: "+15145551234", body: "x", idempotencyKey: "k9" }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toMatchObject({ status: 400, code: 21408 });
+  });
+
+  it("un code absurde (« 0 », vide, texte) ne devient pas un faux code Twilio", async () => {
+    // Consigner `error_code = 0` ferait croire à un code que Twilio n'a jamais
+    // émis, et le ferait remonter dans les erreurs les plus fréquentes.
+    for (const code of ["0", "", "abc"]) {
+      const { fetchFn } = makeFetch(400, JSON.stringify({ code, message: "bizarre" }));
+      const transport = createTwilioTransport({ ...cfg, fetchFn });
+      const err = await transport({ to: "+15145551234", body: "x", idempotencyKey: "k" }).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err, code).toMatchObject({ status: 400, code: null });
+    }
   });
 
   it("5xx AVEC corps JSON Twilio (le cas réel) → le statut reste lisible : 500, code 20500", async () => {

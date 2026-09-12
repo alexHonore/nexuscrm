@@ -25,6 +25,25 @@ export function normalizePhone(input: string | null | undefined): string | null 
   return `+${digits}`;
 }
 
+/**
+ * La forme E.164, écrite UNE fois pour tout le dépôt : un « + », un indicatif
+ * de pays qui ne commence jamais par zéro, huit à quinze chiffres en tout —
+ * exactement ce que voip.ms et Twilio acceptent.
+ *
+ * Elle vivait en trois exemplaires (le fournisseur SMS, `telephony/simulring`,
+ * l'écran de profil), dont un qui acceptait `+0…`. Trois copies d'une même
+ * règle finissent toujours par diverger, et le jour où l'une se resserre pour
+ * un refus de Twilio, les autres continuent d'accepter la forme qu'elle vient
+ * de rejeter.
+ *
+ * `normalizePhone` ne s'en sert PAS : elle reste volontairement tolérante — son
+ * travail est de ne pas perdre un lead, celui d'ici est de dire si un numéro
+ * est composable.
+ */
+export function isE164(value: string): boolean {
+  return /^\+[1-9][0-9]{7,14}$/.test(value);
+}
+
 /** Display format: "+14184761542" → "(418) 476-1542"; non-NANP left as-is. */
 export function formatPhone(e164: string | null | undefined): string {
   if (!e164) return "";

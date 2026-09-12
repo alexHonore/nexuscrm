@@ -33,6 +33,8 @@
     "smsHandoffBody": "{name} : l'assistant vous passe la main ({reason}).",
     "smsBlockedTitle": "Réponse de l'assistant bloquée",
     "smsBlockedBody": "{name} : un garde-fou a bloqué la réponse — le fil attend un humain.",
+    "smsUnsendableTitle": "Numéro non joignable",
+    "smsUnsendableBody": "{name} : ce numéro ne peut recevoir aucun texto. L'assistant s'est arrêté avant d'écrire — ouvrez la fiche et corrigez le téléphone.",
     "smsErrorTitle": "Assistant en panne",
     "smsErrorBody": "{name} : le modèle n'a pas répondu ({reason}) — le fil attend un humain.",
     "smsStoppedTitle": "Conversation arrêtée",

@@ -69,6 +69,14 @@ export const ENROLL_REFUSALS = [
   "campaign_not_active",
   "outside_window",
   "no_phone",
+  /**
+   * Il y a un numéro, mais rien ne peut y arriver : mal formé, ou dans un pays
+   * que le compte Twilio n'a pas le droit de servir. Distinct de `no_phone`
+   * parce que le geste diffère — l'un dit « il manque le téléphone », l'autre
+   * « celui qui est là est faux », et c'est la seconde phrase qui envoie
+   * quelqu'un corriger la fiche.
+   */
+  "unsendable_phone",
   "suppressed",
   "do_not_call",
   "already_enrolled",
@@ -109,6 +117,8 @@ export interface EnrollFacts {
   status: string;
   now: Date;
   hasPhone: boolean;
+  /** Le numéro peut RECEVOIR un texto (`src/lib/sms/destination.ts`). */
+  sendablePhone: boolean;
   suppressed: boolean;
   doNotCall: boolean;
   alreadyEnrolled: boolean;
@@ -142,6 +152,12 @@ export function canEnroll(config: CampaignConfig, facts: EnrollFacts): EnrollDec
   if (facts.suppressed) return deny("suppressed");
   if (config.audience.excludeDoNotCall && facts.doNotCall) return deny("do_not_call");
 
+  // APRÈS les refus exprimés, et pour la même raison qu'eux : quelqu'un qui a
+  // dit STOP doit être rapporté comme ayant dit STOP, même si son numéro est
+  // aussi abîmé. Cacher un refus derrière un problème de saisie ferait relancer
+  // la personne dès que la fiche serait corrigée.
+  if (!facts.sendablePhone) return deny("unsendable_phone");
+
   if (facts.alreadyEnrolled) return deny("already_enrolled");
   // Une conversation en cours n'est pas une audience à ouvrir : l'ouverture
   // froide arriverait au milieu d'un échange que quelqu'un mène déjà.
@@ -169,6 +185,12 @@ export const TOUCH_REFUSALS = [
   "campaign_not_active",
   "enrollment_ended",
   "suppressed",
+  /**
+   * Le numéro de la fiche ne peut rien recevoir. Relu à CHAQUE barreau et pas
+   * seulement à l'inscription : une fiche se corrige — et se casse — pendant
+   * les trois semaines d'une échelle.
+   */
+  "unsendable_phone",
   /** `clients.doNotCall` posé APRÈS l'inscription (disposition d'après-appel). */
   "do_not_call",
   "ai_paused",
@@ -194,6 +216,8 @@ export interface TouchFacts {
   /** Interrupteur d'arrêt global (`sms.killSwitch`). */
   killSwitch: boolean;
   suppressed: boolean;
+  /** Le numéro peut RECEVOIR un texto — voir `src/lib/sms/destination.ts`. */
+  sendablePhone: boolean;
   /** `clients.doNotCall` au moment du barreau, pas à l'inscription. */
   doNotCall: boolean;
   /** `audience.excludeDoNotCall` de la campagne. */
@@ -255,6 +279,16 @@ export function canSendTouch(facts: TouchFacts): TouchDecision {
   // effacerait la conversion qu'on cherchait justement à mesurer.
   if (!facts.stillTargeted) return deny("left_audience");
   if (!facts.aiEnabled) return deny("ai_paused");
+  // Le numéro mort ne décide qu'APRÈS tout ce qui raconte ce qui est arrivé à
+  // la PERSONNE ou à l'inscription (réponse, rendez-vous, sortie d'audience,
+  // inscription déjà close). Placé plus haut, un job de barreau resté en vol
+  // réécrivait le sort d'une inscription déjà réglée : une personne qui vient
+  // de prendre rendez-vous voyait son inscription repassée en « écartée —
+  // numéro non joignable », et le bilan de campagne perdait la conversion.
+  // Ce n'est pas non plus un « pas maintenant » : un numéro qui ne peut rien
+  // recevoir ne le pourra pas davantage demain matin, donc il passe AVANT les
+  // reports (interrupteur, expéditeur, heures de politesse).
+  if (!facts.sendablePhone) return deny("unsendable_phone");
   if (facts.step >= facts.ladderLength) return deny("ladder_exhausted");
   if (facts.alreadySent) return deny("already_sent");
 

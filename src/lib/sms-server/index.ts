@@ -9,6 +9,7 @@ import { db } from "@/db";
 import { settings } from "@/db/schema";
 import { suppressions } from "@/db/schema-sms";
 import { smsSettingsSchema } from "@/lib/settings";
+import { checkDestination, parseAllowedRegions, type DestinationVerdict } from "@/lib/sms/destination";
 import {
   createSmsProvider,
   createTwilioTransport,
@@ -123,12 +124,41 @@ export function getSmsProvider(): SmsProvider {
   return createSmsProvider({
     mode,
     allowlist: parseAllowlist(env.TEST_PHONE_ALLOWLIST),
+    allowedRegions: allowedSmsRegions(),
     transport,
     suppressions: drizzleSuppressionStore,
     gate: settingsSendGate,
     logger: jsonLogger,
     clock: systemClock,
   });
+}
+
+/**
+ * Les régions que le compte Twilio a le droit de servir — `SMS_ALLOWED_REGIONS`
+ * (« 1 », « 1,33 », ou `*` pour lever la garde). Défaut : l'Amérique du Nord.
+ *
+ * Lu ici, à côté des identifiants Twilio, parce que c'est bien de la CONSOLE
+ * Twilio qu'il parle : les permissions géographiques d'un compte sont une
+ * case à cocher là-bas, et ce réglage n'en est que le miroir. Les tenir
+ * accordés est une décision d'exploitant — un pays ouvert ici mais fermé chez
+ * Twilio ramène le 21408 qu'on cherche à éviter.
+ */
+export function allowedSmsRegions(): readonly string[] {
+  return parseAllowedRegions(process.env.SMS_ALLOWED_REGIONS);
+}
+
+/**
+ * Ce numéro peut-il recevoir un texto ? — la même question que se pose la
+ * porte d'envoi, posée AVANT de payer un appel au modèle.
+ *
+ * Un seul verdict pour tout le dépôt : le moteur d'agent (`runTurn`), les
+ * campagnes (inscription, barreau) et le fournisseur lisent la même règle avec
+ * la même liste de régions. Deux copies finiraient par refuser deux choses
+ * différentes, et le fil dirait « non joignable » à un endroit pendant qu'un
+ * envoi partait ailleurs.
+ */
+export function checkSmsDestination(to: string | null | undefined): DestinationVerdict {
+  return checkDestination(to, allowedSmsRegions());
 }
 
 /**

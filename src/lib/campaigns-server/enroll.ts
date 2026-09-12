@@ -13,6 +13,7 @@ import {
 } from "@/lib/campaigns/eligibility";
 import { nextTouchAt } from "@/lib/campaigns/ladder";
 import { pickVariant } from "@/lib/campaigns/variants";
+import { checkSmsDestination } from "@/lib/sms-server";
 import { audienceWhere } from "./audience";
 
 /**
@@ -160,6 +161,9 @@ export async function enrollClients(
       status: row.status,
       now,
       hasPhone: client.phone.trim() !== "",
+      // « Il y a un numéro » ne suffit pas — `normalizePhone` accepte tout ce
+      // qui contient un chiffre. Le verdict est celui de la porte d'envoi.
+      sendablePhone: checkSmsDestination(client.phone).sendable,
       suppressed: suppressed.has(client.phone),
       doNotCall: client.doNotCall,
       alreadyEnrolled: alreadyIn.has(clientId),

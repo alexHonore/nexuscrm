@@ -7,7 +7,9 @@
  * ports de `./types`. Le câblage env + Drizzle vit dans `src/lib/sms-server`.
  */
 import { z } from "zod";
+import { isE164 } from "@/lib/phone";
 import { analyzeSms } from "./segments";
+import { checkDestination } from "./destination";
 import type {
   Clock,
   Logger,
@@ -19,8 +21,6 @@ import type {
   SmsTransport,
   SuppressionStore,
 } from "./types";
-
-const E164_RE = /^\+[0-9]{8,15}$/;
 
 // ── Résolution de mode ───────────────────────────────────────────────────────
 
@@ -43,7 +43,7 @@ export function parseAllowlist(value: string | undefined): string[] {
   return value
     .split(",")
     .map((entry) => entry.trim())
-    .filter((entry) => E164_RE.test(entry));
+    .filter((entry) => isE164(entry));
 }
 
 // ── Pipeline d'envoi ─────────────────────────────────────────────────────────
@@ -56,6 +56,14 @@ function maskPhone(to: string): string {
 export interface SmsProviderDeps {
   mode: SmsMode;
   allowlist: string[];
+  /**
+   * Indicatifs de pays que le compte Twilio a le droit de servir
+   * (`SMS_ALLOWED_REGIONS`). OBLIGATOIRE, comme tous les autres ports : un
+   * second assembleur qui l'oublierait refuserait en silence des destinataires
+   * que le tour d'agent, lui, accepte — deux portes, deux réponses, aucune
+   * erreur. Le compilateur est le seul garde-fou qui ne s'oublie pas.
+   */
+  allowedRegions: readonly string[];
   transport: SmsTransport;
   suppressions: SuppressionStore;
   gate: SendGate;
@@ -71,7 +79,7 @@ export interface SmsProviderDeps {
  * couche file d'attente (phase 2) possède les reprises.
  */
 export function createSmsProvider(deps: SmsProviderDeps): SmsProvider {
-  const { mode, allowlist, transport, suppressions, gate, logger, clock } = deps;
+  const { mode, allowlist, allowedRegions, transport, suppressions, gate, logger, clock } = deps;
   const allowed = new Set(allowlist);
 
   return {
@@ -82,7 +90,16 @@ export function createSmsProvider(deps: SmsProviderDeps): SmsProvider {
         return { segments, encoding, mode, sent: false, skippedReason };
       };
 
-      if (!E164_RE.test(to)) return skipped("invalid_to");
+      // Le destinataire est-il joignable ? Cette porte ne demandait que « E.164
+      // ou pas » (voir ./destination pour ce que ça laissait passer). Le même
+      // verdict est rendu bien plus haut — avant d'appeler le modèle ; ici,
+      // c'est le dernier filet, parce que tout envoi passe par cette fonction.
+      const destination = checkDestination(to, allowedRegions);
+      if (!destination.sendable) {
+        return skipped(
+          destination.detail ? `${destination.reason}: ${destination.detail}` : destination.reason,
+        );
+      }
       if (!(await gate.isSendingAllowed())) return skipped("kill_switch");
       if (await suppressions.isSuppressed(to)) return skipped("suppressed");
 
@@ -123,9 +140,22 @@ export function createSmsProvider(deps: SmsProviderDeps): SmsProvider {
 
 const twilioMessageSchema = z.object({ sid: z.string() });
 
-/** Corps d'erreur Twilio : { code: 21211, message: "Invalid 'To' …", … } */
+/**
+ * Corps d'erreur Twilio : { code: 21211, message: "Invalid 'To' …", … }
+ *
+ * Le code est normalisé ICI, au bord — Twilio l'écrit tantôt en nombre, tantôt
+ * en chaîne, et la colonne `messages.error_code` est un entier. Le faire au
+ * bord évite qu'un `typeof … === "string" ? Number(…) : null` soit réécrit
+ * dans chaque consommateur, chacun avec ses propres trous : un `"0"` laissé
+ * passer ferait consigner un code Twilio qui n'existe pas.
+ */
 const twilioErrorSchema = z.object({
-  code: z.union([z.number(), z.string()]),
+  code: z
+    .union([z.number(), z.string()])
+    .transform((raw) => {
+      const n = typeof raw === "number" ? raw : /^\d+$/.test(raw.trim()) ? Number(raw) : NaN;
+      return Number.isInteger(n) && n > 0 ? n : null;
+    }),
   message: z.string(),
 });
 
@@ -142,7 +172,7 @@ export class TwilioSendError extends Error {
     /** Statut HTTP de la réponse Twilio (400 refus, 429 limite, 500 panne…). */
     public readonly status: number,
     /** Code d'erreur Twilio (21211, 21610, 20500…) quand le corps en porte un. */
-    public readonly code: number | string | null,
+    public readonly code: number | null,
     message: string,
   ) {
     super(message);

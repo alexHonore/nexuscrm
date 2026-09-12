@@ -36,6 +36,7 @@ function enrollFacts(overrides: Partial<EnrollFacts> = {}): EnrollFacts {
     status: "active",
     now: NOW,
     hasPhone: true,
+    sendablePhone: true,
     suppressed: false,
     doNotCall: false,
     alreadyEnrolled: false,
@@ -53,6 +54,7 @@ function touchFacts(overrides: Partial<TouchFacts> = {}): TouchFacts {
     enrollmentStatus: "active",
     killSwitch: false,
     suppressed: false,
+    sendablePhone: true,
     doNotCall: false,
     excludeDoNotCall: true,
     aiEnabled: true,
@@ -328,11 +330,80 @@ describe("éligibilité à l'inscription", () => {
       refusal: "no_phone",
     });
   });
+
+  it("un refus EXPRIMÉ passe devant le numéro mort, à l'inscription aussi", () => {
+    // Sinon quelqu'un qui a dit STOP serait rapporté « numéro non joignable »,
+    // et la correction de sa fiche le remettrait dans l'audience.
+    expect(canEnroll(config(), enrollFacts({ sendablePhone: false, suppressed: true }))).toEqual({
+      allowed: false,
+      refusal: "suppressed",
+    });
+    expect(canEnroll(config(), enrollFacts({ sendablePhone: false, doNotCall: true }))).toEqual({
+      allowed: false,
+      refusal: "do_not_call",
+    });
+  });
+
+  it("un téléphone qui ne peut RIEN recevoir n'est pas un téléphone manquant", () => {
+    // Deux motifs, deux gestes : « sans téléphone » envoie en chercher un,
+    // « non joignable » envoie corriger celui qui est là. Les confondre, c'est
+    // inscrire six barreaux qui finiront tous en refus de Twilio — et, quand
+    // l'assistant rédige, six appels au modèle payés pour rien.
+    expect(canEnroll(config(), enrollFacts({ sendablePhone: false }))).toEqual({
+      allowed: false,
+      refusal: "unsendable_phone",
+    });
+  });
 });
 
 describe("éligibilité d'un barreau", () => {
   it("le cas nominal passe", () => {
     expect(canSendTouch(touchFacts())).toEqual({ allowed: true });
+  });
+
+  it("un numéro devenu injoignable écarte l'inscription, mais seulement en dernier", () => {
+    expect(canSendTouch(touchFacts({ sendablePhone: false }))).toEqual({
+      allowed: false,
+      refusal: "unsendable_phone",
+    });
+    // Ce n'est pas un « pas maintenant » : un numéro mort ne ressuscite pas au
+    // matin, donc il passe DEVANT les reports (interrupteur, expéditeur,
+    // heures de politesse) — sinon le barreau reviendrait chaque jour sans
+    // que personne n'apprenne rien.
+    for (const later of [
+      { killSwitch: true },
+      { hasSender: false },
+      { withinSendWindow: false },
+      { step: 9 },
+    ]) {
+      expect(canSendTouch(touchFacts({ sendablePhone: false, ...later })), JSON.stringify(later))
+        .toEqual({ allowed: false, refusal: "unsendable_phone" });
+    }
+  });
+
+  it("un numéro mort ne réécrit JAMAIS le sort d'une inscription déjà réglée", () => {
+    // Le vrai danger : un job de barreau resté en vol arrive après coup sur une
+    // inscription conclue. S'il tranchait sur le numéro, `finish()` réécrirait
+    // « écartée — numéro non joignable » par-dessus un rendez-vous pris, et le
+    // bilan de campagne perdrait la conversion. Tout ce qui raconte ce qui est
+    // arrivé À LA PERSONNE passe donc devant.
+    const dead = { sendablePhone: false } as const;
+    expect(canSendTouch(touchFacts({ ...dead, suppressed: true })).allowed).toBe(false);
+    for (const [override, expected] of [
+      [{ suppressed: true }, "suppressed"],
+      [{ doNotCall: true }, "do_not_call"],
+      [{ campaignStatus: "paused" }, "campaign_not_active"],
+      [{ enrollmentStatus: "booked" }, "enrollment_ended"],
+      [{ repliedSince: true }, "replied"],
+      [{ liveConversation: true }, "live_conversation"],
+      [{ stillTargeted: false }, "left_audience"],
+      [{ aiEnabled: false }, "ai_paused"],
+    ] as const) {
+      expect(canSendTouch(touchFacts({ ...dead, ...override })), expected).toEqual({
+        allowed: false,
+        refusal: expected,
+      });
+    }
   });
 
   it("un désabonnement APRÈS l'inscription arrête l'échelle", () => {

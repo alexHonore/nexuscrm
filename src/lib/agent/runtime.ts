@@ -40,7 +40,7 @@ import { LlmUnconfiguredError, getLlmProvider } from "@/lib/llm-server";
 import { generateWithChain } from "@/lib/llm/route";
 import type { LLMMessage } from "@/lib/llm/types";
 import type { GenerateInput, LLMResult, ProviderId, ToolCall } from "@/lib/llm/types";
-import { suppressPhone } from "@/lib/sms-server";
+import { checkSmsDestination, suppressPhone } from "@/lib/sms-server";
 import { notifyHumans } from "@/lib/sms-server/notify";
 import {
   applySegmentBudget,
@@ -969,9 +969,15 @@ export async function runTurn(
      */
     consume?: boolean;
     /** Sort des inscriptions de campagne de ce fil (réservation, clôture). */
-    enrollmentOutcome?: { status: "booked" | "completed" | "stopped"; endReason: string };
+    enrollmentOutcome?: {
+      status: "booked" | "completed" | "stopped" | "excluded";
+      endReason: string;
+    };
     /** Prévenir les humains, et pourquoi (texte lisible). */
-    alert?: { kind: "handoff" | "blocked" | "error" | "stopped" | "closed"; reason: string };
+    alert?: {
+      kind: "handoff" | "blocked" | "error" | "unsendable" | "stopped" | "closed";
+      reason: string;
+    };
   }): Promise<TurnResult> => {
     const consume = input.consume !== false;
     const traceId = await db.transaction(async (tx) => {
@@ -1171,6 +1177,52 @@ export async function runTurn(
           }
         : {}),
       events: [{ type: "llm_error", payload: { stage: "init", error: reason } }],
+    });
+  }
+
+  /**
+   * Le destinataire peut-il seulement RECEVOIR ce qu'on s'apprête à écrire ?
+   *
+   * La question était posée tout au bout : le tour classait l'entrant, rédigeait
+   * la réponse, la faisait juger — une demi-douzaine d'appels au modèle — et
+   * Twilio jetait le résultat avec un 21408 (« la région de ce numéro n'est pas
+   * activée sur le compte »). Le fil finissait sur « Ce message n'est pas parti.
+   * Code 21408. », et la facture OpenRouter était payée pour un message que
+   * personne ne pouvait recevoir.
+   *
+   * Elle se pose donc ICI, à la dernière ligne avant le premier appel au
+   * modèle : rien de ce qui coûte n'a encore eu lieu. Et c'est le verdict de la
+   * porte d'envoi (`src/lib/sms/destination.ts`), pas un second — sinon le tour
+   * refuserait d'écrire à quelqu'un à qui l'envoi manuel part très bien.
+   *
+   * Et c'est un ÉCHEC, pas un silence : un numéro abîmé sur une fiche ne se
+   * répare pas tout seul, personne ne le verra en attendant, et la file
+   * réessaierait indéfiniment. On consomme donc les entrants (le tour est
+   * réglé), on allume la pastille avec son motif, on prévient l'humain qui
+   * tient la fiche — et l'inscription de campagne s'arrête là : dérouler les
+   * six barreaux d'une échelle vers un numéro mort n'apprend rien à personne.
+   */
+  const destination = checkSmsDestination(conversation.clientPhone);
+  if (!destination.sendable) {
+    const reason = destination.detail
+      ? `${destination.reason}: ${destination.detail}`
+      : destination.reason;
+    return commit({
+      outcome: "blocked",
+      reason,
+      trace: { runtimeBlock: "", rawResponse: { blocked: reason } },
+      conversationPatch: { needsAttention: true, attentionReason: "unsendable_number" },
+      events: [{ type: "unsendable_number", payload: { reason: destination.reason, detail: destination.detail } }],
+      // « Écartée » et non « arrêtée » : un numéro mort n'est le refus de
+      // personne, et le compte des arrêts se lit comme un compte de NON.
+      // Réversible par « Relancer les terminées » une fois la fiche corrigée.
+      enrollmentOutcome: { status: "excluded", endReason: "unsendable_phone" },
+      // Son PROPRE genre d'alerte. `error` aurait annoncé « Assistant en panne
+      // — le modèle n'a pas répondu », ce qui est faux deux fois : rien n'est
+      // en panne, et le modèle n'a pas été appelé du tout. Le texte vit dans
+      // les deux langues (`notifications.json`) et ne prend pas de `{reason}` :
+      // il n'y a qu'une chose à dire, et elle se dit en entier.
+      alert: { kind: "unsendable", reason: "" },
     });
   }
 

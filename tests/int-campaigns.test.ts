@@ -213,6 +213,28 @@ describe("inscription — idempotence", () => {
   });
 });
 
+describe("inscription — le numéro doit pouvoir RECEVOIR", () => {
+  it("une fiche au numéro impossible est écartée à l'inscription, avec son motif", async () => {
+    const campaign = await makeCampaign();
+    // Huit chiffres recollés par une importation : `+1 234-5678`, que Twilio
+    // refuse par un 21211. La fiche a bien un téléphone — ce n'est donc pas
+    // « no_phone », et les deux motifs appellent deux gestes différents.
+    const broken = await makeReachableClient({ fullName: "Import cassé", phone: "+12345678" });
+    const ok = await makeReachableClient({ fullName: "Bon numéro", phone: "+15145550188" });
+
+    const results = await enrollClients(campaign.id, [broken.id, ok.id], { now: NOW });
+
+    expect(results.find((r) => r.clientId === broken.id)).toMatchObject({
+      enrolled: false,
+      refusal: "unsendable_phone",
+    });
+    expect(results.find((r) => r.clientId === ok.id)?.enrolled).toBe(true);
+    // Une seule inscription écrite : la fiche cassée n'entre pas en base.
+    const rows = await testDb.select().from(campaignEnrollments);
+    expect(rows).toHaveLength(1);
+  });
+});
+
 describe("échelle de relances", () => {
   it("le premier barreau crée le fil, met l'envoi en file et avance d'un cran", async () => {
     const campaign = await makeCampaign();
@@ -350,6 +372,35 @@ describe("arrêts en cours d'échelle", () => {
     });
     expect(row!.status).toBe("stopped");
     // Et surtout : aucun deuxième envoi n'a été mis en file.
+    const sends = await testDb.select().from(scheduledJobs).where(eq(scheduledJobs.type, "send_sms"));
+    expect(sends).toHaveLength(1);
+  });
+
+  it("un numéro cassé en cours d'échelle ÉCARTE l'inscription — et rien ne repart", async () => {
+    // Le câblage, pas la règle pure : `runTouch` doit VRAIMENT demander le
+    // verdict de destination. Sans cette vérification, remplacer le fait par
+    // `true` laissait la suite verte.
+    const campaign = await makeCampaign();
+    const client = await makeReachableClient();
+    const [enrolled] = await enrollClients(campaign.id, [client.id], { now: NOW });
+    await runTouch(enrolled.enrollmentId!, NOW);
+
+    // Quelqu'un retape le téléphone et laisse un « + » de trop : l'indicatif
+    // régional 418 devient l'indicatif de PAYS 41.
+    await testDb.update(clients).set({ phone: "+4184761542" }).where(eq(clients.id, client.id));
+
+    const later = new Date("2026-08-23T15:00:00.000Z");
+    const result = await runTouch(enrolled.enrollmentId!, later);
+    expect(result).toMatchObject({ sent: false, refusal: "unsendable_phone" });
+
+    const row = await testDb.query.campaignEnrollments.findFirst({
+      where: eq(campaignEnrollments.id, enrolled.enrollmentId!),
+    });
+    // « Écartée », pas « arrêtée » : un numéro mort n'est le refus de personne,
+    // et le compte des arrêts se lit comme un compte de NON.
+    expect(row!.status).toBe("excluded");
+    expect(row!.endReason).toBe("unsendable_phone");
+    // Aucun deuxième envoi : c'est tout l'objet de la porte.
     const sends = await testDb.select().from(scheduledJobs).where(eq(scheduledJobs.type, "send_sms"));
     expect(sends).toHaveLength(1);
   });

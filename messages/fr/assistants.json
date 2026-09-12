@@ -686,6 +686,10 @@
         "label": "Heures de politesse",
         "fix": ""
       },
+      "allowed_regions": {
+        "label": "Pays servis",
+        "fix": ""
+      },
       "assistant_active": {
         "label": "Assistant actif",
         "fix": "Aucun assistant actif : personne ne répondra. Compilez-en un, faites passer la suite, puis activez-le."

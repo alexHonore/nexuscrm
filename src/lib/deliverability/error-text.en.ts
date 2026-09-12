@@ -60,6 +60,10 @@ export const ERROR_TEXT_EN: Record<number, FailureText> = {
     label: "Not a mobile",
     why: "Twilio refused the send outright because the number on the client record is not a mobile line — the record is what needs fixing.",
   },
+  21211: {
+    label: "Unreadable number",
+    why: "Twilio could not read the number on the client record as a phone number: too short, an impossible country code, or digits glued together on import. Nothing to send again — the number has to be retyped on the record.",
+  },
 
   // ── unreachable ───────────────────────────────────────────────────────────
 
@@ -101,6 +105,10 @@ export const ERROR_TEXT_EN: Record<number, FailureText> = {
   30037: {
     label: "Sending disabled",
     why: "The Twilio subaccount holding the credentials may not send at all: an account setting, nothing to do with the recipient.",
+  },
+  21606: {
+    label: "Sender cannot text",
+    why: "The number meant to SEND is not an SMS-capable Twilio number — voice only, released from the account, or wrongly attached to the messaging service. The recipient has nothing to do with it: the fix is in the SMS numbers.",
   },
 
   // ── throughput ────────────────────────────────────────────────────────────

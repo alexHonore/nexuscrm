@@ -19,7 +19,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { SignJWT } from "jose";
 import { closeDb, makeClient, makeSmsNumber, makeUser, resetDb, testDb } from "./helpers/db";
-import { auditLogs } from "@/db/schema";
+import { auditLogs, clients } from "@/db/schema";
 import {
   assistants,
   campaignEnrollments,
@@ -217,6 +217,36 @@ describe("PATCH …/enrollments/:id { action: \"reopen\" }", () => {
     const e = await reload(enrollment.id);
     expect(e!.step).toBe(2);
     expect(e!.status).toBe("completed");
+  });
+
+  it("§ le chemin de retour d'un numéro cassé : corriger la fiche, puis relancer", async () => {
+    // La promesse écrite sur l'inscription (« corriger puis Relancer »).
+    // Elle n'existait pas : l'écartement était terminal, et une importation aux
+    // chiffres recollés sortait les fiches de leur campagne pour toujours.
+    await login(await makeUser({ role: "admin" }));
+    const { campaign, enrollment, client } = await scene({
+      client: { phone: "+4184761542" },
+      enrollment: { status: "excluded", endReason: "unsendable_phone" },
+    });
+
+    // Tant que la fiche est fausse, le serveur refuse — et il le dit.
+    const refused = await PATCH(req({ action: "reopen" }), ctx(campaign.id, enrollment.id));
+    expect(refused.status).toBe(409);
+    expect((await reload(enrollment.id))!.status).toBe("excluded");
+
+    // Un caractère en trop retiré : le même geste passe.
+    await testDb
+      .update(clients)
+      .set({ phone: "+14184761542" })
+      .where(eq(clients.id, client.id));
+
+    const res = await PATCH(req({ action: "reopen" }), ctx(campaign.id, enrollment.id));
+    expect(res.status).toBe(200);
+    const e = await reload(enrollment.id);
+    expect(e!.status).toBe("active");
+    expect(e!.step).toBe(1);
+    expect(e!.endReason).toBeNull();
+    expect(e!.nextTouchAt).not.toBeNull();
   });
 
   it("une inscription que l'échelle ne dépasse pas est refusée sans être touchée", async () => {

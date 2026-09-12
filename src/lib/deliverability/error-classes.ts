@@ -157,6 +157,19 @@ export const ERROR_CLASSES: Record<number, ErrorClass> = catalogue([
   [30006, "invalid", false, "Landline or unreachable carrier"],
   /** Refus à la création : le « To » n'est pas un mobile. Voir `HARD_INVALID_CODES`. */
   [21614, "invalid", false, "'To' number is not a valid mobile number"],
+  /**
+   * Le code le plus probable d'un numéro abîmé — et il MANQUAIT.
+   *
+   * Twilio le renvoie à la création quand le « To » ne se lit pas comme un
+   * numéro : trop court, indicatif impossible, chiffres recollés par une
+   * importation. Absent d'ici, il tombait en famille « other » et la rangée
+   * d'échec annonçait « Erreur inconnue » — sur le cas, précisément, où la
+   * réparation est la plus simple du monde : ouvrir la fiche et corriger le
+   * numéro. Hors de `HARD_INVALID_CODES` pour la même raison que 21614 : c'est
+   * un refus à la CRÉATION, pas un accusé de livraison, et ces listes-là
+   * nourrissent des taux dont le dénominateur est « ce que Twilio a accepté ».
+   */
+  [21211, "invalid", false, "Invalid 'To' phone number"],
 
   // ── unreachable ───────────────────────────────────────────────────────────
   /**
@@ -224,6 +237,13 @@ export const ERROR_CLASSES: Record<number, ErrorClass> = catalogue([
   [30035, "registration", true, "US A2P 10DLC - Message from a number still being configured"],
   /** Le (sous-)compte porteur des identifiants n'a pas le droit d'émettre. */
   [30037, "registration", false, "Outbound Messaging Disabled"],
+  /**
+   * Le « From » n'est pas un numéro Twilio capable d'envoyer des textos :
+   * numéro voix seulement, numéro retiré du compte, ou service de messagerie
+   * mal accroché. C'est le pendant EXPÉDITEUR du 21211 : rien à corriger sur
+   * la fiche du contact, tout à corriger dans /admin/sms-numbers.
+   */
+  [21606, "registration", false, "The 'From' number is not a valid, SMS-capable Twilio number"],
 
   // ── throughput ────────────────────────────────────────────────────────────
   /**

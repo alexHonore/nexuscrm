@@ -227,11 +227,17 @@ export function SmsThreadCard({
         if (!result.ok) {
           setRows((current) => current.filter((r) => r.id !== optimistic.id));
           setBody(text);
+          // Le troisième mur qui a un NOM. « Une erreur est survenue » sur un
+          // numéro que Twilio ne peut pas servir envoie retaper le message,
+          // puis rappeler le contact — alors que le geste utile est d'ouvrir
+          // la fiche et de corriger le téléphone.
           toast.error(
             result.error === "suppressed"
               ? t("thread.suppressed")
-              : result.error === "noNumber"
-                ? t("thread.noNumber")
+              : result.error === "unsendable"
+                ? t("thread.unsendable")
+                : result.error === "noNumber"
+                  ? t("thread.noNumber")
                   : t("thread.error"),
           );
           return;

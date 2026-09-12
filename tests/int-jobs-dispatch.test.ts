@@ -22,6 +22,7 @@ import {
 } from "./helpers/db";
 import { assistants, conversations, messages, promptCores, scheduledJobs, suppressions } from "@/db/schema-sms";
 import { RETRY_BACKOFF_MS, type SendSmsPayload } from "@/lib/jobs/types";
+import { errorCodeText } from "@/lib/deliverability/error-text";
 import { TwilioSendError } from "@/lib/sms/provider";
 import type { SendInput, SendResult } from "@/lib/sms/types";
 
@@ -452,6 +453,56 @@ describe("dispatcher de la file (runDispatchCycle + /api/cron/dispatch)", () => 
       .where(eq(conversations.id, conversation.id));
     expect(conv.needsAttention).toBe(true);
     expect(conv.attentionReason).toBe("send_failed");
+    // Le CODE de Twilio est consigné avec le refus. Il était jeté : la rangée
+    // n'avait que « refusé par Twilio », et un 21408 (« pays désactivé ») se
+    // lisait exactement comme un 21610 ou un 30007. Avec le code, l'écran va
+    // chercher les mots du catalogue (`errorCodeText`) et dit CE QUI s'est
+    // passé — le nombre restant là pour le support Twilio.
+    expect(rows[0].errorCode).toBe(21211);
+  });
+
+  it("un 21408 (pays désactivé) : le CODE et le motif disent deux choses différentes", async () => {
+    // La rangée porte les deux, et il le faut : `skip_reason` dit d'où vient le
+    // refus (Twilio, pas nous), `error_code` dit LEQUEL — et c'est le code seul
+    // qui fait afficher « Pays désactivé » avec sa phrase d'explication. Sans
+    // lui, un 21408, un 21610 et un 30007 se lisaient tous « refusé par
+    // Twilio », trois pannes différentes pour un seul mot inutilisable.
+    freezeAt(IN_WINDOW);
+    const { conversation } = await seedThread();
+    await enqueueDue(sendPayload(conversation));
+    providerMock.sendOverride = async () => {
+      throw new TwilioSendError(
+        400,
+        21408,
+        "twilio_send_failed: http 400 21408 Permission to send an SMS has not been enabled for the region indicated by the To number",
+      );
+    };
+
+    await runDispatchCycle();
+
+    const [row] = await testDb.select().from(messages);
+    expect(row.status).toBe("failed");
+    expect(row.errorCode).toBe(21408);
+    expect(row.skipReason?.split(":")[0]).toBe("provider_rejected");
+    // Et le catalogue sait le nommer — c'est ce que l'écran affichera.
+    expect(errorCodeText(21408, "fr").label).toBe("Pays désactivé");
+  });
+
+  it("un délai réseau ne consigne AUCUN code : il n'y en a pas eu", async () => {
+    // `error_code` non nul voudrait dire « Twilio a répondu ceci » ; sur un
+    // socket qui pend, Twilio n'a rien répondu du tout.
+    freezeAt(IN_WINDOW);
+    const { conversation } = await seedThread();
+    await enqueueDue(sendPayload(conversation));
+    providerMock.sendOverride = async () => {
+      throw new Error("twilio_send_failed: timeout after 15000ms");
+    };
+
+    await runDispatchCycle();
+
+    const [row] = await testDb.select().from(messages);
+    expect(row.status).toBe("unknown");
+    expect(row.errorCode).toBeNull();
   });
 
   it("délai ou panne réseau (aucun statut HTTP) : rangée « unknown / transport_error », jamais renvoyé", async () => {

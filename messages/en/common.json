@@ -125,7 +125,8 @@
       "sms_handoff": "The assistant hands over",
       "sms_blocked": "Assistant reply blocked",
       "sms_error": "Assistant failure",
-      "sms_stopped": "Conversation stopped"
+      "sms_stopped": "Conversation stopped",
+      "sms_unsendable": "Number cannot receive texts"
     },
     "quietTitle": "Quiet hours",
     "quietIntro": "Nothing buzzes between these two times (Toronto time). Both fields empty: never quiet.",

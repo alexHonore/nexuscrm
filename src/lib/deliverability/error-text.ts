@@ -110,6 +110,10 @@ export const ERROR_TEXT: Record<number, FailureText> = {
     label: "Pas un mobile",
     why: "Twilio a refusé l'envoi dès la création parce que le numéro inscrit sur la fiche n'est pas une ligne mobile — c'est la fiche qu'il faut corriger.",
   },
+  21211: {
+    label: "Numéro illisible",
+    why: "Twilio n'a pas réussi à lire le numéro de la fiche comme un numéro de téléphone : trop court, indicatif impossible, ou chiffres recollés à l'importation. Rien à réessayer — le numéro est à retaper sur la fiche.",
+  },
 
   // ── unreachable ───────────────────────────────────────────────────────────
 
@@ -151,6 +155,10 @@ export const ERROR_TEXT: Record<number, FailureText> = {
   30037: {
     label: "Envoi désactivé",
     why: "Le sous-compte Twilio qui porte les identifiants n'a pas le droit d'émettre : c'est un réglage de compte, rien à voir avec le destinataire.",
+  },
+  21606: {
+    label: "Expéditeur incapable",
+    why: "Le numéro qui devait ENVOYER n'est pas un numéro Twilio capable de texter — voix seulement, retiré du compte, ou mal rattaché au service de messagerie. Le destinataire n'y est pour rien : la correction est dans les numéros SMS.",
   },
 
   // ── throughput ────────────────────────────────────────────────────────────

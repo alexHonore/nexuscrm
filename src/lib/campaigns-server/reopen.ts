@@ -14,12 +14,13 @@ import { resolveQuietHours } from "@/lib/assistants/quiet-hours";
 import { LIVE_CONVERSATION_WINDOW_MS, targetsCategory } from "@/lib/campaigns/eligibility";
 import {
   LADDER_EXHAUSTED_REASON,
+  UNSENDABLE_PHONE_REASON,
   enrollmentReopenable,
   type ReopenRefusal,
 } from "@/lib/campaigns/enrollment-status";
 import { MAX_REOPEN, planReopen } from "@/lib/campaigns/reopen";
 import { campaignRowToConfig, type CampaignConfig } from "@/lib/campaigns/schema";
-import { settingsSendGate } from "@/lib/sms-server";
+import { checkSmsDestination, settingsSendGate } from "@/lib/sms-server";
 import type { QuietHours } from "@/lib/sms/quiet-hours";
 import { outboundCountToday } from "@/lib/sms-server/daily-cap";
 
@@ -67,6 +68,8 @@ export type ReopenRowRefusal =
   | ReopenRefusal
   | "not_found"
   | "no_phone"
+  /** Il y a un numéro, mais Twilio ne peut rien y livrer — voir `src/lib/sms/destination.ts`. */
+  | "unsendable_phone"
   | "suppressed"
   | "do_not_call"
   | "replied_since"
@@ -156,10 +159,29 @@ const CANDIDATE_FIELDS = {
 function candidateWhere(campaignId: string, ladderLength: number) {
   return and(
     eq(campaignEnrollments.campaignId, campaignId),
-    eq(campaignEnrollments.status, "completed"),
-    eq(campaignEnrollments.endReason, LADDER_EXHAUSTED_REASON),
+    reopenableState(),
     sql`${campaignEnrollments.endedAt} is not null`,
     lt(campaignEnrollments.step, ladderLength),
+  )!;
+}
+
+/**
+ * Les deux états relançables, en SQL — le miroir exact des deux portes de
+ * `enrollmentReopenable`. Écrit une fois : il sert au prédicat des candidats ET
+ * à la garde de l'écriture, et deux copies finiraient par sélectionner des
+ * lignes que l'écriture refuserait ensuite (« Modifiée entre-temps » sur des
+ * inscriptions que personne n'a touchées).
+ */
+function reopenableState() {
+  return or(
+    and(
+      eq(campaignEnrollments.status, "completed"),
+      eq(campaignEnrollments.endReason, LADDER_EXHAUSTED_REASON),
+    ),
+    and(
+      eq(campaignEnrollments.status, "excluded"),
+      eq(campaignEnrollments.endReason, UNSENDABLE_PHONE_REASON),
+    ),
   )!;
 }
 
@@ -352,6 +374,17 @@ async function screen(
     // l'inscription, et « ne pas appeler » est absolu.
     if (row.doNotCall) {
       deny("do_not_call");
+      continue;
+    }
+    // APRÈS les refus exprimés, le même ordre que `canEnroll` et
+    // `canSendTouch` : relancer vers un numéro qui ne peut rien recevoir
+    // remettrait en vol une inscription que le premier barreau refermerait
+    // aussitôt — et, quand l'assistant rédige, après un appel au modèle payé
+    // pour rien. C'est aussi la garde qui rend la relance sûre : une
+    // inscription écartée POUR ce motif redevient candidate, et il faut bien
+    // vérifier que la fiche a effectivement été corrigée.
+    if (!checkSmsDestination(row.phone).sendable) {
+      deny("unsendable_phone");
       continue;
     }
 
@@ -598,8 +631,7 @@ export async function reopenEnrollments(
         and(
           eq(campaignEnrollments.id, slot.enrollmentId),
           eq(campaignEnrollments.campaignId, campaignId),
-          eq(campaignEnrollments.status, "completed"),
-          eq(campaignEnrollments.endReason, LADDER_EXHAUSTED_REASON),
+          reopenableState(),
           eq(campaignEnrollments.step, slot.step),
         ),
       )

@@ -548,6 +548,10 @@ export const ATTENTION_LOOK: Record<string, Look> = {
   blocked_output: { color: "#EF4444", Icon: ShieldXIcon },
   guardrail_unavailable: { color: "#EF4444", Icon: ShieldQuestionMarkIcon },
   send_failed: { color: "#EF4444", Icon: UnplugIcon },
+  // Le combiné barré, comme la famille « Numéro invalide » de la vue Échecs
+  // (`FAILURE_FAMILY_LOOK.invalid`) : c'est le même fait, dit une fois avant
+  // l'envoi et une fois après. Deux pictogrammes en feraient deux pannes.
+  unsendable_number: { color: "#EF4444", Icon: PhoneOffIcon },
   truncated: { color: "#EF4444", Icon: ScissorsIcon },
   content_filter: { color: "#EF4444", Icon: FilterXIcon },
   // Terminé — le verdict est rendu.

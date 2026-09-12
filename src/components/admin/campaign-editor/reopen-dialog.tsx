@@ -39,6 +39,7 @@ const REFUSALS = new Set([
   "not_ladder_end",
   "nothing_new",
   "no_phone",
+  "unsendable_phone",
   "suppressed",
   "do_not_call",
   "replied_since",

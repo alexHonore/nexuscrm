@@ -125,7 +125,8 @@
       "sms_handoff": "L'assistant passe la main",
       "sms_blocked": "Réponse de l'assistant bloquée",
       "sms_error": "Assistant en panne",
-      "sms_stopped": "Conversation arrêtée"
+      "sms_stopped": "Conversation arrêtée",
+      "sms_unsendable": "Numéro non joignable"
     },
     "quietTitle": "Heures de silence",
     "quietIntro": "Rien ne vibre entre ces deux heures (heure de Toronto). Les deux champs vides : jamais de silence.",

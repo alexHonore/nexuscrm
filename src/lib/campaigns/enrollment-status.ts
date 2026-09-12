@@ -36,6 +36,19 @@ export const LEFT_AUDIENCE_REASON = "left_audience";
  */
 export const LADDER_EXHAUSTED_REASON = "ladder_exhausted";
 
+/**
+ * Le SEUL motif d'écartement qui se relance.
+ *
+ * Une inscription « écartée » l'est presque toujours pour une raison qui ne
+ * revient pas : la fiche a changé de catégorie, un fil vivant existait déjà,
+ * la fiche a été supprimée. Celle-ci est d'une autre espèce — on n'a pas pu
+ * PARLER à la personne parce que son numéro était inutilisable, et un numéro
+ * se corrige. Sans cette porte, une importation aux chiffres recollés sortait
+ * définitivement des centaines de fiches de leur campagne, et le motif écrit
+ * sur l'inscription promettait un chemin de retour qui n'existait pas.
+ */
+export const UNSENDABLE_PHONE_REASON = "unsendable_phone";
+
 const IN_FLIGHT = new Set(["pending", "active"]);
 
 /** L'inscription peut-elle encore recevoir des messages (hors pause) ? */
@@ -71,13 +84,17 @@ export type ReopenDecision = { allowed: true } | { allowed: false; refusal: Reop
  * Peut-on RELANCER cette inscription terminée, c'est-à-dire la remettre en vol
  * au barreau où elle s'est arrêtée parce que l'échelle a GRANDI depuis ?
  *
- * Une seule porte : l'échelle est allée jusqu'au bout (`completed` +
- * `ladder_exhausted`) et la campagne compte désormais plus de barreaux que
- * cette inscription n'en a consommés. Tout le reste — un désabonnement, un
- * « ne pas appeler », une réponse, un rendez-vous, un retrait, une sortie
- * d'audience — n'est pas une échelle finie et ne se relance jamais : ce sont
- * des décisions PRISES SUR LA PERSONNE, et rallonger une échelle ne les annule
- * pas.
+ * Deux portes, et deux seulement. La première : l'échelle est allée jusqu'au
+ * bout (`completed` + `ladder_exhausted`) et la campagne compte désormais plus
+ * de barreaux que cette inscription n'en a consommés. La seconde : elle a été
+ * écartée parce que le numéro de la fiche ne pouvait rien recevoir
+ * (`excluded` + `unsendable_phone`) — on n'a pas pu PARLER à la personne, ce
+ * qui n'est pas une décision prise sur elle, et un numéro se retape.
+ *
+ * Tout le reste — un désabonnement, un « ne pas appeler », une réponse, un
+ * rendez-vous, un retrait, une sortie d'audience — ne se relance jamais : ce
+ * sont des décisions PRISES SUR LA PERSONNE, et rallonger une échelle ne les
+ * annule pas.
  *
  * Le `step` n'est jamais rembobiné : les barreaux déjà tracés
  * (`campaign_touches`, unique sur `(inscription, barreau)`) ne repartent pas.
@@ -99,7 +116,13 @@ export function enrollmentReopenable(
   if (enrollmentInFlight(e.status) || e.endedAt == null) {
     return { allowed: false, refusal: "not_closed" };
   }
-  if (e.status !== "completed" || e.endReason !== LADDER_EXHAUSTED_REASON) {
+  const ladderEnd = e.status === "completed" && e.endReason === LADDER_EXHAUSTED_REASON;
+  // Écartée faute de numéro utilisable : ce n'est pas une décision prise sur la
+  // personne, c'est une fiche à corriger. Le serveur revérifie le téléphone au
+  // moment de relancer (`campaigns-server/reopen.ts`) et refuse encore s'il est
+  // toujours mort — ce prédicat n'autorise que le BOUTON.
+  const fixableNumber = e.status === "excluded" && e.endReason === UNSENDABLE_PHONE_REASON;
+  if (!ladderEnd && !fixableNumber) {
     return { allowed: false, refusal: "not_ladder_end" };
   }
   // Rien de neuf : la remettre en vol la ferait re-clôturer au premier cycle

@@ -8,13 +8,32 @@ import { createNotifications } from "@/lib/notify";
 import { bucketFor, can, grantsFor, roleForUser } from "@/lib/permissions/access";
 import { getSetting } from "@/lib/settings";
 
-export type HumanAlertKind = "inbound" | "handoff" | "blocked" | "error" | "stopped" | "closed";
+/**
+ * `unsendable` n'est pas un `error` : la panne du modèle et le numéro abîmé
+ * demandent deux gestes opposés. « Assistant en panne — le modèle n'a pas
+ * répondu » sur un téléphone mal saisi envoie vérifier les clés et les crédits
+ * OpenRouter (le réflexe appris lors de la panne du 2026-08-25), alors que la
+ * réparation tient dans le champ téléphone d'une fiche — et le modèle, ici,
+ * n'a justement PAS été appelé.
+ */
+export type HumanAlertKind =
+  | "inbound"
+  | "handoff"
+  | "blocked"
+  | "error"
+  | "unsendable"
+  | "stopped"
+  | "closed";
 
-const KEYS: Record<HumanAlertKind, { title: "smsInboundTitle" | "smsHandoffTitle" | "smsBlockedTitle" | "smsErrorTitle" | "smsStoppedTitle" | "smsClosedTitle"; body: "smsInboundBody" | "smsHandoffBody" | "smsBlockedBody" | "smsErrorBody" | "smsStoppedBody" | "smsClosedBody" }> = {
+const KEYS: Record<HumanAlertKind, { title: "smsInboundTitle" | "smsHandoffTitle" | "smsBlockedTitle" | "smsErrorTitle" | "smsUnsendableTitle" | "smsStoppedTitle" | "smsClosedTitle"; body: "smsInboundBody" | "smsHandoffBody" | "smsBlockedBody" | "smsErrorBody" | "smsUnsendableBody" | "smsStoppedBody" | "smsClosedBody" }> = {
   inbound: { title: "smsInboundTitle", body: "smsInboundBody" },
   handoff: { title: "smsHandoffTitle", body: "smsHandoffBody" },
   blocked: { title: "smsBlockedTitle", body: "smsBlockedBody" },
   error: { title: "smsErrorTitle", body: "smsErrorBody" },
+  // Sans `{reason}` : la consigne est écrite dans CHAQUE langue plutôt
+  // qu'interpolée depuis le moteur, qui n'écrit qu'en français (règle 2). Une
+  // notification anglaise moitié française est pire qu'une notification vague.
+  unsendable: { title: "smsUnsendableTitle", body: "smsUnsendableBody" },
   stopped: { title: "smsStoppedTitle", body: "smsStoppedBody" },
   closed: { title: "smsClosedTitle", body: "smsClosedBody" },
 };

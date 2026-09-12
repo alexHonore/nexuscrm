@@ -32,6 +32,7 @@ export const CHECK_IDS = [
   "sms_number",
   "messaging_service",
   "quiet_hours",
+  "allowed_regions",
   "assistant_active",
   "assistant_suite",
   "campaign_active",
@@ -68,6 +69,17 @@ export interface PreflightFacts {
   activeNumberCount: number;
   numbersWithoutMessagingService: number;
   quietHoursLabel: string;
+  /**
+   * Les indicatifs de pays servis (`SMS_ALLOWED_REGIONS`), en clair.
+   *
+   * C'est une porte VRAIE : un numéro hors de cette liste est écarté à
+   * l'inscription, à chaque barreau, à l'envoi manuel et au tour d'agent. Sans
+   * cette ligne, la seule trace du réglage vivait dans `.env.example` et dans
+   * des commentaires — et le courtier lisait « corrigez le numéro sur la
+   * fiche » sur un numéro parfaitement correct, sans jamais savoir qu'un
+   * interrupteur décidait à sa place.
+   */
+  allowedRegionsLabel: string;
   activeAssistantCount: number;
   /** Assistants actifs dont la suite n'est PAS verte. */
   activeAssistantsWithRedSuite: number;
@@ -165,6 +177,7 @@ export function preflight(facts: PreflightFacts): PreflightReport {
 
   // ── Ce qui décide qu'il part vers QUELQU'UN ──────────────────────────────
   add("quiet_hours", "info", true, facts.quietHoursLabel);
+  add("allowed_regions", "info", true, facts.allowedRegionsLabel);
 
   // ── Ce qui décide qu'il dit quelque chose ────────────────────────────────
   add("llm_provider", "blocker", facts.llmProvidersConfigured.length > 0, facts.llmProvidersConfigured.join(", "));

@@ -27,6 +27,7 @@ export const NOTIFICATION_TYPES = [
   "sms_handoff",
   "sms_blocked",
   "sms_error",
+  "sms_unsendable",
   "sms_stopped",
   "sms_closed",
 ] as const;
@@ -85,6 +86,9 @@ const RULES: Record<NotificationType, PushRule> = {
   // ce n'est pas un client qui parle : cela peut attendre le matin.
   sms_blocked: { push: true, urgency: "normal", ttl: 7200, urgent: false, collapse: "client" },
   sms_error: { push: true, urgency: "normal", ttl: 7200, urgent: false, collapse: "client" },
+  // Une fiche à corriger, pas un client qui attend : la cloche suffit, et un
+  // envoi groupé mal importé ne doit pas faire vibrer un téléphone cent fois.
+  sms_unsendable: { push: true, urgency: "low", ttl: 7200, urgent: false, collapse: "client" },
   sms_stopped: { push: true, urgency: "normal", ttl: 7200, urgent: false, collapse: "client" },
   // L'assistant a fermé la conversation proprement : rien à faire, rien à
   // réveiller. La ligne reste dans la cloche pour qui la consulte.

@@ -11,7 +11,7 @@ import { getCurrentUser } from "@/lib/auth/guards";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { createSession, readSession } from "@/lib/auth/session";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
-import { normalizePhone } from "@/lib/phone";
+import { isE164, normalizePhone } from "@/lib/phone";
 import { NOTIFICATION_TYPES, parseHhMm, pushRule } from "@/lib/push/policy";
 
 export type ProfileResult =
@@ -218,15 +218,6 @@ export async function updateQuietHoursAction(input: {
   return { ok: true };
 }
 
-/**
- * Le numéro composable, tel que voip.ms et Twilio l'acceptent : indicatif de
- * pays, huit à quinze chiffres. Le même que celui de `resolveSimulRing`, et
- * recopié pour la même raison qu'il y est écrit — un « 514 555-0199 » collé
- * tel quel produit un `<Number>` invalide, c'est-à-dire un appel entrant qui
- * échoue au lieu de sonner.
- */
-const DIALABLE_E164 = /^\+[1-9]\d{7,14}$/;
-
 /** Le numéro précédent, déchiffré, ou `null` — une clé changée ne doit rien casser. */
 function previousMobile(enc: string | null): string | null {
   if (!enc) return null;
@@ -291,7 +282,10 @@ export async function updateMobileAction(input: {
   else if (raw === "") phone = null;
   else {
     phone = normalizePhone(raw);
-    if (!phone || !DIALABLE_E164.test(phone)) return { ok: false, error: "phone" };
+    // Composable au sens de voip.ms et Twilio : un « 514 555-0199 » collé tel
+    // quel produit un `<Number>` invalide — un appel entrant qui échoue au lieu
+    // de sonner.
+    if (!phone || !isE164(phone)) return { ok: false, error: "phone" };
   }
   const ringMobile = phone === null ? false : parsed.data.ringMobile;
 

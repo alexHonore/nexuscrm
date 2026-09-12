@@ -34,6 +34,15 @@ export const ENGINE_REASONS = [
   "blocked_output",
   "guardrail_unavailable",
   "send_failed",
+  /**
+   * Le numéro de la fiche ne peut RIEN recevoir — mal formé, ou dans un pays
+   * que le compte Twilio n'a pas le droit de servir. Rangé côté « réparer »
+   * bien qu'il n'y ait aucune panne : la réparation est réelle, elle se fait
+   * sur la fiche, et tant qu'elle n'est pas faite l'assistant n'a plus rien à
+   * tenter. Sans ce motif, ces fils tombaient dans « Envoi en échec » après
+   * coup — avec un appel au modèle payé pour un message jamais parti.
+   */
+  "unsendable_number",
   "truncated",
   "content_filter",
 ] as const;

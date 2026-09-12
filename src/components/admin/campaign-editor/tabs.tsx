@@ -116,6 +116,8 @@ const END_REASONS = new Set([
   "opted_out",
   "ladder_exhausted",
   "suppressed",
+  // Arrêt pour numéro mort : la fiche est à corriger, pas la campagne.
+  "unsendable_phone",
   "do_not_call",
   "live_conversation",
   "client_deleted",

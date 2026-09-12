@@ -686,6 +686,10 @@
         "label": "Quiet hours",
         "fix": ""
       },
+      "allowed_regions": {
+        "label": "Served countries",
+        "fix": ""
+      },
       "assistant_active": {
         "label": "Active assistant",
         "fix": "No active assistant: nobody will reply. Compile one, get the suite green, then activate it."

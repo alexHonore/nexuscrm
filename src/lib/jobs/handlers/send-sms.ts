@@ -157,10 +157,26 @@ export async function handleSendSms(
     }
     const synchronousRejection = status !== null && status >= 400 && status < 500;
     const reason = synchronousRejection ? "provider_rejected" : "transport_error";
+    // Le CODE de Twilio, consigné avec le refus.
+    //
+    // Il était jeté : `TwilioSendError` le portait depuis toujours, et cette
+    // écriture ne gardait que le texte. `messages.error_code` restait donc nul
+    // sur un refus SYNCHRONE — le seul cas où Twilio dit tout de suite pourquoi
+    // — et l'écran, qui n'affiche le catalogue (`errorCodeText`) qu'en présence
+    // d'un code, tombait sur « Non envoyé : refusé par Twilio ». Un 21408 se
+    // lisait donc exactement comme un 21610 ou un 30007 : trois pannes
+    // différentes, un seul mot, et rien à faire de ce mot. Avec le code, la
+    // rangée dit « Pays désactivé », explique la case à cocher de la console
+    // Twilio, et garde le nombre pour le support.
+    //
+    // Déjà normalisé en entier par le schéma du transport (`twilioErrorSchema`)
+    // : rien à convertir ici.
+    const errorCode = err instanceof TwilioSendError ? err.code : null;
     await db
       .update(messages)
       .set({
         status: synchronousRejection ? "failed" : "unknown",
+        errorCode,
         skipReason: `${reason}: ${message.slice(0, 200)}`,
       })
       .where(eq(messages.id, intent.id));

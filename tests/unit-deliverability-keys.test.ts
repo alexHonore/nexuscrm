@@ -19,6 +19,7 @@ import adminFr from "../messages/fr/admin.json";
 import commonEn from "../messages/en/common.json";
 import commonFr from "../messages/fr/common.json";
 import { RANGE_DAYS } from "@/lib/deliverability/range";
+import { UNSENDABLE_REASONS } from "@/lib/sms/destination";
 import {
   FINDING_FAMILIES,
   METRIC_IDS,
@@ -67,11 +68,18 @@ const CONSTRUCTED: string[] = [
     (s) => `deliverability.tabs.${s}`,
   ),
   // Raisons de non-envoi réellement écrites par le moteur. Une raison inconnue
-  // s'affiche telle quelle — pas de clé, pas de plantage.
+  // s'affiche telle quelle — pas de clé, pas de plantage ; mais une raison que
+  // le moteur écrit VRAIMENT doit avoir son étiquette, sinon l'écran français
+  // affiche un identifiant anglais en snake_case.
+  //
+  // Les verdicts de destination viennent de la liste FERMÉE de
+  // `@/lib/sms/destination` plutôt que d'une copie à la main : c'est
+  // exactement par une copie oubliée que « region_blocked » et
+  // « invalid_nanp » sont apparus bruts sur cet écran.
   ...[
+    ...UNSENDABLE_REASONS,
     "kill_switch",
     "suppressed",
-    "invalid_to",
     "sandbox_not_allowlisted",
     "not_sent",
     "twilio_message_not_found",

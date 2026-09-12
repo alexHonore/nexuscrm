@@ -987,9 +987,11 @@ export function ConversationsInbox({
         toast.error(
           result.error === "suppressed"
             ? t("inbox.retrySuppressed")
-            : result.error === "noNumber"
-              ? t("thread.noNumber")
-              : t("error"),
+            : result.error === "unsendable"
+              ? t("thread.unsendable")
+              : result.error === "noNumber"
+                ? t("thread.noNumber")
+                : t("error"),
         );
         // Rafraîchir quand même : « introuvable » veut dire que la rangée n'est
         // plus à nous, et l'écran doit cesser de la montrer.

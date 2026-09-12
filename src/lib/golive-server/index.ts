@@ -5,6 +5,7 @@ import { assistants, campaigns, smsNumbers } from "@/db/schema-sms";
 import { getSetting } from "@/lib/settings";
 import { withModelFallbackChain } from "@/lib/assistants/schema";
 import { configuredProviders } from "@/lib/llm-server";
+import { allowedSmsRegions } from "@/lib/sms-server";
 import { resolveSmsMode } from "@/lib/sms/provider";
 import { DEFAULT_QUIET_HOURS } from "@/lib/sms/quiet-hours";
 import { preflight, type PreflightFacts, type PreflightReport } from "@/lib/golive/preflight";
@@ -104,6 +105,18 @@ export async function collectPreflight(now = new Date()): Promise<PreflightRepor
     activeNumberCount: numbers[0]?.active ?? 0,
     numbersWithoutMessagingService: numbers[0]?.withoutService ?? 0,
     quietHoursLabel: `${DEFAULT_QUIET_HOURS.weekday[0]}h-${DEFAULT_QUIET_HOURS.weekday[1]}h`,
+    // « +1 » plutôt que « 1 » : c'est l'écriture qu'un humain reconnaît, et
+    // celle que `SMS_ALLOWED_REGIONS` accepte de toute façon en entrée.
+    //
+    // Le cas « tout ouvert » garde son astérisque au lieu d'un mot : ce détail
+    // est rendu TEL QUEL par l'écran (`preflight` le passe en `detail`, la
+    // page ne le traduit pas), si bien qu'un mot écrit ici s'afficherait en
+    // français à un usager en anglais — la règle 2. L'astérisque est en plus
+    // exactement ce que l'exploitant a tapé dans `SMS_ALLOWED_REGIONS` : la
+    // ligne de préflight lui rend son propre réglage, sans interprétation.
+    allowedRegionsLabel: allowedSmsRegions()
+      .map((r) => (r === "*" ? "*" : `+${r}`))
+      .join(", "),
     activeAssistantCount: assistantRows[0]?.active ?? 0,
     activeAssistantsWithRedSuite: assistantRows[0]?.redSuite ?? 0,
     activeCampaignCount: campaignRows[0]?.active ?? 0,

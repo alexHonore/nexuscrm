@@ -66,6 +66,29 @@ describe("§ qui peut être relancé", () => {
     }
   });
 
+  it("§ un numéro qu'on peut CORRIGER se repêche — la seule écartée qui revient", () => {
+    // Écartée parce que son numéro ne pouvait rien recevoir : ce n'est pas une
+    // décision prise sur la personne, c'est une fiche à retaper. Sans cette
+    // porte, une importation aux chiffres recollés sortait définitivement des
+    // centaines de fiches de leur campagne — et le motif écrit sur
+    // l'inscription promettait un retour qui n'existait pas.
+    expect(
+      enrollmentReopenable(closed({ status: "excluded", endReason: "unsendable_phone" }), {
+        ladderLength: 3,
+      }),
+    ).toEqual({ allowed: true });
+    // Elle reste soumise aux mêmes conditions que les autres : rien de neuf,
+    // rien à relancer.
+    expect(
+      enrollmentReopenable(
+        closed({ status: "excluded", endReason: "unsendable_phone", step: 3 }),
+        { ladderLength: 3 },
+      ),
+    ).toEqual({ allowed: false, refusal: "nothing_new" });
+    // Et le serveur revérifie le numéro au moment de relancer
+    // (`campaigns-server/reopen.ts`) : ce prédicat n'autorise que le BOUTON.
+  });
+
   it("une inscription encore en vol ne se « relance » pas — elle se reprend", () => {
     for (const status of ["pending", "active"]) {
       expect(
