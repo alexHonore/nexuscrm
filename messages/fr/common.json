@@ -106,6 +106,8 @@
     "enableFailed": "Cet appareil n'a pas pu être inscrit",
     "test": "Envoyer un essai",
     "testSent": "Essai envoyé — il devrait arriver dans quelques secondes",
+    "testNoDevice": "Aucun appareil inscrit : activez les notifications sur ce téléphone d\u2019abord.",
+    "testNoneReached": "Aucun appareil n\u2019a pu \u00eatre atteint. Ceux qui ne r\u00e9pondent plus viennent d\u2019\u00eatre retir\u00e9s de la liste.",
     "testFailed": "L'essai n'est pas parti",
     "devicesTitle": "Mes appareils",
     "devicesEmpty": "Aucun appareil inscrit pour l'instant.",

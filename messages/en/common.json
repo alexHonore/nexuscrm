@@ -106,6 +106,8 @@
     "enableFailed": "This device could not be enrolled",
     "test": "Send a test",
     "testSent": "Test sent — it should arrive within seconds",
+    "testNoDevice": "No device registered: turn notifications on for this phone first.",
+    "testNoneReached": "No device could be reached. The ones that no longer answer have just been removed from the list.",
     "testFailed": "The test did not go out",
     "devicesTitle": "My devices",
     "devicesEmpty": "No device enrolled yet.",

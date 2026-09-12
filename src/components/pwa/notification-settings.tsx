@@ -326,8 +326,24 @@ export function NotificationSettings({
     setTesting(true);
     try {
       const response = await fetch("/api/push/test", { method: "POST" });
-      if (response.ok) toast.success(t("push.testSent"));
+      // C'est `sent` qui tranche, PAS le code HTTP. La route répond 200 même
+      // quand aucun appareil n'a rien reçu — tous injoignables, tous périmés
+      // et élagués au passage. Ce bouton est le seul outil dont dispose un
+      // téléphoniste pour savoir si sa poche va vibrer : un « Essai envoyé »
+      // affiché alors que rien n'est parti ne fait pas que rater son travail,
+      // il fait croire que la chaîne est bonne et envoie chercher la panne
+      // ailleurs.
+      const body = (await response.json().catch(() => null)) as {
+        sent?: number;
+      } | null;
+      if (response.ok && (body?.sent ?? 0) > 0) toast.success(t("push.testSent"));
+      else if (response.status === 503) toast.error(t("push.notConfigured"));
+      else if (response.status === 409) toast.error(t("push.testNoDevice"));
+      else if (response.ok) toast.error(t("push.testNoneReached"));
       else toast.error(t("push.testFailed"));
+      // La route supprime les abonnements que le service déclare disparus :
+      // la liste affichée doit refléter ce ménage tout de suite.
+      router.refresh();
     } catch {
       toast.error(t("push.testFailed"));
     } finally {

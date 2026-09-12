@@ -65,7 +65,19 @@ export async function POST(request: NextRequest) {
   // Rotation de clés : l'ancienne ligne s'en va, sinon deux endpoints
   // désignent le même téléphone et l'un des deux répondra 410 pour toujours.
   if (previousEndpoint && previousEndpoint !== subscription.endpoint) {
-    await db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, previousEndpoint));
+    // Borné au PROPRIÉTAIRE. `previousEndpoint` arrive dans le corps de la
+    // requête, donc du client : sans cette condition, un compte authentifié
+    // pouvait effacer l'abonnement du téléphone de n'importe qui d'autre en
+    // postant son endpoint — et faire taire un collègue sans laisser de trace
+    // (règle 1 : le serveur ne fait jamais confiance à ce qu'on lui envoie).
+    await db
+      .delete(pushSubscriptions)
+      .where(
+        and(
+          eq(pushSubscriptions.endpoint, previousEndpoint),
+          eq(pushSubscriptions.userId, actor.user.id),
+        ),
+      );
   }
 
   const [row] = await db
