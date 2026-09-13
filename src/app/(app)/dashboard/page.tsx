@@ -26,7 +26,7 @@ import { loadDirectory, requireActor, scopeFor, withVisibility } from "@/lib/per
 import { formatPhone, phoneMatchKey } from "@/lib/phone";
 import { RedialButton } from "@/components/calls/redial-button";
 import { APP_TZ, torontoDayRange, torontoMonthStart } from "@/components/clients/timezone";
-import { CONVERSATION_STATE_LOOK, LookIcon } from "@/components/look";
+import { CALL_DIRECTION_LOOK, CONVERSATION_STATE_LOOK, LookIcon } from "@/components/look";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -524,7 +524,7 @@ export default async function DashboardPage() {
           <Card className="shadow-xs lg:col-span-2">
             <CardHeader className="border-b">
               <CardTitle className="flex items-center gap-2">
-                <PhoneMissedIcon aria-hidden className="size-4 text-red-600 dark:text-red-400" />
+                <PhoneMissedIcon aria-hidden className="size-4" style={{ color: CALL_DIRECTION_LOOK.missed.color }} />
                 {t("missedCalls.title")}
                 <Badge variant="destructive" className="tabular-nums">
                   {missedGroups.length}

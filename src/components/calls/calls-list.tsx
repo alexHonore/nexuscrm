@@ -1,5 +1,5 @@
-import { PhoneIncoming, PhoneMissed, PhoneOutgoing } from "lucide-react";
 import Link from "next/link";
+import { CALL_DIRECTION_LOOK } from "@/components/look";
 import { cn } from "@/lib/utils";
 import { RedialButton } from "./redial-button";
 
@@ -50,20 +50,14 @@ function DirectionIcon({
   label: string;
   className?: string;
 }) {
-  const Icon = missed ? PhoneMissed : direction === "outbound" ? PhoneOutgoing : PhoneIncoming;
+  // Le vocabulaire partagé : le rouge d'un appel manqué est le MÊME ici, dans
+  // les filtres, sur la fiche et dans la cloche. Il était recopié à la main
+  // dans quatre écrans, avec quatre nuances légèrement différentes.
+  const look = CALL_DIRECTION_LOOK[missed ? "missed" : direction];
+  const Icon = look.Icon;
   return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center",
-        missed
-          ? "text-red-600 dark:text-red-400"
-          : direction === "outbound"
-            ? "text-emerald-600 dark:text-emerald-500"
-            : "text-blue-600 dark:text-blue-400",
-        className,
-      )}
-    >
-      <Icon aria-hidden className="size-4" />
+    <span className={cn("inline-flex shrink-0 items-center", className)}>
+      <Icon aria-hidden className="size-4" style={{ color: look.color }} />
       <span className="sr-only">{label}</span>
     </span>
   );

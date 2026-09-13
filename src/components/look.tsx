@@ -57,7 +57,9 @@ import {
   PauseIcon,
   PencilLineIcon,
   PhoneCallIcon,
+  PhoneIncomingIcon,
   PhoneMissedIcon,
+  PhoneOutgoingIcon,
   PhoneOffIcon,
   PlayIcon,
   PowerIcon,
@@ -738,6 +740,29 @@ export const SUPPRESSION_LOOK: Record<string, Look> = {
  * retomberait en pastille anonyme au milieu de quatorze lignes illustrées.
  * `tests/unit-look.test.ts` le refuse.
  */
+/**
+ * Les TROIS lectures d'une ligne du journal d'appels — et il y en a bien trois,
+ * jamais deux.
+ *
+ * « Entrant » et « manqué » sont le même sens de circulation, et pourtant rien
+ * ne demande le même geste : l'un raconte une conversation qui a eu lieu,
+ * l'autre quelqu'un qui attend encore. Les confondre sous une seule couleur
+ * « entrant » ferait disparaître le seul appel qui coûte de l'argent.
+ *
+ * Cette famille existe parce que le rouge de l'appel manqué était recopié à la
+ * main dans QUATRE écrans — le journal, ses filtres, l'historique d'une fiche
+ * et le tableau de bord — chacun avec sa nuance de Tailwind. Le même appel
+ * manqué n'avait donc pas tout à fait la même couleur selon l'endroit d'où on
+ * le regardait, ce que le vocabulaire existe précisément pour empêcher. Le
+ * rouge est ici le MÊME que celui de `NOTIFICATION_LOOK.missed_call` : la
+ * cloche et le journal parlent du même fait.
+ */
+export const CALL_DIRECTION_LOOK: Record<"missed" | "inbound" | "outbound", Look> = {
+  missed: { color: SEVERITY_LOOK.block.color, Icon: PhoneMissedIcon },
+  inbound: { color: TONE.speech, Icon: PhoneIncomingIcon },
+  outbound: { color: "#10B981", Icon: PhoneOutgoingIcon },
+};
+
 export const NOTIFICATION_LOOK: Record<string, Look> = {
   // « Quelqu'un attend qu'on le rappelle. »
   missed_call: { color: SEVERITY_LOOK.block.color, Icon: PhoneMissedIcon },

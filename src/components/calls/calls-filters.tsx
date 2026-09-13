@@ -1,11 +1,26 @@
 "use client";
 
-import { PhoneIncoming, PhoneMissed, PhoneOutgoing, XIcon } from "lucide-react";
+import { XIcon } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useTransition } from "react";
+import { CALL_DIRECTION_LOOK, type Look } from "@/components/look";
 import { Button } from "@/components/ui/button";
 import type { DispositionOption } from "@/lib/dispositions";
+
+/**
+ * Le pictogramme d'une puce de filtre d'appel.
+ *
+ * `tinted` dit « la puce n'est PAS enfoncée » : elle porte alors la couleur du
+ * sens d'appel, qui est ce qui la rend reconnaissable au milieu de la bande.
+ * Enfoncée, elle hérite du contraste de la puce elle-même — sans quoi le rouge
+ * sur fond rouge deviendrait illisible. La couleur ne porte jamais le sens
+ * toute seule : le libellé est écrit juste à côté.
+ */
+function CallGlyph({ look, tinted }: { look: Look; tinted: boolean }) {
+  const Icon = look.Icon;
+  return <Icon aria-hidden className="size-3.5" style={tinted ? { color: look.color } : undefined} />;
+}
 import { cn } from "@/lib/utils";
 
 export type CallsPeriod = "today" | "7" | "30";
@@ -121,13 +136,7 @@ export function CallsFilters({
               apply({ direction: direction === "outbound" ? null : "outbound", missed: null })
             }
           >
-            <PhoneOutgoing
-              aria-hidden
-              className={cn(
-                "size-3.5",
-                direction !== "outbound" && "text-emerald-600 dark:text-emerald-500",
-              )}
-            />
+            <CallGlyph look={CALL_DIRECTION_LOOK.outbound} tinted={direction !== "outbound"} />
             {t("callsPage.filters.outbound")}
           </button>
           <button
@@ -136,13 +145,7 @@ export function CallsFilters({
             className={chipClass(direction === "inbound")}
             onClick={() => apply({ direction: direction === "inbound" ? null : "inbound" })}
           >
-            <PhoneIncoming
-              aria-hidden
-              className={cn(
-                "size-3.5",
-                direction !== "inbound" && "text-blue-600 dark:text-blue-400",
-              )}
-            />
+            <CallGlyph look={CALL_DIRECTION_LOOK.inbound} tinted={direction !== "inbound"} />
             {t("callsPage.filters.inbound")}
           </button>
           <button
@@ -156,10 +159,7 @@ export function CallsFilters({
               })
             }
           >
-            <PhoneMissed
-              aria-hidden
-              className={cn("size-3.5", !missed && "text-red-600 dark:text-red-400")}
-            />
+            <CallGlyph look={CALL_DIRECTION_LOOK.missed} tinted={!missed} />
             {t("callsPage.filters.missed")}
           </button>
         </div>

@@ -7,12 +7,11 @@ import {
   HistoryIcon,
   MapPinIcon,
   Mic2Icon,
-  PhoneIncomingIcon,
-  PhoneMissedIcon,
   PhoneOutgoingIcon,
   VideoIcon,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
+import { CALL_DIRECTION_LOOK, TONE, lookTint } from "@/components/look";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -74,7 +73,11 @@ export function ClientHistory({
     const config = DISPOSITION_CONFIG[d as Disposition];
     const known = Boolean(config);
     const label = override?.label ?? (known ? t(`dispositions.${d as Disposition}`) : d);
-    const color = override?.color ?? config?.color ?? "#64748b";
+    // Le gris du vocabulaire, pas un hex recopié : c'est la teinte « pour
+    // information », la même que partout ailleurs pour une disposition qu'on ne
+    // connaît pas. Elle dormait ici en dur depuis l'origine — ce fichier ne
+    // parlait pas encore le vocabulaire, donc rien ne l'attrapait.
+    const color = override?.color ?? config?.color ?? TONE.raw;
     return (
       <span
         className="inline-flex h-5 items-center rounded-full border px-2 text-xs font-medium whitespace-nowrap"
@@ -118,25 +121,31 @@ export function ClientHistory({
                     key={c.id}
                     className="-mx-2 flex items-start gap-3 rounded-lg px-2 py-3 transition-colors hover:bg-muted/50"
                   >
-                    {c.missed ? (
-                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-red-500/10 text-red-600 dark:text-red-400">
-                        <PhoneMissedIcon aria-label={t("history.missed")} className="size-4" />
-                      </span>
-                    ) : c.direction === "outbound" ? (
-                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                        <PhoneOutgoingIcon
-                          aria-label={t("history.outbound")}
-                          className="size-4"
-                        />
-                      </span>
-                    ) : (
-                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400">
-                        <PhoneIncomingIcon
-                          aria-label={t("history.inbound")}
-                          className="size-4"
-                        />
-                      </span>
-                    )}
+                    {(() => {
+                      // Une seule écriture pour les trois sens : les teintes
+                      // viennent du vocabulaire, plus de la mémoire de celui
+                      // qui a écrit l'écran.
+                      const kind = c.missed
+                        ? ("missed" as const)
+                        : c.direction === "outbound"
+                          ? ("outbound" as const)
+                          : ("inbound" as const);
+                      const look = CALL_DIRECTION_LOOK[kind];
+                      const tint = lookTint(look);
+                      const Icon = look.Icon;
+                      return (
+                        <span
+                          className="flex size-8 shrink-0 items-center justify-center rounded-full"
+                          style={{ backgroundColor: tint.backgroundColor }}
+                        >
+                          <Icon
+                            aria-label={t(`history.${kind}`)}
+                            className="size-4"
+                            style={{ color: look.color }}
+                          />
+                        </span>
+                      );
+                    })()}
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
                         <span className="font-medium tabular-nums">{fmt(c.startedAt)}</span>
@@ -144,7 +153,14 @@ export function ClientHistory({
                           {formatDuration(c.durationSec)}
                         </span>
                         {c.missed && !c.disposition ? (
-                          <span className="inline-flex h-5 items-center rounded-full border border-red-500/25 bg-red-500/10 px-2 text-xs font-medium whitespace-nowrap text-red-600 dark:text-red-400">
+                          <span
+                            className="inline-flex h-5 items-center rounded-full border px-2 text-xs font-medium whitespace-nowrap"
+                            style={{
+                              color: CALL_DIRECTION_LOOK.missed.color,
+                              backgroundColor: lookTint(CALL_DIRECTION_LOOK.missed).backgroundColor,
+                              borderColor: lookTint(CALL_DIRECTION_LOOK.missed).borderColor,
+                            }}
+                          >
                             {t("history.missed")}
                           </span>
                         ) : null}
