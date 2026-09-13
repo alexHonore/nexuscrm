@@ -593,7 +593,8 @@
       "call": "Appel",
       "calls": "Appels",
       "recording": "Enregistrement",
-      "webhook_key": "Clé webhook"
+      "webhook_key": "Clé webhook",
+      "recording_collection": "Recueil d'écoute"
     },
     "fields": {
       "fullName": "Nom complet",
@@ -731,7 +732,16 @@
       "source_transfer": "Clients transférés (source)",
       "permissions_update": "Rôles et droits modifiés",
       "client_claim": "Fiche prise",
-      "client_release": "Fiche rendue au bassin"
+      "client_release": "Fiche rendue au bassin",
+      "recording_star": "Enregistrement marqué",
+      "recording_unstar": "Marque-page retiré",
+      "recording_collection_create": "Recueil d'écoute créé",
+      "recording_collection_update": "Recueil d'écoute modifié",
+      "recording_collection_delete": "Recueil d'écoute supprimé",
+      "recording_collection_add": "Appel rangé dans un recueil",
+      "recording_collection_remove": "Appel retiré d'un recueil",
+      "recording_transcribe": "Transcription d'un enregistrement",
+      "calls_sync": "Synchronisation des appels voip.ms"
     }
   },
   "billing": {

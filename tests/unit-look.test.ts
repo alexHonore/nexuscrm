@@ -26,6 +26,7 @@ import {
   EDITOR_TAB_LOOK,
   GOAL_LOOK,
   GUARDRAIL_KIND_LOOK,
+  LIBRARY_LOOK,
   LookGlyph,
   LookIcon,
   NOTIFICATION_LOOK,
@@ -344,6 +345,7 @@ describe("un pictogramme ne remplace pas un libellé", () => {
       ...DELIVERABILITY_LOOK,
       ...ROLE_LOOK,
       ...PERMISSION_GROUP_LOOK,
+      ...LIBRARY_LOOK,
       sms: CHANNEL_LOOK.sms,
     })) {
       expect(typeof look.Icon, `${key}.Icon`).not.toBe("string");
@@ -351,6 +353,37 @@ describe("un pictogramme ne remplace pas un libellé", () => {
       // Rendu pour de vrai : un nom d'icône disparu de lucide passerait le
       // typage et n'afficherait rien du tout.
       expect(renderToStaticMarkup(createElement(look.Icon)), key).toContain("<svg");
+    }
+  });
+});
+
+describe("la bibliothèque d'écoute", () => {
+  it("les trois gestes ont chacun leur pictogramme", () => {
+    const missing = (["starred", "folder", "tag"] as const).filter((k) => !LIBRARY_LOOK[k]);
+    expect(missing, `gestes sans look : ${missing.join(", ")}`).toEqual([]);
+  });
+
+  it("marquer ne ressemble pas à ranger", () => {
+    // L'étoile est un geste privé, le dossier un geste d'équipe : les
+    // confondre d'un coup d'œil serait laisser croire qu'on partage ce
+    // qu'on garde pour soi.
+    expect(LIBRARY_LOOK.starred.color).not.toBe(LIBRARY_LOOK.folder.color);
+  });
+
+  it("le dossier et l'étiquette sont le MÊME geste, deux questions", () => {
+    // Même teinte assumée (voir le docblock de la famille) — ce qui les
+    // sépare doit donc être le pictogramme, sinon rien ne les sépare.
+    expect(LIBRARY_LOOK.folder.color).toBe(LIBRARY_LOOK.tag.color);
+    expect(LIBRARY_LOOK.folder.Icon).not.toBe(LIBRARY_LOOK.tag.Icon);
+  });
+
+  it("aucune teinte inventée, et jamais celle du canal SMS", () => {
+    const allowed = new Set<string>([...Object.values(TONE), QUEUE_KIND_LOOK.send.color]);
+    for (const [key, look] of Object.entries(LIBRARY_LOOK)) {
+      expect(allowed, `${key} invente une teinte`).toContain(look.color);
+      expect(look.color, `${key} emprunte la couleur du canal SMS`).not.toBe(
+        CHANNEL_LOOK.sms.color,
+      );
     }
   });
 });

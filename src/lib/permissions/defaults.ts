@@ -103,6 +103,9 @@ export function defaultRoles(): Role[] {
         "clients.bulk",
         "clients.contact",
         "clients.recordings",
+        // Le superviseur est celui qui forme : c'est lui qui constitue les
+        // dossiers d'écoute, pas le courtier entre deux rendez-vous.
+        "clients.recordingsCurate",
         "clients.history",
         "conversations.view",
         "conversations.reply",

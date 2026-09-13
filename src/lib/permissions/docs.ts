@@ -194,6 +194,15 @@ export const PERMISSION_DOCS: Record<PermissionKey, DocEntry> = {
     pitfallsFr:
       "Chaque écoute est consignée au journal d'audit, nommément — l'accès se donne, il ne s'oublie pas. Le droit d'ouvrir le journal d'appels ne donne pas l'audio : ce sont deux cases.",
   },
+  "clients.recordingsCurate": {
+    labelFr: "Ranger les enregistrements",
+    whatFr:
+      "Crée et renomme les dossiers de formation et les étiquettes, y range des appels et écrit le motif qui dit pourquoi il faut les écouter. Marquer un appel d'une étoile ne demande PAS ce droit : une étoile n'appartient qu'à celui qui la pose.",
+    whyFr:
+      "Un dossier est PARTAGÉ : il dit à toute l'équipe « voilà comment on répond à cette objection ». Le remplir, c'est enseigner — et supprimer un dossier efface le classement de tout le monde, pas le sien.",
+    pitfallsFr:
+      "Il ne donne pas l'audio : sans « Écouter les enregistrements », on range des appels qu'on ne peut pas ouvrir. Et un dossier ne montre jamais plus que ce que la matrice laisse voir — son décompte suit le regard de chacun, deux personnes n'y verront pas le même nombre d'appels.",
+  },
   "clients.history": {
     labelFr: "Voir l'historique",
     whatFr:

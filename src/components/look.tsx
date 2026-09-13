@@ -29,9 +29,11 @@ import {
   FilterIcon,
   FilterXIcon,
   FlaskConicalIcon,
+  FolderIcon,
   FolderTreeIcon,
   GaugeIcon,
   HandIcon,
+  HashIcon,
   HourglassIcon,
   IdCardIcon,
   LayersIcon,
@@ -84,6 +86,7 @@ import {
   SlidersHorizontalIcon,
   SmartphoneIcon,
   SparklesIcon,
+  StarIcon,
   SplitIcon,
   SquareArrowOutUpRightIcon,
   SquarePenIcon,
@@ -762,6 +765,32 @@ export const CALL_DIRECTION_LOOK: Record<"missed" | "inbound" | "outbound", Look
   inbound: { color: TONE.speech, Icon: PhoneIncomingIcon },
   outbound: { color: "#10B981", Icon: PhoneOutgoingIcon },
 };
+
+/**
+ * La bibliothèque d'écoute — les TROIS gestes qu'on pose sur un enregistrement.
+ *
+ * L'étoile est ambre, comme tout ce qui veut dire « il y a quelque chose à
+ * faire ici » (`TONE.scrutiny`) : marquer un appel, ce n'est pas le classer,
+ * c'est se promettre d'y revenir. Elle n'appartient qu'à celui qui la pose,
+ * et c'est justement pour ça qu'elle ne porte aucune couleur d'équipe.
+ *
+ * Le dossier et l'étiquette PARTAGENT le cyan, et ce n'est pas un oubli :
+ * c'est la même teinte que « ranger » porte déjà dans la file d'envoi
+ * (`QUEUE_KIND_LOOK.send`), et les deux sont le même geste — mettre un appel
+ * quelque part pour que l'équipe le retrouve. Ce qui les sépare est la
+ * question posée, donc le pictogramme : le dossier répond « où est-il
+ * classé ? », l'étiquette « qu'est-ce que c'est ? ». Leur donner deux
+ * couleurs aurait laissé croire à deux mécaniques là où il n'y en a qu'une.
+ *
+ * Le croisillon plutôt qu'une étiquette dessinée : `TagIcon` et `TagsIcon`
+ * disent déjà « catégorie du pipeline » sur l'écran des fiches et dans
+ * l'inbox. Deux sens pour un pictogramme, c'est un pictogramme de moins.
+ */
+export const LIBRARY_LOOK = {
+  starred: { color: TONE.scrutiny, Icon: StarIcon },
+  folder: { color: QUEUE_KIND_LOOK.send.color, Icon: FolderIcon },
+  tag: { color: QUEUE_KIND_LOOK.send.color, Icon: HashIcon },
+} as const satisfies Record<string, Look>;
 
 export const NOTIFICATION_LOOK: Record<string, Look> = {
   // « Quelqu'un attend qu'on le rappelle. »

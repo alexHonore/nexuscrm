@@ -3,8 +3,9 @@ import postgres from "postgres";
 import * as schemaCrm from "./schema";
 import * as schemaSms from "./schema-sms";
 import * as schemaPush from "./schema-push";
+import * as schemaLibrary from "./schema-library";
 
-const schema = { ...schemaCrm, ...schemaSms, ...schemaPush };
+const schema = { ...schemaCrm, ...schemaSms, ...schemaPush, ...schemaLibrary };
 
 const globalForDb = globalThis as unknown as { pgConn?: ReturnType<typeof postgres> };
 
@@ -55,3 +56,4 @@ export const db = drizzle(conn, { schema });
 export * as tables from "./schema";
 export * as tablesSms from "./schema-sms";
 export * as tablesPush from "./schema-push";
+export * as tablesLibrary from "./schema-library";

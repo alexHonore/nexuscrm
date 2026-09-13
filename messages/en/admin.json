@@ -593,7 +593,8 @@
       "call": "Call",
       "calls": "Calls",
       "recording": "Recording",
-      "webhook_key": "Webhook key"
+      "webhook_key": "Webhook key",
+      "recording_collection": "Listening collection"
     },
     "fields": {
       "fullName": "Full name",
@@ -731,7 +732,16 @@
       "source_transfer": "Clients transferred (source)",
       "permissions_update": "Roles & rights changed",
       "client_claim": "Record taken",
-      "client_release": "Record returned to the pool"
+      "client_release": "Record returned to the pool",
+      "recording_star": "Recording starred",
+      "recording_unstar": "Star removed",
+      "recording_collection_create": "Listening collection created",
+      "recording_collection_update": "Listening collection changed",
+      "recording_collection_delete": "Listening collection deleted",
+      "recording_collection_add": "Call filed into a collection",
+      "recording_collection_remove": "Call removed from a collection",
+      "recording_transcribe": "Recording transcribed",
+      "calls_sync": "voip.ms call sync"
     }
   },
   "billing": {

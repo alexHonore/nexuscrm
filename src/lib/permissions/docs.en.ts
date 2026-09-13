@@ -99,6 +99,12 @@ export const PERMISSION_TEXT_EN: Record<string, DocOverlay> = {
     why: "A recording holds everything the client said, including what was written down nowhere and what they never expected to circulate.",
     pitfalls: "Every playback is written to the audit log, by name — access is given, it is not forgotten. The right to open the call log does not grant the audio: those are two boxes.",
   },
+  "clients.recordingsCurate": {
+    label: "File the recordings",
+    what: "Creates and renames training folders and tags, files calls into them, and writes the reason that says why they are worth hearing. Starring a call does NOT need this right: a star belongs to whoever puts it there.",
+    why: "A folder is SHARED: it tells the whole team \"this is how we answer that objection\". Filling one is teaching — and deleting a folder wipes out everybody's filing, not your own.",
+    pitfalls: "It does not grant the audio: without \"Listen to recordings\", you file calls you cannot open. And a folder never shows more than the matrix allows — its count follows each viewer's reach, so two people will not see the same number of calls in it.",
+  },
   "clients.history": {
     label: "See the history",
     what: "Opens the \"History\" card on the record: calls, appointments, and the change log.",

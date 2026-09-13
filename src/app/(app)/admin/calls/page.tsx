@@ -23,6 +23,7 @@ import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { CallsFilters } from "@/components/analytics/calls-filters";
 import { CallsList, type CallRow } from "@/components/analytics/calls-list";
+import type { CollectionOption } from "@/components/analytics/recording-marks";
 import { SyncCallsButton } from "@/components/analytics/sync-calls-button";
 import { APP_TZ, dayStartUtc, shiftDateStr } from "@/components/analytics/period";
 import { VizTheme } from "@/components/analytics/viz-theme";
@@ -35,6 +36,7 @@ import { bucketFor, grantsFor } from "@/lib/permissions/access";
 import type { Grants } from "@/lib/permissions/catalog";
 import { loadDirectory, requirePerm, visibilityCondition } from "@/lib/permissions/server";
 import { formatPhone } from "@/lib/phone";
+import { type CallMarkers, loadCollections, markersFor } from "@/lib/recordings/library";
 import { getUserOptions } from "../analytics/queries";
 
 export const dynamic = "force-dynamic";
@@ -225,6 +227,26 @@ export default async function CallsPage({
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  // La bibliothèque d'écoute, sur la page qu'on parcourt vraiment : marquer un
+  // appel se fait en le lisant, pas en allant le rechercher ailleurs. Deux
+  // requêtes pour vingt-cinq lignes, et seulement pour qui peut écouter — sans
+  // ce droit, il n'y a pas d'enregistrement à ranger, donc pas de bouton.
+  const canListen = actor.can("clients.recordings");
+  const canCurate = actor.can("clients.recordingsCurate");
+  const [marks, allCollections] = await Promise.all([
+    canListen
+      ? markersFor(
+          actor,
+          rows.map((r) => r.id),
+        )
+      : Promise.resolve(new Map<string, CallMarkers>()),
+    canCurate ? loadCollections(actor) : Promise.resolve([]),
+  ]);
+  const collectionOptions: CollectionOption[] = allCollections.map((c) => ({
+    id: c.id,
+    kind: c.kind,
+    name: c.name,
+  }));
   const timePattern = locale === "en" ? "h:mm a" : "HH 'h' mm";
   const callRows: CallRow[] = rows.map((row) => {
     const rawNumber =
@@ -272,7 +294,12 @@ export default async function CallsPage({
       note: history ? row.note : null,
       // L'enregistrement aussi — et le proxy exige en plus `clients.recordings`
       // (il journalise chaque écoute). Sans ce droit, pas de bouton mort ici.
-      recordingUrl: history && actor.can("clients.recordings") ? row.recordingUrl : null,
+      recordingUrl: history && canListen ? row.recordingUrl : null,
+      // Une étoile sur une fiche dont l'historique est fermé serait un aveu :
+      // « cet appel existe, et quelqu'un l'a trouvé remarquable ». Fermé, la
+      // ligne n'en porte aucune, et les deux boutons disparaissent.
+      marks:
+        history && canListen ? (marks.get(row.id) ?? { starred: false, collections: [] }) : null,
     };
   });
 
@@ -318,7 +345,7 @@ export default async function CallsPage({
         {t("callsPage.resultsCount", { count: nf.format(total) })}
       </p>
 
-      <CallsList rows={callRows} />
+      <CallsList rows={callRows} collections={collectionOptions} canCurate={canCurate} />
 
       {totalPages > 1 ? (
         <nav

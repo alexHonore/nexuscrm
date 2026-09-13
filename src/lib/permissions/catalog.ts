@@ -47,6 +47,9 @@ export const PERMISSION_KEYS = [
   /** Voir téléphone et courriel en clair. Sinon : masqués (•••-4512). */
   "clients.contact",
   "clients.recordings",
+  /** Ranger les enregistrements : dossiers, étiquettes et motifs d'écoute.
+   *  Marquer d'une étoile n'en relève PAS — une étoile n'appartient qu'à soi. */
+  "clients.recordingsCurate",
   /** Historique : appels, rendez-vous, journal de modifications de la fiche. */
   "clients.history",
 

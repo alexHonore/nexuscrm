@@ -12,6 +12,7 @@ import {
   Globe,
   KeyRound,
   LayoutDashboard,
+  LibraryBig,
   LogOut,
   Megaphone,
   Menu,
@@ -175,6 +176,15 @@ const ADMIN_GROUPS: NavGroup[] = [
         perm: "admin.deliverability",
       },
       { href: "/admin/calls", labelKey: "calls", icon: PhoneCall, perm: "admin.calls" },
+      // La bibliothèque suit le journal d'appels : c'est de là qu'on y range.
+      // Elle s'ouvre avec le droit d'ÉCOUTER, pas celui de ranger — un
+      // téléphoniste vient y écouter ce qu'on lui a préparé.
+      {
+        href: "/admin/recordings",
+        labelKey: "recordings",
+        icon: LibraryBig,
+        perm: "clients.recordings",
+      },
       { href: "/admin/billing", labelKey: "billing", icon: Wallet, perm: "admin.billing" },
       { href: "/admin/audit", labelKey: "audit", icon: ShieldCheck, perm: "admin.audit" },
     ],

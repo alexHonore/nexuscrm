@@ -8,8 +8,9 @@ import bcrypt from "bcryptjs";
 import * as schemaCrm from "@/db/schema";
 import * as schemaSms from "@/db/schema-sms";
 import * as schemaPush from "@/db/schema-push";
+import * as schemaLibrary from "@/db/schema-library";
 
-const schema = { ...schemaCrm, ...schemaSms, ...schemaPush };
+const schema = { ...schemaCrm, ...schemaSms, ...schemaPush, ...schemaLibrary };
 
 const conn = postgres(process.env.DATABASE_URL!, { prepare: false, max: 4 });
 export const testDb = drizzle(conn, { schema });
@@ -25,7 +26,8 @@ export async function resetDb(): Promise<void> {
       guardrail_runs, guardrail_audit, guardrail_fixtures, guardrail_rules,
       campaign_touches, campaign_enrollments, campaigns,
       assistant_versions, assistants, objection_packs, prompt_cores, param_docs,
-      push_subscriptions, user_reach
+      push_subscriptions, user_reach,
+      call_stars, recording_collection_items, recording_collections
     restart identity cascade;
   `);
 }
