@@ -3,6 +3,7 @@
   "markAllRead": "Tout marquer lu",
   "allRead": "Toutes les notifications sont lues",
   "unreadCount": "{count, plural, one {# non lue} other {# non lues}}",
+  "recallTitle": "{count, plural, one {Un appel à rappeler} other {# appels à rappeler}}",
   "empty": "Aucune notification.",
   "emptyHint": "Les mentions, suivis à faire et nouveaux prospects apparaîtront ici.",
   "page": "Page {page} sur {pages}",

@@ -1,5 +1,6 @@
-import { desc, eq, and, isNull, sql } from "drizzle-orm";
+import { desc, eq, and, gte, isNull, notInArray, sql } from "drizzle-orm";
 import { Bell, BellOff } from "lucide-react";
+import { CALL_DIRECTION_LOOK } from "@/components/look";
 import { getTranslations } from "next-intl/server";
 import { db } from "@/db";
 import { clients, notifications } from "@/db/schema";
@@ -11,6 +12,11 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { MarkAllReadButton, NotificationItem } from "./notification-list";
 
 const PAGE_SIZE = 20;
+
+/** Combien d'appels à rappeler tiennent en tête sans repousser le reste hors de l'écran. */
+const RECALL_LIMIT = 5;
+/** Au-delà, un appel manqué ne se « rappelle » plus : il s'archive. */
+const RECALL_WINDOW_MS = 48 * 3600_000;
 
 /**
  * La cloche — et ce qu'elle n'a plus le droit de dire.
@@ -57,8 +63,57 @@ export default async function NotificationsPage({
       : undefined,
   );
 
+  // ── « À rappeler » ───────────────────────────────────────────────────────
+  // Les appels manqués des dernières 48 h, remontés en tête. Définis par le
+  // TYPE et surtout PAS par « non lu » : la lecture optimiste de la liste ferait
+  // sauter la ligne sous le pouce au moment même où on appuie dessus, et un
+  // appel qu'on a LU sans rappeler reste un appel à rappeler.
+  //
+  // Même `where` que la liste, donc même filtre de visibilité : une section
+  // écrite à côté, sans cette condition, annoncerait l'existence de fiches que
+  // ce regard n'a pas le droit de voir (règles 1 et 13).
+  // `new Date()` puis arithmétique sur l'instant obtenu : `Date.now()` appelé
+  // en plein rendu est refusé par la règle de pureté de React, et les autres
+  // écrans serveur du dépôt prennent l'heure de cette façon.
+  const now = new Date();
+  const recall = await db
+    .select({
+      id: notifications.id,
+      type: notifications.type,
+      title: notifications.title,
+      body: notifications.body,
+      link: notifications.link,
+      readAt: notifications.readAt,
+      createdAt: notifications.createdAt,
+    })
+    .from(notifications)
+    .where(
+      and(
+        where,
+        eq(notifications.type, "missed_call"),
+        gte(notifications.createdAt, new Date(now.getTime() - RECALL_WINDOW_MS)),
+      ),
+    )
+    .orderBy(desc(notifications.createdAt))
+    .limit(RECALL_LIMIT);
+
+  // SORTIES de la liste paginée, et retranchées du total. Sans ça elles
+  // paraissent deux fois en page 1, laissent un trou en page 2, et la dernière
+  // page annonce des lignes qui n'existent plus.
+  const listWhere = recall.length
+    ? and(
+        where,
+        notInArray(
+          notifications.id,
+          recall.map((r) => r.id),
+        ),
+      )
+    : where;
+
   const [total, unreadCount, unreadEverything, rows] = await Promise.all([
-    db.$count(notifications, where),
+    db.$count(notifications, listWhere),
+    // Tout l'écran, section comprise : le nombre affiché à côté du titre doit
+    // correspondre à ce qu'on voit, pas à ce qui reste sous la section.
     db.$count(notifications, and(where, isNull(notifications.readAt))),
     // Le MÊME compte, sans le filtre : la pastille de la coquille le calcule
     // ainsi (src/app/(app)/layout.tsx). Sans lui, une notification cachée et
@@ -87,7 +142,7 @@ export default async function NotificationsPage({
         createdAt: notifications.createdAt,
       })
       .from(notifications)
-      .where(where)
+      .where(listWhere)
       .orderBy(desc(notifications.createdAt))
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
@@ -120,13 +175,47 @@ export default async function NotificationsPage({
         }
       />
 
+      {recall.length > 0 ? (
+        <section aria-labelledby="recall-heading" className="space-y-2">
+          <h2
+            id="recall-heading"
+            className="flex items-center gap-2 text-sm font-medium"
+            style={{ color: CALL_DIRECTION_LOOK.missed.color }}
+          >
+            <CALL_DIRECTION_LOOK.missed.Icon aria-hidden className="size-4" />
+            {t("recallTitle", { count: recall.length })}
+          </h2>
+          <ul className="space-y-2">
+            {recall.map((n) => (
+              <NotificationItem
+                key={n.id}
+                notification={{
+                  id: n.id,
+                  type: n.type,
+                  title: n.title,
+                  body: n.body,
+                  link: n.link,
+                  read: n.readAt !== null,
+                  createdAt: n.createdAt.toISOString(),
+                }}
+              />
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       {rows.length === 0 ? (
-        <EmptyState
-          icon={<BellOff />}
-          title={t("empty")}
-          hint={t("emptyHint")}
-          className="rounded-xl border border-dashed"
-        />
+        // La section « À rappeler » n'est pas « rien » : une cloche qui ne
+        // contient QUE des appels à rappeler ne doit pas annoncer qu'elle est
+        // vide juste en dessous d'eux.
+        recall.length > 0 ? null : (
+          <EmptyState
+            icon={<BellOff />}
+            title={t("empty")}
+            hint={t("emptyHint")}
+            className="rounded-xl border border-dashed"
+          />
+        )
       ) : (
         <ul className="space-y-2">
           {rows.map((n) => (

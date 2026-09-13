@@ -3,6 +3,7 @@
   "markAllRead": "Mark all as read",
   "allRead": "All notifications are read",
   "unreadCount": "{count, plural, one {# unread} other {# unread}}",
+  "recallTitle": "{count, plural, one {One call to return} other {# calls to return}}",
   "empty": "No notifications.",
   "emptyHint": "Mentions, due follow-ups and new leads will show up here.",
   "page": "Page {page} of {pages}",
