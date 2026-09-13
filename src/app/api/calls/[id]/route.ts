@@ -1,11 +1,12 @@
 import { and, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { missedCallNotification } from "@/components/clients/notification-content";
+import { missedCallRows } from "@/components/clients/notification-content";
 import { db } from "@/db";
 import { DISPOSITIONS, calls, categories, clients, followups } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
-import { createNotification } from "@/lib/notify";
+import { activeAssignee } from "@/lib/calls/assignee";
+import { createNotifications } from "@/lib/notify";
 import { apiActor, canSeeClient, clientRef, grantsOnClient } from "@/lib/permissions/server";
 import { notifyCategoryChanged } from "@/lib/campaigns-server/match";
 
@@ -199,22 +200,29 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   // ici que naît la notification de rappel. Une seule fois : la garde
   // !call.endedAt rend les rejeux du même PATCH inoffensifs.
   if (call.direction === "inbound" && !answeredAt && endedAt && !call.endedAt) {
-    let client: { id: string; fullName: string } | null = null;
+    let client: { id: string; fullName: string; assignedToId: string | null } | null = null;
+    let visibleToLineOwner = false;
     if (call.clientId) {
       const row = await db.query.clients.findFirst({
         where: eq(clients.id, call.clientId),
         columns: { id: true, fullName: true, assignedToId: true },
       });
-      // Une notification SURVIT à l'écran : elle ne nomme la fiche que si
-      // celle-ci existe pour son destinataire. Sinon, le numéro seul et le
-      // journal d'appels — même règle que POST /api/calls.
-      client = row && (await canSeeClient(actor, row)) ? row : null;
+      // Une notification SURVIT à l'écran : celle du propriétaire de la ligne
+      // ne nomme la fiche que si celle-ci existe POUR LUI. Sinon, le numéro
+      // seul et le journal d'appels — même règle que POST /api/calls.
+      //
+      // La fiche reste chargée pour autant, et c'est le changement : elle
+      // porte le DÉTENTEUR, qui doit apprendre que son client a appelé. Lui la
+      // voit par définition ; la garde ci-dessus ne concerne que l'autre.
+      client = row ?? null;
+      visibleToLineOwner = row !== undefined && (await canSeeClient(actor, row));
     }
-    await createNotification(
-      missedCallNotification({
-        userId: auth.id,
-        locale: auth.locale === "en" ? "en" : "fr",
+    await createNotifications(
+      missedCallRows({
+        lineOwner: { id: auth.id, locale: auth.locale },
+        assignee: await activeAssignee(client?.assignedToId),
         client,
+        visibleToLineOwner,
         fromNumber: call.fromNumber,
       }),
     );

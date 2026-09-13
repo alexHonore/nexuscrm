@@ -1,6 +1,7 @@
 import {
   ActivityIcon,
   ArchiveIcon,
+  AtSignIcon,
   AudioLinesIcon,
   BadgeQuestionMarkIcon,
   BanIcon,
@@ -50,10 +51,13 @@ import {
   MessagesSquareIcon,
   PackageOpenIcon,
   UserRoundIcon,
+  UserCheckIcon,
+  UserPlusIcon,
   UserSearchIcon,
   PauseIcon,
   PencilLineIcon,
   PhoneCallIcon,
+  PhoneMissedIcon,
   PhoneOffIcon,
   PlayIcon,
   PowerIcon,
@@ -702,6 +706,63 @@ export const SUPPRESSION_LOOK: Record<string, Look> = {
  * serait d'écrire un hex dans un écran — exactement ce que ce fichier existe
  * pour empêcher.
  */
+/**
+ * Ce que dit une ligne de la CLOCHE, d'un coup d'oeil.
+ *
+ * Quatorze types y cohabitaient sous la même pastille bleue, et six d'entre
+ * eux n'avaient même pas de pictogramme : on lisait la même petite cloche
+ * générique pour un texto reçu, une fiche qu'on vous confie et un client qui
+ * vient d'appeler dans le vide. Impossible de trier vingt lignes au pouce sans
+ * les lire une par une — et comme on ne les lit pas, on les saute toutes.
+ *
+ * TROIS lectures, pas quatorze. La couleur GROUPE, elle n'identifie pas : ce
+ * sont le pictogramme et le libellé écrit en clair qui disent quoi.
+ *
+ * - Le ROUGE de `SEVERITY_LOOK.block` : « quelqu'un attend qu'on le rappelle ».
+ *   Deux types seulement, et c'est délibéré — un appel manqué et un prospect
+ *   qui vient d'entrer sont les deux seules lignes qui coûtent de l'argent à
+ *   l'heure. Peindre en rouge tout ce qui est « un problème » ferait
+ *   exactement retomber dans le défaut d'aujourd'hui, en plus criard.
+ * - L'AMBRE de `TONE.scrutiny` : « il y a quelque chose à faire ». Un humain
+ *   est requis, mais personne n'est au bout du fil.
+ * - Le GRIS de `TONE.raw` : « pour information ». La ligne existe, elle
+ *   n'appelle aucun geste.
+ *
+ * Aucune teinte neuve : les trois sont empruntées au vocabulaire existant.
+ * Et jamais `CHANNEL_LOOK.sms`, qui veut dire « ceci SORT de l'application »
+ * sur une fiche client — un texto dont on est prévenu n'est pas un texto qu'on
+ * envoie.
+ *
+ * La liste est FERMÉE et se lit sur `NOTIFICATION_TYPES`
+ * (`src/lib/push/policy.ts`) : un quinzième type ajouté sans entrée ici
+ * retomberait en pastille anonyme au milieu de quatorze lignes illustrées.
+ * `tests/unit-look.test.ts` le refuse.
+ */
+export const NOTIFICATION_LOOK: Record<string, Look> = {
+  // « Quelqu'un attend qu'on le rappelle. »
+  missed_call: { color: SEVERITY_LOOK.block.color, Icon: PhoneMissedIcon },
+  incoming_lead: { color: SEVERITY_LOOK.block.color, Icon: UserPlusIcon },
+
+  // « Il y a quelque chose à faire. »
+  sms_inbound: { color: TONE.scrutiny, Icon: MessageSquareDotIcon },
+  sms_handoff: { color: TONE.scrutiny, Icon: HandIcon },
+  sms_blocked: { color: TONE.scrutiny, Icon: ShieldXIcon },
+  sms_error: { color: TONE.scrutiny, Icon: CpuIcon },
+  // Le MÊME combiné barré que `ATTENTION_LOOK.unsendable_number` : c'est le
+  // même fait, vu depuis la cloche au lieu du fil. Deux pictogrammes en
+  // feraient deux pannes.
+  sms_unsendable: { color: TONE.scrutiny, Icon: PhoneOffIcon },
+  mention: { color: TONE.scrutiny, Icon: AtSignIcon },
+  assignment: { color: TONE.scrutiny, Icon: UserCheckIcon },
+  followup_due: { color: TONE.scrutiny, Icon: ClockIcon },
+
+  // « Pour information. »
+  appointment: { color: TONE.raw, Icon: CalendarCheckIcon },
+  sms_stopped: { color: TONE.raw, Icon: XOctagonIcon },
+  sms_closed: { color: TONE.raw, Icon: CircleCheckIcon },
+  system: { color: TONE.raw, Icon: ServerCogIcon },
+};
+
 export function lookTint(look: Look) {
   return {
     color: look.color,

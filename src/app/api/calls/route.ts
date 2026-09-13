@@ -4,11 +4,12 @@ import { z } from "zod";
 import { db } from "@/db";
 import { calls, clients } from "@/db/schema";
 import {
-  missedCallNotification,
+  missedCallRows,
   notificationContent,
 } from "@/components/clients/notification-content";
 import { logAudit } from "@/lib/audit";
-import { createNotification } from "@/lib/notify";
+import { activeAssignee } from "@/lib/calls/assignee";
+import { createNotification, createNotifications } from "@/lib/notify";
 import { apiActor, canSeeClient, grantsOnClient, verifyAssignment } from "@/lib/permissions/server";
 import { normalizePhone, phoneMatchKey } from "@/lib/phone";
 import { getSetting } from "@/lib/settings";
@@ -215,16 +216,20 @@ export async function POST(req: NextRequest) {
     // d'ancien détenteur à prévenir.
   }
 
-  // Appel manqué : notification de rappel pour le propriétaire de la ligne.
-  // Sans accès à la fiche, elle ne porte que le NUMÉRO et mène au journal
-  // d'appels — une notification est du contenu qui survit, et elle nommerait
-  // pour toujours une fiche que l'écran refuse d'afficher.
+  // Appel manqué : notification de rappel pour le propriétaire de la ligne —
+  // ET pour le détenteur de la fiche, qui ne saurait pas autrement que « son »
+  // client a appelé. Sans accès à la fiche, celle du propriétaire de la ligne
+  // ne porte que le NUMÉRO et mène au journal d'appels : une notification est
+  // du contenu qui survit, et elle nommerait pour toujours une fiche que
+  // l'écran refuse d'afficher. Le détenteur, lui, voit la sienne par
+  // définition. `missedCallRows` tranche les deux cas et le doublon.
   if (body.direction === "inbound" && !body.answeredAt && body.endedAt) {
-    await createNotification(
-      missedCallNotification({
-        userId: user.id,
-        locale,
-        client: visible ? client : null,
+    await createNotifications(
+      missedCallRows({
+        lineOwner: { id: user.id, locale },
+        assignee: await activeAssignee(client?.assignedToId),
+        client,
+        visibleToLineOwner: visible,
         fromNumber,
       }),
     );

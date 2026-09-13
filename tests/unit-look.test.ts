@@ -28,6 +28,7 @@ import {
   GUARDRAIL_KIND_LOOK,
   LookGlyph,
   LookIcon,
+  NOTIFICATION_LOOK,
   ORIGIN_LOOK,
   PERMISSION_GROUP_LOOK,
   QUEUE_KIND_LOOK,
@@ -43,6 +44,7 @@ import { ATTENTION_REASONS, attentionKindOf } from "@/components/conversations/s
 import { assistantStatusEnum } from "@/db/schema-sms";
 import { ASSISTANT_TOOLS, GOAL_TYPES } from "@/lib/assistants/schema";
 import { PERMISSION_GROUPS } from "@/lib/permissions/catalog";
+import { NOTIFICATION_TYPES } from "@/lib/push/policy";
 import { defaultRoles } from "@/lib/permissions/defaults";
 import { GUARDRAIL_KINDS, GUARDRAIL_SEVERITIES } from "@/lib/guardrails/types";
 import { FINDING_FAMILIES, VERDICTS } from "@/lib/deliverability/types";
@@ -110,6 +112,42 @@ describe("couverture du vocabulaire", () => {
     // milieu de cinq pastilles illustrées.
     const missing = ASSISTANT_LIST_STATES.filter((id) => !ASSISTANT_STATUS_LOOK[id]);
     expect(missing, `états sans look : ${missing.join(", ")}`).toEqual([]);
+  });
+
+  it("chaque type de notification a son pictogramme", () => {
+    // La liste se lit sur NOTIFICATION_TYPES et non sur les clés de la famille :
+    // sinon le test se vérifierait lui-même, et un quinzième type ajouté au
+    // produit retomberait en pastille grise au milieu de quatorze lignes
+    // illustrées — pire que si aucune n'était illustrée, parce que l'oeil saute
+    // alors la ligne sans image.
+    const missing = NOTIFICATION_TYPES.filter((type) => !NOTIFICATION_LOOK[type]);
+    expect(missing, `types sans look : ${missing.join(", ")}`).toEqual([]);
+  });
+
+  it("les notifications n'empruntent que des teintes du vocabulaire, et jamais celle du canal SMS", () => {
+    // Trois lectures seulement — « on attend qu'on rappelle », « il y a quelque
+    // chose à faire », « pour information » — parce que quatorze couleurs ne se
+    // distinguent pas. Et surtout pas CHANNEL_LOOK.sms, qui veut dire « ceci
+    // SORT de l'application » sur une fiche client : être prévenu d'un texto
+    // n'est pas en envoyer un.
+    const allowed = new Set([SEVERITY_LOOK.block.color, TONE.scrutiny, TONE.raw]);
+    for (const type of NOTIFICATION_TYPES) {
+      const look = NOTIFICATION_LOOK[type];
+      expect(allowed.has(look.color), `${type} invente une teinte : ${look.color}`).toBe(true);
+      expect(look.color, `${type} porte la couleur du canal SMS`).not.toBe(CHANNEL_LOOK.sms.color);
+    }
+  });
+
+  it("deux types de notification ne partagent jamais un pictogramme", () => {
+    // La couleur GROUPE, le pictogramme IDENTIFIE : deux concepts sous le même
+    // dessin rendraient la ligne indéchiffrable dès que la teinte est commune.
+    const seen = new Map<unknown, string>();
+    for (const type of NOTIFICATION_TYPES) {
+      const { Icon } = NOTIFICATION_LOOK[type];
+      const twin = seen.get(Icon);
+      expect(twin, `${type} et ${twin} partagent un pictogramme`).toBeUndefined();
+      seen.set(Icon, type);
+    }
   });
 
   it("chaque motif d'attention d'un fil a son pictogramme", () => {

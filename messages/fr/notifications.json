@@ -16,7 +16,8 @@
     "appointment": "Rendez-vous",
     "system": "Système",
     "missed_call": "Appel manqué",
-    "assignment": "Assignation"
+    "assignment": "Assignation",
+    "sms_closed": "Conversation terminée"
   },
   "content": {
     "mentionTitle": "{name} vous a mentionné",

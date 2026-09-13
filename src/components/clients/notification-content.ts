@@ -61,6 +61,86 @@ export function missedCallNotification(opts: {
   };
 }
 
+/**
+ * QUI doit apprendre qu'un appel entrant n'a pas été pris.
+ *
+ * Deux personnes, et pour deux raisons différentes :
+ *
+ * - **Le propriétaire de la ligne** : son téléphone a sonné dans le vide. C'est
+ *   lui qui rappelle, tout de suite, et c'est la notification qui existait déjà.
+ * - **Le détenteur de la fiche** : « son » client vient d'appeler. Il ne le
+ *   savait pas — l'appel a sonné ailleurs, sur la ligne principale ou chez un
+ *   collègue — et c'est pourtant lui qui connaît le dossier, la dernière
+ *   objection, le rendez-vous qu'on attendait. Sans cette ligne-ci, un rappel
+ *   se perdait entre deux personnes qui croyaient chacune que l'autre s'en
+ *   occupait.
+ *
+ * Trois règles, toutes dictées par des cas réels :
+ *
+ * 1. JAMAIS deux fois la même personne. Quand le détenteur EST le propriétaire
+ *    de la ligne — le cas le plus courant, puisqu'on appelle le numéro qu'on a
+ *    reçu — il ne reçoit qu'une notification. Deux lignes identiques dans la
+ *    cloche feraient douter du compte, et deux vibrations feraient couper les
+ *    notifications de l'application entière.
+ * 2. La notification du détenteur NOMME le client ; celle du propriétaire de
+ *    la ligne seulement si `visibleToLineOwner` — une notification est du
+ *    contenu qui SURVIT, et elle nommerait pour toujours une fiche que l'écran
+ *    refuse d'afficher.
+ *
+ *    Ne PAS lire ça comme « le détenteur voit forcément sa fiche » : c'est
+ *    faux. La case `own` d'un rôle sur mesure est semée FERMÉE
+ *    (`src/lib/permissions/schema.ts`), rien ne la garantit. Ce qui rend le
+ *    geste sûr est ailleurs, et existait déjà : l'écran de la cloche masque
+ *    toute ligne dont le lien mène à une fiche hors de portée, et `fanoutPush`
+ *    refait la même vérification avant d'envoyer. Une notification écrite pour
+ *    quelqu'un qui n'a pas le droit de voir la fiche ne fuit donc rien — elle
+ *    ne s'affiche pas et ne part pas. Nommer le client ici est le choix utile
+ *    dans le cas normal, et sans risque dans le cas tordu.
+ * 3. Un compte désactivé n'est pas un destinataire. L'appelant résout
+ *    `assignee` à `null` dans ce cas — la règle ne peut pas le savoir seule, et
+ *    c'est délibéré : ce module reste PUR, sans base ni réseau, pour que les
+ *    quatre chemins qui l'appellent (webphone, PATCH d'appel, TwiML Twilio,
+ *    synchro CDR) partagent la MÊME règle au lieu de la réécrire chacun à leur
+ *    façon — c'est exactement comme ça qu'ils avaient fini par diverger.
+ */
+export function missedCallRows(opts: {
+  /** Celui dont la ligne a sonné. */
+  lineOwner: { id: string; locale: string };
+  /** Le détenteur de la fiche, s'il y en a un et qu'il est ACTIF. */
+  assignee: { id: string; locale: string } | null;
+  client: { id: string; fullName: string } | null;
+  /** Le propriétaire de la ligne a-t-il le droit de voir cette fiche ? */
+  visibleToLineOwner: boolean;
+  /** E.164, ou null si le numéro est masqué. */
+  fromNumber: string | null;
+}): ReturnType<typeof missedCallNotification>[] {
+  const asLocale = (value: string): "fr" | "en" => (value === "en" ? "en" : "fr");
+
+  const rows = [
+    missedCallNotification({
+      userId: opts.lineOwner.id,
+      locale: asLocale(opts.lineOwner.locale),
+      client: opts.visibleToLineOwner ? opts.client : null,
+      fromNumber: opts.fromNumber,
+    }),
+  ];
+
+  // Sans fiche, il n'y a pas de détenteur à prévenir : un numéro inconnu
+  // n'appartient à personne.
+  if (opts.client && opts.assignee && opts.assignee.id !== opts.lineOwner.id) {
+    rows.push(
+      missedCallNotification({
+        userId: opts.assignee.id,
+        locale: asLocale(opts.assignee.locale),
+        client: opts.client,
+        fromNumber: opts.fromNumber,
+      }),
+    );
+  }
+
+  return rows;
+}
+
 /** Turn "@[Name](uuid)" tokens into plain "@Name" and clamp for excerpts. */
 export function commentExcerpt(body: string, max = 140): string {
   const plain = body.replace(/@\[([^\]]+)\]\(([0-9a-fA-F-]{36})\)/g, "@$1").trim();

@@ -1,22 +1,16 @@
 "use client";
 
 import { enUS, fr } from "date-fns/locale";
-import {
-  AtSignIcon,
-  BellIcon,
-  CalendarDaysIcon,
-  CheckCheckIcon,
-  ClockIcon,
-  PhoneMissedIcon,
-  UserPlusIcon,
-} from "lucide-react";
+import { BellIcon, CheckCheckIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { NOTIFICATION_LOOK, TONE, lookTint } from "@/components/look";
 import { RelativeTime } from "@/components/relative-time";
 import { Button } from "@/components/ui/button";
 import { emitDataChange } from "@/lib/live";
+import { pushRule } from "@/lib/push/policy";
 import { cn } from "@/lib/utils";
 import { markAllNotificationsReadAction, markNotificationReadAction } from "./actions";
 
@@ -30,14 +24,7 @@ export type NotificationData = {
   createdAt: string; // ISO
 };
 
-const TYPE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  mention: AtSignIcon,
-  followup_due: ClockIcon,
-  incoming_lead: UserPlusIcon,
-  appointment: CalendarDaysIcon,
-  missed_call: PhoneMissedIcon,
-  system: BellIcon,
-};
+
 
 /**
  * « Tout marquer comme lu ».
@@ -84,6 +71,9 @@ export function MarkAllReadButton({
 
 export function NotificationItem({ notification }: { notification: NotificationData }) {
   const t = useTranslations("notifications");
+  // Les six types SMS ont leur libellé dans `common.push.types`, où l'écran de
+  // profil va déjà les chercher : deux namespaces, un seul libellé par concept.
+  const tCommon = useTranslations("common");
   const locale = useLocale();
   const dfnsLocale = locale === "en" ? enUS : fr;
   const router = useRouter();
@@ -98,11 +88,29 @@ export function NotificationItem({ notification }: { notification: NotificationD
     setRead(notification.read);
   }
 
-  const Icon = TYPE_ICONS[notification.type] ?? BellIcon;
-  const typeLabel =
-    notification.type in TYPE_ICONS
-      ? t(`types.${notification.type as "mention" | "followup_due" | "incoming_lead" | "appointment" | "system"}`)
+  // Le vocabulaire partagé plutôt qu'une table locale : c'est lui qui garantit
+  // qu'un type ajouté au produit reçoit son pictogramme (tests/unit-look.test.ts).
+  const look = NOTIFICATION_LOOK[notification.type] ?? { color: TONE.raw, Icon: BellIcon };
+  const tint = lookTint(look);
+  const Icon = look.Icon;
+
+  // Les libellés vivent dans DEUX namespaces : les sept types historiques dans
+  // `notifications.types`, les six types SMS dans `common.push.types` — où
+  // l'écran de profil va déjà les chercher. Le repli sur le type BRUT reste en
+  // dernier recours : il vaut mieux lire « sms_inbound » qu'une page blanche,
+  // mais il ne doit jamais être atteint (règle 2).
+  const typeLabel = t.has(`types.${notification.type}`)
+    ? t(`types.${notification.type}`)
+    : tCommon.has(`push.types.${notification.type}`)
+      ? tCommon(`push.types.${notification.type}`)
       : notification.type;
+
+  // La bordure épaisse ne se donne QU'À ce qui traverse les heures de silence :
+  // un appel manqué, un nouveau prospect, un fil qui rend la main. C'est la
+  // même liste que celle qui fait vibrer un téléphone la nuit — la cloche et la
+  // poche disent donc la même chose, ce qui évite d'avoir à les accorder à la
+  // main le jour où l'une des deux change.
+  const urgent = pushRule(notification.type).urgent;
 
   const open = () => {
     const wasUnread = !read;
@@ -130,18 +138,28 @@ export function NotificationItem({ notification }: { notification: NotificationD
         className={cn(
           "flex min-h-14 w-full items-start gap-3 rounded-xl p-3 text-left ring-1 ring-foreground/10 transition-colors hover:bg-muted/60 active:bg-muted",
           read ? "bg-card" : "bg-primary/5",
+          // Le trait de gauche : la marque qui survit à une capture en noir et
+          // blanc, et qu'on voit en défilant sans lire.
+          urgent && "border-l-4 pl-[calc(0.75rem-4px)]",
         )}
+        style={urgent ? { borderLeftColor: tint.borderColor } : undefined}
       >
         <span
-          className={cn(
-            "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full",
-            read ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary",
-          )}
-          aria-label={typeLabel}
+          aria-hidden
+          className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full"
+          style={read ? undefined : { backgroundColor: tint.backgroundColor, color: tint.color }}
         >
-          <Icon className="size-4" />
+          <Icon
+            className={cn("size-4", read && "text-muted-foreground")}
+            style={read ? undefined : { color: tint.color }}
+          />
         </span>
         <span className="min-w-0 flex-1">
+          {/* Le libellé du type, ÉCRIT. L'icône le double, elle ne le remplace
+              pas, et la couleur ne porte jamais le sens toute seule (règle 11). */}
+          <span className="block text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
+            {typeLabel}
+          </span>
           <span className="flex items-baseline justify-between gap-2">
             <span
               className={cn(

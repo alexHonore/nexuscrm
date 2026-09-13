@@ -2,7 +2,7 @@ import "server-only";
 import { and, eq, gte, like, lt, or, sql } from "drizzle-orm";
 import { fromZonedTime } from "date-fns-tz";
 import { APP_TZ, dayStartUtc } from "@/components/analytics/period";
-import { missedCallNotification } from "@/components/clients/notification-content";
+import { missedCallRows } from "@/components/clients/notification-content";
 import { db } from "@/db";
 import { calls, clients, users } from "@/db/schema";
 import { runAfterResponse } from "@/lib/after-response";
@@ -269,14 +269,20 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
         sipUsername: users.sipUsername,
         didNumber: users.didNumber,
         locale: users.locale,
+        // Pour joindre le DÉTENTEUR d'une fiche en plus du propriétaire de la
+        // ligne : un compte désactivé n'est pas un destinataire, mais son
+        // téléphone reste abonné et vibrerait encore.
+        isActive: users.isActive,
       })
       .from(users);
     const userByAccount = new Map<string, (typeof allUsers)[number]>();
     const userByDid = new Map<string, (typeof allUsers)[number]>();
+    const userById = new Map<string, (typeof allUsers)[number]>();
     for (const u of allUsers) {
       if (u.sipUsername) userByAccount.set(u.sipUsername, u);
       const didKey = phoneMatchKey(u.didNumber);
       if (didKey) userByDid.set(didKey, u);
+      userById.set(u.id, u);
     }
 
     // ── 3. Appels existants dans la fenêtre (index en mémoire) ──
@@ -311,7 +317,7 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
     const missedToNotify: Array<{
       user: (typeof allUsers)[number];
       fromNumber: string | null;
-      client: { id: string; fullName: string } | null;
+      client: { id: string; fullName: string; assignedToId: string | null } | null;
     }> = [];
     const cdrRowsCollapsed = collapseCrossAccountLegs(
       collapseCdrLegs(cdrRows),
@@ -405,10 +411,16 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
         const otherRaw = direction === "inbound" ? row.callerid : row.destination;
         const otherKey = phoneMatchKey(otherRaw);
 
-        let client: { id: string; fullName: string } | null = null;
+        // `assignedToId` voyage avec la fiche jusqu'aux notifications : c'est
+        // lui qui désigne le second destinataire d'un appel manqué.
+        let client: { id: string; fullName: string; assignedToId: string | null } | null = null;
         if (otherKey) {
           const [match] = await tx
-            .select({ id: clients.id, fullName: clients.fullName })
+            .select({
+              id: clients.id,
+              fullName: clients.fullName,
+              assignedToId: clients.assignedToId,
+            })
             .from(clients)
             .where(
               or(like(clients.phone, `%${otherKey}`), like(clients.phoneAlt, `%${otherKey}`)),
@@ -552,14 +564,24 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
     // ── 6. Notifications d'appels manqués récents ──
     if (missedToNotify.length > 0) {
       missedRows.push(
-        ...missedToNotify.map((m) =>
-          missedCallNotification({
-            userId: m.user.id,
-            locale: m.user.locale === "en" ? "en" : "fr",
+        ...missedToNotify.flatMap((m) => {
+          // L'annuaire est déjà en mémoire : résoudre le détenteur ne coûte
+          // pas une requête de plus, même sur une synchro qui rattrape
+          // plusieurs dizaines d'appels d'un coup.
+          const holder = m.client?.assignedToId
+            ? userById.get(m.client.assignedToId)
+            : undefined;
+          return missedCallRows({
+            lineOwner: { id: m.user.id, locale: m.user.locale },
+            assignee:
+              holder && holder.isActive ? { id: holder.id, locale: holder.locale } : null,
             client: m.client,
+            // Chemin MACHINE : pas de regard à filtrer. Le propriétaire de la
+            // ligne a reçu l'appel, la fiche est nommée pour lui comme avant.
+            visibleToLineOwner: true,
             fromNumber: m.fromNumber,
-          }),
-        ),
+          });
+        }),
       );
       await createNotifications(missedRows, { tx, push: false });
       counts.missedNotified = missedToNotify.length;

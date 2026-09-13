@@ -1,10 +1,11 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { and, desc, eq, gte, isNull, like, or } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
-import { missedCallNotification } from "@/components/clients/notification-content";
+import { missedCallRows } from "@/components/clients/notification-content";
 import { db } from "@/db";
 import { calls, clients, users } from "@/db/schema";
-import { createNotification } from "@/lib/notify";
+import { activeAssignee } from "@/lib/calls/assignee";
+import { createNotifications } from "@/lib/notify";
 import { userReach } from "@/db/schema-push";
 import { decryptSecret } from "@/lib/crypto";
 import { normalizePhone, phoneMatchKey } from "@/lib/phone";
@@ -188,10 +189,12 @@ async function handleInboundDialResult(params: URLSearchParams): Promise<NextRes
     return twiml("<Hangup/>");
   }
 
-  let client: { id: string; fullName: string } | null = null;
+  // `assignedToId` est lu ICI et pas ailleurs : c'est lui qui dit à QUI, en
+  // plus du propriétaire du DID, cet appel manqué appartient vraiment.
+  let client: { id: string; fullName: string; assignedToId: string | null } | null = null;
   if (fromKey) {
     const [match] = await db
-      .select({ id: clients.id, fullName: clients.fullName })
+      .select({ id: clients.id, fullName: clients.fullName, assignedToId: clients.assignedToId })
       .from(clients)
       .where(or(like(clients.phone, `%${fromKey}`), like(clients.phoneAlt, `%${fromKey}`)))
       .limit(1);
@@ -209,11 +212,17 @@ async function handleInboundDialResult(params: URLSearchParams): Promise<NextRes
     provider: "twilio",
     providerCallId: callSid,
   });
-  await createNotification(
-    missedCallNotification({
-      userId: owner.id,
-      locale: owner.locale === "en" ? "en" : "fr",
+  // Chemin MACHINE : aucun regard humain n'est en jeu ici, donc la fiche est
+  // nommée pour le propriétaire du DID comme elle l'a toujours été — il vient
+  // de recevoir l'appel de cette personne, le numéro ne lui apprend rien qu'il
+  // ne sache déjà. Ce qui est NOUVEAU, c'est la seconde ligne : le détenteur
+  // de la fiche, qui lui n'a rien entendu sonner.
+  await createNotifications(
+    missedCallRows({
+      lineOwner: { id: owner.id, locale: owner.locale },
+      assignee: await activeAssignee(client?.assignedToId),
       client,
+      visibleToLineOwner: true,
       fromNumber,
     }),
   );

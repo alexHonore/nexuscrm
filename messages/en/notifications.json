@@ -16,7 +16,8 @@
     "appointment": "Appointment",
     "system": "System",
     "missed_call": "Missed call",
-    "assignment": "Assignment"
+    "assignment": "Assignment",
+    "sms_closed": "Conversation closed"
   },
   "content": {
     "mentionTitle": "{name} mentioned you",
