@@ -6,6 +6,7 @@ import { asc } from "drizzle-orm";
 import { LibraryBig } from "lucide-react";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
+import { AudioStoragePanel } from "@/components/analytics/audio-storage-panel";
 import { CallsList, type CallRow } from "@/components/analytics/calls-list";
 import { CollectionsPanel } from "@/components/analytics/collections-panel";
 import { APP_TZ } from "@/components/analytics/period";
@@ -18,6 +19,7 @@ import { categories } from "@/db/schema";
 import { dispositionDisplayMap } from "@/lib/dispositions";
 import { requirePerm } from "@/lib/permissions/server";
 import { formatPhone } from "@/lib/phone";
+import { audioStateFor, audioUsage } from "@/lib/recordings/audio";
 import {
   LIBRARY_PAGE_SIZE,
   type LibraryScope,
@@ -69,6 +71,8 @@ export default async function RecordingLibraryPage({
   const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? Math.floor(pageRaw) : 1;
 
   const canCurate = actor.can("clients.recordingsCurate");
+  // La jauge compte TOUTE la base : réservée à qui configure l'application.
+  const canManageStorage = actor.can("admin.settings");
 
   const [collections, starred] = await Promise.all([loadCollections(actor), starredCount(actor)]);
 
@@ -94,12 +98,14 @@ export default async function RecordingLibraryPage({
       .orderBy(asc(categories.sortOrder)),
   ]);
 
-  const [marks, grantsOfHolder] = await Promise.all([
+  const [marks, grantsOfHolder, audioStates, storage] = await Promise.all([
     markersFor(
       actor,
       rows.map((r) => r.id),
     ),
     grantsResolver(actor),
+    audioStateFor(rows.map((r) => r.id)),
+    canManageStorage ? audioUsage() : Promise.resolve(null),
   ]);
 
   const dispoDisplay = dispositionDisplayMap(catRows, locale === "en" ? "en" : "fr");
@@ -149,6 +155,9 @@ export default async function RecordingLibraryPage({
       // d'ici plutôt qu'aller lancer la synchro de toute la journée.
       canPullRecording:
         history && !row.recordingUrl && row.provider === "voipms" && row.answered,
+      // La copie gardée chez nous : seulement là où il y a un enregistrement
+      // qu'on a le droit d'entendre.
+      audio: history && row.recordingUrl ? (audioStates.get(row.id) ?? { state: "none" }) : null,
     };
   });
 
@@ -182,12 +191,15 @@ export default async function RecordingLibraryPage({
       />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
-        <CollectionsPanel
-          collections={collections}
-          starred={starred}
-          scope={scope}
-          canCurate={canCurate}
-        />
+        <div className="space-y-5">
+          <CollectionsPanel
+            collections={collections}
+            starred={starred}
+            scope={scope}
+            canCurate={canCurate}
+          />
+          {storage ? <AudioStoragePanel usage={storage} /> : null}
+        </div>
 
         <section className="min-w-0 space-y-3">
           <div>

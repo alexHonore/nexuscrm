@@ -5,7 +5,9 @@ import { db } from "@/db";
 import { callStars } from "@/db/schema-library";
 import { logAudit } from "@/lib/audit";
 import { readJson } from "@/app/api/admin/_helpers";
+import { runAfterResponse } from "@/lib/after-response";
 import { apiPerm } from "@/lib/permissions/server";
+import { keepAudio, pruneOrphanAudio } from "@/lib/recordings/audio";
 import { reachableCall } from "@/lib/recordings/library";
 
 const bodySchema = z.object({ callId: z.uuid() });
@@ -47,6 +49,14 @@ export async function POST(req: Request) {
     detail: { clientId: call.clientId },
   });
 
+  // Marquer, c'est promettre d'y revenir : l'audio est gardé tout de suite —
+  // après la réponse, pour que l'étoile se remplisse sans attendre voip.ms.
+  if (call.recordingUrl) {
+    runAfterResponse(async () => {
+      await keepAudio(call.id);
+    });
+  }
+
   return NextResponse.json({ ok: true, starred: true });
 }
 
@@ -70,6 +80,10 @@ export async function DELETE(req: Request) {
       action: "recording.unstar",
       entity: "call",
       entityId: body.callId,
+    });
+    // Plus marqué par personne ni rangé nulle part : sa copie rend la place.
+    runAfterResponse(async () => {
+      await pruneOrphanAudio([body.callId]);
     });
   }
 

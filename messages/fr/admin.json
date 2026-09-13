@@ -742,7 +742,11 @@
       "recording_collection_remove": "Appel retiré d'un recueil",
       "recording_transcribe": "Transcription d'un enregistrement",
       "calls_sync": "Synchronisation des appels voip.ms",
-      "recording_pull": "Enregistrement demandé à voip.ms"
+      "recording_pull": "Enregistrement demandé à voip.ms",
+      "recording_audio_keep": "Audio d'un appel conservé",
+      "recording_audio_remove": "Audio conservé retiré",
+      "recording_audio_remove_all": "Tout l'audio conservé retiré",
+      "recording_audio_cap": "Plafond de l'audio conservé modifié"
     }
   },
   "billing": {

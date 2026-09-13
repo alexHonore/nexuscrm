@@ -1,5 +1,15 @@
 import { relations, sql } from "drizzle-orm";
-import { index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import {
+  customType,
+  index,
+  integer,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { calls, users } from "./schema";
 
 // ── La bibliothèque d'écoute : marquer un appel, le ranger, dire pourquoi ────
@@ -149,6 +159,54 @@ export const recordingCollectionItems = pgTable(
     index("recording_collection_items_call_idx").on(t.callId),
   ],
 );
+
+/**
+ * Le type `bytea` de Postgres. Drizzle 0.45 n'en livre pas ; postgres.js rend
+ * et accepte déjà des `Buffer`, il suffit de nommer la colonne.
+ */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => "bytea",
+});
+
+/**
+ * L'audio d'un appel de la bibliothèque, gardé CHEZ NOUS.
+ *
+ * voip.ms ne garde pas ses enregistrements indéfiniment, et chaque écoute lui
+ * redemandait le fichier (jusqu'à une minute et demie d'attente). Un appel
+ * marqué ou rangé est justement un appel qu'on réécoutera — et qu'on voudra
+ * encore dans six mois pour former quelqu'un.
+ *
+ * Dans la base plutôt que dans un compartiment de fichiers : décision de
+ * l'exploitant (2026-09-13), pour n'ajouter ni secret ni service. Le prix de
+ * ce choix est la place — le forfait gratuit de Supabase compte 500 Mo pour
+ * TOUTE la base, et une base pleine passe en lecture seule, CRM compris. D'où
+ * le plafond (réglage `recordings.audioCapMb`) : au-delà, on cesse de
+ * conserver ; on ne remplit jamais.
+ *
+ * La ligne SURVIT au retrait de l'audio (`audio` à NULL, `removed_at` posé) :
+ * elle se souvient que quelqu'un a choisi de rendre cette place, et le
+ * ramassage automatique ne doit pas retélécharger derrière son dos.
+ *
+ * `bytes` double la longueur de `audio` pour que la jauge ne lise jamais un
+ * seul octet d'audio : un `sum(bytes)` reste une lecture de quelques lignes.
+ */
+export const recordingAudio = pgTable("recording_audio", {
+  callId: uuid("call_id")
+    .primaryKey()
+    .references(() => calls.id, { onDelete: "cascade" }),
+  audio: bytea("audio"),
+  bytes: integer("bytes").notNull().default(0),
+  contentType: text("content_type").notNull().default("audio/mpeg"),
+  /**
+   * La référence d'où vient la copie. Si `calls.recording_url` change (une
+   * synchro qui rattache un autre enregistrement), la copie est périmée : on
+   * ne la sert plus, et le prochain passage la remplace.
+   */
+  sourceRef: text("source_ref").notNull(),
+  keptAt: timestamp("kept_at", { withTimezone: true }).notNull().defaultNow(),
+  removedAt: timestamp("removed_at", { withTimezone: true }),
+  removedById: uuid("removed_by_id").references(() => users.id, { onDelete: "set null" }),
+});
 
 // ── Relations ────────────────────────────────────────────────────────────────
 

@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { shiftDateStr, todayStr } from "@/components/analytics/period";
+import { runAfterResponse } from "@/lib/after-response";
 import { logAudit } from "@/lib/audit";
 import { syncCdrRange } from "@/lib/cdr-sync";
 import { apiPerm } from "@/lib/permissions/server";
+import { keepPendingAudio, pruneOrphanAudio } from "@/lib/recordings/audio";
 
 export const dynamic = "force-dynamic";
 // L'API voip.ms peut mettre plus de 90 s à répondre — laisser de la marge.
@@ -53,6 +55,13 @@ export async function POST(req: Request) {
   }
 
   const { counts, recordingFields, errors } = await syncCdrRange(from, to);
+
+  // Les enregistrements fraîchement rattachés d'appels déjà marqués ou rangés
+  // sont gardés — après la réponse : l'admin qui a cliqué n'attend pas voip.ms.
+  runAfterResponse(async () => {
+    await pruneOrphanAudio();
+    await keepPendingAudio({ limit: 10 });
+  });
 
   await logAudit({
     userId: actor.user.id,

@@ -33,6 +33,7 @@ import {
   FolderTreeIcon,
   GaugeIcon,
   HandIcon,
+  HardDriveDownloadIcon,
   HashIcon,
   HourglassIcon,
   IdCardIcon,
@@ -790,6 +791,12 @@ export const LIBRARY_LOOK = {
   starred: { color: TONE.scrutiny, Icon: StarIcon },
   folder: { color: QUEUE_KIND_LOOK.send.color, Icon: FolderIcon },
   tag: { color: QUEUE_KIND_LOOK.send.color, Icon: HashIcon },
+  /**
+   * L'audio gardé CHEZ NOUS plutôt que redemandé à voip.ms. Gris ardoise
+   * (`TONE.raw`) : c'est de la matière brute — des octets dans la base —, pas
+   * un geste d'équipe ni une promesse de revenir.
+   */
+  kept: { color: TONE.raw, Icon: HardDriveDownloadIcon },
 } as const satisfies Record<string, Look>;
 
 export const NOTIFICATION_LOOK: Record<string, Look> = {

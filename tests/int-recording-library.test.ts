@@ -16,7 +16,7 @@
  */
 import { SignJWT } from "jose";
 import { and, eq } from "drizzle-orm";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDb, makeClient, makeUser, resetDb, testDb } from "./helpers/db";
 
 vi.mock("server-only", () => ({}));
@@ -49,6 +49,19 @@ vi.mock("next/headers", () => ({
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }));
+
+// Marquer ou ranger un appel enregistré en garde l'audio (voir
+// int-recording-audio) : ici, voip.ms reste injoignable, pour qu'aucun test
+// de ce fichier ne parte sur le réseau.
+vi.mock("@/lib/voipms", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/voipms")>();
+  return {
+    ...actual,
+    getCallRecordingFile: vi.fn(async () => {
+      throw new actual.VoipMsError("offline", "voip.ms simulé hors ligne");
+    }),
+  };
+});
 
 const starRoute = await import("@/app/api/admin/recordings/star/route");
 const collectionsRoute = await import("@/app/api/admin/recordings/collections/route");
@@ -167,6 +180,13 @@ beforeEach(async () => {
   stagiaire = await makeUser({ name: "Stagiaire", role: "caller" });
   await writeConfig();
   await loginAs(chef);
+});
+
+// Le travail détaché (garder l'audio, faire le ménage) doit finir AVANT la
+// remise à zéro du test suivant.
+afterEach(async () => {
+  const { flushAfterResponse } = await import("@/lib/after-response");
+  await flushAfterResponse();
 });
 
 afterAll(async () => {

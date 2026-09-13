@@ -4,9 +4,11 @@ import { z } from "zod";
 import { readJson } from "@/app/api/admin/_helpers";
 import { db } from "@/db";
 import { recordingCollections } from "@/db/schema-library";
+import { runAfterResponse } from "@/lib/after-response";
 import { diffFields, logAudit } from "@/lib/audit";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { apiPerm } from "@/lib/permissions/server";
+import { pruneOrphanAudio } from "@/lib/recordings/audio";
 import { DESCRIPTION_MAX, NAME_MAX } from "@/lib/recordings/library";
 
 export const dynamic = "force-dynamic";
@@ -97,6 +99,10 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
     entity: "recording_collection",
     entityId: id,
     detail: { kind: before.kind, name: before.name, filed: before.items.length },
+  });
+  // Les appels qui n'étaient là que par ce recueil rendent leur place.
+  runAfterResponse(async () => {
+    await pruneOrphanAudio();
   });
 
   return NextResponse.json({ ok: true, filed: before.items.length });

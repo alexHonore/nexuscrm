@@ -4,6 +4,7 @@ import { PhoneIncoming, PhoneMissed, PhoneOff, PhoneOutgoing, Play, X } from "lu
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { type KeptAudio, KeptAudioControl } from "@/components/analytics/kept-audio";
 import { PullRecordingButton } from "@/components/analytics/pull-recording-button";
 import {
   type CallMarks,
@@ -62,6 +63,12 @@ export type CallRow = {
    * montre tous les appels, il n'en range aucun.
    */
   filingNote?: string | null;
+  /**
+   * La copie de l'audio gardée chez nous — bibliothèque seulement. Absent
+   * ailleurs ; `null` quand il n'y a pas (ou pas le droit d'entendre)
+   * d'enregistrement à garder.
+   */
+  audio?: KeptAudio | null;
 };
 
 function mmss(totalSec: number): string {
@@ -437,6 +444,11 @@ export function CallsList({
                   compact
                   explainMissing={variant === "library"}
                 />
+              </div>
+            ) : null}
+            {row.audio ? (
+              <div className="mt-2">
+                <KeptAudioControl callId={row.id} audio={row.audio} canCurate={canCurate} />
               </div>
             ) : null}
           </li>

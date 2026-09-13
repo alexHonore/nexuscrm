@@ -205,6 +205,20 @@ export const transcriptsSettingsSchema = z.object({
 });
 export type TranscriptsSettings = z.infer<typeof transcriptsSettingsSchema>;
 
+/**
+ * La bibliothèque d'écoute. Un seul réglage : la place que l'audio conservé a
+ * le droit de prendre DANS LA BASE (table `recording_audio`).
+ *
+ * Défaut 200 Mo : le forfait gratuit de Supabase compte 500 Mo pour toute la
+ * base, et une base pleine passe en lecture seule — le CRM entier avec elle.
+ * Au plafond, on cesse de conserver ; on ne remplit jamais. 0 = ne plus rien
+ * conserver (l'écoute repasse alors toujours par voip.ms).
+ */
+export const recordingsSettingsSchema = z.object({
+  audioCapMb: z.number().int().min(0).max(8_000).default(200),
+});
+export type RecordingsSettings = z.infer<typeof recordingsSettingsSchema>;
+
 const SCHEMAS = {
   booking: bookingSettingsSchema,
   /**
@@ -219,6 +233,7 @@ const SCHEMAS = {
   classification: classificationSettingsSchema,
   consumption: consumptionSettingsSchema,
   transcripts: transcriptsSettingsSchema,
+  recordings: recordingsSettingsSchema,
 } as const;
 
 export type SettingKey = keyof typeof SCHEMAS;

@@ -4,8 +4,10 @@ import { z } from "zod";
 import { readJson } from "@/app/api/admin/_helpers";
 import { db } from "@/db";
 import { recordingCollectionItems, recordingCollections } from "@/db/schema-library";
+import { runAfterResponse } from "@/lib/after-response";
 import { logAudit } from "@/lib/audit";
 import { apiPerm } from "@/lib/permissions/server";
+import { keepAudio, pruneOrphanAudio } from "@/lib/recordings/audio";
 import { NOTE_MAX, reachableCall } from "@/lib/recordings/library";
 
 export const dynamic = "force-dynamic";
@@ -76,6 +78,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     },
   });
 
+  // Rangé pour être réécouté : son audio est gardé, après la réponse.
+  if (call.recordingUrl) {
+    runAfterResponse(async () => {
+      await keepAudio(call.id);
+    });
+  }
+
   return NextResponse.json({ item: row }, { status: 201 });
 }
 
@@ -112,6 +121,10 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     entity: "call",
     entityId: body.callId,
     detail: { collectionId: id },
+  });
+  // Rangé nulle part ailleurs et marqué par personne : sa copie rend la place.
+  runAfterResponse(async () => {
+    await pruneOrphanAudio([body.callId]);
   });
 
   return NextResponse.json({ ok: true });

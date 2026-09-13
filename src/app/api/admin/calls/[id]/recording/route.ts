@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { runAfterResponse } from "@/lib/after-response";
 import { logAudit } from "@/lib/audit";
 import { pullCallRecording } from "@/lib/cdr-sync";
 import { apiPerm } from "@/lib/permissions/server";
+import { keepAudio } from "@/lib/recordings/audio";
 import { reachableCall } from "@/lib/recordings/library";
 
 export const dynamic = "force-dynamic";
@@ -48,6 +50,14 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
       ...(outcome.status === "upstream_error" ? { message: outcome.message } : {}),
     },
   });
+
+  // Un appel de la bibliothèque qui reçoit enfin son enregistrement le garde
+  // (`keepAudio` refuse de lui-même tout appel qui n'y est pas).
+  if (outcome.status === "attached") {
+    runAfterResponse(async () => {
+      await keepAudio(call.id);
+    });
+  }
 
   // La référence de l'enregistrement ne part pas au navigateur : l'écran se
   // recharge et la reçoit par le même chemin que les autres lignes.

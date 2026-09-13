@@ -2,8 +2,10 @@ import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { calls } from "@/db/schema";
+import { runAfterResponse } from "@/lib/after-response";
 import { logAudit } from "@/lib/audit";
 import { apiPerm, clientRef, grantsOnClient } from "@/lib/permissions/server";
+import { readKeptAudio, storeFetchedAudio } from "@/lib/recordings/audio";
 import {
   extractRecordingAudio,
   getCallRecordingFile,
@@ -100,6 +102,15 @@ export async function GET(req: NextRequest) {
       detail,
     });
 
+  // ── L'audio conservé d'abord ──
+  // Instantané, et toujours là quand voip.ms ne l'a plus. Même garde et même
+  // trace que l'écoute par voip.ms : seule la provenance change.
+  const kept = await readKeptAudio(call.id, rawUrl);
+  if (kept) {
+    await audit({ source: "kept" });
+    return rangeResponse(kept.buf, range, kept.contentType);
+  }
+
   // ── Référence interne : retéléchargement par l'API voip.ms ──
   const ref = parseRecordingRef(rawUrl);
   if (ref) {
@@ -117,7 +128,14 @@ export async function GET(req: NextRequest) {
     const audio = extractRecordingAudio(payload);
     if ("base64" in audio) {
       const buf = Buffer.from(audio.base64, "base64");
-      return rangeResponse(buf, range, sniffAudioType(buf));
+      const contentType = sniffAudioType(buf);
+      // Au passage, sans une requête de plus : un appel de la bibliothèque
+      // garde cette copie (plafond et retrait volontaire respectés), et la
+      // prochaine écoute ne dérangera pas voip.ms.
+      runAfterResponse(async () => {
+        await storeFetchedAudio(call.id, rawUrl, buf, contentType);
+      });
+      return rangeResponse(buf, range, contentType);
     }
     if ("url" in audio) {
       const upstream = await fetch(audio.url, {

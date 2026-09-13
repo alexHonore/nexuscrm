@@ -377,6 +377,13 @@ describe("la bibliothèque d'écoute", () => {
     expect(LIBRARY_LOOK.folder.Icon).not.toBe(LIBRARY_LOOK.tag.Icon);
   });
 
+  it("l'audio conservé a son propre pictogramme, distinct des trois gestes", () => {
+    // « gardé dans la base » n'est ni « marqué », ni « rangé » : un même
+    // pictogramme ferait croire qu'étoiler un appel, c'est le télécharger.
+    const gestures = [LIBRARY_LOOK.starred, LIBRARY_LOOK.folder, LIBRARY_LOOK.tag].map((l) => l.Icon);
+    expect(gestures).not.toContain(LIBRARY_LOOK.kept.Icon);
+  });
+
   it("aucune teinte inventée, et jamais celle du canal SMS", () => {
     const allowed = new Set<string>([...Object.values(TONE), QUEUE_KIND_LOOK.send.color]);
     for (const [key, look] of Object.entries(LIBRARY_LOOK)) {
