@@ -741,7 +741,8 @@
       "recording_collection_add": "Call filed into a collection",
       "recording_collection_remove": "Call removed from a collection",
       "recording_transcribe": "Recording transcribed",
-      "calls_sync": "voip.ms call sync"
+      "calls_sync": "voip.ms call sync",
+      "recording_pull": "Recording requested from voip.ms"
     }
   },
   "billing": {

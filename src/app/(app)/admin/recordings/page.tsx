@@ -145,6 +145,10 @@ export default async function RecordingLibraryPage({
       recordingUrl: history ? row.recordingUrl : null,
       marks: history ? (marks.get(row.id) ?? { starred: false, collections: [] }) : null,
       filingNote: history ? row.filingNote : null,
+      // Rangé pour être écouté, mais sans audio encore : le demander à voip.ms
+      // d'ici plutôt qu'aller lancer la synchro de toute la journée.
+      canPullRecording:
+        history && !row.recordingUrl && row.provider === "voipms" && row.answered,
     };
   });
 

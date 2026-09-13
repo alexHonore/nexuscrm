@@ -741,7 +741,8 @@
       "recording_collection_add": "Appel rangé dans un recueil",
       "recording_collection_remove": "Appel retiré d'un recueil",
       "recording_transcribe": "Transcription d'un enregistrement",
-      "calls_sync": "Synchronisation des appels voip.ms"
+      "calls_sync": "Synchronisation des appels voip.ms",
+      "recording_pull": "Enregistrement demandé à voip.ms"
     }
   },
   "billing": {

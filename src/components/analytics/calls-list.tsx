@@ -4,6 +4,7 @@ import { PhoneIncoming, PhoneMissed, PhoneOff, PhoneOutgoing, Play, X } from "lu
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { PullRecordingButton } from "@/components/analytics/pull-recording-button";
 import {
   type CallMarks,
   type CollectionOption,
@@ -42,6 +43,13 @@ export type CallRow = {
   dispositionColor: string | null;
   note: string | null;
   recordingUrl: string | null;
+  /**
+   * Cet appel peut-il demander SON enregistrement à voip.ms tout de suite ?
+   * Vrai seulement là où un enregistrement peut exister et manque encore :
+   * appel voip.ms décroché, sans audio, sur une fiche dont on a le droit
+   * d'écouter l'historique. Ailleurs, pas de bouton — il ne trouverait rien.
+   */
+  canPullRecording: boolean;
   /**
    * Étoile de CELUI qui regarde, et recueils où l'appel est rangé. `null` =
    * cette ligne n'offre aucun de ces gestes (pas le droit d'écouter, ou
@@ -173,6 +181,9 @@ function RecordingCell({
 }) {
   const t = useTranslations("analytics");
   if (!row.recordingUrl) {
+    // voip.ms a peut-être déjà l'audio : le demander pour CET appel, tout de
+    // suite, plutôt que d'attendre la synchro de toute la journée.
+    if (row.canPullRecording) return <PullRecordingButton callId={row.id} compact={compact} />;
     // La synchronisation voip.ms ne passe qu'une fois par jour : un appel
     // marqué le matin n'a son enregistrement que le lendemain. Un tiret
     // laisserait croire qu'il n'y en aura jamais.
@@ -417,7 +428,7 @@ export function CallsList({
                 />
               </div>
             ) : null}
-            {row.recordingUrl || variant === "library" ? (
+            {row.recordingUrl || row.canPullRecording || variant === "library" ? (
               <div className="mt-3">
                 <RecordingCell
                   row={row}

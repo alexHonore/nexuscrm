@@ -137,6 +137,9 @@ export type LibraryCallRow = {
   clientName: string | null;
   holderId: string | null;
   rawNumber: string | null;
+  /** Décroché — un appel jamais décroché n'a pas d'enregistrement à demander. */
+  answered: boolean;
+  provider: (typeof calls.$inferSelect)["provider"];
   /** Le motif écrit au moment du classement — vide hors d'un dossier. */
   filingNote: string | null;
 };
@@ -165,6 +168,7 @@ export async function loadLibraryPage(
     disposition: calls.disposition,
     note: calls.note,
     recordingUrl: calls.recordingUrl,
+    provider: calls.provider,
     userName: users.name,
     clientId: clients.id,
     clientName: clients.fullName,
@@ -237,6 +241,7 @@ type RawRow = {
   clientId: string | null;
   clientName: string | null;
   holderId: string | null;
+  provider: (typeof calls.$inferSelect)["provider"];
   filingNote: string | null;
 };
 
@@ -255,6 +260,8 @@ function toLibraryRow(row: RawRow): LibraryCallRow {
     clientName: row.clientName,
     holderId: row.holderId,
     rawNumber: row.direction === "outbound" ? row.toNumber : row.fromNumber,
+    answered: row.answeredAt !== null,
+    provider: row.provider,
     filingNote: row.filingNote,
   };
 }

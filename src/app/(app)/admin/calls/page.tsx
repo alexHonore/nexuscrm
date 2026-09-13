@@ -184,6 +184,7 @@ export default async function CallsPage({
         disposition: calls.disposition,
         note: calls.note,
         recordingUrl: calls.recordingUrl,
+        provider: calls.provider,
         userName: users.name,
         clientId: clients.id,
         clientName: clients.fullName,
@@ -300,6 +301,14 @@ export default async function CallsPage({
       // ligne n'en porte aucune, et les deux boutons disparaissent.
       marks:
         history && canListen ? (marks.get(row.id) ?? { starred: false, collections: [] }) : null,
+      // « Récupérer » : seulement là où voip.ms PEUT avoir un enregistrement —
+      // un appel voip.ms décroché — et où l'on aurait le droit de l'écouter.
+      canPullRecording:
+        history &&
+        canListen &&
+        !row.recordingUrl &&
+        row.provider === "voipms" &&
+        row.answeredAt !== null,
     };
   });
 
