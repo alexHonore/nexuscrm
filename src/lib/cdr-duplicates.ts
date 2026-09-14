@@ -26,9 +26,10 @@ import { phoneMatchKey } from "@/lib/phone";
  *
  * Trois gestes, dans cet ordre :
  *  1. le doublon rejoint l'appel du webphone qu'il double — même ligne, même
- *     numéro, à ±3 min, appel resté sans uniqueid. Celui-ci reçoit l'uniqueid,
- *     la durée du registre et l'enregistrement : ce que la synchro lui aurait
- *     donné si elle l'avait trouvé ;
+ *     numéro, durées qui se chevauchent. Resté sans uniqueid, cet appel reçoit
+ *     celui du doublon, la durée du registre et l'enregistrement : ce que la
+ *     synchro lui aurait donné si elle l'avait trouvé. Déjà retrouvé, il garde
+ *     les siens — le doublon n'était qu'une autre patte ;
  *  2. sinon, un SORTANT vers le DID d'un compte de la même ligne était en fait
  *     un ENTRANT pour lui : il lui revient ;
  *  3. deux doublons du même compte, même sens, même numéro, dont les durées se
@@ -43,6 +44,13 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 const MATCH_WINDOW_MS = 3 * 60 * 1000;
 /** Deux pattes : des durées qui se chevauchent, à 2 s près (voir `collapseCdrLegs`). */
 const LEG_SLACK_MS = 2_000;
+/**
+ * Un doublon et l'appel du webphone qu'il double : leurs durées se chevauchent,
+ * à 5 s près — l'horloge du navigateur et celle de voip.ms ne sont pas
+ * réglées à la seconde. Recomposer un numéro prend plus que ça : le rappel
+ * d'un appel sans réponse ne se fond pas dans le premier essai.
+ */
+const TWIN_SLACK_MS = 5_000;
 
 export type TeamLine = { id: string; sipUsername: string | null; didNumber: string | null };
 export type DuplicateRepair = { merged: number; reassigned: number };
@@ -56,6 +64,7 @@ type CallRow = {
   toNumber: string | null;
   startedAt: Date;
   answeredAt: Date | null;
+  endedAt: Date | null;
   durationSec: number;
   disposition: string | null;
   note: string | null;
@@ -134,6 +143,7 @@ export async function repairCallDuplicates(
       toNumber: calls.toNumber,
       startedAt: calls.startedAt,
       answeredAt: calls.answeredAt,
+      endedAt: calls.endedAt,
       durationSec: calls.durationSec,
       disposition: calls.disposition,
       note: calls.note,
@@ -143,8 +153,12 @@ export async function repairCallDuplicates(
     .from(calls)
     .where(and(eq(calls.provider, "voipms"), gte(calls.startedAt, from), lt(calls.startedAt, to)));
 
-  // Les appels du webphone que la synchro n'a jamais retrouvés au registre.
-  const unmatched = rows.filter((c) => c.providerCallId === null);
+  // Les appels du webphone — retrouvés au registre ou non. Retrouvé, l'appel
+  // porte l'uniqueid d'une patte, et le doublon celui de l'autre (l'ancien
+  // regroupement exigeait la seconde exacte) : relevé en production le
+  // 2026-09-14, 46 appels avaient ainsi leur double sans disposition, avec le
+  // même enregistrement.
+  const webphone = rows.filter((c) => !fromRegistry(c));
   const suspects = rows
     .filter(fromRegistry)
     .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime() || a.id.localeCompare(b.id));
@@ -169,14 +183,23 @@ export async function repairCallDuplicates(
     if (!number) continue;
 
     const gap = (c: CallRow) => Math.abs(c.startedAt.getTime() - p.startedAt.getTime());
-    const twin = unmatched
+    // Le MÊME appel, pas seulement la même minute : les durées se chevauchent.
+    const pStart = p.startedAt.getTime();
+    const pEnd = pStart + p.durationSec * 1000;
+    const overlaps = (w: CallRow) => {
+      const wStart = w.startedAt.getTime();
+      const wEnd = Math.max(w.endedAt?.getTime() ?? wStart, wStart + w.durationSec * 1000);
+      return pStart <= wEnd + TWIN_SLACK_MS && wStart <= pEnd + TWIN_SLACK_MS;
+    };
+    const twin = webphone
       .filter(
         (w) =>
           peers.has(w.userId) &&
           (!calledMate || w.userId === calledMate) &&
           w.direction === direction &&
           theirNumber(w) === number &&
-          gap(w) <= MATCH_WINDOW_MS,
+          gap(w) <= MATCH_WINDOW_MS &&
+          overlaps(w),
       )
       .sort((a, b) => gap(a) - gap(b))[0];
     if (twin) {

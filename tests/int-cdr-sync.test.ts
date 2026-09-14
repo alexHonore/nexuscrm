@@ -257,6 +257,61 @@ describe("synchronisation CDR", () => {
     expect(stars.map((s) => s.callId)).toEqual([mine.id]);
   });
 
+  it("RÉPARE : la patte en trop à côté d'un appel du webphone DÉJÀ retrouvé — qui garde ses données", async () => {
+    const me = await makeLineUser();
+    const at = hourAgo();
+    // L'appel du webphone, retrouvé par une synchro : sa disposition, son uniqueid, l'enregistrement.
+    const mine = await webphoneCall(me.id, at, {
+      providerCallId: "leg-1",
+      disposition: "voicemail",
+      durationSec: 63,
+      recordingUrl: "voipms:100000_alex:r4",
+    });
+    // L'autre patte, inscrite comme un appel, avec le même enregistrement.
+    await registryCall(me.id, new Date(at.getTime() + 1000), {
+      providerCallId: "leg-2",
+      durationSec: 63,
+      recordingUrl: "voipms:100000_alex:r4",
+    });
+
+    const out = await runSync(dayStr(at), dayStr(new Date()));
+    expect(out.counts.duplicatesMerged).toBe(1);
+    const rows = await testDb.select().from(calls);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: mine.id,
+      providerCallId: "leg-1",
+      disposition: "voicemail",
+      recordingUrl: "voipms:100000_alex:r4",
+    });
+  });
+
+  it("ne fond pas un rappel dans le premier essai quand le webphone n'a journalisé que celui-ci", async () => {
+    const { alex, mikey } = await sharedLine();
+    const at = hourAgo();
+    // Premier essai sans réponse, raccroché après 30 s — le seul que le webphone a gardé.
+    const firstTry = await webphoneCall(alex.id, at, {
+      answeredAt: null,
+      durationSec: 0,
+      endedAt: new Date(Math.floor(at.getTime() / 1000) * 1000 + 30_437),
+    });
+    // Deux doublons : l'essai, et le rappel une minute plus tard (5 min, enregistré).
+    await registryCall(mikey.id, at, { answeredAt: null, durationSec: 0, providerCallId: "try" });
+    const redial = await registryCall(mikey.id, new Date(at.getTime() + 60_000), {
+      durationSec: 300,
+      providerCallId: "redial",
+      recordingUrl: "voipms:100000_alex:r3",
+    });
+
+    const out = await runSync(dayStr(at), dayStr(new Date()));
+    expect(out.counts.duplicatesMerged).toBe(1);
+    const [tried] = await testDb.select().from(calls).where(eq(calls.id, firstTry.id));
+    // L'essai garde le sien — pas l'enregistrement de 5 min du rappel.
+    expect(tried).toMatchObject({ providerCallId: "try", recordingUrl: null, durationSec: 0 });
+    const [kept] = await testDb.select().from(calls).where(eq(calls.id, redial.id));
+    expect(kept?.recordingUrl).toBe("voipms:100000_alex:r3");
+  });
+
   it("RÉPARE : un appel reçu, inscrit sous l'autre compte comme un sortant vers son DID, lui revient", async () => {
     const { alex, mikey } = await sharedLine();
     const at = hourAgo();
