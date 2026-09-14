@@ -62,11 +62,13 @@ const createSchema = z.object({
 });
 
 /**
- * voip.ms est lent : on prend tout le budget d'exécution disponible. Si la
- * plateforme coupe quand même, le compte utilisateur reste créé et « Réessayer »
+ * voip.ms est lent : on prend tout le budget d'exécution disponible — 300 s,
+ * comme la synchro. À 60 s, la plateforme coupait la création d'une ligne en
+ * pleine liste des sous-comptes (504 le 2026-08-07, puis le 2026-09-14). Si
+ * elle coupe quand même, le compte utilisateur reste créé et « Réessayer »
  * récupère la ligne (le provisionnement est idempotent).
  */
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /**
  * Provisionne la ligne SIP d'un utilisateur : sous-compte voip.ms créé (ou

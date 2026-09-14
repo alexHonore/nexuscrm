@@ -10,6 +10,10 @@ import { didDigits, routeDidToSubAccount, updateSubAccountCallerId } from "@/lib
 import { readJson, voipmsErrorResponse } from "../../_helpers";
 import { releaseDidFromOthers } from "../_assignments";
 
+// Deux questions à voip.ms (routage, puis identifiant d'appelant), chacune
+// parfois plus d'une minute : le budget de la synchro, pas les 60 s par défaut.
+export const maxDuration = 300;
+
 const schema = z.object({
   did: z.string().trim().min(7).max(32),
   /** Nom complet du sous-compte voip.ms ("compte_sousnom"). */
