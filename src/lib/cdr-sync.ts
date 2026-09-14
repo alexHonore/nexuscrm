@@ -151,14 +151,21 @@ function cdrSighting(row: Pick<VoipMsCdr, "date" | "callerid" | "destination">):
   };
 }
 
-/** Les lignes SIP de l'équipe, par sous-compte et par DID. */
+/**
+ * Les lignes SIP de l'équipe : par sous-compte, TOUS ses détenteurs, dans
+ * l'ordre de la liste reçue (de création — voir les appelants) ; par DID.
+ */
 function indexLines<U extends { sipUsername: string | null; didNumber: string | null }>(
   list: U[],
-): { byAccount: Map<string, U>; byDid: Map<string, U> } {
-  const byAccount = new Map<string, U>();
+): { byAccount: Map<string, U[]>; byDid: Map<string, U> } {
+  const byAccount = new Map<string, U[]>();
   const byDid = new Map<string, U>();
   for (const u of list) {
-    if (u.sipUsername) byAccount.set(u.sipUsername, u);
+    if (u.sipUsername) {
+      const holders = byAccount.get(u.sipUsername);
+      if (holders) holders.push(u);
+      else byAccount.set(u.sipUsername, [u]);
+    }
     const didKey = phoneMatchKey(u.didNumber);
     if (didKey) byDid.set(didKey, u);
   }
@@ -166,46 +173,146 @@ function indexLines<U extends { sipUsername: string | null; didNumber: string | 
 }
 
 /**
- * À quelle ligne revient une ligne CDR : à son sous-compte, sinon — compte
- * inconnu, patte du compte principal, DID routé ailleurs — à l'usager dont le
- * DID est la destination, et c'est alors un entrant pour lui (auparavant ces
- * lignes étaient écartées et les appels manqués devenaient invisibles).
+ * Qui a pu passer ou recevoir l'appel d'une ligne CDR : les détenteurs de son
+ * sous-compte, sinon — compte inconnu, patte du compte principal, DID routé
+ * ailleurs — l'usager dont le DID est la destination, et c'est alors un
+ * entrant pour lui (auparavant ces lignes étaient écartées et les appels
+ * manqués devenaient invisibles).
+ *
+ * D'ordinaire un seul détenteur. Une ligne PARTAGÉE — refusée désormais, mais
+ * la base peut en garder : le 2026-09-13, Alex et « mikey » étaient tous deux
+ * sur 551013_alex — ne dit pas qui a appelé, et la synchro donnait tout au
+ * dernier lu : les appels d'Alex naissaient une seconde fois sous « mikey »,
+ * avec leurs enregistrements. Le DID appelé tranche pour un entrant ; pour un
+ * sortant, c'est l'appel du webphone qui dira qui c'était (voir la synchro).
+ * L'identifiant d'appelant, lui, ne tranche rien : c'est un réglage du
+ * sous-compte, le même pour tous ceux qui le partagent.
  */
-function cdrLineOwner<U>(
+function cdrLineOwner<U extends { didNumber: string | null }>(
   row: Pick<VoipMsCdr, "account" | "destination">,
-  lines: { byAccount: Map<string, U>; byDid: Map<string, U> },
-): { user: U; forcedInbound: boolean } | null {
-  const byAccount = lines.byAccount.get(row.account);
-  if (byAccount) return { user: byAccount, forcedInbound: false };
+  lines: { byAccount: Map<string, U[]>; byDid: Map<string, U> },
+): { holders: U[]; forcedInbound: boolean } | null {
   const destKey = phoneMatchKey(row.destination);
+  const holders = lines.byAccount.get(row.account);
+  if (holders && holders.length > 0) {
+    const called =
+      holders.length > 1 && destKey
+        ? holders.find((u) => phoneMatchKey(u.didNumber) === destKey)
+        : undefined;
+    return { holders: called ? [called] : holders, forcedInbound: false };
+  }
   const byDid = destKey ? lines.byDid.get(destKey) : undefined;
-  return byDid ? { user: byDid, forcedInbound: true } : null;
+  return byDid ? { holders: [byDid], forcedInbound: true } : null;
+}
+
+/**
+ * Marge au-delà de laquelle deux lignes CDR qui se suivent ne sont plus deux
+ * pattes du même appel : de quoi couvrir deux horodatages à une seconde
+ * d'écart, bien trop court pour raccrocher et recomposer.
+ */
+const LEG_SLACK_MS = 2_000;
+
+/** Début et fin d'une ligne CDR, en millisecondes — `null` sans date lisible. */
+function cdrSpan(row: { date: string; seconds: string }): { start: number; end: number } | null {
+  const at = row.date ? parseCdrDate(row.date) : null;
+  if (!at) return null;
+  const start = at.getTime();
+  return { start, end: start + (Number.parseInt(row.seconds, 10) || 0) * 1000 };
 }
 
 /**
  * Un même appel produit PLUSIEURS lignes CDR chez voip.ms — une par patte
  * (sous-compte → passerelle, passerelle → destination). Observé en production :
- * uniqueid consécutifs (…374 / …375), même seconde, même destination, seules
- * les durées diffèrent. Sans regroupement, la 1re patte s'attachait à l'appel
- * local et la 2e était insérée comme un appel fantôme.
+ * uniqueid consécutifs (…374 / …375), même destination, seules les durées
+ * diffèrent. Sans regroupement, la 1re patte s'attachait à l'appel local et la
+ * 2e était insérée comme un appel fantôme.
  *
- * On garde une ligne par (sous-compte, destination, seconde exacte) : celle qui
- * a la plus longue durée, c'est-à-dire la patte qui couvre tout l'appel. Deux
- * appels distincts vers le même numéro, depuis le même poste, à la même
- * seconde : impossible en pratique.
+ * On garde une ligne par appel — même sous-compte, même destination, pattes
+ * qui se CHEVAUCHENT dans le temps : celle qui a la plus longue durée, soit la
+ * patte qui couvre tout l'appel ; à égalité, le plus petit uniqueid, pour que
+ * deux synchros gardent la MÊME (l'API ne promet aucun ordre, et garder
+ * l'autre patte la fois suivante l'inscrivait en double). Le chevauchement
+ * plutôt que la seconde exacte : deux pattes peuvent être horodatées à une
+ * seconde d'écart — le 2026-09-12, un appel de 16 min 51 est apparu deux fois.
+ * Un rappel du même numéro commence APRÈS la fin du premier appel : il ne
+ * chevauche pas, et reste un appel à part.
  */
-export function collapseCdrLegs<T extends { account: string; destination: string; date: string; seconds: string }>(
-  rows: T[],
-): T[] {
-  const best = new Map<string, T>();
-  for (const row of rows) {
-    const key = `${row.account}|${phoneMatchKey(row.destination) ?? row.destination}|${row.date}`;
-    const current = best.get(key);
-    if (!current || (Number.parseInt(row.seconds, 10) || 0) > (Number.parseInt(current.seconds, 10) || 0)) {
-      best.set(key, row);
+export function collapseCdrLegs<
+  T extends { account: string; destination: string; date: string; seconds: string; uniqueid?: string },
+>(rows: T[]): T[] {
+  type Leg = { row: T; index: number; start: number; end: number };
+  const secs = (leg: Leg) => Number.parseInt(leg.row.seconds, 10) || 0;
+  const better = (a: Leg, b: Leg) =>
+    secs(a) !== secs(b) ? secs(a) > secs(b) : (a.row.uniqueid ?? "") < (b.row.uniqueid ?? "");
+
+  const kept: Array<{ row: T; index: number }> = [];
+  const legs: Leg[] = [];
+  rows.forEach((row, index) => {
+    const span = cdrSpan(row);
+    // Sans date lisible, pas de regroupement possible : la synchro l'écartera.
+    if (span) legs.push({ row, index, ...span });
+    else kept.push({ row, index });
+  });
+  legs.sort((a, b) => a.start - b.start);
+
+  const open = new Map<string, { best: Leg; end: number }>();
+  for (const leg of legs) {
+    const key = `${leg.row.account}|${phoneMatchKey(leg.row.destination) ?? leg.row.destination}`;
+    const call = open.get(key);
+    if (call && leg.start <= call.end + LEG_SLACK_MS) {
+      if (better(leg, call.best)) call.best = leg;
+      call.end = Math.max(call.end, leg.end);
+      continue;
     }
+    if (call) kept.push(call.best);
+    open.set(key, { best: leg, end: leg.end });
   }
-  return [...best.values()];
+  for (const call of open.values()) kept.push(call.best);
+  return kept.sort((a, b) => a.index - b.index).map((k) => k.row);
+}
+
+/**
+ * Deux lignes du registre sont-elles deux pattes du MÊME appel ? Même
+ * destination ; même sous-compte — ou un compte inconnu (compte principal)
+ * qui cite le même appelant, jamais deux sous-comptes connus (l'agent A qui
+ * appelle le DID de l'agent B, ce sont deux appels) — et des durées qui se
+ * chevauchent, comme pour `collapseCdrLegs`.
+ */
+function sameCallLegs(a: VoipMsCdr, b: VoipMsCdr, knownAccounts: ReadonlySet<string>): boolean {
+  const key = (n: string) => phoneMatchKey(n) ?? n;
+  if (key(a.destination) !== key(b.destination)) return false;
+  if (a.account !== b.account) {
+    if (knownAccounts.has(a.account) && knownAccounts.has(b.account)) return false;
+    if (key(a.callerid) !== key(b.callerid)) return false;
+  }
+  const sa = cdrSpan(a);
+  const sb = cdrSpan(b);
+  if (!sa || !sb) return false;
+  return sa.start <= sb.end + LEG_SLACK_MS && sb.start <= sa.end + LEG_SLACK_MS;
+}
+
+/**
+ * Les pattes de chaque ligne du registre, elle comprise. Le regroupement n'en
+ * garde qu'une ; les autres restent utiles : un appel du journal peut porter
+ * l'uniqueid de n'importe laquelle (celle qu'une synchro précédente a gardée),
+ * et un enregistrement aussi.
+ */
+function cdrLegIndex(
+  rows: VoipMsCdr[],
+  knownAccounts: ReadonlySet<string>,
+): (row: VoipMsCdr) => VoipMsCdr[] {
+  const keyOf = (r: VoipMsCdr) => phoneMatchKey(r.destination) ?? r.destination ?? "";
+  const byDest = new Map<string, VoipMsCdr[]>();
+  for (const r of rows) {
+    if (!r.uniqueid) continue;
+    const bucket = byDest.get(keyOf(r));
+    if (bucket) bucket.push(r);
+    else byDest.set(keyOf(r), [r]);
+  }
+  return (row) =>
+    (byDest.get(keyOf(row)) ?? []).filter(
+      (r) => r === row || r.uniqueid === row.uniqueid || sameCallLegs(row, r, knownAccounts),
+    );
 }
 
 /**
@@ -340,11 +447,14 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
 
   // Les enregistrements se demandent PAR SOUS-COMPTE (paramètre `account`
   // obligatoire). On lit donc la liste des lignes avant d'interroger voip.ms.
-  const sipAccounts = (
-    await db.select({ sipUsername: users.sipUsername }).from(users)
-  )
-    .map((u) => u.sipUsername)
-    .filter((a): a is string => Boolean(a));
+  // Une ligne partagée par deux comptes ne se demande qu'une fois.
+  const sipAccounts = [
+    ...new Set(
+      (await db.select({ sipUsername: users.sipUsername }).from(users))
+        .map((u) => u.sipUsername)
+        .filter((a): a is string => Boolean(a)),
+    ),
+  ];
 
   const recordings: VoipMsRecording[] = [];
   for (const account of sipAccounts) {
@@ -393,7 +503,9 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
         // téléphone reste abonné et vibrerait encore.
         isActive: users.isActive,
       })
-      .from(users);
+      .from(users)
+      // L'ordre fixe le premier détenteur d'une ligne partagée (voir plus bas).
+      .orderBy(users.createdAt);
     const lines = indexLines(allUsers);
     const userByAccount = lines.byAccount;
     const userById = new Map(allUsers.map((u) => [u.id, u]));
@@ -432,10 +544,9 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
       fromNumber: string | null;
       client: { id: string; fullName: string; assignedToId: string | null } | null;
     }> = [];
-    const cdrRowsCollapsed = collapseCrossAccountLegs(
-      collapseCdrLegs(cdrRows),
-      new Set(userByAccount.keys()),
-    );
+    const knownAccounts = new Set(userByAccount.keys());
+    const cdrRowsCollapsed = collapseCrossAccountLegs(collapseCdrLegs(cdrRows), knownAccounts);
+    const legsOf = cdrLegIndex(cdrRows, knownAccounts);
     for (const row of cdrRowsCollapsed) {
       try {
         if (!row.uniqueid) continue;
@@ -446,7 +557,7 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
           counts.unknownAccount += 1;
           continue;
         }
-        const { user, forcedInbound } = owner;
+        const { holders, forcedInbound } = owner;
         const startedAt = parseCdrDate(row.date);
         if (!startedAt) {
           pushError(`cdr ${row.uniqueid}: date invalide "${row.date}"`);
@@ -455,9 +566,19 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
         const seconds = Number.parseInt(row.seconds, 10) || 0;
         const answered = row.disposition?.toUpperCase() === "ANSWERED";
 
-        // a) Correspondance directe par providerCallId.
-        const direct = byProviderId.get(row.uniqueid);
+        // Les uniqueid de TOUTES les pattes de cet appel : une synchro
+        // précédente a pu en garder une autre (voir collapseCdrLegs), et un
+        // enregistrement peut citer n'importe laquelle.
+        const legUids = legsOf(row).map((r) => r.uniqueid);
+        const remember = (call: CallRowLite) => {
+          for (const uid of legUids) if (!byProviderId.has(uid)) byProviderId.set(uid, call);
+        };
+
+        // a) Correspondance directe par providerCallId — celui de n'importe
+        //    quelle patte de l'appel.
+        const direct = legUids.map((uid) => byProviderId.get(uid)).find((c) => c !== undefined);
         if (direct) {
+          remember(direct);
           counts.matchedByProviderId += 1;
           const needsAnswer = answered && !direct.answeredAt;
           if (direct.durationSec !== seconds || needsAnswer) {
@@ -474,11 +595,13 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
           continue;
         }
 
-        // b) Heuristique : même utilisateur, ±3 min, mêmes 10 derniers chiffres.
+        // b) Heuristique : un détenteur de la ligne, ±3 min, mêmes 10 derniers
+        //    chiffres. Sur une ligne partagée, c'est ici que se dit qui a
+        //    appelé : l'appel que son webphone a journalisé.
         const sighting = cdrSighting(row);
-        const candidates = (byUser.get(user.id) ?? []).filter(
-          (c) => !c.providerCallId && fitsCall(sighting, c),
-        );
+        const candidates = holders
+          .flatMap((h) => byUser.get(h.id) ?? [])
+          .filter((c) => !c.providerCallId && fitsCall(sighting, c));
         if (candidates.length > 0) {
           candidates.sort(
             (a, b) =>
@@ -498,12 +621,15 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
           match.providerCallId = row.uniqueid;
           match.durationSec = seconds;
           if (needsAnswer) match.answeredAt = startedAt;
-          byProviderId.set(row.uniqueid, match);
+          remember(match);
           counts.matchedHeuristic += 1;
           continue;
         }
 
-        // c) Aucun appel local : insertion depuis le CDR.
+        // c) Aucun appel local : insertion depuis le CDR. Ligne partagée et
+        //    aucun webphone pour trancher : le premier détenteur (le compte le
+        //    plus ancien), faute de mieux — voir cdrLineOwner.
+        const user = holders[0];
         const didKey = phoneMatchKey(user.didNumber);
         const direction: "inbound" | "outbound" =
           forcedInbound || (didKey && destKey && didKey === destKey) ? "inbound" : "outbound";
@@ -566,7 +692,7 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
           answeredAt: answered ? startedAt : null,
           recordingUrl: null,
         };
-        byProviderId.set(row.uniqueid, lite);
+        remember(lite);
         const list = byUser.get(user.id);
         if (list) list.push(lite);
         else byUser.set(user.id, [lite]);
@@ -595,9 +721,11 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
         // Repli principal : même ligne SIP, puis même horaire et même numéro.
         const when = facts.when;
         if (!call && facts.account && when) {
-          const owner = userByAccount.get(facts.account);
-          if (owner) {
-            const candidates = (byUser.get(owner.id) ?? []).filter((c) => fitsCall(facts, c));
+          const holders = userByAccount.get(facts.account) ?? [];
+          if (holders.length > 0) {
+            const candidates = holders
+              .flatMap((h) => byUser.get(h.id) ?? [])
+              .filter((c) => fitsCall(facts, c));
             candidates.sort(
               (a, b) =>
                 Math.abs(a.startedAt.getTime() - when.getTime()) -
@@ -762,50 +890,44 @@ async function locateInCdr(
   const lines = indexLines(
     await db
       .select({ id: users.id, sipUsername: users.sipUsername, didNumber: users.didNumber })
-      .from(users),
+      .from(users)
+      .orderBy(users.createdAt),
   );
+  const known = new Set(lines.byAccount.keys());
+  const legsOf = cdrLegIndex(rows, known);
   const t0 = call.startedAt.getTime();
   const gapOf = (s: Sighting) => Math.abs((s.when?.getTime() ?? Number.POSITIVE_INFINITY) - t0);
-  const ranked = collapseCrossAccountLegs(collapseCdrLegs(rows), new Set(lines.byAccount.keys()))
-    .filter((row) => row.uniqueid && cdrLineOwner(row, lines)?.user.id === call.userId)
-    .map((row) => ({ uid: row.uniqueid, sighting: cdrSighting(row) }))
+  const ranked = collapseCrossAccountLegs(collapseCdrLegs(rows), known)
+    .filter(
+      (row) =>
+        row.uniqueid && cdrLineOwner(row, lines)?.holders.some((h) => h.id === call.userId),
+    )
+    .map((row) => ({
+      uid: row.uniqueid,
+      sighting: cdrSighting(row),
+      legs: legsOf(row).map((r) => r.uniqueid),
+    }))
     .filter((c) => fitsCall(c.sighting, call))
     .sort((a, b) => gapOf(a.sighting) - gapOf(b.sighting));
 
+  // Un appel du registre dont une patte est déjà portée par un autre appel du
+  // journal est à celui-là : la synchro le lui rendrait par correspondance directe.
   const claimed = new Set<string>();
-  if (ranked.length > 0) {
+  const uids = ranked.flatMap((c) => c.legs);
+  if (uids.length > 0) {
     const taken = await db
       .select({ uid: calls.providerCallId })
       .from(calls)
-      .where(
-        and(
-          ne(calls.id, call.id),
-          inArray(
-            calls.providerCallId,
-            ranked.map((c) => c.uid),
-          ),
-        ),
-      );
+      .where(and(ne(calls.id, call.id), inArray(calls.providerCallId, uids)));
     for (const t of taken) if (t.uid) claimed.add(t.uid);
   }
-  const primary = ranked.find((c) => !claimed.has(c.uid));
-  const legs = new Set<string>();
-  const foreign = new Set<string>();
-  if (!primary) return { primary: null, legs, foreign };
+  const primary = ranked.find((c) => !c.legs.some((uid) => claimed.has(uid)));
+  if (!primary) return { primary: null, legs: new Set(), foreign: new Set() };
 
-  const primaryAt = primary.sighting.when?.getTime() ?? t0;
-  for (const row of rows) {
-    if (!row.uniqueid) continue;
-    const s = cdrSighting(row);
-    const sameCall =
-      !claimed.has(row.uniqueid) &&
-      s.when !== null &&
-      Math.abs(s.when.getTime() - primaryAt) <= LEG_TOLERANCE_MS &&
-      fitsCall(s, call);
-    (sameCall ? legs : foreign).add(row.uniqueid);
-  }
-  legs.add(primary.uid);
-  foreign.delete(primary.uid);
+  const legs = new Set(primary.legs);
+  const foreign = new Set(
+    rows.flatMap((r) => (r.uniqueid && !legs.has(r.uniqueid) ? [r.uniqueid] : [])),
+  );
   return { primary: primary.uid, legs, foreign };
 }
 

@@ -27,6 +27,10 @@ export function errorMessage(t: Tr, err: unknown): string {
       "user_not_found",
     ];
     if (known.includes(code)) return t(`users.errors.${code}`);
+    if (code === "sip_taken") {
+      const holder = typeof err.data.holder === "string" ? err.data.holder : "?";
+      return t("users.errors.sip_taken", { holder });
+    }
     if (code === "voipms") {
       const msg = typeof err.data.message === "string" ? err.data.message : String(err.data.status ?? "");
       return `${t("users.voip.apiError")} : ${msg}`;

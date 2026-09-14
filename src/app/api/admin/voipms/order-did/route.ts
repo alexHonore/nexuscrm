@@ -18,7 +18,7 @@ import {
   type VoipMsDid,
 } from "@/lib/voipms";
 import { readJson, toAdminUser, voipmsErrorResponse } from "../../_helpers";
-import { releaseDidFromOthers } from "../_assignments";
+import { lineHolders, releaseDidFromOthers } from "../_assignments";
 import { provisionSipLine, withVoipTimeout, type ProvisionResult } from "../_provisioning";
 
 /**
@@ -100,7 +100,12 @@ export async function POST(req: Request) {
   const didE164 = normalizePhone(body.did);
   if (!didE164) return NextResponse.json({ error: "invalid_did" }, { status: 422 });
 
-  let account = target.sipUsername;
+  // Une ligne partagée avec un autre compte n'est pas la sienne : le numéro
+  // sonnerait chez les deux. Elle compte comme absente — on lui en crée une.
+  let account =
+    target.sipUsername && (await lineHolders(db, target.sipUsername, target.id)).length === 0
+      ? target.sipUsername
+      : null;
   let provision: ProvisionResult | null = null;
   let alreadyOwned = false;
 

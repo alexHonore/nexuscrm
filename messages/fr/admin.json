@@ -185,6 +185,7 @@
       "cannot_demote_self": "Vous ne pouvez pas retirer votre propre rôle d'administrateur.",
       "cannot_delete_self": "Vous ne pouvez pas supprimer votre propre compte.",
       "invalid_did": "Numéro (DID) invalide.",
+      "sip_taken": "Cette ligne SIP est déjà celle de {holder}. Deux comptes ne peuvent pas partager une ligne : voip.ms inscrit tous ses appels sous le même nom, et le CRM ne saurait plus qui a appelé. Créez-lui plutôt sa propre ligne.",
       "has_activity": "Cet utilisateur a un historique (appels, rendez-vous, relances ou commentaires) qui serait détruit. Désactivez plutôt son compte pour conserver les données.",
       "user_not_found": "L'utilisateur ciblé n'existe plus. Rechargez la page."
     },

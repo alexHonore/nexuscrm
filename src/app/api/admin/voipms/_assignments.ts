@@ -64,6 +64,37 @@ export function indexBySipAccount(list: AssignedUser[]): Map<string, AssignedUse
 }
 
 /**
+ * Les AUTRES comptes qui portent ce sous-compte SIP (comparaison insensible à
+ * la casse et aux espaces).
+ *
+ * Une ligne ne se partage pas plus qu'un numéro, et pour une raison de plus :
+ * voip.ms inscrit tous les appels d'un sous-compte sous son nom, et rien — ni
+ * le registre, ni l'enregistrement — ne dit lequel des comptes a appelé. Le
+ * 2026-09-13, Alex et « mikey » partageaient 551013_alex : les appels d'Alex
+ * apparaissaient une seconde fois sous « mikey », et leurs enregistrements avec.
+ */
+export async function lineHolders(
+  tx: DbOrTx,
+  account: string,
+  exceptUserId: string,
+): Promise<{ id: string; name: string; email: string }[]> {
+  const key = account.trim().toLowerCase();
+  if (!key) return [];
+  return tx
+    .select({ id: users.id, name: users.name, email: users.email })
+    .from(users)
+    .where(and(ne(users.id, exceptUserId), sql`lower(trim(${users.sipUsername})) = ${key}`));
+}
+
+/** Refus d'attribuer une ligne qu'un autre compte porte déjà (voir `lineHolders`). */
+export class LineTakenError extends Error {
+  constructor(public holder: string) {
+    super(`sip_taken: ${holder}`);
+    this.name = "LineTakenError";
+  }
+}
+
+/**
  * Retire le DID de tout AUTRE utilisateur qui le porterait — deux comptes ne
  * doivent jamais partager un numéro (identifiant d'appelant sortant et routage
  * entrant deviendraient ambigus). À appeler DANS la transaction qui assigne.

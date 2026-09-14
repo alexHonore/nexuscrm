@@ -15,7 +15,7 @@ import {
   roleForUser,
   setUserRole,
 } from "@/lib/permissions/server";
-import { releaseDidFromOthers } from "../../voipms/_assignments";
+import { lineHolders, releaseDidFromOthers } from "../../voipms/_assignments";
 import { readJson, requestedRole, toAdminUser } from "../../_helpers";
 
 const patchSchema = z.object({
@@ -174,6 +174,16 @@ export async function PATCH(req: Request, ctx: Ctx) {
     changed.push(body.isActive ? "activate" : "deactivate");
     // Désactivation → invalider toutes les sessions existantes.
     if (!body.isActive) set.tokenVersion = sql`${users.tokenVersion} + 1` as unknown as number;
+  }
+
+  // Une ligne SIP ne se partage pas (voir `lineHolders`). Refus net plutôt
+  // que de la retirer à l'autre compte, comme on le fait pour un DID : lui
+  // ôter sa ligne couperait son téléphone sans qu'il le sache.
+  if (changed.includes("sipUsername") && set.sipUsername) {
+    const [holder] = await lineHolders(db, set.sipUsername, id);
+    if (holder) {
+      return NextResponse.json({ error: "sip_taken", holder: holder.name }, { status: 409 });
+    }
   }
 
   try {

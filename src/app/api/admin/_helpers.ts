@@ -8,6 +8,7 @@ import { CALLER_ROLE_ID } from "@/lib/permissions/defaults";
 import type { PermissionsConfig, Role } from "@/lib/permissions/types";
 import { VoipMsError } from "@/lib/voipms";
 import { computePhoneStatus, sipGatewayConfigured } from "./users/_phone-status";
+import { LineTakenError } from "./voipms/_assignments";
 
 // ── Générateurs de mots de passe ─────────────────────────────────────────────
 
@@ -120,6 +121,10 @@ export async function readReassignTarget(
  * l'UI puisse afficher le message précis + un indice de correction.
  */
 export function voipmsErrorResponse(err: unknown): NextResponse {
+  // Pas une panne voip.ms : un refus du CRM, avec son propre message.
+  if (err instanceof LineTakenError) {
+    return NextResponse.json({ error: "sip_taken", holder: err.holder }, { status: 409 });
+  }
   if (err instanceof VoipMsError) {
     return NextResponse.json(
       { error: "voipms", status: err.status, message: err.message },

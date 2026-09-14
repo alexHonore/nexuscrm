@@ -185,6 +185,7 @@
       "cannot_demote_self": "You cannot remove your own administrator role.",
       "cannot_delete_self": "You cannot delete your own account.",
       "invalid_did": "Invalid number (DID).",
+      "sip_taken": "This SIP line already belongs to {holder}. Two accounts cannot share a line: voip.ms logs all of its calls under one name, and the CRM could no longer tell who called. Create a line of their own instead.",
       "has_activity": "This user has history (calls, appointments, follow-ups or comments) that would be destroyed. Deactivate the account instead to keep the data.",
       "user_not_found": "The target user no longer exists. Reload the page."
     },

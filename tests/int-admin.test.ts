@@ -237,6 +237,42 @@ describe("opérations d'administration", () => {
       expect(unchanged.email).toBe("libre@nexus.ca");
     });
 
+    it("refuse la ligne SIP d'un autre compte — 409 sip_taken, en nommant son détenteur", async () => {
+      const admin = await makeUser({ role: "admin" });
+      await makeUser({ name: "Alex", sipUsername: "551013_alex" });
+      const mikey = await makeUser({ name: "mikey" });
+      await loginAs(admin);
+
+      // Casse et espaces ne font pas une autre ligne.
+      const res = await userIdRoute.PATCH(
+        jsonRequest(`http://localhost/api/admin/users/${mikey.id}`, "PATCH", {
+          sipUsername: " 551013_ALEX ",
+        }),
+        ctx(mikey.id),
+      );
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "sip_taken", holder: "Alex" });
+      const [row] = await testDb.select().from(users).where(eq(users.id, mikey.id));
+      expect(row.sipUsername).toBeNull();
+    });
+
+    it("un compte qui partage DÉJÀ une ligne reste modifiable pour le reste", async () => {
+      const admin = await makeUser({ role: "admin" });
+      await makeUser({ name: "Alex", sipUsername: "551013_alex" });
+      const mikey = await makeUser({ name: "mikey", sipUsername: "551013_alex" });
+      await loginAs(admin);
+
+      // L'écran renvoie la ligne telle quelle avec le reste du formulaire.
+      const res = await userIdRoute.PATCH(
+        jsonRequest(`http://localhost/api/admin/users/${mikey.id}`, "PATCH", {
+          name: "Mikey",
+          sipUsername: "551013_alex",
+        }),
+        ctx(mikey.id),
+      );
+      expect(res.status).toBe(200);
+    });
+
     it("la désactivation incrémente tokenVersion et invalide les sessions en cours", async () => {
       const admin = await makeUser({ role: "admin" });
       const other = await makeUser({ role: "admin", name: "Second admin" });

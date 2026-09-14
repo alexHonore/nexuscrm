@@ -70,6 +70,120 @@ describe("synchronisation CDR", () => {
     vi.mocked(getCdr).mockResolvedValue([]);
   });
 
+  // ── Ligne partagée, pattes d'un même appel (2026-09-12 : l'appel d'Alex au
+  //    581-990-5955 inscrit deux fois sous « mikey », qui partageait sa ligne) ──
+
+  const ALEX_DID = "+15149561693";
+  const hourAgo = () => new Date(Date.now() - 3600_000);
+  const outboundLeg = (at: Date, overrides: Partial<VoipMsCdr> = {}) =>
+    cdrRow({
+      date: cdrDate(at),
+      callerid: "5149561693",
+      destination: "15819905955",
+      description: "Outbound",
+      disposition: "ANSWERED",
+      seconds: "1011",
+      ...overrides,
+    });
+
+  it("ligne PARTAGÉE : l'appel sortant revient à celui dont le webphone l'a journalisé — une seule fois", async () => {
+    const alex = await makeUser({
+      name: "Alex",
+      sipUsername: SUB_ACCOUNT,
+      didNumber: ALEX_DID,
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+    });
+    await makeUser({
+      name: "mikey",
+      sipUsername: SUB_ACCOUNT,
+      didNumber: DID,
+      createdAt: new Date("2026-09-06T00:00:00Z"),
+    });
+    const at = hourAgo();
+    const [webphone] = await testDb
+      .insert(calls)
+      .values({
+        userId: alex.id,
+        direction: "outbound",
+        fromNumber: ALEX_DID,
+        toNumber: "+15819905955",
+        startedAt: at,
+        answeredAt: new Date(at.getTime() + 5000),
+        durationSec: 1010,
+        provider: "voipms",
+      })
+      .returning();
+    // Deux pattes, horodatées à une seconde d'écart.
+    vi.mocked(getCdr).mockResolvedValue([
+      outboundLeg(at, { uniqueid: "leg-a" }),
+      outboundLeg(new Date(at.getTime() + 1000), { uniqueid: "leg-b" }),
+    ]);
+
+    const out = await runSync(dayStr(at), dayStr(new Date()));
+    expect(out.counts.inserted).toBe(0);
+    expect(out.counts.matchedHeuristic).toBe(1);
+    const rows = await testDb.select().from(calls);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: webphone.id, userId: alex.id, providerCallId: "leg-a" });
+  });
+
+  it("ligne PARTAGÉE : un entrant va à celui dont le DID a été composé", async () => {
+    await makeUser({
+      name: "Alex",
+      sipUsername: SUB_ACCOUNT,
+      didNumber: ALEX_DID,
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+    });
+    const mikey = await makeUser({
+      name: "mikey",
+      sipUsername: SUB_ACCOUNT,
+      didNumber: DID,
+      createdAt: new Date("2026-09-06T00:00:00Z"),
+    });
+    const at = hourAgo();
+    vi.mocked(getCdr).mockResolvedValue([
+      cdrRow({ date: cdrDate(at), disposition: "ANSWERED", seconds: "60" }),
+    ]);
+
+    await runSync(dayStr(at), dayStr(new Date()));
+    const [row] = await testDb.select().from(calls);
+    expect(row).toMatchObject({ userId: mikey.id, direction: "inbound" });
+  });
+
+  it("deux synchros qui ne gardent pas la même patte n'inscrivent pas l'appel deux fois", async () => {
+    await makeLineUser();
+    const at = hourAgo();
+    const kept = outboundLeg(at, { callerid: "4189065924", uniqueid: "leg-2" });
+    vi.mocked(getCdr).mockResolvedValue([kept]);
+    await runSync(dayStr(at), dayStr(new Date()));
+
+    // La seconde fois, voip.ms liste aussi l'autre patte, de même durée : le
+    // regroupement garde le plus petit uniqueid — pas celui de la 1re synchro.
+    vi.mocked(getCdr).mockResolvedValue([
+      kept,
+      outboundLeg(new Date(at.getTime() + 1000), { callerid: "4189065924", uniqueid: "leg-1" }),
+    ]);
+    const second = await runSync(dayStr(at), dayStr(new Date()));
+    expect(second.counts.inserted).toBe(0);
+    expect(await testDb.select().from(calls)).toHaveLength(1);
+  });
+
+  it("un rappel du même numéro, après la fin du premier appel, reste un appel à part", async () => {
+    await makeLineUser();
+    const at = hourAgo();
+    vi.mocked(getCdr).mockResolvedValue([
+      outboundLeg(at, { callerid: "4189065924", seconds: "20", uniqueid: "first" }),
+      outboundLeg(new Date(at.getTime() + 40_000), {
+        callerid: "4189065924",
+        seconds: "300",
+        uniqueid: "redial",
+      }),
+    ]);
+
+    const out = await runSync(dayStr(at), dayStr(new Date()));
+    expect(out.counts.inserted).toBe(2);
+  });
+
   it("insère un entrant manqué (sous-compte connu) et notifie le propriétaire de la ligne", async () => {
     const me = await makeLineUser();
     const client = await makeClient({ fullName: "Jean Tremblay", phone: "+14185551234" });

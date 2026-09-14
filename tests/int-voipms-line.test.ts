@@ -216,6 +216,56 @@ describe("ligne SIP voip.ms", () => {
       expect(decryptSecret(row.sipPasswordEnc!)).toBe(body.password);
     });
 
+    it("LIGNE PARTAGÉE : le second compte reçoit une ligne à lui, sans que celle de l'autre soit touchée", async () => {
+      const admin = await makeUser({ role: "admin" });
+      await makeUser({ name: "Alex", email: "alex@nexus.ca", sipUsername: "551013_alex" });
+      const mikey = await makeUser({ name: "Mikey", email: "mikey@nexus.ca", sipUsername: "551013_alex" });
+      await loginAs(admin);
+
+      const stub = stubVoipms({
+        getSubAccounts: () => ({ status: "success", accounts: [sub({ password: "MotDePasseAlex9" })] }),
+        createSubAccount: (p) => ({ status: "success", account: `551013_${p.get("username")}` }),
+      });
+
+      const res = await subaccountsRoute.POST(
+        jsonRequest("http://localhost/api/admin/voipms/subaccounts", "POST", { userId: mikey.id }),
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { account: string; created: boolean };
+      expect(body.created).toBe(true);
+      expect(body.account).not.toBe("551013_alex");
+      // Rien d'autre que lire la liste et créer : la ligne d'Alex n'est pas réécrite.
+      expect(stub.methods().filter((m) => m !== "getSubAccounts" && m !== "createSubAccount")).toEqual([]);
+
+      const [row] = await testDb.select().from(users).where(eq(users.id, mikey.id));
+      expect(row.sipUsername).toBe(body.account);
+    });
+
+    it("refuse de reprendre par son nom la ligne d'un autre compte — avant d'y toucher", async () => {
+      const admin = await makeUser({ role: "admin" });
+      await makeUser({ name: "Alex", email: "alex@nexus.ca", sipUsername: "551013_alex" });
+      const mikey = await makeUser({ name: "Mikey", email: "mikey@nexus.ca" });
+      await loginAs(admin);
+
+      const stub = stubVoipms({
+        getSubAccounts: () => ({ status: "success", accounts: [sub({ password: "MotDePasseAlex9" })] }),
+        createSubAccount: () => ({ status: "username_already_exists" }),
+      });
+
+      const res = await subaccountsRoute.POST(
+        jsonRequest("http://localhost/api/admin/voipms/subaccounts", "POST", {
+          userId: mikey.id,
+          username: "alex",
+        }),
+      );
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "sip_taken", holder: "Alex" });
+      expect(stub.methods().filter((m) => m !== "getSubAccounts" && m !== "createSubAccount")).toEqual([]);
+
+      const [row] = await testDb.select().from(users).where(eq(users.id, mikey.id));
+      expect(row.sipUsername).toBeNull();
+    });
+
     it("n'attribue JAMAIS un DID libre tout seul", async () => {
       const admin = await makeUser({ role: "admin" });
       const target = await makeUser({ name: "Sam", email: "sam@nexus.ca" });

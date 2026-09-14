@@ -12,6 +12,7 @@ import {
   type VoipMsSubAccount,
 } from "@/lib/voipms";
 import { generateSipPassword } from "../_helpers";
+import { LineTakenError, lineHolders } from "./_assignments";
 
 /**
  * Provisionnement d'une ligne SIP voip.ms — logique PARTAGÉE entre la création
@@ -217,11 +218,18 @@ export async function provisionSipLine(
   const derived = !wanted;
   let existing: VoipMsSubAccount | undefined;
 
+  // Une ligne PARTAGÉE avec un autre compte n'est pas « la sienne » : la
+  // reprendre la laisserait partagée (voir `lineHolders`). On lui en crée une.
+  const own =
+    user.sipUsername && (await lineHolders(db, user.sipUsername, user.id)).length === 0
+      ? user.sipUsername
+      : null;
+
   if (!wanted) {
     // Chemin automatique : la liste sert à la fois à reprendre une ligne déjà
     // provisionnée (rejeu) et à garantir l'unicité du nom dérivé.
     const accounts = await getSubAccounts();
-    existing = findSubAccount(accounts, user.sipUsername);
+    existing = findSubAccount(accounts, own);
     wanted = existing ? existing.username || existing.account : deriveSipUsername(user, accounts);
   }
   // Le format n'est contraignant que pour une CRÉATION : un compte déjà existant
@@ -253,6 +261,11 @@ export async function provisionSipLine(
       // existait déjà) : on relit la liste avant d'abandonner.
       const found = findSubAccount(await getSubAccounts().catch(() => []), wanted);
       if (!found) throw err;
+      // Le nom demandé est la ligne d'un AUTRE compte : refus AVANT de la
+      // reprendre — la reprise réécrirait son profil (identifiant d'appelant
+      // compris) avant même d'être refusée.
+      const [holder] = await lineHolders(db, found.account, user.id);
+      if (holder) throw new LineTakenError(holder.name);
       password = await adoptSubAccount(found, fallbackPassword, calleridNumber);
       account = found.account;
     }
@@ -263,6 +276,8 @@ export async function provisionSipLine(
     account = findSubAccount(await getSubAccounts().catch(() => []), wanted)?.account ?? wanted;
   }
 
+  const [holder] = await lineHolders(db, account, user.id);
+  if (holder) throw new LineTakenError(holder.name);
   await storeSipCredentials(user.id, account, password);
 
   return { account, password, created, derived };

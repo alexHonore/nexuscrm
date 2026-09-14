@@ -427,6 +427,28 @@ describe("un appel du webphone, retrouvé au registre de voip.ms", () => {
     });
   });
 
+  it("ligne PARTAGÉE : l'appel du plus ancien des deux comptes se retrouve aussi", async () => {
+    const luc = await lineUser({ createdAt: new Date("2026-01-01T00:00:00Z") });
+    await makeUser({
+      name: "mikey",
+      role: "caller",
+      sipUsername: LINE,
+      createdAt: new Date("2026-09-06T00:00:00Z"),
+    });
+    const call = await makeCall(luc.id);
+    vi.mocked(getCdr).mockResolvedValue([cdr({ uniqueid: "shared-1" })]);
+    vi.mocked(getCallRecordings).mockResolvedValue([
+      rec({ callrecording: "s", call_id: "shared-1", when: at(T, 3600) }),
+    ]);
+
+    expect(await pullCallRecording(call.id)).toMatchObject({
+      status: "attached",
+      recordingUrl: recordingRef(LINE, "s"),
+      diag: { matchedBy: "uid" },
+    });
+    expect(await providerCallIdOf(call.id)).toBe("shared-1");
+  });
+
   it("le registre en panne n'empêche pas de chercher : horaire et numéro, comme avant", async () => {
     const luc = await lineUser();
     const call = await makeCall(luc.id);
