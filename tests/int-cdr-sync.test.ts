@@ -286,6 +286,34 @@ describe("synchronisation CDR", () => {
     });
   });
 
+  it("un appel très court : ses pattes à 4 s d'écart restent UN appel, et la patte fondue ne revient pas", async () => {
+    const me = await makeLineUser();
+    const at = hourAgo();
+    // Le webphone, retrouvé par la patte 1 ; la patte 2 démarre 4 s plus tard.
+    // Une seconde chacune : elles ne se chevauchent pas.
+    const mine = await webphoneCall(me.id, at, {
+      providerCallId: "short-1",
+      disposition: "voicemail",
+      durationSec: 1,
+      endedAt: new Date(Math.floor(at.getTime() / 1000) * 1000 + 9_437),
+    });
+    await registryCall(me.id, new Date(at.getTime() + 4000), { providerCallId: "short-2", durationSec: 1 });
+    vi.mocked(getCdr).mockResolvedValue([
+      outboundLeg(at, { callerid: "4189065924", seconds: "1", uniqueid: "short-1" }),
+      outboundLeg(new Date(at.getTime() + 4000), { callerid: "4189065924", seconds: "1", uniqueid: "short-2" }),
+    ]);
+
+    const first = await runSync(dayStr(at), dayStr(new Date()));
+    expect(first.counts.duplicatesMerged).toBe(1);
+    expect(first.counts.inserted).toBe(0);
+    // Et la synchro suivante n'a plus rien à défaire ni à refaire.
+    const second = await runSync(dayStr(at), dayStr(new Date()));
+    expect(second.counts.duplicatesMerged).toBe(0);
+    expect(second.counts.inserted).toBe(0);
+    const rows = await testDb.select().from(calls);
+    expect(rows.map((r) => r.id)).toEqual([mine.id]);
+  });
+
   it("ne fond pas un rappel dans le premier essai quand le webphone n'a journalisé que celui-ci", async () => {
     const { alex, mikey } = await sharedLine();
     const at = hourAgo();

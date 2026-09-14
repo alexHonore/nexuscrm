@@ -256,17 +256,20 @@ export function collapseCdrLegs<
   });
   legs.sort((a, b) => a.start - b.start);
 
-  const open = new Map<string, { best: Leg; end: number }>();
+  const open = new Map<string, { best: Leg; start: number; end: number }>();
   for (const leg of legs) {
     const key = `${leg.row.account}|${phoneMatchKey(leg.row.destination) ?? leg.row.destination}`;
     const call = open.get(key);
-    if (call && leg.start <= call.end + LEG_SLACK_MS) {
+    // Même appel : les pattes démarrent à quelques secondes l'une de l'autre
+    // (un appel très court n'a presque pas de durée pour se chevaucher), ou
+    // se chevauchent.
+    if (call && (leg.start - call.start <= LEG_TOLERANCE_MS || leg.start <= call.end + LEG_SLACK_MS)) {
       if (better(leg, call.best)) call.best = leg;
       call.end = Math.max(call.end, leg.end);
       continue;
     }
     if (call) kept.push(call.best);
-    open.set(key, { best: leg, end: leg.end });
+    open.set(key, { best: leg, start: leg.start, end: leg.end });
   }
   for (const call of open.values()) kept.push(call.best);
   return kept.sort((a, b) => a.index - b.index).map((k) => k.row);
@@ -289,7 +292,10 @@ function sameCallLegs(a: VoipMsCdr, b: VoipMsCdr, knownAccounts: ReadonlySet<str
   const sa = cdrSpan(a);
   const sb = cdrSpan(b);
   if (!sa || !sb) return false;
-  return sa.start <= sb.end + LEG_SLACK_MS && sb.start <= sa.end + LEG_SLACK_MS;
+  return (
+    Math.abs(sa.start - sb.start) <= LEG_TOLERANCE_MS ||
+    (sa.start <= sb.end + LEG_SLACK_MS && sb.start <= sa.end + LEG_SLACK_MS)
+  );
 }
 
 /**
