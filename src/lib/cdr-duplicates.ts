@@ -52,6 +52,22 @@ const LEG_SLACK_MS = 2_000;
  */
 const TWIN_SLACK_MS = 5_000;
 
+/**
+ * La durée d'un appel du journal et celle d'une trace du registre se
+ * chevauchent-elles ? UNE règle pour la réparation et pour la synchro : si
+ * l'une fondait ce que l'autre ne reconnaît pas, la seconde le réinsérerait à
+ * chaque passage (vu en production le 2026-09-14).
+ */
+export function overlapsCall(
+  call: { startedAt: Date; endedAt: Date | null; durationSec: number },
+  start: number,
+  end: number,
+): boolean {
+  const callStart = call.startedAt.getTime();
+  const callEnd = Math.max(call.endedAt?.getTime() ?? callStart, callStart + call.durationSec * 1000);
+  return start <= callEnd + TWIN_SLACK_MS && callStart <= end + TWIN_SLACK_MS;
+}
+
 export type TeamLine = { id: string; sipUsername: string | null; didNumber: string | null };
 export type DuplicateRepair = { merged: number; reassigned: number };
 
@@ -185,12 +201,7 @@ export async function repairCallDuplicates(
     const gap = (c: CallRow) => Math.abs(c.startedAt.getTime() - p.startedAt.getTime());
     // Le MÊME appel, pas seulement la même minute : les durées se chevauchent.
     const pStart = p.startedAt.getTime();
-    const pEnd = pStart + p.durationSec * 1000;
-    const overlaps = (w: CallRow) => {
-      const wStart = w.startedAt.getTime();
-      const wEnd = Math.max(w.endedAt?.getTime() ?? wStart, wStart + w.durationSec * 1000);
-      return pStart <= wEnd + TWIN_SLACK_MS && wStart <= pEnd + TWIN_SLACK_MS;
-    };
+    const overlaps = (w: CallRow) => overlapsCall(w, pStart, pStart + p.durationSec * 1000);
     const twin = webphone
       .filter(
         (w) =>

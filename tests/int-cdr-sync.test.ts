@@ -314,6 +314,48 @@ describe("synchronisation CDR", () => {
     expect(rows.map((r) => r.id)).toEqual([mine.id]);
   });
 
+  it("un entrant dont la patte qui décroche démarre 25 s après celle qui sonne : UN appel, sans va-et-vient", async () => {
+    const me = await makeLineUser();
+    const at = hourAgo();
+    const base = Math.floor(at.getTime() / 1000) * 1000;
+    // Le webphone, retrouvé par la patte qui sonne.
+    const mine = await webphoneCall(me.id, at, {
+      direction: "inbound",
+      fromNumber: "+14184311685",
+      toNumber: DID,
+      providerCallId: "ring",
+      durationSec: 229,
+      endedAt: new Date(base + 254_437),
+    });
+    // Le doublon qu'avaient laissé les synchros d'avant (la patte qui décroche).
+    await registryCall(me.id, new Date(base + 25_000), {
+      direction: "inbound",
+      fromNumber: "+141843116854184311685",
+      toNumber: DID,
+      providerCallId: "answer",
+      durationSec: 229,
+    });
+    vi.mocked(getCdr).mockResolvedValue([
+      cdrRow({ date: cdrDate(at), callerid: "4184311685", disposition: "NO ANSWER", seconds: "0", uniqueid: "ring" }),
+      cdrRow({
+        date: cdrDate(new Date(base + 25_000)),
+        callerid: '"4184311685" <4184311685>',
+        disposition: "ANSWERED",
+        seconds: "229",
+        uniqueid: "answer",
+      }),
+    ]);
+
+    const first = await runSync(dayStr(at), dayStr(new Date()));
+    expect(first.counts.duplicatesMerged).toBe(1);
+    expect(first.counts.inserted).toBe(0);
+    const second = await runSync(dayStr(at), dayStr(new Date()));
+    expect(second.counts.duplicatesMerged).toBe(0);
+    expect(second.counts.inserted).toBe(0);
+    const rows = await testDb.select().from(calls);
+    expect(rows.map((r) => r.id)).toEqual([mine.id]);
+  });
+
   it("ne fond pas un rappel dans le premier essai quand le webphone n'a journalisé que celui-ci", async () => {
     const { alex, mikey } = await sharedLine();
     const at = hourAgo();

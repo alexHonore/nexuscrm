@@ -6,7 +6,7 @@ import { missedCallRows } from "@/components/clients/notification-content";
 import { db } from "@/db";
 import { calls, clients, users } from "@/db/schema";
 import { runAfterResponse } from "@/lib/after-response";
-import { repairCallDuplicates } from "@/lib/cdr-duplicates";
+import { overlapsCall, repairCallDuplicates } from "@/lib/cdr-duplicates";
 import { createNotifications } from "@/lib/notify";
 import { fanoutPush, type PushableRow } from "@/lib/push/fanout";
 import { normalizePhone, phoneMatchKey } from "@/lib/phone";
@@ -44,6 +44,7 @@ type CallRowLite = {
   id: string;
   userId: string;
   startedAt: Date;
+  endedAt: Date | null;
   fromNumber: string | null;
   toNumber: string | null;
   providerCallId: string | null;
@@ -65,6 +66,16 @@ const MATCH_WINDOW_MS = 3 * 60 * 1000;
 function parseCdrDate(raw: string): Date | null {
   const d = fromZonedTime(raw.replace(" ", "T"), APP_TZ);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Le numéro d'un champ du registre. voip.ms écrit parfois l'appelant d'un
+ * entrant sous la forme `"Nom" <4184311685>` — le nom est souvent le numéro
+ * lui-même : lu tel quel, il donnait `+141843116854184311685` au journal.
+ */
+function cdrNumber(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  return /<([^>]+)>/.exec(raw)?.[1] ?? raw;
 }
 
 /**
@@ -539,6 +550,7 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
         id: calls.id,
         userId: calls.userId,
         startedAt: calls.startedAt,
+        endedAt: calls.endedAt,
         fromNumber: calls.fromNumber,
         toNumber: calls.toNumber,
         providerCallId: calls.providerCallId,
@@ -647,6 +659,28 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
           continue;
         }
 
+        // b bis) Aucun appel libre, mais un appel DÉJÀ retrouvé de la ligne,
+        //    même numéro, dont la durée chevauche celle-ci : une autre patte du
+        //    même appel, que le regroupement n'a pas reconnue — un entrant sur
+        //    une ligne partagée sonne sur une patte et décroche sur une autre,
+        //    ~25 s plus tard. La règle de la réparation (`overlapsCall`) : sans
+        //    elle, la réparation fondait cette patte et la synchro la
+        //    réinsérait, à chaque passage.
+        const rowStart = startedAt.getTime();
+        const sameCall = holders
+          .flatMap((h) => byUser.get(h.id) ?? [])
+          .find(
+            (c) =>
+              c.providerCallId !== null &&
+              fitsCall(sighting, c) &&
+              overlapsCall(c, rowStart, rowStart + seconds * 1000),
+          );
+        if (sameCall) {
+          remember(sameCall);
+          counts.matchedHeuristic += 1;
+          continue;
+        }
+
         // c) Aucun appel local : insertion depuis le CDR. Ligne partagée et
         //    aucun webphone pour trancher : le premier détenteur (le compte le
         //    plus ancien), faute de mieux — voir cdrLineOwner.
@@ -682,7 +716,7 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
             userId: user.id,
             clientId,
             direction,
-            fromNumber: normalizePhone(row.callerid),
+            fromNumber: normalizePhone(cdrNumber(row.callerid)),
             toNumber: normalizePhone(row.destination),
             startedAt,
             answeredAt: answered ? startedAt : null,
@@ -699,14 +733,15 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
         // Les appels rattachés plus haut ont déjà été journalisés — et
         // notifiés — par le webphone ; pas de doublon possible ici.
         if (direction === "inbound" && !answered && startedAt.getTime() >= notifyCutoff) {
-          missedToNotify.push({ user, fromNumber: normalizePhone(row.callerid), client });
+          missedToNotify.push({ user, fromNumber: normalizePhone(cdrNumber(row.callerid)), client });
         }
 
         const lite: CallRowLite = {
           id: insertedRow.id,
           userId: user.id,
           startedAt,
-          fromNumber: normalizePhone(row.callerid),
+          endedAt: new Date(startedAt.getTime() + seconds * 1000),
+          fromNumber: normalizePhone(cdrNumber(row.callerid)),
           toNumber: normalizePhone(row.destination),
           providerCallId: row.uniqueid,
           durationSec: seconds,
