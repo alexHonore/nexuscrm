@@ -666,8 +666,13 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
         //    ~25 s plus tard. La règle de la réparation (`overlapsCall`) : sans
         //    elle, la réparation fondait cette patte et la synchro la
         //    réinsérait, à chaque passage.
+        //    Tous les comptes de la ligne, pas seulement celui dont le DID a
+        //    été composé : un entrant sonne chez tous — et c'est peut-être
+        //    l'autre qui a décroché (6 sept. : l'appel au DID d'Alex, pris par
+        //    « mikey »). La réparation regarde toute la ligne ; ici aussi.
         const rowStart = startedAt.getTime();
-        const sameCall = holders
+        const lineMates = userByAccount.get(row.account) ?? holders;
+        const sameCall = lineMates
           .flatMap((h) => byUser.get(h.id) ?? [])
           .find(
             (c) =>

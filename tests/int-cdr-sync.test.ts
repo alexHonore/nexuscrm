@@ -356,6 +356,50 @@ describe("synchronisation CDR", () => {
     expect(rows.map((r) => r.id)).toEqual([mine.id]);
   });
 
+  it("ligne PARTAGÉE : un entrant au DID de l'un, décroché par l'autre, n'est pas réinséré à chaque synchro", async () => {
+    const { alex, mikey } = await sharedLine();
+    const at = hourAgo();
+    const base = Math.floor(at.getTime() / 1000) * 1000;
+    // mikey a décroché l'appel composé au DID d'Alex : c'est son webphone qui l'a journalisé.
+    const answered = await webphoneCall(mikey.id, at, {
+      direction: "inbound",
+      fromNumber: "+14184311685",
+      toNumber: ALEX_DID,
+      providerCallId: "ring",
+      disposition: "dncl",
+      durationSec: 31,
+      endedAt: new Date(base + 56_437),
+    });
+    // Le doublon laissé sous Alex, celui dont le DID a été composé.
+    await registryCall(alex.id, new Date(base + 25_000), {
+      direction: "inbound",
+      fromNumber: "+14184311685",
+      toNumber: ALEX_DID,
+      providerCallId: "answer",
+      durationSec: 31,
+    });
+    vi.mocked(getCdr).mockResolvedValue([
+      cdrRow({ date: cdrDate(at), callerid: "4184311685", destination: "5149561693", disposition: "NO ANSWER", seconds: "0", uniqueid: "ring" }),
+      cdrRow({
+        date: cdrDate(new Date(base + 25_000)),
+        callerid: "4184311685",
+        destination: "5149561693",
+        disposition: "ANSWERED",
+        seconds: "31",
+        uniqueid: "answer",
+      }),
+    ]);
+
+    const first = await runSync(dayStr(at), dayStr(new Date()));
+    expect(first.counts.duplicatesMerged).toBe(1);
+    expect(first.counts.inserted).toBe(0);
+    const second = await runSync(dayStr(at), dayStr(new Date()));
+    expect(second.counts.duplicatesMerged).toBe(0);
+    expect(second.counts.inserted).toBe(0);
+    const rows = await testDb.select().from(calls);
+    expect(rows.map((r) => r.id)).toEqual([answered.id]);
+  });
+
   it("ne fond pas un rappel dans le premier essai quand le webphone n'a journalisé que celui-ci", async () => {
     const { alex, mikey } = await sharedLine();
     const at = hourAgo();
