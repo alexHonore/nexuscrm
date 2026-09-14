@@ -670,8 +670,15 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
         //    été composé : un entrant sonne chez tous — et c'est peut-être
         //    l'autre qui a décroché (6 sept. : l'appel au DID d'Alex, pris par
         //    « mikey »). La réparation regarde toute la ligne ; ici aussi.
+        //    Par les détenteurs retenus, pas par le compte de la ligne CDR : la
+        //    patte qui décroche passe souvent par le compte PRINCIPAL, attribuée
+        //    par le DID — le compte de la ligne n'y dit rien de ses voisins.
         const rowStart = startedAt.getTime();
-        const lineMates = userByAccount.get(row.account) ?? holders;
+        const lineMates = [
+          ...new Set(
+            holders.flatMap((h) => (h.sipUsername ? (userByAccount.get(h.sipUsername) ?? [h]) : [h])),
+          ),
+        ];
         const sameCall = lineMates
           .flatMap((h) => byUser.get(h.id) ?? [])
           .find(

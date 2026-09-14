@@ -400,6 +400,50 @@ describe("synchronisation CDR", () => {
     expect(rows.map((r) => r.id)).toEqual([answered.id]);
   });
 
+  it("ligne PARTAGÉE : même quand la patte qui décroche passe par le compte PRINCIPAL", async () => {
+    const { alex, mikey } = await sharedLine();
+    const at = hourAgo();
+    const base = Math.floor(at.getTime() / 1000) * 1000;
+    const answered = await webphoneCall(mikey.id, at, {
+      direction: "inbound",
+      fromNumber: "+15142661939",
+      toNumber: ALEX_DID,
+      providerCallId: "ring",
+      disposition: "callback",
+      durationSec: 229,
+      endedAt: new Date(base + 254_437),
+    });
+    await registryCall(alex.id, new Date(base + 25_000), {
+      direction: "inbound",
+      fromNumber: "+15142661939",
+      toNumber: ALEX_DID,
+      providerCallId: "answer",
+      durationSec: 229,
+    });
+    vi.mocked(getCdr).mockResolvedValue([
+      cdrRow({ date: cdrDate(at), callerid: "5142661939", destination: "5149561693", disposition: "NO ANSWER", seconds: "0", uniqueid: "ring" }),
+      // Compte principal : attribuée à Alex par son DID.
+      cdrRow({
+        date: cdrDate(new Date(base + 25_000)),
+        account: MAIN_ACCOUNT,
+        callerid: "5142661939",
+        destination: "5149561693",
+        disposition: "ANSWERED",
+        seconds: "229",
+        uniqueid: "answer",
+      }),
+    ]);
+
+    const first = await runSync(dayStr(at), dayStr(new Date()));
+    expect(first.counts.duplicatesMerged).toBe(1);
+    expect(first.counts.inserted).toBe(0);
+    const second = await runSync(dayStr(at), dayStr(new Date()));
+    expect(second.counts.duplicatesMerged).toBe(0);
+    expect(second.counts.inserted).toBe(0);
+    const rows = await testDb.select().from(calls);
+    expect(rows.map((r) => r.id)).toEqual([answered.id]);
+  });
+
   it("ne fond pas un rappel dans le premier essai quand le webphone n'a journalisé que celui-ci", async () => {
     const { alex, mikey } = await sharedLine();
     const at = hourAgo();
