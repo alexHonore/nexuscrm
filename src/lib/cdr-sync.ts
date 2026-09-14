@@ -16,6 +16,7 @@ import {
   getCallRecordings,
   getCdr,
   recordingRef,
+  type VoipMsCdr,
   type VoipMsRecording,
 } from "@/lib/voipms";
 
@@ -115,19 +116,70 @@ function recordingFacts(rec: VoipMsRecording): RecordingFacts {
 }
 
 /**
- * L'identifiant d'enregistrement n'est PAS toujours l'uniqueid du CDR. On
- * rapproche alors comme pour les CDR : même horaire à ±3 min, mêmes 10
- * derniers chiffres. (Même ligne SIP : c'est à l'appelant de n'offrir que les
- * appels du propriétaire du sous-compte.)
+ * Une trace d'appel chez voip.ms — ligne CDR ou enregistrement — réduite à ce
+ * qui la rapproche d'un appel du journal : son heure et ses numéros.
  */
-function recordingFitsCall(
-  facts: RecordingFacts,
+type Sighting = {
+  when: Date | null;
+  callerKey: ReturnType<typeof phoneMatchKey>;
+  destKey: ReturnType<typeof phoneMatchKey>;
+};
+
+/**
+ * Même appel ? Même horaire à ±3 min, et un numéro de l'appel parmi ceux de la
+ * trace (10 derniers chiffres). UNE règle pour les lignes CDR comme pour les
+ * enregistrements, pour la synchro comme pour la récupération d'un appel.
+ * (Même ligne SIP : c'est à l'appelant de n'offrir que les appels du
+ * propriétaire du sous-compte.)
+ */
+function fitsCall(
+  sighting: Sighting,
   call: { startedAt: Date; fromNumber: string | null; toNumber: string | null },
 ): boolean {
-  if (!facts.when) return false;
-  if (Math.abs(call.startedAt.getTime() - facts.when.getTime()) > MATCH_WINDOW_MS) return false;
+  if (!sighting.when) return false;
+  if (Math.abs(call.startedAt.getTime() - sighting.when.getTime()) > MATCH_WINDOW_MS) return false;
   const keys = [phoneMatchKey(call.fromNumber), phoneMatchKey(call.toNumber)].filter(Boolean);
-  return keys.some((k) => k === facts.callerKey || k === facts.destKey);
+  return keys.some((k) => k === sighting.callerKey || k === sighting.destKey);
+}
+
+/** Une ligne CDR vue comme une trace (`date` en heure locale de Toronto). */
+function cdrSighting(row: Pick<VoipMsCdr, "date" | "callerid" | "destination">): Sighting {
+  return {
+    when: row.date ? parseCdrDate(row.date) : null,
+    callerKey: phoneMatchKey(row.callerid),
+    destKey: phoneMatchKey(row.destination),
+  };
+}
+
+/** Les lignes SIP de l'équipe, par sous-compte et par DID. */
+function indexLines<U extends { sipUsername: string | null; didNumber: string | null }>(
+  list: U[],
+): { byAccount: Map<string, U>; byDid: Map<string, U> } {
+  const byAccount = new Map<string, U>();
+  const byDid = new Map<string, U>();
+  for (const u of list) {
+    if (u.sipUsername) byAccount.set(u.sipUsername, u);
+    const didKey = phoneMatchKey(u.didNumber);
+    if (didKey) byDid.set(didKey, u);
+  }
+  return { byAccount, byDid };
+}
+
+/**
+ * À quelle ligne revient une ligne CDR : à son sous-compte, sinon — compte
+ * inconnu, patte du compte principal, DID routé ailleurs — à l'usager dont le
+ * DID est la destination, et c'est alors un entrant pour lui (auparavant ces
+ * lignes étaient écartées et les appels manqués devenaient invisibles).
+ */
+function cdrLineOwner<U>(
+  row: Pick<VoipMsCdr, "account" | "destination">,
+  lines: { byAccount: Map<string, U>; byDid: Map<string, U> },
+): { user: U; forcedInbound: boolean } | null {
+  const byAccount = lines.byAccount.get(row.account);
+  if (byAccount) return { user: byAccount, forcedInbound: false };
+  const destKey = phoneMatchKey(row.destination);
+  const byDid = destKey ? lines.byDid.get(destKey) : undefined;
+  return byDid ? { user: byDid, forcedInbound: true } : null;
 }
 
 /**
@@ -342,15 +394,9 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
         isActive: users.isActive,
       })
       .from(users);
-    const userByAccount = new Map<string, (typeof allUsers)[number]>();
-    const userByDid = new Map<string, (typeof allUsers)[number]>();
-    const userById = new Map<string, (typeof allUsers)[number]>();
-    for (const u of allUsers) {
-      if (u.sipUsername) userByAccount.set(u.sipUsername, u);
-      const didKey = phoneMatchKey(u.didNumber);
-      if (didKey) userByDid.set(didKey, u);
-      userById.set(u.id, u);
-    }
+    const lines = indexLines(allUsers);
+    const userByAccount = lines.byAccount;
+    const userById = new Map(allUsers.map((u) => [u.id, u]));
 
     // ── 3. Appels existants dans la fenêtre (index en mémoire) ──
     const windowFrom = new Date(dayStartUtc(dateFrom).getTime() - 6 * 3600_000);
@@ -393,23 +439,14 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
     for (const row of cdrRowsCollapsed) {
       try {
         if (!row.uniqueid) continue;
-        const calleridKey = phoneMatchKey(row.callerid);
         const destKey = phoneMatchKey(row.destination);
 
-        // Compte inconnu (patte du compte principal, DID routé ailleurs…) :
-        // si la destination est le DID d'un usager, c'est un entrant pour lui
-        // — auparavant ces lignes étaient écartées et les appels manqués
-        // devenaient invisibles.
-        let user = userByAccount.get(row.account);
-        let forcedInbound = false;
-        if (!user && destKey) {
-          user = userByDid.get(destKey);
-          forcedInbound = user !== undefined;
-        }
-        if (!user) {
+        const owner = cdrLineOwner(row, lines);
+        if (!owner) {
           counts.unknownAccount += 1;
           continue;
         }
+        const { user, forcedInbound } = owner;
         const startedAt = parseCdrDate(row.date);
         if (!startedAt) {
           pushError(`cdr ${row.uniqueid}: date invalide "${row.date}"`);
@@ -438,15 +475,10 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
         }
 
         // b) Heuristique : même utilisateur, ±3 min, mêmes 10 derniers chiffres.
-        const candidates = (byUser.get(user.id) ?? []).filter((c) => {
-          if (c.providerCallId) return false;
-          if (Math.abs(c.startedAt.getTime() - startedAt.getTime()) > MATCH_WINDOW_MS)
-            return false;
-          const keys = [phoneMatchKey(c.fromNumber), phoneMatchKey(c.toNumber)].filter(
-            Boolean,
-          );
-          return keys.some((k) => k === calleridKey || k === destKey);
-        });
+        const sighting = cdrSighting(row);
+        const candidates = (byUser.get(user.id) ?? []).filter(
+          (c) => !c.providerCallId && fitsCall(sighting, c),
+        );
         if (candidates.length > 0) {
           candidates.sort(
             (a, b) =>
@@ -565,9 +597,7 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
         if (!call && facts.account && when) {
           const owner = userByAccount.get(facts.account);
           if (owner) {
-            const candidates = (byUser.get(owner.id) ?? []).filter((c) =>
-              recordingFitsCall(facts, c),
-            );
+            const candidates = (byUser.get(owner.id) ?? []).filter((c) => fitsCall(facts, c));
             candidates.sort(
               (a, b) =>
                 Math.abs(a.startedAt.getTime() - when.getTime()) -
@@ -659,35 +689,158 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
   return { counts, recordingFields: [...recordingFields], errors };
 }
 
+/** Pourquoi rien n'a été rattaché — trois situations qui ne se disent pas pareil. */
+export type PullNotFoundReason =
+  /** Aucun enregistrement sur la ligne ce jour-là : le plus souvent, pas ENCORE. */
+  | "pending"
+  /** voip.ms en a sur la ligne ce jour-là, mais aucun n'est celui de cet appel. */
+  | "unmatched"
+  /** Pas un appel voip.ms : rien à lui demander. */
+  | "not_voipms";
+
+/**
+ * Ce que la demande a vu chez voip.ms — pour le journal d'audit, jamais pour
+ * le navigateur. C'est ce qui manquait le 2026-09-13 : « pas encore » ne
+ * disait pas si voip.ms n'avait rien, ou avait quelque chose qu'on ne savait
+ * pas rapprocher.
+ */
+export type PullDiagnostics = {
+  /** Enregistrements de la ligne sur la journée, porteurs d'un identifiant. */
+  recordingsOnLine: number;
+  /** Noms des champs vus sur ces enregistrements — jamais les valeurs. */
+  recordingFields: string[];
+  /** L'appel a son uniqueid : déjà connu, ou retrouvé au registre (CDR). */
+  cdrFound: boolean;
+  /** Le registre n'a pas répondu ; on a rapproché sans lui. */
+  cdrError?: string;
+  /**
+   * Écart, en secondes, entre l'appel et l'enregistrement de la ligne le plus
+   * proche. Une heure pile trahirait un fuseau.
+   */
+  nearestGapSec: number | null;
+  /** Par où l'enregistrement a été reconnu. */
+  matchedBy?: "uid" | "time" | "cited";
+};
+
 export type PullRecordingOutcome =
   /** Trouvé chez voip.ms et rattaché à l'appel. */
-  | { status: "attached"; recordingUrl: string }
+  | { status: "attached"; recordingUrl: string; diag: PullDiagnostics }
   /** L'appel avait déjà le sien (posé avant, ou par une synchro entre-temps). */
   | { status: "already"; recordingUrl: string }
-  /** voip.ms n'a rien qui corresponde — le plus souvent : pas ENCORE. */
-  | { status: "not_found" }
+  /** Rien de rattaché — voir `reason`. */
+  | { status: "not_found"; reason: PullNotFoundReason; diag?: PullDiagnostics }
   /** Le téléphoniste n'a pas de sous-compte voip.ms : personne à qui demander. */
   | { status: "no_line" }
   | { status: "upstream_error"; message: string };
+
+type CallToLocate = {
+  id: string;
+  userId: string;
+  startedAt: Date;
+  fromNumber: string | null;
+  toNumber: string | null;
+};
+
+/**
+ * Retrouve UN appel du journal dans le registre (CDR) de voip.ms, avec les
+ * règles de la synchro : pattes regroupées, attribution à la ligne, horaire et
+ * numéro. Rend :
+ *  - `primary` : l'uniqueid que la synchro lui donnerait ;
+ *  - `legs` : ceux de toutes ses pattes — un enregistrement peut porter celui
+ *    d'une patte écartée au regroupement ;
+ *  - `foreign` : ceux des AUTRES appels du registre. Un enregistrement qui en
+ *    porte un n'est pas le nôtre, même tombé à la bonne minute : rappeler le
+ *    même numéro dans la foulée est la règle, en centre d'appels.
+ * Un uniqueid déjà porté par un autre appel du journal lui reste — la synchro
+ * le lui rendrait par correspondance directe. Appel introuvable : rien de
+ * tout ça, et le rapprochement retombe sur l'horaire et le numéro.
+ */
+async function locateInCdr(
+  call: CallToLocate,
+  rows: VoipMsCdr[],
+): Promise<{ primary: string | null; legs: Set<string>; foreign: Set<string> }> {
+  const lines = indexLines(
+    await db
+      .select({ id: users.id, sipUsername: users.sipUsername, didNumber: users.didNumber })
+      .from(users),
+  );
+  const t0 = call.startedAt.getTime();
+  const gapOf = (s: Sighting) => Math.abs((s.when?.getTime() ?? Number.POSITIVE_INFINITY) - t0);
+  const ranked = collapseCrossAccountLegs(collapseCdrLegs(rows), new Set(lines.byAccount.keys()))
+    .filter((row) => row.uniqueid && cdrLineOwner(row, lines)?.user.id === call.userId)
+    .map((row) => ({ uid: row.uniqueid, sighting: cdrSighting(row) }))
+    .filter((c) => fitsCall(c.sighting, call))
+    .sort((a, b) => gapOf(a.sighting) - gapOf(b.sighting));
+
+  const claimed = new Set<string>();
+  if (ranked.length > 0) {
+    const taken = await db
+      .select({ uid: calls.providerCallId })
+      .from(calls)
+      .where(
+        and(
+          ne(calls.id, call.id),
+          inArray(
+            calls.providerCallId,
+            ranked.map((c) => c.uid),
+          ),
+        ),
+      );
+    for (const t of taken) if (t.uid) claimed.add(t.uid);
+  }
+  const primary = ranked.find((c) => !claimed.has(c.uid));
+  const legs = new Set<string>();
+  const foreign = new Set<string>();
+  if (!primary) return { primary: null, legs, foreign };
+
+  const primaryAt = primary.sighting.when?.getTime() ?? t0;
+  for (const row of rows) {
+    if (!row.uniqueid) continue;
+    const s = cdrSighting(row);
+    const sameCall =
+      !claimed.has(row.uniqueid) &&
+      s.when !== null &&
+      Math.abs(s.when.getTime() - primaryAt) <= LEG_TOLERANCE_MS &&
+      fitsCall(s, call);
+    (sameCall ? legs : foreign).add(row.uniqueid);
+  }
+  legs.add(primary.uid);
+  foreign.delete(primary.uid);
+  return { primary: primary.uid, legs, foreign };
+}
 
 /**
  * L'enregistrement d'UN appel, demandé à voip.ms tout de suite — sans
  * attendre le cron du lendemain ni rapatrier toute la journée de tous les
  * postes comme « Synchroniser voip.ms ».
  *
- * Une seule question à voip.ms : les enregistrements du sous-compte de CE
- * téléphoniste, sur la journée de l'appel (deux s'il frôle minuit). Le
- * rapprochement est celui de la synchro, dans le même ordre de préférence —
- * uniqueid du CDR, puis horaire et numéro, puis uniqueid cité — et passe par
- * les mêmes fonctions : un enregistrement ne doit pas finir sous deux appels
- * différents selon le bouton pressé.
+ * Deux questions à voip.ms, posées EN MÊME TEMPS (son API peut mettre plus
+ * d'une minute) : les enregistrements du sous-compte de CE téléphoniste sur la
+ * journée de l'appel (deux s'il frôle minuit), et le registre de la même
+ * journée — pour trouver à l'appel son uniqueid s'il n'en a pas encore, et
+ * reconnaître ceux des AUTRES appels.
  *
- * Deux gardes que la synchro tient par construction (elle voit tout le lot)
- * et qu'un appel isolé doit tenir à la main :
+ * Pourquoi le registre : un appel du webphone n'a JAMAIS d'uniqueid avant une
+ * synchro. Sans lui, il ne restait que l'horaire et les numéros de
+ * l'enregistrement — un horaire dont voip.ms ne dit pas le fuseau (la liste
+ * n'accepte pas de `timezone`, et le registre a déjà menti d'une heure), et
+ * des numéros dont il manque la moitié (sa liste documentée n'a pas de
+ * `caller`). Le 2026-09-13, « Récupérer » répondait « pas encore » pour des
+ * appels que voip.ms avait bel et bien enregistrés. L'uniqueid est le lien
+ * vérifié en production, celui par lequel la synchro rattache.
+ *
+ * L'ordre de préférence reste celui de la synchro — uniqueid, puis horaire et
+ * numéro, puis uniqueid cité — et passe par les mêmes fonctions : un
+ * enregistrement ne doit pas finir sous deux appels différents selon le bouton
+ * pressé.
+ *
+ * Trois gardes qu'un appel isolé doit tenir à la main :
  *  - un enregistrement déjà posé sur un AUTRE appel ne se vole pas ;
- *  - un enregistrement dont l'uniqueid désigne un AUTRE appel connu non plus.
- * L'écriture est conditionnelle (`recording_url IS NULL`) : une synchro
- * passée entre-temps garde le dernier mot, sans verrou à partager avec elle.
+ *  - un enregistrement dont l'uniqueid désigne un autre appel connu non plus ;
+ *  - ni, l'appel une fois retrouvé au registre, celui qui porte l'uniqueid
+ *    d'un AUTRE appel du registre, même tombé à la bonne minute.
+ * Les écritures sont conditionnelles (`IS NULL`) : une synchro passée
+ * entre-temps garde le dernier mot, sans verrou à partager avec elle.
  *
  * Chemin MACHINE, sans regard : c'est la route qui vérifie que l'appelant
  * atteint CET appel avant de demander quoi que ce soit. `null` = appel absent.
@@ -696,6 +849,7 @@ export async function pullCallRecording(callId: string): Promise<PullRecordingOu
   const [call] = await db
     .select({
       id: calls.id,
+      userId: calls.userId,
       startedAt: calls.startedAt,
       fromNumber: calls.fromNumber,
       toNumber: calls.toNumber,
@@ -712,31 +866,74 @@ export async function pullCallRecording(callId: string): Promise<PullRecordingOu
   if (call.recordingUrl) return { status: "already", recordingUrl: call.recordingUrl };
   // Un appel Twilio n'a pas d'enregistrement chez voip.ms, et le chercher sous
   // le sous-compte de la ligne pourrait en ramener un qui n'est pas le sien.
-  if (call.provider !== "voipms") return { status: "not_found" };
+  if (call.provider !== "voipms") return { status: "not_found", reason: "not_voipms" };
   if (!call.account) return { status: "no_line" };
   const account = call.account;
 
   const t0 = call.startedAt.getTime();
   const day = (at: number) => formatInTimeZone(new Date(at), APP_TZ, "yyyy-MM-dd");
+  const dateFrom = day(t0 - MATCH_WINDOW_MS);
+  const dateTo = day(t0 + MATCH_WINDOW_MS);
 
-  let recordings: VoipMsRecording[];
-  try {
-    recordings = await getCallRecordings(
-      account,
-      day(t0 - MATCH_WINDOW_MS),
-      day(t0 + MATCH_WINDOW_MS),
-    );
-  } catch (err) {
+  // Le registre est demandé même quand l'appel a déjà son uniqueid : c'est lui
+  // qui dit quels enregistrements sont ceux des autres appels.
+  const [listed, registry] = await Promise.allSettled([
+    getCallRecordings(account, dateFrom, dateTo),
+    getCdr(dateFrom, dateTo),
+  ]);
+  if (listed.status === "rejected") {
+    const err: unknown = listed.reason;
     return { status: "upstream_error", message: err instanceof Error ? err.message : String(err) };
   }
 
-  const found = recordings
+  const recordingFields = new Set<string>();
+  for (const rec of listed.value) for (const k of Object.keys(rec)) recordingFields.add(k);
+  const found = listed.value
     .map(recordingFacts)
     .filter(
       (f): f is RecordingFacts & { locator: string } =>
         f.locator !== undefined && (f.account === undefined || f.account === account),
     );
-  if (found.length === 0) return { status: "not_found" };
+
+  // ── L'appel au registre : ses uniqueid, et ceux des autres ──
+  const ours = new Set<string>(call.providerCallId ? [call.providerCallId] : []);
+  let foreign = new Set<string>();
+  let foundUid: string | null = null;
+  let cdrError: string | undefined;
+  if (registry.status === "rejected") {
+    // Le registre en panne n'empêche pas de chercher : on rapproche alors
+    // comme avant, par l'horaire et le numéro.
+    const err: unknown = registry.reason;
+    cdrError = err instanceof Error ? err.message : String(err);
+  } else {
+    const located = await locateInCdr(call, registry.value);
+    if (!call.providerCallId) foundUid = located.primary;
+    for (const uid of located.legs) ours.add(uid);
+    foreign = located.foreign;
+    // Celui que l'appel porte déjà reste le sien, quoi qu'en dise l'horaire.
+    for (const uid of ours) foreign.delete(uid);
+  }
+  // L'uniqueid retrouvé reste sur l'appel, enregistrement ou pas : la synchro
+  // reconnaîtra l'appel par correspondance directe — c'est ce qu'elle aurait
+  // écrit elle-même — et la prochaine demande le connaîtra même si le
+  // registre ne répond pas.
+  if (foundUid) {
+    await db
+      .update(calls)
+      .set({ providerCallId: foundUid })
+      .where(and(eq(calls.id, call.id), isNull(calls.providerCallId)));
+  }
+
+  const gap = (f: RecordingFacts) => Math.abs((f.when?.getTime() ?? Infinity) - t0);
+  const gaps = found.filter((f) => f.when).map(gap);
+  const diag: PullDiagnostics = {
+    recordingsOnLine: found.length,
+    recordingFields: [...recordingFields].sort(),
+    cdrFound: ours.size > 0,
+    ...(cdrError ? { cdrError } : {}),
+    nearestGapSec: gaps.length > 0 ? Math.round(Math.min(...gaps) / 1000) : null,
+  };
+  if (found.length === 0) return { status: "not_found", reason: "pending", diag };
 
   const locators = found.map((f) => f.locator);
   const uids = found.flatMap((f) => (f.callUid ? [f.callUid] : []));
@@ -754,16 +951,17 @@ export async function pullCallRecording(callId: string): Promise<PullRecordingOu
   const takenLocators = new Set(others.map((o) => o.recordingUrl));
   const otherUids = new Set(others.map((o) => o.providerCallId));
   const free = found.filter(
-    (f) => !takenLocators.has(f.locator) && !(f.callUid && otherUids.has(f.callUid)),
+    (f) =>
+      !takenLocators.has(f.locator) &&
+      !(f.callUid && (otherUids.has(f.callUid) || foreign.has(f.callUid))),
   );
 
-  const ownUid = call.providerCallId;
-  const gap = (f: RecordingFacts) => Math.abs((f.when?.getTime() ?? Infinity) - t0);
-  const pick =
-    (ownUid ? free.find((f) => f.callUid === ownUid) : undefined) ??
-    free.filter((f) => recordingFitsCall(f, call)).sort((a, b) => gap(a) - gap(b))[0] ??
-    (ownUid ? free.find((f) => f.haystack.includes(ownUid)) : undefined);
-  if (!pick) return { status: "not_found" };
+  const byUid = free.find((f) => f.callUid !== undefined && ours.has(f.callUid));
+  const byTime = free.filter((f) => fitsCall(f, call)).sort((a, b) => gap(a) - gap(b))[0];
+  const cited = free.find((f) => [...ours].some((uid) => f.haystack.includes(uid)));
+  const pick = byUid ?? byTime ?? cited;
+  if (!pick) return { status: "not_found", reason: "unmatched", diag };
+  diag.matchedBy = pick === byUid ? "uid" : pick === byTime ? "time" : "cited";
 
   const written = await db
     .update(calls)
@@ -777,7 +975,7 @@ export async function pullCallRecording(callId: string): Promise<PullRecordingOu
       .where(eq(calls.id, call.id));
     return now?.recordingUrl
       ? { status: "already", recordingUrl: now.recordingUrl }
-      : { status: "not_found" };
+      : { status: "not_found", reason: "unmatched", diag };
   }
 
   // La note d'appel IA suit l'enregistrement, comme après une synchro
@@ -788,5 +986,5 @@ export async function pullCallRecording(callId: string): Promise<PullRecordingOu
   } catch {
     // voir ci-dessus
   }
-  return { status: "attached", recordingUrl: pick.locator };
+  return { status: "attached", recordingUrl: pick.locator, diag };
 }

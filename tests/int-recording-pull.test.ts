@@ -59,7 +59,7 @@ vi.mock("@/lib/voipms", async (importOriginal) => {
   };
 });
 
-const { getCallRecordings, recordingRef, VoipMsError } = await import("@/lib/voipms");
+const { getCallRecordings, getCdr, recordingRef, VoipMsError } = await import("@/lib/voipms");
 const { pullCallRecording, syncCdrRange } = await import("@/lib/cdr-sync");
 const route = await import("@/app/api/admin/calls/[id]/recording/route");
 const { auditLogs, calls } = await import("@/db/schema");
@@ -68,6 +68,7 @@ const { CALLER_ROLE_ID, OBSERVER_ROLE_ID, defaultPermissionsConfig } =
   await import("@/lib/permissions/defaults");
 const { setSetting } = await import("@/lib/settings");
 type VoipMsRecording = Awaited<ReturnType<typeof getCallRecordings>>[number];
+type VoipMsCdr = Awaited<ReturnType<typeof getCdr>>[number];
 
 const TZ = "America/Toronto";
 const LINE = "551013_luc";
@@ -124,10 +125,38 @@ async function recordingOf(callId: string): Promise<string | null> {
   return row?.url ?? null;
 }
 
+async function providerCallIdOf(callId: string): Promise<string | null> {
+  const [row] = await testDb
+    .select({ uid: calls.providerCallId })
+    .from(calls)
+    .where(eq(calls.id, callId));
+  return row?.uid ?? null;
+}
+
+/** Une ligne du registre voip.ms (CDR) : l'appel sortant de Luc, par défaut. */
+function cdr(overrides: Partial<VoipMsCdr> & { when?: Date } = {}): VoipMsCdr {
+  seq += 1;
+  const { when, ...rest } = overrides;
+  return {
+    date: voipDate(when ?? T),
+    callerid: "4189065924",
+    destination: "14185551234",
+    description: "Outbound",
+    account: LINE,
+    disposition: "ANSWERED",
+    duration: "00:02:00",
+    seconds: "120",
+    uniqueid: `cdr-uid-${seq}`,
+    ...rest,
+  };
+}
+
 beforeEach(async () => {
   await resetDb();
   vi.mocked(getCallRecordings).mockReset();
   vi.mocked(getCallRecordings).mockResolvedValue([]);
+  vi.mocked(getCdr).mockReset();
+  vi.mocked(getCdr).mockResolvedValue([]);
 });
 
 afterAll(async () => {
@@ -147,10 +176,16 @@ describe("un seul appel — le rapprochement", () => {
     ]);
 
     const out = await pullCallRecording(call.id);
-    expect(out).toEqual({ status: "attached", recordingUrl: recordingRef(LINE, "mine") });
+    expect(out).toMatchObject({
+      status: "attached",
+      recordingUrl: recordingRef(LINE, "mine"),
+      diag: { matchedBy: "uid" },
+    });
     expect(await recordingOf(call.id)).toBe(recordingRef(LINE, "mine"));
     expect(getCallRecordings).toHaveBeenCalledTimes(1);
     expect(getCallRecordings).toHaveBeenCalledWith(LINE, DAY, DAY);
+    // Le registre est consulté quand même : c'est lui qui désigne les autres appels.
+    expect(getCdr).toHaveBeenCalledWith(DAY, DAY);
   });
 
   it("sans uniqueid encore, rapproche par horaire et numéro — le plus proche gagne", async () => {
@@ -164,7 +199,11 @@ describe("un seul appel — le rapprochement", () => {
     ]);
 
     const out = await pullCallRecording(call.id);
-    expect(out).toEqual({ status: "attached", recordingUrl: recordingRef(LINE, "close") });
+    expect(out).toMatchObject({
+      status: "attached",
+      recordingUrl: recordingRef(LINE, "close"),
+      diag: { matchedBy: "time", cdrFound: false },
+    });
   });
 
   it("hors de ±3 min, rien — et rien d'écrit", async () => {
@@ -172,8 +211,23 @@ describe("un seul appel — le rapprochement", () => {
     const call = await makeCall(luc.id);
     vi.mocked(getCallRecordings).mockResolvedValue([rec({ when: at(T, 200) })]);
 
-    expect(await pullCallRecording(call.id)).toEqual({ status: "not_found" });
+    expect(await pullCallRecording(call.id)).toMatchObject({
+      status: "not_found",
+      reason: "unmatched",
+      diag: { recordingsOnLine: 1, nearestGapSec: 200 },
+    });
     expect(await recordingOf(call.id)).toBeNull();
+  });
+
+  it("aucun enregistrement sur la ligne : « pas encore », avec ce que voip.ms a montré", async () => {
+    const luc = await lineUser();
+    const call = await makeCall(luc.id);
+
+    expect(await pullCallRecording(call.id)).toEqual({
+      status: "not_found",
+      reason: "pending",
+      diag: { recordingsOnLine: 0, recordingFields: [], cdrFound: false, nearestGapSec: null },
+    });
   });
 
   it("ne prend pas l'enregistrement déjà posé sur un autre appel", async () => {
@@ -187,7 +241,10 @@ describe("un seul appel — le rapprochement", () => {
       rec({ callrecording: "taken", when: at(T, 10) }),
     ]);
 
-    expect(await pullCallRecording(call.id)).toEqual({ status: "not_found" });
+    expect(await pullCallRecording(call.id)).toMatchObject({
+      status: "not_found",
+      reason: "unmatched",
+    });
     expect(await recordingOf(call.id)).toBeNull();
     expect(await recordingOf(other.id)).toBe(recordingRef(LINE, "taken"));
   });
@@ -200,7 +257,10 @@ describe("un seul appel — le rapprochement", () => {
       rec({ callrecording: "theirs", call_id: "cdr-other", when: at(T, 5) }),
     ]);
 
-    expect(await pullCallRecording(call.id)).toEqual({ status: "not_found" });
+    expect(await pullCallRecording(call.id)).toMatchObject({
+      status: "not_found",
+      reason: "unmatched",
+    });
   });
 
   it("un appel qui a déjà le sien ne dérange pas voip.ms", async () => {
@@ -226,8 +286,9 @@ describe("un seul appel — le rapprochement", () => {
     const luc = await lineUser();
     const call = await makeCall(luc.id, { provider: "twilio" });
 
-    expect(await pullCallRecording(call.id)).toEqual({ status: "not_found" });
+    expect(await pullCallRecording(call.id)).toEqual({ status: "not_found", reason: "not_voipms" });
     expect(getCallRecordings).not.toHaveBeenCalled();
+    expect(getCdr).not.toHaveBeenCalled();
   });
 
   it("un appel qui frôle minuit demande les deux journées", async () => {
@@ -253,6 +314,155 @@ describe("un seul appel — le rapprochement", () => {
 
   it("un appel inconnu : null", async () => {
     expect(await pullCallRecording("00000000-0000-4000-8000-000000000000")).toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe("un appel du webphone, retrouvé au registre de voip.ms", () => {
+  /**
+   * Le cas du 2026-09-13 (581-990-5955) : un appel du webphone n'a pas
+   * d'uniqueid avant une synchro, et l'enregistrement tel que voip.ms le
+   * documente n'a pas de `caller` — son horaire, sans fuseau demandé, peut
+   * être décalé d'une heure. Avant, « Récupérer » répondait « pas encore ».
+   */
+  it("rattache par l'uniqueid retrouvé au registre, même quand l'horaire de l'enregistrement ment d'une heure", async () => {
+    const luc = await lineUser();
+    const call = await makeCall(luc.id);
+    vi.mocked(getCdr).mockResolvedValue([cdr({ uniqueid: "1757426400.374" })]);
+    vi.mocked(getCallRecordings).mockResolvedValue([
+      {
+        callrecording: "r-5955",
+        account: LINE,
+        call_id: "1757426400.374",
+        datetime: voipDate(at(T, 3600)),
+        destination: "4185551234",
+        type: "outgoing",
+        duration: "0:02:00",
+      },
+    ]);
+
+    const out = await pullCallRecording(call.id);
+    expect(out).toMatchObject({
+      status: "attached",
+      recordingUrl: recordingRef(LINE, "r-5955"),
+      diag: { matchedBy: "uid", cdrFound: true, nearestGapSec: 3600 },
+    });
+    expect(getCdr).toHaveBeenCalledWith(DAY, DAY);
+    // L'uniqueid reste sur l'appel : la synchro le reconnaîtra directement.
+    expect(await providerCallIdOf(call.id)).toBe("1757426400.374");
+  });
+
+  it("reconnaît l'uniqueid d'une patte écartée au regroupement", async () => {
+    const luc = await lineUser();
+    const call = await makeCall(luc.id);
+    // Deux pattes, même seconde : la synchro garde la plus longue (…375).
+    vi.mocked(getCdr).mockResolvedValue([
+      cdr({ uniqueid: "u-374", seconds: "3" }),
+      cdr({ uniqueid: "u-375", seconds: "120" }),
+    ]);
+    vi.mocked(getCallRecordings).mockResolvedValue([
+      rec({ callrecording: "leg", call_id: "u-374", when: at(T, 3600) }),
+    ]);
+
+    expect(await pullCallRecording(call.id)).toMatchObject({
+      status: "attached",
+      recordingUrl: recordingRef(LINE, "leg"),
+    });
+    expect(await providerCallIdOf(call.id)).toBe("u-375");
+  });
+
+  it("ne prend pas l'enregistrement du rappel d'à côté, même tombé à la bonne minute", async () => {
+    const luc = await lineUser();
+    // Premier essai à 10 h 00, rappel du même numéro à 10 h 01 — c'est celui-ci
+    // qu'on veut écouter. Le premier est au journal, sans uniqueid lui non plus.
+    await makeCall(luc.id);
+    const call = await makeCall(luc.id, { startedAt: at(T, 60), answeredAt: at(T, 65) });
+    vi.mocked(getCdr).mockResolvedValue([
+      cdr({ uniqueid: "first", seconds: "20" }),
+      cdr({ uniqueid: "redial", when: at(T, 60) }),
+    ]);
+    vi.mocked(getCallRecordings).mockResolvedValue([
+      rec({ callrecording: "first-rec", call_id: "first", when: at(T, 0) }),
+    ]);
+
+    expect(await pullCallRecording(call.id)).toMatchObject({
+      status: "not_found",
+      reason: "unmatched",
+    });
+    expect(await recordingOf(call.id)).toBeNull();
+
+    // Le sien arrive : il est pris, et pas l'autre.
+    vi.mocked(getCallRecordings).mockResolvedValue([
+      rec({ callrecording: "first-rec", call_id: "first", when: at(T, 0) }),
+      rec({ callrecording: "redial-rec", call_id: "redial", when: at(T, 3660) }),
+    ]);
+    expect(await pullCallRecording(call.id)).toMatchObject({
+      status: "attached",
+      recordingUrl: recordingRef(LINE, "redial-rec"),
+    });
+  });
+
+  it("un entrant, inscrit au registre sous le compte principal : attribué par le DID", async () => {
+    const luc = await lineUser({ didNumber: "+14189065924" });
+    const call = await makeCall(luc.id, {
+      direction: "inbound",
+      fromNumber: CLIENT_NUMBER,
+      toNumber: "+14189065924",
+    });
+    vi.mocked(getCdr).mockResolvedValue([
+      cdr({
+        uniqueid: "in-1",
+        account: "551013",
+        callerid: "4185551234",
+        destination: "4189065924",
+      }),
+    ]);
+    vi.mocked(getCallRecordings).mockResolvedValue([
+      rec({ callrecording: "in-rec", call_id: "in-1", destination: "551013_luc", when: at(T, 3600) }),
+    ]);
+
+    expect(await pullCallRecording(call.id)).toMatchObject({
+      status: "attached",
+      recordingUrl: recordingRef(LINE, "in-rec"),
+    });
+  });
+
+  it("le registre en panne n'empêche pas de chercher : horaire et numéro, comme avant", async () => {
+    const luc = await lineUser();
+    const call = await makeCall(luc.id);
+    vi.mocked(getCdr).mockRejectedValue(new VoipMsError("timeout", "voip.ms: aucune réponse"));
+    vi.mocked(getCallRecordings).mockResolvedValue([rec({ callrecording: "t", when: at(T, 20) })]);
+
+    const out = await pullCallRecording(call.id);
+    expect(out).toMatchObject({
+      status: "attached",
+      recordingUrl: recordingRef(LINE, "t"),
+      diag: { matchedBy: "time", cdrFound: false, cdrError: "voip.ms: aucune réponse" },
+    });
+    expect(await providerCallIdOf(call.id)).toBeNull();
+  });
+
+  it("retrouvé au registre sans enregistrement encore : l'uniqueid est gardé pour la prochaine fois", async () => {
+    const luc = await lineUser();
+    const call = await makeCall(luc.id);
+    vi.mocked(getCdr).mockResolvedValue([cdr({ uniqueid: "later" })]);
+
+    expect(await pullCallRecording(call.id)).toMatchObject({
+      status: "not_found",
+      reason: "pending",
+      diag: { cdrFound: true },
+    });
+    expect(await providerCallIdOf(call.id)).toBe("later");
+  });
+
+  it("un uniqueid déjà porté par un autre appel du journal ne se reprend pas", async () => {
+    const luc = await lineUser();
+    await makeCall(luc.id, { startedAt: at(T, 10), providerCallId: "owned" });
+    const call = await makeCall(luc.id);
+    vi.mocked(getCdr).mockResolvedValue([cdr({ uniqueid: "owned", when: at(T, 10) })]);
+
+    await pullCallRecording(call.id);
+    expect(await providerCallIdOf(call.id)).toBeNull();
   });
 });
 
@@ -359,9 +569,29 @@ describe("la route", () => {
 
     const res = await post(call.id);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ status: "not_found" });
+    expect(await res.json()).toEqual({ status: "not_found", reason: "pending" });
     const [log] = await testDb.select().from(auditLogs);
-    expect((log.detail as { status: string }).status).toBe("not_found");
+    expect(log.detail).toMatchObject({
+      status: "not_found",
+      reason: "pending",
+      voipms: { recordingsOnLine: 0, cdrFound: false },
+    });
+  });
+
+  it("des enregistrements, mais pas le sien : la raison le dit, et l'audit garde les NOMS de champs", async () => {
+    const call = await makeCall(luc.id);
+    vi.mocked(getCallRecordings).mockResolvedValue([rec({ when: at(T, 900) })]);
+
+    const res = await post(call.id);
+    expect(await res.json()).toEqual({ status: "not_found", reason: "unmatched" });
+    const [log] = await testDb.select().from(auditLogs);
+    const detail = log.detail as { voipms: { recordingFields: string[]; nearestGapSec: number } };
+    expect(detail.voipms.recordingFields).toEqual(
+      expect.arrayContaining(["callrecording", "call_id", "datetime", "destination"]),
+    );
+    expect(detail.voipms.nearestGapSec).toBe(900);
+    // Des noms, jamais des valeurs.
+    expect(JSON.stringify(log.detail)).not.toContain("4185551234");
   });
 
   it("voip.ms en panne : 502", async () => {

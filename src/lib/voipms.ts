@@ -507,7 +507,35 @@ const EMPTY_RECORDING_STATUSES = new Set([
 ]);
 
 /**
- * Enregistrements d'appels d'UN sous-compte.
+ * Taille d'une page de `getCallRecordings`. L'API pagine (`start`, `length`)
+ * et ne dit nulle part combien elle renvoie quand on ne précise rien : sans
+ * ces deux paramètres, une ligne chargée pouvait perdre la fin de sa journée
+ * sans que rien ne le signale.
+ */
+const RECORDINGS_PAGE = 200;
+/** Garde-fou : une ligne, une plage — jamais plus de pages que ça. */
+const RECORDINGS_MAX_PAGES = 25;
+
+async function recordingsPage(
+  account: string,
+  dateFrom: string,
+  dateTo: string,
+  page?: { start: number; length: number },
+): Promise<VoipMsRecording[]> {
+  try {
+    const r = await voipms<{ call_recordings?: VoipMsRecording[]; recordings?: VoipMsRecording[] }>(
+      "getCallRecordings",
+      { account, date_from: dateFrom, date_to: dateTo, ...page },
+    );
+    return r.call_recordings ?? r.recordings ?? [];
+  } catch (err) {
+    if (err instanceof VoipMsError && EMPTY_RECORDING_STATUSES.has(err.status)) return [];
+    throw err;
+  }
+}
+
+/**
+ * Enregistrements d'appels d'UN sous-compte, toutes pages confondues.
  *
  * `account` est OBLIGATOIRE : sans lui l'API répond « missing_account » et la
  * synchronisation n'attachait jamais rien (constaté en production le
@@ -520,16 +548,36 @@ export async function getCallRecordings(
   dateFrom: string,
   dateTo: string,
 ): Promise<VoipMsRecording[]> {
-  try {
-    const r = await voipms<{ call_recordings?: VoipMsRecording[]; recordings?: VoipMsRecording[] }>(
-      "getCallRecordings",
-      { account, date_from: dateFrom, date_to: dateTo },
-    );
-    return r.call_recordings ?? r.recordings ?? [];
-  } catch (err) {
-    if (err instanceof VoipMsError && EMPTY_RECORDING_STATUSES.has(err.status)) return [];
-    throw err;
+  const all: VoipMsRecording[] = [];
+  const seen = new Set<string>();
+  for (let n = 0; n < RECORDINGS_MAX_PAGES; n += 1) {
+    let list: VoipMsRecording[];
+    try {
+      list = await recordingsPage(account, dateFrom, dateTo, {
+        start: n * RECORDINGS_PAGE,
+        length: RECORDINGS_PAGE,
+      });
+    } catch (err) {
+      // Une API qui refuserait la pagination (« invalid_length »…) : on
+      // retombe sur la demande d'avant, sans pages, plutôt que de ne rien rendre.
+      if (n === 0 && err instanceof VoipMsError && err.status.startsWith("invalid_")) {
+        return recordingsPage(account, dateFrom, dateTo);
+      }
+      throw err;
+    }
+    let fresh = 0;
+    for (const rec of list) {
+      const key = typeof rec.callrecording === "string" ? rec.callrecording : JSON.stringify(rec);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      all.push(rec);
+      fresh += 1;
+    }
+    // Page incomplète : c'était la dernière. Rien de neuf : voip.ms ignore
+    // `start` et renverrait toujours la même page.
+    if (list.length < RECORDINGS_PAGE || fresh === 0) break;
   }
+  return all;
 }
 
 /**

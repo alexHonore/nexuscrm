@@ -6,11 +6,12 @@
  * être retéléchargé à l'écoute, et la référence stockée dans
  * `calls.recording_url` doit survivre à l'aller-retour.
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
 const {
+  getCallRecordings,
   recordingRef,
   parseRecordingRef,
   extractRecordingAudio,
@@ -77,6 +78,71 @@ describe("type MIME de l'audio servi", () => {
 
   it("ne prétend rien sur un contenu inconnu", () => {
     expect(sniff([0x00, 0x01, 0x02, 0x03])).toBe("application/octet-stream");
+  });
+});
+
+describe("getCallRecordings — toutes les pages", () => {
+  beforeEach(() => {
+    vi.stubEnv("VOIPMS_API_USERNAME", "api@nexus.test");
+    vi.stubEnv("VOIP_MS_API_PASSWORD", "secret");
+    vi.stubEnv("VOIPMS_API_PROXY_URL", "");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  /** Simule voip.ms ; rend les paramètres de chaque demande reçue. */
+  function serve(answer: (params: URLSearchParams) => unknown): URLSearchParams[] {
+    const seen: URLSearchParams[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: unknown) => {
+        const params = new URL(String(input)).searchParams;
+        seen.push(params);
+        return new Response(JSON.stringify(answer(params)));
+      }),
+    );
+    return seen;
+  }
+  const recs = (from: number, n: number) =>
+    Array.from({ length: n }, (_, i) => ({ callrecording: String(from + i), account: "a" }));
+
+  it("demande page après page, jusqu'à une page incomplète", async () => {
+    const seen = serve((p) => ({
+      status: "success",
+      recordings: p.get("start") === "0" ? recs(0, 200) : recs(200, 3),
+    }));
+
+    const out = await getCallRecordings("a", "2026-09-13", "2026-09-13");
+    expect(out).toHaveLength(203);
+    expect(seen.map((p) => [p.get("start"), p.get("length")])).toEqual([
+      ["0", "200"],
+      ["200", "200"],
+    ]);
+  });
+
+  it("s'arrête quand voip.ms ignore `start` et renvoie toujours la même page", async () => {
+    const seen = serve(() => ({ status: "success", recordings: recs(0, 200) }));
+
+    expect(await getCallRecordings("a", "2026-09-13", "2026-09-13")).toHaveLength(200);
+    expect(seen).toHaveLength(2);
+  });
+
+  it("retombe sur la demande sans pages si voip.ms refuse la pagination", async () => {
+    const seen = serve((p) =>
+      p.has("length")
+        ? { status: "invalid_length" }
+        : { status: "success", call_recordings: recs(0, 5) },
+    );
+
+    expect(await getCallRecordings("a", "2026-09-13", "2026-09-13")).toHaveLength(5);
+    expect(seen[1].has("start")).toBe(false);
+  });
+
+  it("« aucun enregistrement » est une liste vide, pas une panne", async () => {
+    serve(() => ({ status: "no_recordings" }));
+    expect(await getCallRecordings("a", "2026-09-13", "2026-09-13")).toEqual([]);
   });
 });
 

@@ -8,8 +8,10 @@ import { keepAudio } from "@/lib/recordings/audio";
 import { reachableCall } from "@/lib/recordings/library";
 
 export const dynamic = "force-dynamic";
-// Une seule question à voip.ms, mais son API peut mettre plus d'une minute.
-export const maxDuration = 120;
+// Deux questions à voip.ms en même temps, dont chacune peut prendre plus
+// d'une minute, et une liste d'enregistrements qui peut venir en plusieurs
+// pages : la même marge que la synchro.
+export const maxDuration = 300;
 
 /**
  * POST /api/admin/calls/[id]/recording — va chercher chez voip.ms
@@ -47,6 +49,13 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
     detail: {
       status: outcome.status,
       clientId: call.clientId,
+      ...(outcome.status === "not_found" ? { reason: outcome.reason } : {}),
+      // Ce que voip.ms a montré — des nombres et des NOMS de champs, jamais
+      // une valeur : de quoi trancher entre « il n'avait rien » et « on n'a
+      // pas su rapprocher », sans avoir à rejouer la demande.
+      ...((outcome.status === "attached" || outcome.status === "not_found") && outcome.diag
+        ? { voipms: outcome.diag }
+        : {}),
       ...(outcome.status === "upstream_error" ? { message: outcome.message } : {}),
     },
   });
@@ -63,6 +72,9 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
   // recharge et la reçoit par le même chemin que les autres lignes.
   if (outcome.status === "upstream_error") {
     return NextResponse.json({ status: outcome.status }, { status: 502 });
+  }
+  if (outcome.status === "not_found") {
+    return NextResponse.json({ status: outcome.status, reason: outcome.reason });
   }
   return NextResponse.json({ status: outcome.status });
 }

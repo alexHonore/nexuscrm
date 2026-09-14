@@ -10,6 +10,18 @@ import { Button } from "@/components/ui/button";
 type PullStatus = "attached" | "already" | "not_found" | "no_line" | "upstream_error";
 
 /**
+ * « Rien de rattaché » se dit de trois façons : voip.ms n'a encore rien sur la
+ * ligne, il a des enregistrements dont aucun n'est celui de cet appel, ou
+ * l'appel n'est pas passé par lui (voir `PullNotFoundReason`).
+ */
+const NOT_FOUND_MESSAGE = {
+  pending: "callsPage.pullPending",
+  unmatched: "callsPage.pullUnmatched",
+  not_voipms: "callsPage.pullNotVoipms",
+} as const;
+type NotFoundReason = keyof typeof NOT_FOUND_MESSAGE;
+
+/**
  * « Récupérer » : l'enregistrement d'UN appel, demandé à voip.ms tout de
  * suite — pour l'appel de ce matin qu'on veut écouter maintenant, sans lancer
  * la synchronisation de toute la journée de tous les postes.
@@ -29,13 +41,17 @@ export function PullRecordingButton({ callId, compact }: { callId: string; compa
     setBusy(true);
     try {
       const res = await fetch(`/api/admin/calls/${callId}/recording`, { method: "POST" });
-      const data = (await res.json().catch(() => null)) as { status?: PullStatus } | null;
+      const data = (await res.json().catch(() => null)) as {
+        status?: PullStatus;
+        reason?: NotFoundReason;
+      } | null;
       const status = res.ok ? data?.status : undefined;
       if (status === "attached" || status === "already") {
         toast.success(t("callsPage.pullAttached"));
         router.refresh();
       } else if (status === "not_found") {
-        toast.info(t("callsPage.pullNotFound"));
+        const reason = data?.reason && data.reason in NOT_FOUND_MESSAGE ? data.reason : "pending";
+        toast.info(t(NOT_FOUND_MESSAGE[reason]));
       } else if (status === "no_line") {
         toast.warning(t("callsPage.pullNoLine"));
       } else {
