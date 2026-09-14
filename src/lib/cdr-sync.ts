@@ -6,6 +6,7 @@ import { missedCallRows } from "@/components/clients/notification-content";
 import { db } from "@/db";
 import { calls, clients, users } from "@/db/schema";
 import { runAfterResponse } from "@/lib/after-response";
+import { repairCallDuplicates } from "@/lib/cdr-duplicates";
 import { createNotifications } from "@/lib/notify";
 import { fanoutPush, type PushableRow } from "@/lib/push/fanout";
 import { normalizePhone, phoneMatchKey } from "@/lib/phone";
@@ -406,6 +407,10 @@ export type CdrSyncResult = {
     recordingsWithoutUrl: number;
     /** Jobs `call_transcript` mis en file pour les enregistrements sans note IA. */
     transcriptsQueued: number;
+    /** Appels en double fusionnés dans le bon (voir `repairCallDuplicates`). */
+    duplicatesMerged: number;
+    /** Appels rendus au compte dont le DID avait été composé. */
+    callsReassigned: number;
   };
   /**
    * Noms des champs renvoyés par voip.ms pour un enregistrement SANS URL
@@ -429,6 +434,8 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
     recordingsAttached: 0,
     recordingsWithoutUrl: 0,
     transcriptsQueued: 0,
+    duplicatesMerged: 0,
+    callsReassigned: 0,
   };
   const errors: string[] = [];
   const recordingFields = new Set<string>();
@@ -510,9 +517,17 @@ export async function syncCdrRange(dateFrom: string, dateTo: string): Promise<Cd
     const userByAccount = lines.byAccount;
     const userById = new Map(allUsers.map((u) => [u.id, u]));
 
-    // ── 3. Appels existants dans la fenêtre (index en mémoire) ──
     const windowFrom = new Date(dayStartUtc(dateFrom).getTime() - 6 * 3600_000);
     const windowTo = new Date(dayStartUtc(dateTo).getTime() + 30 * 3600_000);
+
+    // ── 2 bis. Doublons d'une ligne partagée ou d'une patte répétée ──
+    // AVANT l'index en mémoire : les appels réparés y entrent sous leur vrai
+    // détenteur, avec l'uniqueid et l'enregistrement que le doublon portait.
+    const repaired = await repairCallDuplicates(tx, allUsers, windowFrom, windowTo);
+    counts.duplicatesMerged = repaired.merged;
+    counts.callsReassigned = repaired.reassigned;
+
+    // ── 3. Appels existants dans la fenêtre (index en mémoire) ──
     const existing: CallRowLite[] = await tx
       .select({
         id: calls.id,

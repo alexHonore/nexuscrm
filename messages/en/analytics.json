@@ -93,6 +93,8 @@
     "syncRunning": "Syncing…",
     "syncDone": "{cdr, plural, =0 {No voip.ms calls} one {# voip.ms call} other {# voip.ms calls}} — {attached, plural, =0 {no new recordings} one {# new recording} other {# new recordings}}.",
     "syncFailed": "voip.ms sync failed. Please try again shortly.",
+    "syncMerged": "{count, plural, one {# duplicate call merged into the right one} other {# duplicate calls merged into the right ones}} — shared line or repeated call leg.",
+    "syncReassigned": "{count, plural, one {# incoming call given back to the person whose number was dialed} other {# incoming calls given back to the person whose number was dialed}}.",
     "pullRecording": "Fetch",
     "pullRunning": "Looking…",
     "pullTitle": "Ask voip.ms for this call's recording",

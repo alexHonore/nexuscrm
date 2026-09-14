@@ -25,6 +25,8 @@ export function SyncCallsButton() {
         ok?: boolean;
         recordingsAttached?: number;
         cdrRows?: number;
+        duplicatesMerged?: number;
+        callsReassigned?: number;
         errors?: string[];
       } | null;
       if (!res.ok || !data) {
@@ -37,6 +39,14 @@ export function SyncCallsButton() {
           attached: data.recordingsAttached ?? 0,
         }),
       );
+      // La synchro répare en passant les doublons qu'elle trouve : le dire,
+      // sinon des lignes disparaissent du journal sans explication.
+      if ((data.duplicatesMerged ?? 0) > 0) {
+        toast.info(t("callsPage.syncMerged", { count: data.duplicatesMerged ?? 0 }));
+      }
+      if ((data.callsReassigned ?? 0) > 0) {
+        toast.info(t("callsPage.syncReassigned", { count: data.callsReassigned ?? 0 }));
+      }
       if (data.errors && data.errors.length > 0) {
         toast.warning(data.errors[0]);
       }

@@ -7,8 +7,10 @@
  */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { formatInTimeZone } from "date-fns-tz";
+import { eq } from "drizzle-orm";
 import { closeDb, makeClient, makeUser, resetDb, testDb } from "./helpers/db";
 import { calls, notifications } from "@/db/schema";
+import { callStars } from "@/db/schema-library";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/voipms", async (importOriginal) => {
@@ -166,6 +168,141 @@ describe("synchronisation CDR", () => {
     const second = await runSync(dayStr(at), dayStr(new Date()));
     expect(second.counts.inserted).toBe(0);
     expect(await testDb.select().from(calls)).toHaveLength(1);
+  });
+
+  // ── Réparation des doublons déjà en base — pour n'importe quels comptes ──
+
+  /** Une ligne telle que la synchro la crée depuis le registre : à la seconde pile. */
+  async function registryCall(userId: string, at: Date, over: Partial<typeof calls.$inferInsert> = {}) {
+    const startedAt = new Date(Math.floor(at.getTime() / 1000) * 1000);
+    const durationSec = over.durationSec ?? 1011;
+    const [row] = await testDb
+      .insert(calls)
+      .values({
+        userId,
+        direction: "outbound",
+        fromNumber: "+14189065924",
+        toNumber: "+15819905955",
+        startedAt,
+        answeredAt: startedAt,
+        endedAt: new Date(startedAt.getTime() + durationSec * 1000),
+        durationSec,
+        provider: "voipms",
+        providerCallId: `reg-${Math.random().toString(36).slice(2)}`,
+        ...over,
+      })
+      .returning();
+    return row;
+  }
+  /** Un appel du webphone : l'heure du navigateur, avec ses millisecondes. */
+  async function webphoneCall(userId: string, at: Date, over: Partial<typeof calls.$inferInsert> = {}) {
+    const startedAt = new Date(Math.floor(at.getTime() / 1000) * 1000 + 437);
+    const [row] = await testDb
+      .insert(calls)
+      .values({
+        userId,
+        direction: "outbound",
+        fromNumber: ALEX_DID,
+        toNumber: "+15819905955",
+        startedAt,
+        answeredAt: new Date(startedAt.getTime() + 5000),
+        durationSec: 1010,
+        provider: "voipms",
+        ...over,
+      })
+      .returning();
+    return row;
+  }
+  async function sharedLine() {
+    const alex = await makeUser({
+      name: "Alex",
+      sipUsername: SUB_ACCOUNT,
+      didNumber: ALEX_DID,
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+    });
+    const mikey = await makeUser({
+      name: "mikey",
+      sipUsername: SUB_ACCOUNT,
+      didNumber: DID,
+      createdAt: new Date("2026-09-06T00:00:00Z"),
+    });
+    return { alex, mikey };
+  }
+
+  it("RÉPARE : les doublons nés sous l'autre compte d'une ligne partagée rejoignent l'appel du webphone", async () => {
+    const { alex, mikey } = await sharedLine();
+    const at = hourAgo();
+    const mine = await webphoneCall(alex.id, at);
+    const withRecording = await registryCall(mikey.id, at, {
+      providerCallId: "leg-a",
+      recordingUrl: "voipms:100000_alex:r1",
+    });
+    await registryCall(mikey.id, new Date(at.getTime() + 1000), { providerCallId: "leg-b" });
+    // Marqué par quelqu'un avant la réparation : l'étoile suit.
+    await testDb.insert(callStars).values({ callId: withRecording.id, userId: alex.id });
+
+    const out = await runSync(dayStr(at), dayStr(new Date()));
+    expect(out.counts.duplicatesMerged).toBe(2);
+
+    const rows = await testDb.select().from(calls);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: mine.id,
+      userId: alex.id,
+      providerCallId: "leg-a",
+      recordingUrl: "voipms:100000_alex:r1",
+      durationSec: 1011,
+    });
+    const stars = await testDb.select().from(callStars);
+    expect(stars.map((s) => s.callId)).toEqual([mine.id]);
+  });
+
+  it("RÉPARE : un appel reçu, inscrit sous l'autre compte comme un sortant vers son DID, lui revient", async () => {
+    const { alex, mikey } = await sharedLine();
+    const at = hourAgo();
+    const row = await registryCall(mikey.id, at, {
+      fromNumber: "+14185551234",
+      toNumber: ALEX_DID,
+      durationSec: 60,
+    });
+
+    const out = await runSync(dayStr(at), dayStr(new Date()));
+    expect(out.counts.callsReassigned).toBe(1);
+    const [after] = await testDb.select().from(calls).where(eq(calls.id, row.id));
+    expect(after).toMatchObject({ userId: alex.id, direction: "inbound" });
+  });
+
+  it("RÉPARE : deux pattes d'un même appel inscrites comme deux appels n'en font plus qu'un", async () => {
+    const me = await makeLineUser();
+    const at = hourAgo();
+    await registryCall(me.id, at);
+    const keeper = await registryCall(me.id, new Date(at.getTime() + 1000), {
+      recordingUrl: "voipms:100000_alex:r2",
+    });
+
+    const out = await runSync(dayStr(at), dayStr(new Date()));
+    expect(out.counts.duplicatesMerged).toBe(1);
+    const rows = await testDb.select().from(calls);
+    expect(rows.map((r) => r.id)).toEqual([keeper.id]);
+  });
+
+  it("ne touche ni à ce qu'une personne a annoté, ni aux comptes qui ne partagent pas de ligne, ni à un rappel", async () => {
+    const { alex, mikey } = await sharedLine();
+    const other = await makeUser({ name: "Sam", sipUsername: "100000_sam", didNumber: "+14180009999" });
+    const at = hourAgo();
+    // Ligne partagée, mais le « doublon » porte une disposition : quelqu'un l'a traité.
+    await webphoneCall(alex.id, at);
+    await registryCall(mikey.id, at, { disposition: "interested" });
+    // Même numéro, même minute, mais sur une AUTRE ligne : deux vrais appels.
+    await registryCall(other.id, at, { fromNumber: "+14180009999" });
+    // Deux appels de Sam au même numéro, le second après la fin du premier.
+    await registryCall(other.id, new Date(at.getTime() + 3600_000 / 2), { durationSec: 20 });
+    await registryCall(other.id, new Date(at.getTime() + 3600_000 / 2 + 60_000), { durationSec: 20 });
+
+    const out = await runSync(dayStr(at), dayStr(new Date()));
+    expect(out.counts.duplicatesMerged).toBe(0);
+    expect(out.counts.callsReassigned).toBe(0);
+    expect(await testDb.select().from(calls)).toHaveLength(5);
   });
 
   it("un rappel du même numéro, après la fin du premier appel, reste un appel à part", async () => {
