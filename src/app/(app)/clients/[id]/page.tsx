@@ -571,6 +571,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
                   clientId={client.id}
                   canComment={grants.comment}
                   comments={history.comments}
+                  viewerId={actor.user.id}
                 />
                 {/* À quoi cette personne est rattachée — visible AVANT le fil :
                     comprendre pourquoi des SMS partent précède leur lecture. */}

@@ -171,7 +171,11 @@
     "posted": "Commentaire publié",
     "empty": "Aucun commentaire pour l'instant.",
     "you": "Vous",
-    "internalOnly": "Note interne — visible par l'équipe seulement, jamais envoyée au client."
+    "internalOnly": "Note interne — visible par l'équipe seulement, jamais envoyée au client.",
+    "mentionHint": "Mentionner un collègue",
+    "mentionNone": "Aucun collègue ne correspond à « {query} ».",
+    "mentionKeys": "↑ ↓ pour choisir · Entrée pour insérer · Échap pour fermer",
+    "mentionButton": "Mentionner"
   },
   "history": {
     "title": "Historique",

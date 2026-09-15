@@ -171,7 +171,11 @@
     "posted": "Comment posted",
     "empty": "No comments yet.",
     "you": "You",
-    "internalOnly": "Internal note — visible to the team only, never sent to the client."
+    "internalOnly": "Internal note — visible to the team only, never sent to the client.",
+    "mentionHint": "Mention a teammate",
+    "mentionNone": "No teammate matches “{query}”.",
+    "mentionKeys": "↑ ↓ to choose · Enter to insert · Esc to close",
+    "mentionButton": "Mention"
   },
   "history": {
     "title": "History",
