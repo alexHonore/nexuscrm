@@ -6,6 +6,7 @@ import { sendSmsPayloadSchema, type JobOutcome, type ScheduledJob } from "@/lib/
 import { TwilioSendError } from "@/lib/sms/provider";
 import { isWithinSendWindow, nextSendTime } from "@/lib/sms/quiet-hours";
 import { resolveQuietHours } from "@/lib/assistants/quiet-hours";
+import { looksLikeMachineOutput } from "@/lib/model-output";
 import { analyzeSms } from "@/lib/sms/segments";
 import type { SendResult } from "@/lib/sms/types";
 import { getSmsProvider } from "@/lib/sms-server";
@@ -82,6 +83,43 @@ export async function handleSendSms(
     if ((await outboundCountToday(number.id, now())) >= number.dailyCap) {
       return { outcome: "reschedule", runAt: nextSendTime(nextTorontoDayStart(now()), quietHours) };
     }
+  }
+
+  /**
+   * La DERNIÈRE porte avant Twilio.
+   *
+   * Elle ne juge pas le ton — elle refuse ce qui n'est pas un message : un
+   * objet JSON, une balise, un fragment sans une seule lettre. Elle est ici et
+   * pas seulement dans le moteur d'agent parce que TOUS les chemins d'envoi
+   * passent par ce job (ouverture, barreau de campagne, agent, rejeu) : une
+   * porte posée sur un seul d'entre eux laisse les autres ouverts, et c'est
+   * exactement comme ça qu'une cliente a reçu « { } » le 2026-08-25.
+   *
+   * Seulement pour ce qu'une MACHINE a écrit : un téléphoniste qui tape son
+   * message a décidé, lui — même raison que le plafond du jour ci-dessus.
+   */
+  if (payload.aiGenerated && looksLikeMachineOutput(payload.body)) {
+    await db.insert(messages).values({
+      conversationId: payload.conversationId,
+      direction: "out",
+      body: payload.body,
+      jobId: job.id,
+      status: "skipped",
+      skipReason: "not_readable",
+      source: payload.source,
+      aiGenerated: payload.aiGenerated,
+      sentById: payload.sentById,
+      assistantId: payload.assistantId,
+      assistantVersion: payload.assistantVersion,
+      model: payload.model,
+    });
+    // Le fil remonte dans « à traiter » : un humain voit ce que la machine a
+    // voulu envoyer, au lieu d'un silence que personne n'explique.
+    await db
+      .update(conversations)
+      .set({ needsAttention: true, attentionReason: "not_readable" })
+      .where(eq(conversations.id, payload.conversationId));
+    return { outcome: "skipped", reason: "not_readable" };
   }
 
   const analysis = analyzeSms(payload.body);

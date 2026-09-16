@@ -26,30 +26,17 @@
  * (`runtime.ts`) et le bac à sable (`sandbox.ts`) appellent la MÊME fonction,
  * pour que l'aperçu de l'administrateur montre toujours le texte qui partirait.
  */
-
-/** Une balise ouvrante en tête : <thinking>, <tool_call>, <|channel|>… */
-const MARKUP_HEAD = /^<[|/a-z!]/i;
+import { isHumanReadable } from "@/lib/model-output";
 
 /**
  * Ce paragraphe peut-il être un MESSAGE adressé à une personne ?
  *
- * Volontairement étroit : on écarte ce qu'un humain n'écrit jamais dans un
- * texto — un objet ou un tableau JSON, un bloc de code, une balise, un
- * fragment sans une seule lettre. Tout le reste passe. Une règle plus fine
- * (« ça ressemble à une phrase ») refuserait tôt ou tard un vrai message, et
- * un vrai message refusé est une escalade de plus pour l'équipe.
+ * La règle elle-même vit dans `@/lib/model-output` : c'est la MÊME porte que
+ * celle des notes sur les fiches. Deux définitions du « bruit de machine »
+ * finiraient par diverger, et c'est un chemin sans porte qui a livré « { } ».
  */
 export function isMessageLike(paragraph: string): boolean {
-  const text = paragraph.trim();
-  if (text === "") return false;
-  // Sans une seule lettre, il n'y a rien à lire : « { } », « --- », « 1. ».
-  if (!/\p{L}/u.test(text)) return false;
-  // Arguments d'outil, brouillon structuré, objet recraché dans le texte —
-  // qu'il soit refermé ou non : un message ne commence pas par une accolade.
-  if (text.startsWith("{") || text.startsWith("[")) return false;
-  if (text.startsWith("```")) return false;
-  if (MARKUP_HEAD.test(text)) return false;
-  return true;
+  return isHumanReadable(paragraph);
 }
 
 export interface OutboundDraft {

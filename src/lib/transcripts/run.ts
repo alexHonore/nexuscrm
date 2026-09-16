@@ -4,6 +4,7 @@ import { comments } from "@/db/schema";
 import { callTranscripts } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
 import type { LLMResult } from "@/lib/llm/types";
+import { looksLikeMachineOutput } from "@/lib/model-output";
 import { getSetting, type TranscriptsSettings } from "@/lib/settings";
 import {
   buildNoteBody,
@@ -246,6 +247,21 @@ export async function runCallTranscript(
   }
 
   const summary = output.summary.slice(0, SUMMARY_MAX_CHARS);
+  // La PORTE, juste avant d'écrire sur la fiche d'un client. Le lecteur ne
+  // rend déjà plus de note qui ressemble à du JSON ; cette ligne dit que même
+  // si un jour il le refaisait, la fiche ne le verrait pas. C'est la frontière
+  // d'écriture qui tient l'invariant, pas la fonction qui la précède.
+  if (looksLikeMachineOutput(summary)) {
+    await recordRow({
+      callId,
+      clientId: clientId,
+      status: "failed",
+      reason: "malformed_output",
+      transcript: cfg.keepTranscript ? output.transcript : null,
+      billed: { model: cfg.model, result },
+    });
+    return { status: "failed", reason: "malformed_output" };
+  }
   const body = buildNoteBody({ language: cfg.language, call: facts, summary });
 
   const transcriptId = await db.transaction(async (tx) => {

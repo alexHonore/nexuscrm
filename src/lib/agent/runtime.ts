@@ -28,6 +28,7 @@ import { notifyCategoryChanged } from "@/lib/campaigns-server/match";
 import { LEFT_AUDIENCE_REASON } from "@/lib/campaigns/enrollment-status";
 import { resolveClassification } from "@/lib/classification-server";
 import { pickOutboundDraft } from "@/lib/agent/draft";
+import { looksLikeMachineOutput } from "@/lib/model-output";
 import { resolvedRulesFor } from "@/lib/assistants/service";
 import { campaignRowToConfig } from "@/lib/campaigns/schema";
 import { getInternalBookingProvider } from "@/lib/booking/internal";
@@ -644,7 +645,13 @@ async function executeTools(input: {
           clientId: input.clientId,
           assignedToId: input.clientAssignedToId,
           when,
-          note: args.note ?? "Rappel demandé par SMS (assistant)",
+          // MÊME porte : cette note est lue par un téléphoniste dans sa liste
+          // de rappels. Un fragment de JSON y serait aussi illisible que sur
+          // une fiche — on retombe sur la phrase par défaut.
+          note:
+            args.note && !looksLikeMachineOutput(args.note)
+              ? args.note
+              : "Rappel demandé par SMS (assistant)",
         });
         if (!created) {
           input.effects.push({ name, ok: false, detail: "no_assignee" });
@@ -661,6 +668,15 @@ async function executeTools(input: {
       }
       case "add_client_comment": {
         const args = parsed.args as { text: string };
+        // La PORTE avant d'écrire sur la fiche. Un modèle qui recrache des
+        // arguments d'outil dans un champ de texte n'est pas une hypothèse :
+        // c'est ce qui a livré « { } » à une cliente le 2026-08-25. On refuse
+        // l'outil et on le DIT au modèle plutôt que de noter du bruit.
+        if (looksLikeMachineOutput(args.text)) {
+          input.effects.push({ name, ok: false, detail: "not_readable" });
+          record("add_client_comment : le texte fourni n'est pas une note lisible — récris-la en une phrase.");
+          continue;
+        }
         // Une note interne a un AUTEUR : la colonne l'exige. On l'attribue à
         // l'assigné de la fiche (sinon un administrateur), et le corps SIGNE
         // l'assistant — l'équipe ne doit jamais croire qu'un humain l'a écrite.
