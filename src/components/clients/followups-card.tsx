@@ -15,6 +15,12 @@ import {
   type ActionResult,
 } from "@/app/(app)/clients/actions";
 import { Button } from "@/components/ui/button";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarGroup,
+  AvatarGroupCount,
+} from "@/components/ui/avatar";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -42,9 +48,28 @@ export type FollowupData = {
   doneAt: string | null; // ISO
   /** Computed server-side at render time. */
   overdue: boolean;
-  /** À qui la tâche revient. `null` seulement si le compte a disparu. */
-  assignee: FollowupPerson | null;
+  /**
+   * Qui porte ce suivi — un, ou plusieurs. C'est UNE tâche : elle se déplace et
+   * se termine d'un geste pour tout le monde. En base elle s'écrit une ligne
+   * par personne (le tableau de bord et les rappels ne savent lire que ça) ;
+   * la fiche, elle, les recolle (`groupFollowups`).
+   */
+  assignees: FollowupPerson[];
 };
+
+/** Deux lettres pour une pastille — même règle que le fil de commentaires. */
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .map((part) => part[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+/** Pastilles au-delà desquelles on compte au lieu d'empiler. */
+const FACES_SHOWN = 4;
 
 /** Préfixe des lignes optimistes (pas encore d'id serveur). */
 const DRAFT_PREFIX = "draft:";
@@ -168,12 +193,18 @@ export function FollowupsCard({
     const zoned = toZonedTime(new Date(f.dueAt), APP_TZ);
     setDate(format(zoned, "yyyy-MM-dd"));
     setTime(format(zoned, "HH:mm"));
-    // Seul le porteur de CETTE ligne est coché : les lignes voisines d'un suivi
-    // partagé ne sont pas les siennes à décocher. Cocher quelqu'un de plus lui
-    // ouvre la sienne ; décocher ne referme jamais celle d'un autre.
-    setPicked([f.assignee?.id ?? currentUserId]);
+    // La liste cochée EST celle des porteurs : cocher quelqu'un l'ajoute au
+    // suivi, le décocher l'en retire. Une case qui ne ferait qu'ajouter
+    // mentirait à moitié.
+    setPicked(f.assignees.map((person) => person.id));
     setEditId(f.id);
   };
+
+  /** Les personnes cochées, triées comme le serveur les rendra. */
+  const pickedPeople = (): FollowupPerson[] =>
+    candidates
+      .filter((person) => picked.includes(person.id))
+      .sort((a, b) => a.name.localeCompare(b.name, "fr"));
 
   const togglePicked = (id: string, checked: boolean) =>
     setPicked((current) =>
@@ -186,17 +217,16 @@ export function FollowupsCard({
   const submitCreate = () => {
     if (picked.length === 0) return;
     const dueAt = draftDueIso(date, time);
-    const overdue = Date.parse(dueAt) < Date.now();
-    // Une ligne par destinataire, à l'écran comme en base : c'est exactement ce
-    // que le serveur va écrire, et chacun terminera la sienne.
-    const drafts: FollowupData[] = picked.map((id, i) => ({
-      id: `${DRAFT_PREFIX}${Date.now()}:${i}`,
+    // UN suivi, porté par les personnes cochées — c'est ce que la fiche
+    // montrera une fois le serveur passé.
+    const draft: FollowupData = {
+      id: `${DRAFT_PREFIX}${Date.now()}`,
       dueAt,
       note: note.trim() || null,
       doneAt: null,
-      overdue,
-      assignee: candidates.find((c) => c.id === id) ?? null,
-    }));
+      overdue: Date.parse(dueAt) < Date.now(),
+      assignees: pickedPeople(),
+    };
     const payload = {
       clientId,
       date,
@@ -206,7 +236,7 @@ export function FollowupsCard({
     };
     setCreateOpen(false);
     mutate(
-      (current) => [...current, ...drafts],
+      (current) => [...current, draft],
       () => createFollowupAction(payload),
       t("followups.created"),
     );
@@ -215,24 +245,8 @@ export function FollowupsCard({
   const submitEdit = () => {
     if (!editId || picked.length === 0) return;
     const id = editId;
-    const current = rows.find((f) => f.id === id) ?? null;
-    const held = current?.assignee?.id ?? currentUserId;
     const dueAt = draftDueIso(date, time);
-    const overdue = Date.parse(dueAt) < Date.now();
-    // La même règle que le serveur, pour que l'affichage optimiste montre
-    // exactement ce qui va s'écrire : la ligne reste à son porteur s'il est
-    // encore coché, sinon elle part au premier, et le reste ouvre des lignes.
-    const keeper = picked.includes(held) ? held : picked[0];
-    const extras = picked.filter((pid) => pid !== keeper);
-    const keeperPerson = candidates.find((c) => c.id === keeper) ?? current?.assignee ?? null;
-    const drafts: FollowupData[] = extras.map((pid, i) => ({
-      id: `${DRAFT_PREFIX}${Date.now()}:${i}`,
-      dueAt,
-      note: current?.note ?? null,
-      doneAt: null,
-      overdue,
-      assignee: candidates.find((c) => c.id === pid) ?? null,
-    }));
+    const people = pickedPeople();
     const payload = {
       followupId: id,
       date,
@@ -241,25 +255,19 @@ export function FollowupsCard({
     };
     setEditId(null);
     mutate(
-      (list) => [
-        ...list.map((f) =>
+      (list) =>
+        list.map((f) =>
           f.id === id
-            ? { ...f, dueAt, overdue: !f.doneAt && overdue, assignee: keeperPerson }
+            ? {
+                ...f,
+                dueAt,
+                overdue: !f.doneAt && Date.parse(dueAt) < Date.now(),
+                ...(shared ? { assignees: people } : {}),
+              }
             : f,
         ),
-        ...drafts,
-      ],
       () => updateFollowupAction(payload),
-      // Trois issues, trois phrases : des lignes se sont ouvertes chez des
-      // collègues, ou la ligne a changé de main, ou seule l'heure a bougé.
-      // « Suivi confié à 1 personne » ne disait ni laquelle ni quoi.
-      extras.length > 0
-        ? t("followups.added", { count: extras.length })
-        : keeper === held
-          ? t("followups.updated")
-          : keeper === currentUserId
-            ? t("followups.takenBack")
-            : t("followups.handedOver", { name: nameOf(keeperPerson) }),
+      t("followups.updated"),
     );
   };
 
@@ -269,6 +277,54 @@ export function FollowupsCard({
       (list) => list.map((f) => (f.id === id ? { ...f, doneAt, overdue: false } : f)),
       () => completeFollowupAction(id),
       t("followups.completed"),
+    );
+  };
+
+  /**
+   * Les porteurs d'un suivi, en pastilles.
+   *
+   * Trois noms écrits en toutes lettres sous chaque échéance noyaient la carte
+   * — c'est ce qui rendait un suivi partagé illisible. Les initiales tiennent
+   * sur une ligne, quel que soit le nombre de personnes.
+   *
+   * Le dessin ne porte pas le sens tout seul : la phrase entière (« Pour Moi,
+   * Marie Lavoie ») vit en `sr-only` et dans l'infobulle. C'est elle que lit un
+   * lecteur d'écran, et elle que l'on obtient en survolant.
+   */
+  const faces = (people: FollowupPerson[]) => {
+    const label = t("followups.forPerson", {
+      name: people.map((person) => nameOf(person)).join(", "),
+    });
+    const shown = people.slice(0, FACES_SHOWN);
+    return (
+      <span className="flex items-center gap-1.5" title={label}>
+        <span className="sr-only">{label}</span>
+        {/* Le chevauchement de la pile par défaut (8 px) est taillé pour des
+            pastilles de 32 px ; sur les nôtres, de 24, il les écrase en une
+            tache illisible. 4 px laissent lire chaque paire d'initiales. */}
+        <AvatarGroup aria-hidden className="-space-x-1">
+          {shown.map((person) => (
+            <Avatar key={person.id} size="sm">
+              <AvatarFallback className="bg-primary/10 text-[10px] font-medium text-primary">
+                {initials(person.name)}
+              </AvatarFallback>
+            </Avatar>
+          ))}
+          {people.length > shown.length ? (
+            <AvatarGroupCount className="size-6 text-[10px]">
+              +{people.length - shown.length}
+            </AvatarGroupCount>
+          ) : null}
+        </AvatarGroup>
+        {/* Seul, le nom s'écrit : une pastille isolée ne vaut pas la peine
+            d'être déchiffrée. À plusieurs, les initiales suffisent — c'est le
+            nombre et les visages qu'on lit, pas l'état civil. */}
+        {people.length === 1 ? (
+          <span className="truncate" aria-hidden>
+            {nameOf(people[0])}
+          </span>
+        ) : null}
+      </span>
     );
   };
 
@@ -366,10 +422,11 @@ export function FollowupsCard({
                 const overdue = f.overdue;
                 // Ligne optimiste : pas encore d'id serveur, actions inertes.
                 const isDraft = f.id.startsWith(DRAFT_PREFIX);
-                // À qui la tâche revient. On le tait quand il n'y a personne
-                // d'autre à qui elle pourrait revenir — une mention « Moi » sur
-                // chaque ligne d'un bureau d'une personne n'apprend rien.
-                const showsWho = shared || f.assignee?.id !== currentUserId;
+                // À qui la tâche revient. On le tait quand elle n'est qu'à soi
+                // dans un bureau d'une personne — une pastille « moi » sur
+                // chaque ligne n'apprend rien.
+                const showsWho =
+                  f.assignees.length > 1 || shared || f.assignees[0]?.id !== currentUserId;
                 return (
                   <li
                     key={f.id}
@@ -394,19 +451,9 @@ export function FollowupsCard({
                         ) : null}
                       </p>
                       {showsWho ? (
-                        <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                          {/* Le mot « Pour » disparaît de l'écran, pas de la
-                              phrase : le pictogramme le porte à l'œil, et la
-                              ligne lue à voix haute reste entière. Le NOM, lui,
-                              n'est jamais remplacé par un dessin. */}
-                          <UserRoundIcon className="size-3 shrink-0" aria-hidden />
-                          <span className="sr-only">
-                            {t("followups.forPerson", { name: nameOf(f.assignee) })}
-                          </span>
-                          <span className="truncate" aria-hidden>
-                            {nameOf(f.assignee)}
-                          </span>
-                        </p>
+                        <div className="mt-0.5 text-xs text-muted-foreground">
+                          {faces(f.assignees)}
+                        </div>
                       ) : null}
                       {f.note ? (
                         <p className="truncate text-xs text-muted-foreground">{f.note}</p>
@@ -452,14 +499,8 @@ export function FollowupsCard({
               {done.map((f) => (
                 <li key={f.id} className="text-xs text-muted-foreground">
                   <span className="line-through">{fmtDue(f.dueAt)}</span>
-                  {shared || f.assignee?.id !== currentUserId ? (
-                    <span className="ml-2 inline-flex items-center gap-1">
-                      <UserRoundIcon className="size-3 shrink-0" aria-hidden />
-                      <span className="sr-only">
-                        {t("followups.forPerson", { name: nameOf(f.assignee) })}
-                      </span>
-                      <span aria-hidden>{nameOf(f.assignee)}</span>
-                    </span>
+                  {f.assignees.length > 1 || shared || f.assignees[0]?.id !== currentUserId ? (
+                    <span className="ml-2 inline-flex align-middle">{faces(f.assignees)}</span>
                   ) : null}
                   {f.note ? <span className="ml-2 line-through">{f.note}</span> : null}
                   {f.doneAt ? (

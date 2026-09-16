@@ -1,6 +1,6 @@
 "use server";
 
-import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { enUS, fr } from "date-fns/locale";
@@ -995,6 +995,49 @@ export async function bulkDeleteClientsAction(clientIds: string[]): Promise<Bulk
 const FOLLOWUP_MAX_ASSIGNEES = 25;
 
 /**
+ * Ce qui fait qu'UN suivi est UN suivi, alors qu'il s'écrit une ligne par
+ * porteur.
+ *
+ * Le tableau de bord et les rappels d'échéance interrogent
+ * `followups.assigned_to_id` : une tâche partagée DOIT donc poser une ligne
+ * chez chacun, sinon ni la liste du matin ni la notification ne trouvent leur
+ * destinataire. Mais ces lignes ne sont pas trois tâches — c'est la même, et la
+ * fiche doit le montrer ainsi.
+ *
+ * Le lot, c'est donc : même fiche, même échéance, même note. Rien de caché —
+ * ce que l'écran présente comme une ligne est exactement ce que cette condition
+ * ramène, et déplacer l'échéance déplace le lot entier d'un coup, donc il ne se
+ * défait pas en chemin.
+ *
+ * PAS `created_at`, qui semblait pourtant l'identité naturelle du lot : Postgres
+ * l'écrit à la MICROSECONDE (`now()`), et une `Date` JavaScript s'arrête à la
+ * milliseconde. La valeur relue par Drizzle ne vaut donc plus celle qui est en
+ * base, l'égalité ne ramène rien — et sans bruit : l'action répond « fait » et
+ * n'écrit pas. Toute relance déjà posée serait devenue impossible à terminer.
+ *
+ * `due_at` ne tombe pas dans ce piège aujourd'hui (tout ce qui l'écrit passe par
+ * JavaScript), mais « aucun appelant n'utilise `now()` » est un invariant que la
+ * prochaine ligne de code peut rompre sans que rien ne le dise. La comparaison
+ * tronque donc à la milliseconde des DEUX côtés : elle reste juste quelle que
+ * soit la précision de ce qui est en base. La table se compte en milliers de
+ * lignes par fiche — au pire quelques-unes — donc l'index perdu ne coûte rien.
+ *
+ * Conséquence assumée : deux rappels posés séparément pour la même fiche, à la
+ * même minute, avec la même note, ne font qu'une ligne. Ils étaient de toute
+ * façon indiscernables à l'écran — c'est le doublon que ce regroupement existe
+ * pour effacer.
+ */
+function sameFollowup(row: { clientId: string; dueAt: Date; note: string | null }): SQL {
+  return and(
+    eq(followups.clientId, row.clientId),
+    // Le type est écrit NOIR SUR BLANC : passée nue, une `Date` part en texte
+    // non typé et Postgres refuse de la comparer à un `timestamptz`.
+    sql`date_trunc('milliseconds', ${followups.dueAt}) = ${row.dueAt.toISOString()}::timestamptz`,
+    row.note === null ? isNull(followups.note) : eq(followups.note, row.note),
+  )!;
+}
+
+/**
  * À QUI ce suivi revient-il ?
  *
  * Rien de coché = à SON AUTEUR. C'est la règle la moins surprenante : on pose
@@ -1116,6 +1159,8 @@ export async function createFollowupAction(input: {
   const targets = await resolveFollowupTargets(actor, guard.ref, assigneeIds);
   if (!targets.ok) return targets.error;
 
+  // Une ligne par porteur — c'est ce que le tableau de bord et les rappels
+  // savent lire. La fiche les recolle en UN suivi (voir `sameFollowup`).
   await db.insert(followups).values(
     targets.ids.map((assignedToId) => ({
       clientId,
@@ -1144,10 +1189,13 @@ export async function completeFollowupAction(followupId: string): Promise<Action
   // La relance suit sa fiche : invisible, elle n'existe pas non plus.
   if (!(await guardClient(actor, followup.clientId, "followup"))) return NOT_FOUND;
 
+  // UN suivi se termine UNE fois. Terminer seulement sa propre ligne laisserait
+  // la tâche ouverte chez les autres et leur ferait rappeler un client déjà
+  // rappelé — c'est précisément ce que « le même suivi » doit empêcher.
   await db
     .update(followups)
-    .set({ doneAt: followup.doneAt ?? new Date() })
-    .where(eq(followups.id, followupId));
+    .set({ doneAt: new Date() })
+    .where(and(sameFollowup(followup), isNull(followups.doneAt)));
 
   await syncNextFollowup(followup.clientId);
   revalidateClient(followup.clientId);
@@ -1155,24 +1203,22 @@ export async function completeFollowupAction(followupId: string): Promise<Action
 }
 
 /**
- * Déplacer l'échéance d'un suivi, et choisir QUI le porte — un ou plusieurs.
+ * Déplacer l'échéance d'un suivi, et choisir QUI le porte.
  *
- * Une ligne reste une personne. Cocher plusieurs noms ne fabrique donc pas une
- * ligne à plusieurs porteurs : la ligne modifiée va au premier (le porteur
- * actuel s'il est encore coché — on ne déplace pas un suivi sous les pieds de
- * quelqu'un sans raison), et les autres reçoivent CHACUN la leur, à la même
- * échéance et avec la même note. C'est ce que fait déjà la création ; c'est
- * aussi ce que la carte montre ensuite, une ligne par personne.
+ * Les deux touchent au suivi ENTIER : une échéance déplacée l'est pour tout le
+ * monde, et la liste cochée EST la liste des porteurs — cocher quelqu'un lui
+ * ouvre sa ligne, le décocher la lui retire. Une case qui ne ferait qu'ajouter
+ * mentirait à moitié.
  *
- * Décocher n'efface RIEN. Un suivi déjà posé chez quelqu'un est du travail qui
- * lui a été annoncé : il se TERMINE sur sa propre ligne, il ne disparaît pas
- * d'une case décochée dans la boîte d'un collègue.
+ * Personne coché = refus. Un suivi sans porteur n'apparaît sur aucun tableau de
+ * bord et ne déclenche aucun rappel : ce n'est pas un suivi allégé, c'est du
+ * travail qui disparaît sans que personne l'ait terminé.
  */
 export async function updateFollowupAction(input: {
   followupId: string;
   date: string;
   time: string;
-  /** Les porteurs voulus. Absent ou vide : on ne touche pas à qui le porte. */
+  /** Les porteurs voulus. Absent : on ne touche pas à qui le porte. */
   assigneeIds?: string[];
 }): Promise<ActionResult> {
   const actor = await currentActor();
@@ -1198,61 +1244,56 @@ export async function updateFollowupAction(input: {
   const dueAt = fromZonedTime(`${date}T${time}:00`, APP_TZ);
   if (Number.isNaN(dueAt.getTime())) return INVALID;
 
-  const wanted = [...new Set(assigneeIds ?? [])];
-  let keeper = followup.assignedToId;
-  let extras: string[] = [];
+  // Les lignes ENCORE À FAIRE du suivi, reconnues à l'ancienne échéance — c'est
+  // celle qui est en base tant qu'on n'a pas écrit. Ce qui est déjà terminé est
+  // une trace : on ne la déplace pas et on ne la retire pas.
+  const openLines = await db
+    .select({ id: followups.id, assignedToId: followups.assignedToId })
+    .from(followups)
+    .where(and(sameFollowup(followup), isNull(followups.doneAt)));
 
-  if (wanted.length > 0) {
-    const targets = await resolveFollowupTargets(actor, guard.ref, wanted);
+  let added: string[] = [];
+  let removed: string[] = [];
+  if (assigneeIds) {
+    if (assigneeIds.length === 0) return INVALID;
+    const targets = await resolveFollowupTargets(actor, guard.ref, assigneeIds);
     if (!targets.ok) return targets.error;
-    keeper = targets.ids.includes(followup.assignedToId) ? followup.assignedToId : targets.ids[0];
-
-    // Qui a DÉJÀ ce travail, à cette heure-là, avec ce mot-là. Sans ce filtre,
-    // rouvrir une ligne d'un suivi partagé et recocher tout le monde donnait à
-    // chacun une seconde ligne identique — le collègue voyait sa tâche en
-    // double sans que personne l'ait demandée.
-    const twins = await db
-      .select({ assignedToId: followups.assignedToId })
-      .from(followups)
-      .where(
-        and(
-          eq(followups.clientId, followup.clientId),
-          eq(followups.dueAt, dueAt),
-          followup.note === null ? isNull(followups.note) : eq(followups.note, followup.note),
-          isNull(followups.doneAt),
-        ),
-      );
-    const alreadyHeld = new Set([keeper, ...twins.map((t) => t.assignedToId)]);
-    extras = targets.ids.filter((id) => !alreadyHeld.has(id));
+    const wanted = new Set(targets.ids);
+    const held = new Set(openLines.map((l) => l.assignedToId));
+    added = targets.ids.filter((id) => !held.has(id));
+    removed = openLines.filter((l) => !wanted.has(l.assignedToId)).map((l) => l.id);
   }
 
   await db
     .update(followups)
-    .set({ dueAt, assignedToId: keeper })
-    .where(eq(followups.id, followupId));
+    .set({ dueAt })
+    .where(and(sameFollowup(followup), isNull(followups.doneAt)));
 
-  if (extras.length > 0) {
+  if (added.length > 0) {
     await db.insert(followups).values(
-      extras.map((assignedToId) => ({
+      added.map((assignedToId) => ({
         clientId: followup.clientId,
         assignedToId,
         dueAt,
         note: followup.note,
-        // La ligne NEUVE est posée par celui qui coche, pas par l'auteur
-        // d'origine : « qui m'a confié ça » doit nommer quelqu'un d'atteignable.
+        // La ligne NEUVE est posée par celui qui coche : « qui m'a confié ça »
+        // doit nommer quelqu'un à qui on peut aller demander pourquoi.
         createdById: actor.user.id,
       })),
     );
   }
 
-  // Un suivi qu'on repasse à quelqu'un est une nouvelle pour lui, même si la
-  // date n'a pas bougé. Le rendre à soi-même n'en est pas une.
-  const told = [...(keeper === followup.assignedToId ? [] : [keeper]), ...extras];
-  if (told.length > 0) {
+  // Retirer quelqu'un n'efface que SA part, jamais le suivi : les lignes des
+  // autres — et toute ligne déjà terminée, qui est une trace — restent.
+  if (removed.length > 0) {
+    await db.delete(followups).where(inArray(followups.id, removed));
+  }
+
+  if (added.length > 0) {
     await notifyFollowupAssigned({
       actor,
       clientId: followup.clientId,
-      userIds: told,
+      userIds: added,
       dueAt,
       note: followup.note,
     });

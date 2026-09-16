@@ -49,6 +49,67 @@ import type { FilterOption } from "@/components/clients/clients-filters";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Une ligne de `followups` telle que la fiche la charge. */
+type FollowupRow = {
+  id: string;
+  dueAt: Date;
+  note: string | null;
+  doneAt: Date | null;
+  assignedTo: { id: string; name: string } | null;
+};
+
+/**
+ * Recolle les lignes d'un même suivi partagé en UNE tâche portée par plusieurs.
+ *
+ * MÊME clé que le serveur (`sameFollowup` dans les actions) : même échéance,
+ * même note. Ce que cette fonction fond en une ligne est donc exactement ce que
+ * le bouton « Terminer » terminera et ce que la boîte de modification
+ * déplacera — un regroupement qui ne collerait pas à l'action ferait terminer
+ * autre chose que ce qu'on voit.
+ *
+ * L'état — à faire / terminé — entre dans la clé pour qu'un lot à moitié clos
+ * (des données d'avant ce regroupement) se présente en deux lignes honnêtes
+ * plutôt qu'en une qui mentirait sur les deux.
+ */
+function groupFollowups(rows: FollowupRow[], now: Date): FollowupData[] {
+  const groups = new Map<string, FollowupRow[]>();
+  for (const row of rows) {
+    const key = `${row.dueAt.getTime()}|${row.note ?? ""}|${row.doneAt ? "done" : "open"}`;
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(row);
+    else groups.set(key, [row]);
+  }
+
+  const out = [...groups.values()].map((lines) => {
+    const first = lines[0];
+    const doneAt = lines.reduce<Date | null>(
+      (latest, l) => (l.doneAt && (!latest || l.doneAt > latest) ? l.doneAt : latest),
+      null,
+    );
+    return {
+      // N'importe quelle ligne du lot désigne le suivi : les actions
+      // retrouvent les autres toutes seules.
+      id: first.id,
+      dueAt: first.dueAt.toISOString(),
+      note: first.note,
+      doneAt: doneAt?.toISOString() ?? null,
+      overdue: !doneAt && first.dueAt < now,
+      assignees: lines
+        .flatMap((l) => (l.assignedTo ? [{ id: l.assignedTo.id, name: l.assignedTo.name }] : []))
+        .sort((a, b) => a.name.localeCompare(b.name, "fr")),
+    };
+  });
+
+  // Les tâches à faire d'abord, échéance croissante ; les traces ensuite, de la
+  // plus fraîche à la plus ancienne.
+  return [
+    ...out.filter((f) => !f.doneAt).sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt)),
+    ...out
+      .filter((f) => f.doneAt)
+      .sort((a, b) => Date.parse(b.doneAt ?? "") - Date.parse(a.doneAt ?? "")),
+  ];
+}
+
 /**
  * Le numéro MASQUÉ.
  *
@@ -215,9 +276,8 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
       db.query.followups.findMany({
         where: eq(followups.clientId, fiche.id),
         orderBy: [asc(followups.dueAt)],
-        // Un suivi porte un NOM depuis qu'il peut revenir à quelqu'un d'autre
-        // que l'auteur : sans lui, trois lignes identiques ne disent pas à qui
-        // la tâche est confiée.
+        // Un suivi porte des NOMS depuis qu'il peut être confié : sans eux,
+        // une ligne ne dit pas de qui elle est la tâche.
         with: { assignedTo: { columns: { id: true, name: true } } },
       }),
       // « Modifiée par qui » : le schéma ne stocke pas d'updatedById — la
@@ -308,19 +368,16 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
       })),
       // Suivis : les ouverts d'abord (échéance croissante), puis les terminés
       // du plus récent au plus ancien.
-      followups: [
-        ...followupRows.filter((f) => !f.doneAt),
-        ...followupRows
-          .filter((f) => f.doneAt)
-          .sort((a, b) => (b.doneAt?.getTime() ?? 0) - (a.doneAt?.getTime() ?? 0)),
-      ].map((f) => ({
-        id: f.id,
-        dueAt: f.dueAt.toISOString(),
-        note: f.note,
-        doneAt: f.doneAt?.toISOString() ?? null,
-        overdue: !f.doneAt && f.dueAt < now,
-        assignee: f.assignedTo ? { id: f.assignedTo.id, name: f.assignedTo.name } : null,
-      })),
+      //
+      // Un suivi PARTAGÉ s'écrit une ligne par porteur — le tableau de bord et
+      // les rappels d'échéance ne savent lire que `assigned_to_id`. La fiche,
+      // elle, doit montrer UNE tâche : les lignes d'un même lot (`createdAt`,
+      // voir `sameFollowup` dans les actions) sont donc recollées ici, et ce
+      // sont les PORTEURS qui deviennent une liste.
+      //
+      // Ouvertes et terminées ne se mélangent jamais dans un lot : une tâche à
+      // faire et une trace de tâche faite ne sont pas la même ligne à l'écran.
+      followups: groupFollowups(followupRows, now),
       enrollments: enrollmentRows.map((row) => {
         const paused = enrollmentPaused(row);
         const ladderLength = Array.isArray(row.ladder) ? row.ladder.length : 0;

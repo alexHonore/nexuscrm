@@ -405,6 +405,9 @@ describe("intégrité des données clients", () => {
       expect(new Set(rows.map((r) => r.dueAt.toISOString()))).toEqual(
         new Set(["2026-09-15T13:00:00.000Z"]),
       );
+      // Trois lignes, UN suivi : même fiche, même échéance, même note — c'est
+      // ce qui les relie, et ce que la fiche montre comme une seule tâche.
+      expect(new Set(rows.map((r) => r.note))).toEqual(new Set(["Rappeler pour la visite"]));
 
       // L'auteur ne se prévient pas lui-même ; les deux autres, si — chacun
       // dans SA langue, et le mot « suivi » n'est pas le même des deux côtés.
@@ -438,7 +441,7 @@ describe("intégrité des données clients", () => {
       expect((await getClient(client.id)).nextFollowupAt).toBeNull();
     });
 
-    it("repasser un suivi change son porteur et prévient le nouveau", async () => {
+    it("remplacer le porteur d'un suivi prévient le nouveau et libère l'ancien", async () => {
       const author = await makeUser({ role: "admin", name: "Auteur" });
       const alice = await makeUser({ role: "caller", name: "Alice" });
       await login(author);
@@ -447,6 +450,9 @@ describe("intégrité des données clients", () => {
       const [row] = await testDb.select().from(followups);
       expect(row.assignedToId).toBe(author.id);
 
+      // Décocher l'un, cocher l'autre : le suivi reste LE suivi, il change de
+      // mains. Ce n'est pas la même ligne — celle de l'auteur est retirée avec
+      // lui — mais c'est le même lot, donc la fiche montre toujours UNE tâche.
       expect(
         await actions.updateFollowupAction({
           followupId: row.id,
@@ -456,12 +462,19 @@ describe("intégrité des données clients", () => {
         }),
       ).toEqual({ ok: true });
 
-      const after = await testDb.query.followups.findFirst({ where: eq(followups.id, row.id) });
-      expect(after!.assignedToId).toBe(alice.id);
-      // L'auteur reste l'auteur : « qui m'a confié ça » ne se réécrit pas.
-      expect(after!.createdById).toBe(author.id);
-      // Et la ligne reste UNE ligne : personne d'autre n'a été coché.
-      expect(await testDb.select().from(followups)).toHaveLength(1);
+      const after = await testDb.select().from(followups);
+      expect(after).toHaveLength(1);
+      expect(after[0].assignedToId).toBe(alice.id);
+      // « Qui m'a confié ça » nomme celui qui vient de le faire.
+      expect(after[0].createdById).toBe(author.id);
+      // Et c'est bien le MÊME suivi : même échéance, même note.
+      expect(after[0].dueAt.toISOString()).toBe(row.dueAt.toISOString());
+      expect(after[0].note).toBe(row.note);
+      // L'échéance ne bouge pas d'elle-même.
+      expect((await getClient(client.id)).nextFollowupAt?.toISOString()).toBe(
+        "2026-09-20T14:00:00.000Z",
+      );
+
       const notified = await testDb
         .select()
         .from(notifications)
@@ -469,7 +482,7 @@ describe("intégrité des données clients", () => {
       expect(notified.map((n) => n.userId)).toEqual([alice.id]);
     });
 
-    it("cocher d'autres noms à la modification ouvre UNE ligne chacun", async () => {
+    it("modifier un suivi partagé le déplace, l'élargit et le rétrécit d'un geste", async () => {
       const author = await makeUser({ role: "admin", name: "Auteur" });
       const alice = await makeUser({ role: "caller", name: "Alice" });
       const bob = await makeUser({ role: "caller", name: "Bob" });
@@ -483,6 +496,7 @@ describe("intégrité des données clients", () => {
       });
       const [row] = await testDb.select().from(followups);
 
+      // Élargir : deux personnes de plus rejoignent LE MÊME suivi.
       expect(
         await actions.updateFollowupAction({
           followupId: row.id,
@@ -492,41 +506,108 @@ describe("intégrité des données clients", () => {
         }),
       ).toEqual({ ok: true });
 
-      const rows = await testDb.select().from(followups);
+      let rows = await testDb.select().from(followups);
       expect(rows).toHaveLength(3);
-      // La ligne d'origine RESTE à son porteur — il était encore coché.
-      expect(rows.find((r) => r.id === row.id)!.assignedToId).toBe(author.id);
       expect(rows.map((r) => r.assignedToId).sort()).toEqual(
         [author.id, alice.id, bob.id].sort(),
       );
-      // Même échéance, même note, pour tout le monde.
+      // L'échéance a bougé POUR TOUT LE MONDE d'un seul geste, et les lignes
+      // neuves reprennent la note : le lot ne s'est pas coupé en deux.
       expect(new Set(rows.map((r) => r.dueAt.toISOString()))).toEqual(
         new Set(["2026-09-21T15:00:00.000Z"]),
       );
       expect(rows.every((r) => r.note === "Rappeler")).toBe(true);
 
-      // Rouvrir la même ligne et tout recocher ne doit RIEN ajouter : chacun a
-      // déjà ce travail, à cette heure-là, avec ce mot-là.
-      expect(
-        await actions.updateFollowupAction({
-          followupId: row.id,
-          date: "2026-09-21",
-          time: "11:00",
-          assigneeIds: [author.id, alice.id, bob.id],
-        }),
-      ).toEqual({ ok: true });
+      // Rejouer la même liste n'ajoute rien : ce sont déjà les porteurs.
+      await actions.updateFollowupAction({
+        followupId: row.id,
+        date: "2026-09-21",
+        time: "11:00",
+        assigneeIds: [author.id, alice.id, bob.id],
+      });
       expect(await testDb.select().from(followups)).toHaveLength(3);
 
-      // Et décocher n'efface rien : la ligne d'Alice lui appartient.
+      // Rétrécir : décocher Bob le RETIRE du suivi — la case dit ce qu'elle fait.
       expect(
         await actions.updateFollowupAction({
           followupId: row.id,
           date: "2026-09-21",
           time: "11:00",
-          assigneeIds: [author.id],
+          assigneeIds: [author.id, alice.id],
         }),
       ).toEqual({ ok: true });
-      expect(await testDb.select().from(followups)).toHaveLength(3);
+      rows = await testDb.select().from(followups);
+      expect(rows.map((r) => r.assignedToId).sort()).toEqual([author.id, alice.id].sort());
+
+      // Mais jamais jusqu'à personne : un suivi sans porteur est du travail
+      // qui disparaît sans avoir été fait.
+      expect(
+        await actions.updateFollowupAction({
+          followupId: row.id,
+          date: "2026-09-21",
+          time: "11:00",
+          assigneeIds: [],
+        }),
+      ).toEqual({ ok: false, error: "invalid" });
+      expect(await testDb.select().from(followups)).toHaveLength(2);
+    });
+
+    it("termine aussi un suivi posé hors de l'action — la machine en pose", async () => {
+      // Régression. Le lot a d'abord été reconnu à `created_at` : Postgres
+      // l'écrit à la microseconde, une Date JavaScript s'arrête à la
+      // milliseconde, et l'égalité ne ramenait alors RIEN. Toute relance déjà
+      // en base — celles de l'assistant SMS, celles des boutons d'après-appel,
+      // toute la production — serait devenue impossible à terminer, sans le
+      // moindre message d'erreur : l'action répondait « fait » et n'écrivait
+      // pas. Une ligne posée comme la machine les pose garde le test honnête.
+      const user = await makeUser({ role: "admin" });
+      await login(user);
+      const client = await makeClient();
+      await testDb.insert(followups).values({
+        clientId: client.id,
+        assignedToId: user.id,
+        dueAt: new Date("2026-09-20T14:00:00.000Z"),
+        note: "Posé par la machine",
+        createdById: null,
+      });
+      const [row] = await testDb.select().from(followups);
+
+      expect(await actions.completeFollowupAction(row.id)).toEqual({ ok: true });
+      const after = await testDb.query.followups.findFirst({ where: eq(followups.id, row.id) });
+      expect(after!.doneAt).not.toBeNull();
+      expect((await getClient(client.id)).nextFollowupAt).toBeNull();
+    });
+
+    it("terminer un suivi partagé le termine pour tout le monde", async () => {
+      const author = await makeUser({ role: "admin", name: "Auteur" });
+      const alice = await makeUser({ role: "caller", name: "Alice" });
+      await login(author);
+      const client = await makeClient();
+      await actions.createFollowupAction({
+        clientId: client.id,
+        date: "2026-09-20",
+        time: "10:00",
+        assigneeIds: [author.id, alice.id],
+      });
+      // Un SECOND suivi, indépendant : il ne doit pas être emporté.
+      await actions.createFollowupAction({ clientId: client.id, date: "2026-10-01", time: "09:00" });
+
+      const shared = (await testDb.select().from(followups)).filter(
+        (r) => r.dueAt.toISOString() === "2026-09-20T14:00:00.000Z",
+      );
+      expect(shared).toHaveLength(2);
+
+      expect(await actions.completeFollowupAction(shared[0].id)).toEqual({ ok: true });
+
+      const after = await testDb.select().from(followups);
+      // Les deux lignes du suivi partagé sont closes — rappeler un client déjà
+      // rappelé parce que le collègue a coché avant vous n'arrive plus.
+      expect(after.filter((r) => r.doneAt !== null)).toHaveLength(2);
+      // L'autre suivi vit sa vie, et redevient la prochaine échéance.
+      expect(after.filter((r) => r.doneAt === null)).toHaveLength(1);
+      expect((await getClient(client.id)).nextFollowupAt?.toISOString()).toBe(
+        "2026-10-01T13:00:00.000Z",
+      );
     });
 
     it("garde toujours la relance ouverte la plus proche (création dans le désordre)", async () => {
