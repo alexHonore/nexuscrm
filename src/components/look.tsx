@@ -13,6 +13,11 @@ import {
   CalendarClockIcon,
   CalendarPlusIcon,
   CalendarXIcon,
+  ChartAreaIcon,
+  ChartColumnStackedIcon,
+  ChartLineIcon,
+  ChartNoAxesCombinedIcon,
+  ChartPieIcon,
   CheckCheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
@@ -59,6 +64,7 @@ import {
   UserPlusIcon,
   UserSearchIcon,
   PauseIcon,
+  PercentIcon,
   PencilLineIcon,
   PhoneCallIcon,
   PhoneIncomingIcon,
@@ -103,7 +109,7 @@ import {
   ZapIcon,
   type LucideIcon,
 } from "lucide-react";
-import type { ActivityKind } from "@/components/analytics/activity";
+import type { ActivityForm, ActivityKind } from "@/components/analytics/activity";
 import type { ErrorFamily } from "@/lib/deliverability/error-classes";
 import type { GuardrailKind } from "@/lib/guardrails/types";
 import { cn } from "@/lib/utils";
@@ -174,6 +180,29 @@ export const ACTIVITY_LOOK = {
   notes: { color: "var(--viz-act-notes)", Icon: PencilLineIcon },
   records: { color: "var(--viz-act-records)", Icon: UserRoundIcon },
 } as const satisfies Record<ActivityKind, Look>;
+
+/**
+ * Les SIX formes du graphique d'activité.
+ *
+ * Ici la couleur ne distingue RIEN, et c'est voulu : ce ne sont pas six
+ * concepts du produit, ce sont six façons de dessiner le même. Six teintes
+ * dans un menu déroulant feraient des confettis à côté d'un graphique qui, lui,
+ * a besoin de toutes ses couleurs pour dire la donnée. Elles partagent donc
+ * l'encre secondaire, et c'est le pictogramme — seul — qui identifie.
+ *
+ * `var(--muted-foreground)` plutôt qu'un gris écrit à la main : la teinte suit
+ * le thème clair/sombre sans qu'aucun écran n'ait à le savoir.
+ */
+const FORM_INK = "var(--muted-foreground)";
+
+export const CHART_FORM_LOOK = {
+  stacked: { color: FORM_INK, Icon: ChartColumnStackedIcon },
+  area: { color: FORM_INK, Icon: ChartAreaIcon },
+  line: { color: FORM_INK, Icon: ChartLineIcon },
+  share: { color: FORM_INK, Icon: PercentIcon },
+  combo: { color: FORM_INK, Icon: ChartNoAxesCombinedIcon },
+  donut: { color: FORM_INK, Icon: ChartPieIcon },
+} as const satisfies Record<ActivityForm, Look>;
 
 /**
  * Les trois portes de la création — le créateur IA, le formulaire court,

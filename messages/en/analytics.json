@@ -45,15 +45,26 @@
       "day": "Day",
       "week": "Week"
     },
+    "formLabel": "Chart shape",
+    "form": {
+      "stacked": "Stacked bars",
+      "area": "Stacked areas",
+      "line": "Lines",
+      "share": "Share (100%)",
+      "combo": "Columns + trend",
+      "donut": "Donut"
+    },
     "hint": {
       "hour": "Hour by hour, across the period.",
       "day": "Day by day, across the period.",
       "week": "Week by week (from Monday), across the period."
     },
     "hintProfile": "Day profile: the 24 hours summed over the {days} days of the period. For the hour-by-hour timeline, pick a period of 7 days or less.",
+    "hintNoTime": "What everything done over the period is made of — this shape has no time axis, so the grain does not apply.",
     "hour": "{hour}:00",
     "hourRange": "{from}:00 – {to}:00",
     "total": "actions in total",
+    "trend": "Trend",
     "kind": {
       "calls": "Calls",
       "bookings": "Appointments",

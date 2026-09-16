@@ -45,15 +45,26 @@
       "day": "Jour",
       "week": "Semaine"
     },
+    "formLabel": "Forme du graphique",
+    "form": {
+      "stacked": "Barres empilées",
+      "area": "Aires empilées",
+      "line": "Lignes",
+      "share": "Part (100 %)",
+      "combo": "Colonnes + tendance",
+      "donut": "Anneau"
+    },
     "hint": {
       "hour": "Heure par heure, sur la période.",
       "day": "Jour par jour, sur la période.",
       "week": "Semaine par semaine (du lundi), sur la période."
     },
     "hintProfile": "Profil de la journée : les 24 heures cumulées sur les {days} jours de la période. Pour voir la frise heure par heure, choisissez une période d'au plus 7 jours.",
+    "hintNoTime": "De quoi est fait tout ce qui a été fait sur la période — cette forme n'a pas d'axe de temps, la maille ne s'y applique pas.",
     "hour": "{hour} h",
     "hourRange": "{from} h – {to} h",
     "total": "gestes au total",
+    "trend": "Tendance",
     "kind": {
       "calls": "Appels",
       "bookings": "RDV pris",

@@ -19,9 +19,14 @@ vi.mock("server-only", () => ({}));
 
 import { getActivityBuckets, type AnalyticsFilter } from "@/app/(app)/admin/analytics/queries";
 import {
+  ACTIVITY_FORMS,
   ACTIVITY_KINDS,
+  formHasTimeAxis,
   isHourProfile,
+  movingAverage,
+  resolveForm,
   resolveGrain,
+  trendWindow,
   type ActivityKind,
 } from "@/components/analytics/activity";
 import {
@@ -326,6 +331,56 @@ describe("la maille de temps", () => {
     // Le jour et la semaine restent des frises, quelle que soit la longueur.
     expect(isHourProfile("day", 90)).toBe(false);
     expect(isHourProfile("week", 90)).toBe(false);
+  });
+});
+
+describe("les formes du graphique", () => {
+  it("retombe sur la pile devant n'importe quoi", () => {
+    expect(resolveForm(undefined)).toBe("stacked");
+    expect(resolveForm("camembert")).toBe("stacked");
+    for (const f of ACTIVITY_FORMS) expect(resolveForm(f)).toBe(f);
+  });
+
+  it("l'anneau est la SEULE forme sans axe de temps", () => {
+    const sansAxe = ACTIVITY_FORMS.filter((f) => !formHasTimeAxis(f));
+    expect(sansAxe).toEqual(["donut"]);
+  });
+
+  it("la fenêtre de tendance est impaire, donc centrable, et bornée", () => {
+    for (const n of [0, 1, 7, 24, 30, 90, 168, 720, 2000]) {
+      const w = trendWindow(n);
+      expect(w % 2, `fenêtre paire pour ${n} cases`).toBe(1);
+      expect(w).toBeGreaterThanOrEqual(3);
+      expect(w).toBeLessThanOrEqual(25);
+    }
+    // Elle suit la longueur de la série, elle n'est pas figée.
+    expect(trendWindow(7)).toBe(3);
+    expect(trendWindow(30)).toBe(5);
+    expect(trendWindow(168)).toBe(21);
+  });
+
+  it("la moyenne mobile ne plonge PAS aux deux bouts", () => {
+    // Série plate : une moyenne mobile correcte reste plate d'un bout à
+    // l'autre. Diviser par la largeur nominale au lieu du nombre de cases
+    // réellement présentes creuserait un trou au début et à la fin — on
+    // lirait une accalmie là où il n'y a qu'un bord.
+    const flat = movingAverage([10, 10, 10, 10, 10, 10, 10], 5);
+    expect(flat).toEqual([10, 10, 10, 10, 10, 10, 10]);
+  });
+
+  it("la moyenne mobile lisse vraiment, et garde la longueur", () => {
+    const noisy = [0, 10, 0, 10, 0, 10, 0];
+    const smooth = movingAverage(noisy, 3);
+    expect(smooth).toHaveLength(noisy.length);
+    // Le pic isolé est raboté : aucune valeur lissée n'atteint l'extrême brut.
+    expect(Math.max(...smooth)).toBeLessThan(Math.max(...noisy));
+    expect(Math.min(...smooth)).toBeGreaterThan(Math.min(...noisy));
+    // Une fenêtre de 1 rend la série intacte.
+    expect(movingAverage(noisy, 1)).toEqual(noisy);
+  });
+
+  it("supporte une série vide sans exploser", () => {
+    expect(movingAverage([], 5)).toEqual([]);
   });
 });
 

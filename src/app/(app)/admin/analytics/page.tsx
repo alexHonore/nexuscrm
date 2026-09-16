@@ -16,12 +16,15 @@ import {
 import { getLocale, getTranslations } from "next-intl/server";
 import {
   ACTIVITY_KINDS,
+  formHasTimeAxis,
   isHourProfile,
+  resolveForm,
   resolveGrain,
   type ActivityKind,
 } from "@/components/analytics/activity";
 import {
   ActivityChart,
+  ActivityFormSelect,
   ActivityGrainTabs,
   type ActivityDatum,
 } from "@/components/analytics/activity-chart";
@@ -122,6 +125,8 @@ export default async function AnalyticsPage({
   // LONGUEUR de la période qui tranche — l'écran l'annonce sous le titre.
   const grain = resolveGrain(first(sp.grain));
   const hourProfile = isHourProfile(grain, period.dayCount);
+  const form = resolveForm(first(sp.form));
+  const timeAxis = formHasTimeAxis(form);
 
   const [kpis, perDay, perWeek, dispositions, userStats, users, activity] = await Promise.all([
     getKpis(filter),
@@ -356,16 +361,26 @@ export default async function AnalyticsPage({
                 <Activity aria-hidden className="size-4 shrink-0 text-muted-foreground" />
                 {t("activity.title")}
               </CardTitle>
+              {/* Ce que le dessin montre VRAIMENT — la bascule du profil
+                  horaire comme la disparition de l'axe de temps se disent en
+                  toutes lettres, jamais par le seul aspect du graphique. */}
               <p className="text-xs text-muted-foreground">
-                {hourProfile
-                  ? t("activity.hintProfile", { days: period.dayCount })
-                  : t(`activity.hint.${grain}`)}
+                {!timeAxis
+                  ? t("activity.hintNoTime")
+                  : hourProfile
+                    ? t("activity.hintProfile", { days: period.dayCount })
+                    : t(`activity.hint.${grain}`)}
               </p>
             </div>
-            <ActivityGrainTabs grain={grain} />
+            {/* `shrink-0` : sans lui, une aide sur deux lignes écrase les
+                commandes et le menu de forme passe à la ligne tout seul. */}
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <ActivityGrainTabs grain={grain} disabled={!timeAxis} />
+              <ActivityFormSelect form={form} />
+            </div>
           </CardHeader>
           <CardContent>
-            <ActivityChart data={activityData} locale={locale} />
+            <ActivityChart data={activityData} form={form} locale={locale} />
           </CardContent>
         </Card>
 
