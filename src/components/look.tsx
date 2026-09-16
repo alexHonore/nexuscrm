@@ -103,6 +103,7 @@ import {
   ZapIcon,
   type LucideIcon,
 } from "lucide-react";
+import type { ActivityKind } from "@/components/analytics/activity";
 import type { ErrorFamily } from "@/lib/deliverability/error-classes";
 import type { GuardrailKind } from "@/lib/guardrails/types";
 import { cn } from "@/lib/utils";
@@ -151,6 +152,28 @@ export const TONE = {
 export const CHANNEL_LOOK = {
   sms: { color: "#7C3AED", Icon: SmartphoneIcon },
 } as const satisfies Record<string, Look>;
+
+/**
+ * Les cinq FAMILLES D'ACTIVITÉ du graphique de l'analytique — ce qu'on a fait,
+ * et quand.
+ *
+ * La couleur ne s'écrit pas ici : elle vit dans `.nx-viz`
+ * (`src/components/analytics/viz-theme.tsx`), parce qu'une teinte de
+ * visualisation a DEUX valeurs — une par mode — et qu'elles ont été validées
+ * ensemble, dans l'ordre de la pile. Ce qui vit ici, c'est le couple : le
+ * pictogramme identifie la famille, la variable la colore.
+ *
+ * Trois pictogrammes sont ceux qu'on voit déjà ailleurs sur une fiche client —
+ * le combiné, le calendrier, le téléphone du canal SMS : une famille qui
+ * change de dessin en changeant d'écran est une famille qu'on relit.
+ */
+export const ACTIVITY_LOOK = {
+  calls: { color: "var(--viz-act-calls)", Icon: PhoneCallIcon },
+  bookings: { color: "var(--viz-act-bookings)", Icon: CalendarCheckIcon },
+  sms: { color: "var(--viz-act-sms)", Icon: SmartphoneIcon },
+  notes: { color: "var(--viz-act-notes)", Icon: PencilLineIcon },
+  records: { color: "var(--viz-act-records)", Icon: UserRoundIcon },
+} as const satisfies Record<ActivityKind, Look>;
 
 /**
  * Les trois portes de la création — le créateur IA, le formulaire court,

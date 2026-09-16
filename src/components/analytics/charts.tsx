@@ -23,14 +23,14 @@ import { dispositionColorVar } from "@/components/analytics/viz-theme";
  * légende présente dès 2 séries, infobulle sur chaque forme.
  */
 
-const AXIS_TICK = { fill: "var(--muted-foreground)", fontSize: 11 } as const;
-const NAME_TICK = { fill: "var(--foreground)", fontSize: 12 } as const;
-const GRID_STROKE = "var(--border)";
-const CURSOR = { fill: "var(--muted)", opacity: 0.6 } as const;
+export const AXIS_TICK = { fill: "var(--muted-foreground)", fontSize: 11 } as const;
+export const NAME_TICK = { fill: "var(--foreground)", fontSize: 12 } as const;
+export const GRID_STROKE = "var(--border)";
+export const CURSOR = { fill: "var(--muted)", opacity: 0.6 } as const;
 
 // ── Infobulle partagée ───────────────────────────────────────────────────────
 
-type TooltipItem = {
+export type TooltipItem = {
   name?: string | number;
   value?: number | string;
   color?: string;
@@ -87,7 +87,7 @@ function LegendRow({ items }: { items: { color: string; label: string }[] }) {
   );
 }
 
-function EmptyState() {
+export function EmptyState() {
   const t = useTranslations("analytics");
   return (
     <div className="flex h-full items-center justify-center text-sm text-muted-foreground">

@@ -104,3 +104,44 @@ export function listDays(fromStr: string, toStr: string): string[] {
   }
   return out;
 }
+
+/** Le lundi de la semaine d'une date — l'ancre de `date_trunc('week', …)` côté Postgres. */
+export function mondayOf(dateStr: string): string {
+  const dow = new Date(`${dateStr}T12:00:00Z`).getUTCDay(); // 0 = dimanche
+  return shiftDateStr(dateStr, -((dow + 6) % 7));
+}
+
+/** Les lundis couvrant la période, incluses — un axe hebdomadaire sans trou. */
+export function listWeekStarts(fromStr: string, toStr: string): string[] {
+  const out: string[] = [];
+  const last = mondayOf(toStr);
+  let cur = mondayOf(fromStr);
+  let guard = 0;
+  while (cur <= last && guard < MAX_DAYS / 7 + 2) {
+    out.push(cur);
+    cur = shiftDateStr(cur, 7);
+    guard += 1;
+  }
+  return out;
+}
+
+/**
+ * Chaque heure de la période, « YYYY-MM-DD HH » — le format exact que
+ * `to_char(…, 'YYYY-MM-DD HH24')` rend côté Postgres, pour que les deux se
+ * rejoignent sans reformatage.
+ *
+ * Volontairement 24 heures par jour de calendrier, y compris les jours de
+ * changement d'heure : c'est un axe d'affichage, pas une durée. La nuit du
+ * printemps montre une case vide à 2 h et celle de l'automne empile deux fois
+ * la même heure — deux anomalies inoffensives sur un graphique de volume.
+ */
+export function listHours(fromStr: string, toStr: string): string[] {
+  return listDays(fromStr, toStr).flatMap((day) =>
+    Array.from({ length: 24 }, (_, h) => `${day} ${String(h).padStart(2, "0")}`),
+  );
+}
+
+/** Les 24 heures d'une journée type, « 00 » … « 23 ». */
+export function listHourProfile(): string[] {
+  return Array.from({ length: 24 }, (_, h) => String(h).padStart(2, "0"));
+}

@@ -37,6 +37,31 @@
     "minutes": "Minutes",
     "noData": "Aucune donnée pour cette période"
   },
+  "activity": {
+    "title": "Activité",
+    "grainLabel": "Maille de temps",
+    "grain": {
+      "hour": "Heure",
+      "day": "Jour",
+      "week": "Semaine"
+    },
+    "hint": {
+      "hour": "Heure par heure, sur la période.",
+      "day": "Jour par jour, sur la période.",
+      "week": "Semaine par semaine (du lundi), sur la période."
+    },
+    "hintProfile": "Profil de la journée : les 24 heures cumulées sur les {days} jours de la période. Pour voir la frise heure par heure, choisissez une période d'au plus 7 jours.",
+    "hour": "{hour} h",
+    "hourRange": "{from} h – {to} h",
+    "total": "gestes au total",
+    "kind": {
+      "calls": "Appels",
+      "bookings": "RDV pris",
+      "sms": "SMS",
+      "notes": "Notes et suivis",
+      "records": "Fiches"
+    }
+  },
   "table": {
     "title": "Performance par téléphoniste",
     "user": "Téléphoniste",

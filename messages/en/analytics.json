@@ -37,6 +37,31 @@
     "minutes": "Minutes",
     "noData": "No data for this period"
   },
+  "activity": {
+    "title": "Activity",
+    "grainLabel": "Time grain",
+    "grain": {
+      "hour": "Hour",
+      "day": "Day",
+      "week": "Week"
+    },
+    "hint": {
+      "hour": "Hour by hour, across the period.",
+      "day": "Day by day, across the period.",
+      "week": "Week by week (from Monday), across the period."
+    },
+    "hintProfile": "Day profile: the 24 hours summed over the {days} days of the period. For the hour-by-hour timeline, pick a period of 7 days or less.",
+    "hour": "{hour}:00",
+    "hourRange": "{from}:00 – {to}:00",
+    "total": "actions in total",
+    "kind": {
+      "calls": "Calls",
+      "bookings": "Appointments",
+      "sms": "SMS",
+      "notes": "Notes & follow-ups",
+      "records": "Client records"
+    }
+  },
   "table": {
     "title": "Performance by caller",
     "user": "Caller",

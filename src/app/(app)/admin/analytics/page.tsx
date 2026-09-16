@@ -3,6 +3,7 @@ import { enCA } from "date-fns/locale/en-CA";
 import { fr } from "date-fns/locale/fr";
 import { formatInTimeZone } from "date-fns-tz";
 import {
+  Activity,
   CalendarCheck,
   ChartColumn,
   Clock,
@@ -13,6 +14,17 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
+import {
+  ACTIVITY_KINDS,
+  isHourProfile,
+  resolveGrain,
+  type ActivityKind,
+} from "@/components/analytics/activity";
+import {
+  ActivityChart,
+  ActivityGrainTabs,
+  type ActivityDatum,
+} from "@/components/analytics/activity-chart";
 import { AnalyticsFilters } from "@/components/analytics/analytics-filters";
 import {
   BookingsPerWeekChart,
@@ -23,7 +35,13 @@ import {
   type CallsPerDayDatum,
   type DispositionDatum,
 } from "@/components/analytics/charts";
-import { listDays, resolvePeriod } from "@/components/analytics/period";
+import {
+  listDays,
+  listHourProfile,
+  listHours,
+  listWeekStarts,
+  resolvePeriod,
+} from "@/components/analytics/period";
 import { UserStatsTable } from "@/components/analytics/user-stats-table";
 import { VizTheme } from "@/components/analytics/viz-theme";
 import { PageHeader } from "@/components/shell/page-header";
@@ -35,6 +53,7 @@ import { dispositionDisplayMap } from "@/lib/dispositions";
 import { requirePerm } from "@/lib/permissions/server";
 import { cn } from "@/lib/utils";
 import {
+  getActivityBuckets,
   getBookingsPerWeek,
   getCallsPerDay,
   getDispositionBreakdown,
@@ -99,13 +118,19 @@ export default async function AnalyticsPage({
     userId,
   };
 
-  const [kpis, perDay, perWeek, dispositions, userStats, users] = await Promise.all([
+  // La maille du graphique d'activité. « Heure » a deux lectures et c'est la
+  // LONGUEUR de la période qui tranche — l'écran l'annonce sous le titre.
+  const grain = resolveGrain(first(sp.grain));
+  const hourProfile = isHourProfile(grain, period.dayCount);
+
+  const [kpis, perDay, perWeek, dispositions, userStats, users, activity] = await Promise.all([
     getKpis(filter),
     getCallsPerDay(filter),
     getBookingsPerWeek(filter),
     getDispositionBreakdown(filter),
     getUserStats(filter),
     getUserOptions(),
+    getActivityBuckets(filter, grain, hourProfile),
   ]);
 
   const dayLabel = (dateStr: string) =>
@@ -125,6 +150,63 @@ export default async function AnalyticsPage({
     label: t("charts.weekOf", { date: dayLabel(w.weekStart) }),
     count: w.count,
   }));
+
+  // ── Activité : un axe continu, puis les libellés ───────────────────────────
+  //
+  // Les cases sans geste valent 0 et restent affichées : un trou dans la frise
+  // se lirait comme une compression du temps, pas comme une journée creuse.
+  const weekdayLabel = (dateStr: string) =>
+    formatInTimeZone(new Date(`${dateStr}T12:00:00Z`), "UTC", "EEE d MMM", {
+      locale: dateLocale,
+    });
+  const hourLabel = (hh: string) => t("activity.hour", { hour: Number(hh) });
+
+  const activityKeys =
+    grain === "week"
+      ? listWeekStarts(period.fromStr, period.toStr)
+      : grain === "day"
+        ? listDays(period.fromStr, period.toStr)
+        : hourProfile
+          ? listHourProfile()
+          : listHours(period.fromStr, period.toStr);
+
+  const activityByBucket = new Map<string, Partial<Record<ActivityKind, number>>>();
+  for (const row of activity) {
+    const slot = activityByBucket.get(row.bucket) ?? {};
+    slot[row.kind] = (slot[row.kind] ?? 0) + row.count;
+    activityByBucket.set(row.bucket, slot);
+  }
+
+  /** L'étiquette d'axe (courte) et celle de l'infobulle (complète). */
+  const activityLabels = (key: string): { label: string; full: string } => {
+    if (grain === "week") {
+      const week = t("charts.weekOf", { date: dayLabel(key) });
+      return { label: week, full: week };
+    }
+    if (grain === "day") return { label: dayLabel(key), full: weekdayLabel(key) };
+    if (hourProfile) {
+      return {
+        label: hourLabel(key),
+        full: t("activity.hourRange", { from: Number(key), to: (Number(key) + 1) % 24 }),
+      };
+    }
+    const [day = key, hh = "00"] = key.split(" ");
+    return {
+      label: `${dayLabel(day)} ${hourLabel(hh)}`,
+      full: `${weekdayLabel(day)}, ${hourLabel(hh)}`,
+    };
+  };
+
+  const activityData: ActivityDatum[] = activityKeys.map((key) => {
+    const slot = activityByBucket.get(key) ?? {};
+    return {
+      key,
+      ...activityLabels(key),
+      ...(Object.fromEntries(
+        ACTIVITY_KINDS.map((kind) => [kind, slot[kind] ?? 0]),
+      ) as Record<ActivityKind, number>),
+    };
+  });
 
   const dispoTotal = dispositions.reduce((acc, d) => acc + d.count, 0);
   const dispoByKey = new Map(dispositions.map((d) => [d.disposition, d.count]));
@@ -266,6 +348,27 @@ export default async function AnalyticsPage({
 
       {/* ── Graphiques ── */}
       <section className="grid gap-4 lg:grid-cols-2">
+        {/* Ce qu'on a fait, et QUAND — la seule carte qui répond à l'heure. */}
+        <Card className="shadow-xs lg:col-span-2">
+          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1">
+              <CardTitle className="flex items-center gap-2">
+                <Activity aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                {t("activity.title")}
+              </CardTitle>
+              <p className="text-xs text-muted-foreground">
+                {hourProfile
+                  ? t("activity.hintProfile", { days: period.dayCount })
+                  : t(`activity.hint.${grain}`)}
+              </p>
+            </div>
+            <ActivityGrainTabs grain={grain} />
+          </CardHeader>
+          <CardContent>
+            <ActivityChart data={activityData} locale={locale} />
+          </CardContent>
+        </Card>
+
         <Card className="shadow-xs lg:col-span-2">
           <CardHeader>
             <CardTitle>{t("charts.callsPerDay")}</CardTitle>

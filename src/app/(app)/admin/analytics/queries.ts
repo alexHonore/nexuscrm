@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, eq, gte, isNotNull, lt, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { appointments, calls, clients, users } from "@/db/schema";
+import type { ActivityGrain, ActivityKind } from "@/components/analytics/activity";
 
 /** Filtre commun : période [fromUtc, toUtcExclusive) + téléphoniste optionnel. */
 export type AnalyticsFilter = {
@@ -190,4 +191,111 @@ export async function getUserOptions(): Promise<UserOption[]> {
     .select({ id: users.id, name: users.name })
     .from(users)
     .orderBy(asc(users.name));
+}
+
+// ── Activité : ce qu'on a fait, et quand ─────────────────────────────────────
+
+/**
+ * Le seul horodatage qu'un `sql` écrit à la main peut passer à Postgres.
+ *
+ * Les comparaisons bâties avec `gte`/`lt` traversent le mappeur de la colonne
+ * et convertissent toutes seules ; en SQL brut il n'y a pas de colonne à
+ * mapper, et un objet `Date` interpolé part en « [object Object] ».
+ */
+function ts(instant: Date): string {
+  return instant.toISOString();
+}
+
+/**
+ * Les SEPT sources d'un geste, rangées dans les cinq familles affichées.
+ *
+ * Deux familles agrègent deux tables — « notes » (un commentaire et un suivi
+ * sont le même geste : écrire quelque chose sur une fiche) et « fiches » (créer
+ * et modifier). L'addition se fait en SQL, dans le `sum(n)` du dehors.
+ *
+ * `user` est la colonne qui répond à « QUI a posé ce geste » — pas « à qui la
+ * fiche appartient ». Une fiche créée par le webhook n'a personne : elle sort
+ * donc du total dès qu'on filtre sur un téléphoniste, et c'est voulu.
+ *
+ * Ces noms de tables sont écrits à la main : c'est le prix d'une seule requête
+ * plutôt que six. Un renommage dans `schema.ts` ne se verrait pas à la
+ * compilation — `tests/int-analytics-activity.test.ts` est là pour ça.
+ */
+const ACTIVITY_SOURCES: {
+  kind: ActivityKind;
+  from: string;
+  ts: string;
+  user: string;
+  extra?: string;
+}[] = [
+  { kind: "calls", from: "calls c", ts: "c.started_at", user: "c.user_id" },
+  { kind: "bookings", from: "appointments a", ts: "a.created_at", user: "a.user_id" },
+  {
+    kind: "sms",
+    from: "messages m join conversations cv on cv.id = m.conversation_id",
+    ts: "m.created_at",
+    user: "coalesce(m.sent_by_id, cv.assigned_to_id)",
+    // Un sortant retenu (kill switch, suppression, plafond) n'est pas un texto
+    // envoyé : il ne compte pas comme un geste. Les entrants comptent toujours.
+    extra: "(m.direction = 'in' or m.skip_reason is null)",
+  },
+  { kind: "notes", from: "comments cm", ts: "cm.created_at", user: "cm.user_id" },
+  { kind: "notes", from: "followups fu", ts: "fu.created_at", user: "fu.created_by_id" },
+  { kind: "records", from: "clients cl", ts: "cl.created_at", user: "cl.created_by_id" },
+  {
+    kind: "records",
+    from: "audit_logs al",
+    ts: "al.created_at",
+    user: "al.user_id",
+    extra: "al.action in ('client.update', 'client.category', 'client.assign')",
+  },
+];
+
+/** L'expression de regroupement — fuseau inline, jamais un paramètre lié. */
+function bucketSql(col: string, grain: ActivityGrain, profile: boolean): string {
+  const local = `(${col} at time zone 'America/Toronto')`;
+  if (grain === "week") return `to_char(date_trunc('week', ${local}), 'YYYY-MM-DD')`;
+  if (grain === "day") return `to_char(${local}, 'YYYY-MM-DD')`;
+  return profile ? `to_char(${local}, 'HH24')` : `to_char(${local}, 'YYYY-MM-DD HH24')`;
+}
+
+export type ActivityBucket = { kind: ActivityKind; bucket: string; count: number };
+
+/**
+ * Le volume de gestes, par maille de temps et par famille.
+ *
+ * Une seule requête : sept sous-sélections déjà agrégées, réunies par
+ * `union all`, ré-additionnées par famille. Sept allers-retours sur une page
+ * qui en fait déjà six épuiseraient le pool bien avant d'être plus rapides.
+ */
+export async function getActivityBuckets(
+  f: AnalyticsFilter,
+  grain: ActivityGrain,
+  profile: boolean,
+): Promise<ActivityBucket[]> {
+  const parts = ACTIVITY_SOURCES.map(
+    (src) => sql`
+      select ${sql.raw(`'${src.kind}'::text`)} as kind,
+             ${sql.raw(bucketSql(src.ts, grain, profile))} as bucket,
+             count(*)::int as n
+        from ${sql.raw(src.from)}
+       where ${sql.raw(src.ts)} >= ${ts(f.fromUtc)}::timestamptz
+         and ${sql.raw(src.ts)} < ${ts(f.toUtcExclusive)}::timestamptz
+         ${src.extra ? sql.raw(`and ${src.extra}`) : sql``}
+         ${f.userId ? sql`and ${sql.raw(src.user)} = ${f.userId}::uuid` : sql``}
+       group by 1, 2`,
+  );
+
+  const rows = await db.execute<{ kind: string; bucket: string; n: number | string }>(sql`
+    select kind, bucket, sum(n)::int as n
+      from (${sql.join(parts, sql` union all `)}) t
+     group by kind, bucket`);
+
+  // `db.execute` ne passe par aucun mappeur de colonne : un `::int` peut
+  // revenir en texte selon le pilote. On normalise plutôt que de parier.
+  return Array.from(rows).map((r) => ({
+    kind: r.kind as ActivityKind,
+    bucket: r.bucket,
+    count: Number(r.n),
+  }));
 }
