@@ -189,7 +189,13 @@ describe("fidélité du bac à sable", () => {
       expect(text).toContain("attempt < ATTEMPTS");
     }
     expect(source).toContain("CONSIGNE DE CORRECTION");
-    expect(source).toContain(".split(/\\n{2,}/)");
+    // Le choix du texte qui part est la MÊME fonction des deux côtés, pas deux
+    // découpes jumelles : deux copies ont divergé une fois (le SMS « { } » du
+    // 2026-08-25 partait en production sans que l'aperçu le montre jamais).
+    for (const text of [source, runtime]) {
+      expect(text).toContain("pickOutboundDraft(result.text)");
+      expect(text).not.toContain(".split(/\\n{2,}/)");
+    }
     expect(source).toContain("droppedParagraphs");
     // Le même texte de correction que la production, mot pour mot.
     const prodCorrection = /CONSIGNE DE CORRECTION : ta réponse précédente[^`]*`/.exec(runtime)?.[0];

@@ -289,6 +289,52 @@ describe("handleCallTranscript", () => {
     expect(await db.query.comments.findFirst()).toBeUndefined();
   });
 
+  /**
+   * Le cas de la production du 2026-09-15 — celui que le test ci-dessus NE
+   * couvrait pas. Le modèle transcrit tout l'appel, s'arrête sans refermer sa
+   * chaîne ni écrire `summary`, et dit « stop » : `truncated` est faux, la
+   * garde du plafond de jetons ne mord pas. 8 notes sur 52 sont parties ainsi
+   * sur des fiches de clients, signées du nom du téléphoniste.
+   */
+  it("un JSON non terminé qui s'arrête sur « stop » : échec, verbatim gardé, AUCUN commentaire", async () => {
+    await enable();
+    const call = await makeCall();
+    const tronqué =
+      '{\n  "transcript": "Allô. Allô. Monsieur Larbi, est-ce que vous m\'entendez ?' +
+      " Oui, je vous entends. … Bonne soirée, merci.";
+    const deps: TranscriptDeps = {
+      ...okDeps,
+      generate: async () => llmResult(tronqué, { truncated: false, finishReason: "stop" }),
+    };
+    const out = await handleCallTranscript(fakeJob({ callId: call.id }), deps);
+    expect(out).toEqual({ outcome: "failed_permanent", error: "malformed_output" });
+
+    const row = await db.query.callTranscripts.findFirst();
+    expect(row).toMatchObject({ status: "failed", reason: "malformed_output" });
+    // L'échec reste FACTURÉ : la page de consommation doit voir ces dollars.
+    expect(row?.costUsd).toBe("0.01230");
+    // Le verbatim était entier et l'audio est payé : on le garde.
+    expect(row?.transcript).toContain("Bonne soirée, merci.");
+    expect(row?.transcript?.startsWith("{")).toBe(false);
+    expect(row?.summary).toBeNull();
+
+    // La seule chose qui compte pour l'équipe : rien sur la fiche.
+    expect(await db.query.comments.findFirst()).toBeUndefined();
+  });
+
+  it("garde une note écrite en PROSE — le repli légitime n'a pas disparu", async () => {
+    await enable();
+    const call = await makeCall();
+    const deps: TranscriptDeps = {
+      ...okDeps,
+      generate: async () => llmResult("Boîte vocale, aucun échange utile."),
+    };
+    const out = await handleCallTranscript(fakeJob({ callId: call.id }), deps);
+    expect(out).toEqual({ outcome: "done" });
+    const comment = await db.query.comments.findFirst();
+    expect(comment?.body).toContain("Boîte vocale, aucun échange utile.");
+  });
+
   it("s'arrête net quand l'interrupteur d'arrêt SMS est enclenché — pause, pas de rangée", async () => {
     await enable();
     await setSetting("sms", { killSwitch: true });

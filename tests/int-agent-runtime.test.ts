@@ -724,6 +724,41 @@ describe("runTurn", () => {
     expect(await eventsOf(conversation.id)).toContain("extra_paragraphs_dropped");
   });
 
+  /**
+   * Le SMS reçu par une cliente le 2026-08-25 : le modèle a écrit les arguments
+   * de ses outils dans le canal TEXTE avant sa vraie réponse, et « premier
+   * paragraphe » les a pris pour le message. Le corps livré était « { } ».
+   */
+  it("n'envoie JAMAIS les arguments d'outil qu'un modèle écrit en texte", async () => {
+    const { conversation } = await scene();
+    llm.generatorText =
+      "{ }\n\n" +
+      '{"reason":"Projet de vente non actif; souhaite seulement connaître la valeur."}\n\n' +
+      "Je comprends, Jessica. Si votre projet change, vous pourrez nous réécrire ici.";
+    await inbound(conversation.id, "on ne vend pas");
+
+    await runTurn(conversation.id);
+
+    const jobs = await jobsFor(conversation.id);
+    expect(jobs).toHaveLength(1);
+    const body = (jobs[0].payload as { body: string }).body;
+    expect(body).toBe("Je comprends, Jessica. Si votre projet change, vous pourrez nous réécrire ici.");
+    expect(body).not.toContain("{");
+    // L'exploitant doit pouvoir LIRE ce qui a été écarté, pas juste le compter.
+    expect(await eventsOf(conversation.id)).toContain("machine_paragraphs_skipped");
+  });
+
+  it("escalade plutôt que d'envoyer du bruit quand le modèle n'écrit AUCUN message", async () => {
+    const { conversation } = await scene();
+    llm.generatorText = '{ }\n\n{"reason":"x"}';
+    await inbound(conversation.id, "allo");
+
+    const result = await runTurn(conversation.id);
+    expect(result.outcome).toBe("handoff");
+    expect(await jobsFor(conversation.id)).toHaveLength(0);
+    expect(await eventsOf(conversation.id)).toContain("machine_paragraphs_skipped");
+  });
+
 it("une réservation ÉCHOUÉE n'envoie AUCUNE confirmation au client", async () => {
     const { conversation } = await scene();
     // Le modèle annonce un rendez-vous ET appelle book_meeting dans le meme

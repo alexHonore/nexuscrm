@@ -122,10 +122,106 @@ describe("parseTranscriptOutput", () => {
     expect(out.transcript).toBeNull();
   });
 
-  it("se replie sur le texte entier quand le JSON est cassé", () => {
+  it("se replie sur le texte entier quand le modèle répond en PROSE", () => {
     const out = parseTranscriptOutput("Le client veut rappeler en janvier.");
     expect(out.summary).toBe("Le client veut rappeler en janvier.");
     expect(out.transcript).toBeNull();
+    expect(out.failure).toBeNull();
+  });
+
+  // ── Le cas de la production du 2026-09-15 ────────────────────────────────
+  // 8 notes sur 52 : le modèle transcrivait tout l'appel puis s'arrêtait sans
+  // refermer sa chaîne ni écrire `summary`. Le repli « tout le texte est la
+  // note » collait alors `{ "transcript": "Allô…` sur la fiche du client.
+  describe("réponse JSON ratée", () => {
+    const TRONQUÉ =
+      '{\n  "transcript": "Allô. Allô. Monsieur Larbi, est-ce que vous m\'entendez ?' +
+      " Oui, je vous entends. … Bonne soirée, merci.";
+
+    it("ne pousse JAMAIS un débris de JSON comme note", () => {
+      const out = parseTranscriptOutput(TRONQUÉ);
+      expect(out.summary).toBe("");
+      expect(out.failure).toBe("malformed");
+      expect(out.summary).not.toContain("transcript");
+    });
+
+    it("sauve le verbatim entier — l'audio a été écouté et payé", () => {
+      const out = parseTranscriptOutput(TRONQUÉ);
+      expect(out.transcript).toContain("Monsieur Larbi");
+      expect(out.transcript).toContain("Bonne soirée, merci.");
+      expect(out.transcript?.startsWith("{")).toBe(false);
+    });
+
+    it("rend les échappements du verbatim sauvé, jamais leur écriture brute", () => {
+      const out = parseTranscriptOutput('{"transcript": "Téléphoniste : Allô ?\\nClient : Oui');
+      expect(out.transcript).toBe("Téléphoniste : Allô ?\nClient : Oui");
+      expect(out.failure).toBe("malformed");
+    });
+
+    it("deux objets à la suite : on retrouve la note et le verbatim, pas les accolades", () => {
+      const out = parseTranscriptOutput(
+        '{"transcript":"T: allo"}\n{"summary":"Client rappelle."}',
+      );
+      expect(out.summary).toBe("Client rappelle.");
+      expect(out.transcript).toBe("T: allo");
+      expect(out.failure).toBeNull();
+    });
+
+    it("un raisonnement en clair suivi du JSON ne part pas sur la fiche", () => {
+      const out = parseTranscriptOutput(
+        'Je dois transcrire {le fichier} puis résumer.\n{"summary":"Client rappelle."}',
+      );
+      expect(out.summary).toBe("Client rappelle.");
+      expect(out.summary).not.toContain("Je dois transcrire");
+    });
+
+    /**
+     * Le prompt demande désormais la note AVANT le verbatim, exprès : une
+     * coupure mange la fin. Quand le verbatim est là, c'est que la note l'a
+     * précédé et qu'elle est entière — on la récupère au lieu de tout perdre.
+     */
+    it("note écrite AVANT le verbatim : une coupure ne coûte plus la note", () => {
+      const out = parseTranscriptOutput(
+        '{"summary": "Client veut acheter d\'ici la fin de l\'année, budget 400-500k.",' +
+          ' "transcript": "Allô. Allô. Monsieur Larbi… Bonne soirée, merci.',
+      );
+      expect(out.summary).toContain("budget 400-500k");
+      expect(out.transcript).toContain("Bonne soirée, merci.");
+      expect(out.failure).toBeNull();
+    });
+
+    it("mais une note elle-même coupée n'est JAMAIS écrite sur la fiche", () => {
+      // Sans verbatim derrière, rien ne dit que la note est entière.
+      const out = parseTranscriptOutput('{"summary": "Client veut acheter d\'ici la fin de l\'an');
+      expect(out.summary).toBe("");
+      expect(out.failure).toBe("malformed");
+    });
+
+    it("virgule finale : échec, pas le JSON entier en note", () => {
+      const out = parseTranscriptOutput('{"transcript":"T: allo","summary":"RV pris.",}');
+      expect(out.failure).toBe("malformed");
+      expect(out.summary).toBe("");
+    });
+  });
+
+  // ── Le défaut symétrique ─────────────────────────────────────────────────
+  // Une note en prose qui cite un objet ne doit pas être prise pour un JSON
+  // sans note et jetée : c'est exactement la réponse que le prompt DEMANDE
+  // pour une boîte vocale.
+  describe("prose contenant des accolades", () => {
+    it("garde une note qui cite un objet", () => {
+      const out = parseTranscriptOutput(
+        'Le client a donné son code {"postal": "G1V 2M3"} puis a raccroché.',
+      );
+      expect(out.summary).toContain("G1V 2M3");
+      expect(out.failure).toBeNull();
+    });
+
+    it("garde la note « boîte vocale » que le prompt réclame", () => {
+      const out = parseTranscriptOutput("Boîte vocale : message type {} laissé, aucun échange.");
+      expect(out.summary).toContain("Boîte vocale");
+      expect(out.failure).toBeNull();
+    });
   });
 
   it("borne la note — le modèle peut déborder ses consignes", () => {
@@ -135,7 +231,28 @@ describe("parseTranscriptOutput", () => {
 
   it("rend une note vide pour une réponse vide (le cœur la classe en échec)", () => {
     expect(parseTranscriptOutput("").summary).toBe("");
+    expect(parseTranscriptOutput("").failure).toBe("empty");
     expect(parseTranscriptOutput('{"summary": ""}').summary).toBe("");
+    // Format LU, contenu absent : ce n'est pas le même reproche qu'un JSON raté.
+    expect(parseTranscriptOutput('{"summary": ""}').failure).toBe("empty");
+  });
+
+  // La propriété qui compte, quoi qu'écrive le modèle : rien qui ressemble à
+  // du JSON ne doit pouvoir atterrir dans le corps d'un commentaire de fiche.
+  it("aucune entrée ne produit une note qui commence par une accolade", () => {
+    const entrées = [
+      '{"transcript": "T: allo',
+      "{",
+      '```json\n{"summary": "A"}\n```\n```json\n{"summary": "B"}\n```',
+      '[{"summary":"A"}]',
+      "{ }",
+      'Je dois transcrire {le fichier} puis résumer.\n{"summary":"Client rappelle."}',
+    ];
+    for (const entrée of entrées) {
+      const out = parseTranscriptOutput(entrée);
+      if (out.summary === "") continue; // classé en échec : rien n'est poussé
+      expect(buildNoteBody({ language: "fr", call: CALL, summary: out.summary })).not.toContain("{");
+    }
   });
 });
 

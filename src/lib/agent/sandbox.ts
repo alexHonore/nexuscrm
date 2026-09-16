@@ -28,6 +28,7 @@ import {
 import { DEFAULT_QUIET_HOURS } from "@/lib/sms/quiet-hours";
 import { analyzeSms } from "@/lib/sms/segments";
 import { classifyInbound } from "./classify";
+import { pickOutboundDraft } from "./draft";
 import { contactValue, qualificationText } from "./contact-data";
 import { applyRefusal, requiredFieldsFor, rungNeedsSlots } from "./goal";
 import { outreachInstructionText } from "./opening";
@@ -197,6 +198,13 @@ export interface SandboxTurnResult {
   regenerations: number;
   /** Paragraphes que la production aurait COUPÉS : un seul message part. */
   droppedParagraphs: number;
+  /**
+   * Les paragraphes-machine écartés AVANT le message (arguments d'outil
+   * recrachés en texte, brouillon structuré). L'aperçu doit les montrer :
+   * un assistant qui en produit à chaque tour est un assistant à corriger,
+   * et sans cette liste l'administrateur ne voit qu'un texte qui « marche ».
+   */
+  skippedParagraphs: string[];
   /** Le texte complet du modèle, avant la coupe — pour voir ce qui est tombé. */
   fullText: string;
   /**
@@ -301,6 +309,7 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
     turnsUsed: 0,
     regenerations: 0,
     droppedParagraphs: 0,
+    skippedParagraphs: [],
     fullText: "",
     segmentBudget: null,
     usage: tracker.usage,
@@ -454,6 +463,8 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
   let verdicts: RuleVerdict[] = [];
   let regenerations = 0;
   let droppedParagraphs = 0;
+  /** Les paragraphes-machine écartés avant le message — voir draft.ts. */
+  let skippedParagraphs: string[] = [];
   let llmError: string | null = null;
   let terminatedByTool: "stop" | "handoff" | null = null;
   let bookingFailed = false;
@@ -553,15 +564,15 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
 
     if (llmError !== null || terminatedByTool !== null || result === null) break;
 
-    // UN SEUL message par tour : le premier paragraphe part, le reste tombe —
-    // et les garde-fous jugent CE qui part, pas le texte entier.
+    // UN SEUL message par tour : le premier paragraphe qui est un MESSAGE part,
+    // le bruit de machine qui le précède est écarté, le reste tombe — et les
+    // garde-fous jugent CE qui part, pas le texte entier. MÊME fonction qu'en
+    // production (draft.ts) : un aperçu qui choisit autrement ment.
     fullText = result.text;
-    const paragraphs = result.text
-      .split(/\n{2,}/)
-      .map((p) => p.trim())
-      .filter(Boolean);
-    draft = paragraphs[0] ?? "";
-    droppedParagraphs = Math.max(0, paragraphs.length - 1);
+    const picked = pickOutboundDraft(result.text);
+    draft = picked.draft;
+    droppedParagraphs = picked.dropped;
+    skippedParagraphs = picked.skipped;
 
     // Budget de segments — MÊME étape, MÊME place qu'en production : après la
     // découpe, avant les garde-fous. Sans elle, l'aperçu montrerait un message
@@ -611,6 +622,7 @@ export async function simulateTurn(input: SandboxTurnInput): Promise<SandboxTurn
     instruction,
     regenerations,
     droppedParagraphs,
+    skippedParagraphs,
     fullText,
     segmentBudget:
       budgetOutcome === null ||

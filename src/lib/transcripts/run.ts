@@ -81,6 +81,12 @@ async function recordRow(entry: {
   clientId: string | null;
   status: "skipped" | "failed";
   reason: string;
+  /**
+   * Le verbatim RÉCUPÉRÉ d'une réponse ratée. L'audio a été écouté et payé :
+   * sans cette colonne, un échec de format jetterait une transcription
+   * complète et il faudrait repayer la même minute pour la revoir.
+   */
+  transcript?: string | null;
   billed?: { model: string | null; result: LLMResult };
 }): Promise<boolean> {
   const usage = entry.billed?.result.usage;
@@ -91,6 +97,7 @@ async function recordRow(entry: {
       clientId: entry.clientId,
       status: entry.status,
       reason: entry.reason.slice(0, 500),
+      ...(entry.transcript ? { transcript: entry.transcript.slice(0, TRANSCRIPT_MAX_CHARS) } : {}),
       ...(entry.billed
         ? {
             provider: "openrouter",
@@ -211,31 +218,31 @@ export async function runCallTranscript(
     temperature: 0.2,
   });
 
-  // Réponse coupée par le plafond de jetons : la chaîne JSON s'arrête en
-  // plein verbatim et le repli « tout le texte est la note » pousserait ce
-  // débris sur la fiche, figé « done » pour toujours. Rangée `failed` (avec
-  // ce qui a été facturé) — l'admin voit l'échec sur la page de consommation.
-  if (result.truncated) {
-    await recordRow({
-      callId,
-      clientId: clientId,
-      status: "failed",
-      reason: "truncated",
-      billed: { model: cfg.model, result },
-    });
-    return { status: "failed", reason: "truncated" };
-  }
-
   const output = parseTranscriptOutput(result.text);
-  if (output.summary === "") {
+
+  /**
+   * TROIS façons de ne pas avoir de note, et aucune ne doit écrire sur la
+   * fiche. On lit AVANT de regarder `truncated` : ce drapeau ne vaut que ce
+   * que vaut le `finish_reason` du fournisseur — il reste indéfini quand
+   * l'amont se tait, et il valait « stop » sur les 8 rangées pourries de la
+   * production. Se fier à lui seul, c'est laisser le fournisseur décider de ce
+   * qu'on écrit sur la fiche d'un client.
+   *
+   * Le verbatim récupéré est gardé dans la rangée : l'appel est payé, et le
+   * téléphoniste peut encore lire ce qui s'est dit même sans résumé.
+   */
+  const failure = result.truncated ? "truncated" : output.failure;
+  if (failure !== null) {
+    const reason = failure === "truncated" ? "truncated" : `${failure}_output`;
     await recordRow({
       callId,
       clientId: clientId,
       status: "failed",
-      reason: "empty_output",
+      reason,
+      transcript: cfg.keepTranscript ? output.transcript : null,
       billed: { model: cfg.model, result },
     });
-    return { status: "failed", reason: "empty_output" };
+    return { status: "failed", reason };
   }
 
   const summary = output.summary.slice(0, SUMMARY_MAX_CHARS);

@@ -27,6 +27,7 @@ import { categoryEntryPatch } from "@/lib/dispositions";
 import { notifyCategoryChanged } from "@/lib/campaigns-server/match";
 import { LEFT_AUDIENCE_REASON } from "@/lib/campaigns/enrollment-status";
 import { resolveClassification } from "@/lib/classification-server";
+import { pickOutboundDraft } from "@/lib/agent/draft";
 import { resolvedRulesFor } from "@/lib/assistants/service";
 import { campaignRowToConfig } from "@/lib/campaigns/schema";
 import { getInternalBookingProvider } from "@/lib/booking/internal";
@@ -1473,6 +1474,13 @@ export async function runTurn(
   /** Le cran qui a servi, s'il a fallu descendre la chaîne — null sinon. */
   const chainUse: { fallbackRung: ModelRef | null } = { fallbackRung: null };
   let extraParagraphs = 0;
+  /**
+   * Les paragraphes-machine écartés AVANT le message (arguments d'outil
+   * recrachés en texte, brouillon structuré). Journalisés : sans eux, un tour
+   * qui escalade « rien écrit » alors que le modèle a bel et bien parlé reste
+   * inexplicable pour l'exploitant.
+   */
+  let skippedParagraphs: string[] = [];
   /** Le plafond de coût de CET assistant — relu à chaque tour, jamais figé au prompt. */
   const budget = config.approach.segmentBudget;
   /**
@@ -1618,13 +1626,13 @@ export async function runTurn(
 
     if (llmError !== null || terminatedByTool !== null || result === null) break;
 
-    // UN SEUL message par tour : le premier paragraphe part, le reste est noté.
-    const paragraphs = result.text
-      .split(/\n{2,}/)
-      .map((p) => p.trim())
-      .filter(Boolean);
-    draft = paragraphs[0] ?? "";
-    extraParagraphs = Math.max(0, paragraphs.length - 1);
+    // UN SEUL message par tour : le premier paragraphe qui est un MESSAGE part,
+    // le bruit de machine qui le précède est écarté, le reste est noté. La
+    // nature, pas la position — voir draft.ts et le SMS « { } » du 2026-08-25.
+    const picked = pickOutboundDraft(result.text);
+    draft = picked.draft;
+    extraParagraphs = picked.dropped;
+    skippedParagraphs = picked.skipped;
 
     // ── Budget de segments ────────────────────────────────────────────────
     // ICI et nulle part ailleurs : après la découpe en paragraphes, AVANT les
@@ -1715,6 +1723,18 @@ export async function runTurn(
   }
   if (extraParagraphs > 0) {
     events.push({ type: "extra_paragraphs_dropped", payload: { count: extraParagraphs } });
+  }
+  // Le modèle a écrit du bruit de machine avant (ou à la place de) son
+  // message : l'exploitant doit pouvoir le LIRE. Le compte seul ne dit pas si
+  // « { } » a été écarté ou si l'assistant a vraiment perdu la parole.
+  if (skippedParagraphs.length > 0) {
+    events.push({
+      type: "machine_paragraphs_skipped",
+      payload: {
+        count: skippedParagraphs.length,
+        samples: skippedParagraphs.slice(0, 3).map((p) => p.slice(0, 200)),
+      },
+    });
   }
   // Le budget de segments n'a le droit de toucher au texte qu'à découvert :
   // combien coûtait le brouillon, combien coûte ce qui part, et ce qu'il a
