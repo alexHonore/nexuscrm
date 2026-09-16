@@ -38,6 +38,11 @@ export type FollowupItemData = {
   canCall?: boolean;
   /** Programmé par l'assistant SMS plutôt que par quelqu'un de l'équipe. */
   aiScheduled: boolean;
+  /**
+   * Le collègue qui m'a CONFIÉ ce suivi — `null` quand je me le suis noté
+   * moi-même (le cas courant) ou quand l'assistant l'a posé.
+   */
+  assignedByName?: string | null;
 };
 
 export function FollowupItem({ item }: { item: FollowupItemData }) {
@@ -101,6 +106,15 @@ export function FollowupItem({ item }: { item: FollowupItemData }) {
           {item.phoneDisplay}
           {item.note ? ` · ${item.note}` : null}
         </p>
+        {/* Sur sa propre ligne : le nom de celui qui a posé la tâche est ce
+            qu'on lit quand on se demande « pourquoi je dois rappeler ça ? »,
+            et il se ferait couper au bout d'une ligne déjà pleine. */}
+        {item.assignedByName ? (
+          <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+            <UserRoundIcon className="size-3 shrink-0" aria-hidden />
+            {t("followups.assignedBy", { name: item.assignedByName })}
+          </p>
+        ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {dialNumber ? (

@@ -156,7 +156,12 @@
     "complete": "Complete",
     "completed": "Follow-up completed",
     "editDue": "Edit due date",
-    "updated": "Due date updated",
+    "edit": "Edit follow-up",
+    "updated": "Follow-up updated",
+    "assignees": "For whom",
+    "you": "Me",
+    "forPerson": "For {name}",
+    "handedOver": "Follow-up handed to {name}",
     "cancel": "Cancel",
     "empty": "No follow-ups planned.",
     "openSection": "To do",
@@ -212,6 +217,7 @@
     "generic": "Something went wrong",
     "forbidden": "Not allowed",
     "notFound": "Client not found",
+    "invalidAssignee": "That person no longer has access to this record — reload the page and try again.",
     "bulkPartial": "Stopped after {done} of {total} — the rest were not processed. Try again on what's left."
   },
   "views": {

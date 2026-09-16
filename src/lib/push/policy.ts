@@ -14,10 +14,11 @@
 
 import type { PushUrgency } from "./send";
 
-/** Les treize types que la table `notifications` produit aujourd'hui. */
+/** Les types que la table `notifications` produit aujourd'hui. */
 export const NOTIFICATION_TYPES = [
   "mention",
   "followup_due",
+  "followup_assigned",
   "incoming_lead",
   "appointment",
   "system",
@@ -100,6 +101,11 @@ const RULES: Record<NotificationType, PushRule> = {
   mention: { push: true, urgency: "normal", ttl: 86400, urgent: false, collapse: "client" },
   assignment: { push: true, urgency: "normal", ttl: 86400, urgent: false, collapse: "client" },
   followup_due: { push: true, urgency: "normal", ttl: 21600, urgent: false, collapse: "type" },
+  // Un collègue vient de poser une tâche dans ma journée. Ce n'est pas une
+  // urgence — l'échéance peut être dans trois semaines — mais c'est du travail
+  // qu'on m'attribue sans me le dire de vive voix : la ligne doit arriver, et
+  // survivre à un téléphone éteint pour la nuit.
+  followup_assigned: { push: true, urgency: "normal", ttl: 86400, urgent: false, collapse: "client" },
   appointment: { push: true, urgency: "normal", ttl: 86400, urgent: false, collapse: "none" },
 
   // Avertissements d'exploitation (jeton Google expiré, etc.). Ils s'adressent

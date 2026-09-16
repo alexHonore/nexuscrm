@@ -156,7 +156,12 @@
     "complete": "Terminer",
     "completed": "Suivi terminé",
     "editDue": "Modifier l'échéance",
-    "updated": "Échéance modifiée",
+    "edit": "Modifier le suivi",
+    "updated": "Suivi modifié",
+    "assignees": "Pour qui",
+    "you": "Moi",
+    "forPerson": "Pour {name}",
+    "handedOver": "Suivi confié à {name}",
     "cancel": "Annuler",
     "empty": "Aucun suivi planifié.",
     "openSection": "À faire",
@@ -212,6 +217,7 @@
     "generic": "Une erreur est survenue",
     "forbidden": "Action non autorisée",
     "notFound": "Client introuvable",
+    "invalidAssignee": "Ce destinataire n'a plus accès à cette fiche — rouvrez la page et réessayez.",
     "bulkPartial": "Interrompu après {done} fiche(s) sur {total} — les autres n'ont pas été traitées. Réessayez sur la sélection restante."
   },
   "views": {

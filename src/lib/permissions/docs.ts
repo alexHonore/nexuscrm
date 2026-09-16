@@ -125,11 +125,11 @@ export const PERMISSION_DOCS: Record<PermissionKey, DocEntry> = {
   "clients.followup": {
     labelFr: "Planifier un suivi",
     whatFr:
-      "Ouvre la carte « Suivis » de la fiche : créer un rappel, en modifier l'échéance, le terminer.",
+      "Ouvre la carte « Suivis » de la fiche : créer un rappel, en modifier l'échéance, le confier à un collègue, le terminer.",
     whyFr:
-      "Les suivis alimentent « À appeler aujourd'hui » du tableau de bord et la notification d'échéance : ils décident du travail du lendemain.",
+      "Les suivis alimentent « À appeler aujourd'hui » du tableau de bord et la notification d'échéance : ils décident du travail du lendemain — du sien, et de celui des autres depuis qu'un suivi se partage.",
     pitfallsFr:
-      "Un suivi créé sur la fiche d'un collègue est assigné au DÉTENTEUR de la fiche, pas à son auteur : il apparaît dans le tableau de bord de l'autre. Fermer le droit n'efface pas les suivis déjà posés, qui continuent d'échoir.",
+      "Ce droit est AUSSI celui de donner du travail : « Pour qui » écrit une ligne par personne cochée, chacune avec sa notification et son échéance à clore. Il plafonne enfin QUI peut recevoir un suivi — seules les personnes qui voient la fiche ET portent ce droit sont proposées, sans quoi la tâche échoirait chez quelqu'un qui ne peut ni l'ouvrir ni la terminer. Fermer le droit n'efface pas les suivis déjà posés, qui continuent d'échoir.",
   },
   "clients.category": {
     labelFr: "Changer la catégorie",

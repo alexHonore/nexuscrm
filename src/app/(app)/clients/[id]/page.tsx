@@ -15,6 +15,7 @@ import {
   smsNumbers,
 } from "@/db/schema-sms";
 import {
+  followupCandidates,
   grantsOnClient,
   loadDirectory,
   requireActor,
@@ -214,6 +215,10 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
       db.query.followups.findMany({
         where: eq(followups.clientId, fiche.id),
         orderBy: [asc(followups.dueAt)],
+        // Un suivi porte un NOM depuis qu'il peut revenir à quelqu'un d'autre
+        // que l'auteur : sans lui, trois lignes identiques ne disent pas à qui
+        // la tâche est confiée.
+        with: { assignedTo: { columns: { id: true, name: true } } },
       }),
       // « Modifiée par qui » : le schéma ne stocke pas d'updatedById — la
       // dernière écriture HUMAINE vient du journal d'audit (les mises à jour
@@ -314,6 +319,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
         note: f.note,
         doneAt: f.doneAt?.toISOString() ?? null,
         overdue: !f.doneAt && f.dueAt < now,
+        assignee: f.assignedTo ? { id: f.assignedTo.id, name: f.assignedTo.name } : null,
       })),
       enrollments: enrollmentRows.map((row) => {
         const paused = enrollmentPaused(row);
@@ -471,6 +477,10 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
     value: String(s.id),
     label: s.name,
   }));
+  // À qui un suivi peut être confié sur CETTE fiche. Même discipline que la
+  // liste ci-dessous : sans le droit de planifier, l'annuaire ne part pas.
+  const followupPeople = grants.followup ? await followupCandidates(client) : [];
+
   // La liste des collègues n'est envoyée qu'à qui peut réellement donner une
   // fiche : ailleurs, elle n'est qu'un annuaire de plus dans le HTML.
   const userOptions: FilterOption[] = canAssignToOthers
@@ -566,6 +576,8 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
                   clientId={client.id}
                   canManage={grants.followup}
                   followups={history.followups}
+                  candidates={followupPeople}
+                  currentUserId={actor.user.id}
                 />
                 <CommentsTimeline
                   clientId={client.id}

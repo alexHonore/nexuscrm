@@ -53,9 +53,9 @@ export const PERMISSION_TEXT_EN: Record<string, DocOverlay> = {
   },
   "clients.followup": {
     label: "Plan a follow-up",
-    what: "Opens the \"Follow-ups\" card on the record: create a reminder, change its due date, complete it.",
-    why: "Follow-ups feed \"To call today\" on the dashboard and the due-date notification: they decide tomorrow's work.",
-    pitfalls: "A follow-up created on a colleague's record is assigned to the record's HOLDER, not to its author: it shows up on the other person's dashboard. Closing the right does not erase follow-ups already planned, which keep coming due.",
+    what: "Opens the \"Follow-ups\" card on the record: create a reminder, change its due date, hand it to a colleague, complete it.",
+    why: "Follow-ups feed \"To call today\" on the dashboard and the due-date notification: they decide tomorrow's work — one's own, and other people's now that a follow-up can be shared.",
+    pitfalls: "This right is ALSO the right to hand out work: \"For whom\" writes one row per person ticked, each with its own notification and its own due date to close. It caps WHO may receive a follow-up too — only people who can see the record AND hold this right are offered, otherwise the task would land on someone who can neither open nor complete it. Closing the right does not erase follow-ups already planned, which keep coming due.",
   },
   "clients.category": {
     label: "Change the category",

@@ -11,6 +11,7 @@ import {
   BracesIcon,
   CalendarCheckIcon,
   CalendarClockIcon,
+  CalendarPlusIcon,
   CalendarXIcon,
   CheckCheckIcon,
   CircleAlertIcon,
@@ -816,6 +817,11 @@ export const NOTIFICATION_LOOK: Record<string, Look> = {
   mention: { color: TONE.scrutiny, Icon: AtSignIcon },
   assignment: { color: TONE.scrutiny, Icon: UserCheckIcon },
   followup_due: { color: TONE.scrutiny, Icon: ClockIcon },
+  // « On vient de POSER quelque chose dans ma journée. » Pas la même chose que
+  // `followup_due`, qui dit « c'est maintenant » : celle-ci arrive au moment du
+  // partage, souvent pour un jour lointain. Le cadran seul aurait fait croire à
+  // une échéance ; le calendrier avec un plus dit qu'une ligne s'ajoute.
+  followup_assigned: { color: TONE.scrutiny, Icon: CalendarPlusIcon },
 
   // « Pour information. »
   appointment: { color: TONE.raw, Icon: CalendarCheckIcon },

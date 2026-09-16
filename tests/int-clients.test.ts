@@ -357,13 +357,14 @@ describe("intégrité des données clients", () => {
       );
     });
 
-    it("assigne la relance au responsable de la fiche, sinon à l'auteur", async () => {
+    it("revient à SON AUTEUR par défaut, même sur la fiche d'un collègue", async () => {
       const owner = await makeUser({ role: "caller", name: "Titulaire" });
       // L'auteur est l'ADMINISTRATEUR : planifier un suivi sur la fiche d'un
       // collègue exige la case « suivi » de son compartiment, qu'un
-      // téléphoniste n'a pas (préréglage livré). Ce que le test prouve ne
-      // change pas : la relance échoit au TITULAIRE de la fiche, pas à celui
-      // qui l'a écrite — et à l'auteur seulement quand la fiche est au bassin.
+      // téléphoniste n'a pas (préréglage livré). Ce que le test prouve a
+      // CHANGÉ : la relance échoit désormais à celui qui l'écrit, pas au
+      // titulaire de la fiche — on se note un rappel, on ne donne pas du
+      // travail sans le dire. Le partage est un geste séparé et explicite.
       const author = await makeUser({ role: "admin", name: "Auteur" });
       await login(author);
 
@@ -373,9 +374,97 @@ describe("intégrité des données clients", () => {
       await actions.createFollowupAction({ clientId: orphan.id, date: "2026-09-15", time: "09:00" });
 
       const rows = await testDb.select().from(followups);
-      expect(rows.find((r) => r.clientId === assigned.id)!.assignedToId).toBe(owner.id);
+      expect(rows.find((r) => r.clientId === assigned.id)!.assignedToId).toBe(author.id);
       expect(rows.find((r) => r.clientId === orphan.id)!.assignedToId).toBe(author.id);
       expect(rows.every((r) => r.createdById === author.id)).toBe(true);
+    });
+
+    it("confié à plusieurs : une ligne par personne, et une notification chacun", async () => {
+      const author = await makeUser({ role: "admin", name: "Auteur", locale: "fr" });
+      const alice = await makeUser({ role: "caller", name: "Alice", locale: "en" });
+      const bob = await makeUser({ role: "caller", name: "Bob", locale: "fr" });
+      await login(author);
+      const client = await makeClient({ fullName: "Marie Tremblay" });
+
+      expect(
+        await actions.createFollowupAction({
+          clientId: client.id,
+          date: "2026-09-15",
+          time: "09:00",
+          note: "Rappeler pour la visite",
+          assigneeIds: [alice.id, bob.id, author.id],
+        }),
+      ).toEqual({ ok: true });
+
+      const rows = await testDb.select().from(followups);
+      expect(rows).toHaveLength(3);
+      expect(rows.map((r) => r.assignedToId).sort()).toEqual(
+        [alice.id, bob.id, author.id].sort(),
+      );
+      expect(rows.every((r) => r.createdById === author.id)).toBe(true);
+      expect(new Set(rows.map((r) => r.dueAt.toISOString()))).toEqual(
+        new Set(["2026-09-15T13:00:00.000Z"]),
+      );
+
+      // L'auteur ne se prévient pas lui-même ; les deux autres, si — chacun
+      // dans SA langue, et le mot « suivi » n'est pas le même des deux côtés.
+      const notified = await testDb
+        .select()
+        .from(notifications)
+        .where(eq(notifications.type, "followup_assigned"));
+      expect(notified).toHaveLength(2);
+      expect(notified.map((n) => n.userId).sort()).toEqual([alice.id, bob.id].sort());
+      expect(notified.every((n) => n.link === `/clients/${client.id}`)).toBe(true);
+      expect(notified.find((n) => n.userId === bob.id)!.title).toContain("Marie Tremblay");
+      expect(notified.find((n) => n.userId === bob.id)!.body).toContain("Auteur");
+      expect(notified.find((n) => n.userId === bob.id)!.body).toContain("Rappeler pour la visite");
+    });
+
+    it("refuse un destinataire à qui la fiche est fermée — et n'écrit rien", async () => {
+      const author = await makeUser({ role: "admin", name: "Auteur" });
+      const outsider = await makeUser({ role: "caller", name: "Dehors", isActive: false });
+      await login(author);
+      const client = await makeClient();
+
+      expect(
+        await actions.createFollowupAction({
+          clientId: client.id,
+          date: "2026-09-15",
+          time: "09:00",
+          assigneeIds: [outsider.id],
+        }),
+      ).toEqual({ ok: false, error: "invalidAssignee" });
+      expect(await testDb.select().from(followups)).toHaveLength(0);
+      expect((await getClient(client.id)).nextFollowupAt).toBeNull();
+    });
+
+    it("repasser un suivi change son porteur et prévient le nouveau", async () => {
+      const author = await makeUser({ role: "admin", name: "Auteur" });
+      const alice = await makeUser({ role: "caller", name: "Alice" });
+      await login(author);
+      const client = await makeClient();
+      await actions.createFollowupAction({ clientId: client.id, date: "2026-09-20", time: "10:00" });
+      const [row] = await testDb.select().from(followups);
+      expect(row.assignedToId).toBe(author.id);
+
+      expect(
+        await actions.updateFollowupAction({
+          followupId: row.id,
+          date: "2026-09-20",
+          time: "10:00",
+          assigneeId: alice.id,
+        }),
+      ).toEqual({ ok: true });
+
+      const after = await testDb.query.followups.findFirst({ where: eq(followups.id, row.id) });
+      expect(after!.assignedToId).toBe(alice.id);
+      // L'auteur reste l'auteur : « qui m'a confié ça » ne se réécrit pas.
+      expect(after!.createdById).toBe(author.id);
+      const notified = await testDb
+        .select()
+        .from(notifications)
+        .where(eq(notifications.type, "followup_assigned"));
+      expect(notified.map((n) => n.userId)).toEqual([alice.id]);
     });
 
     it("garde toujours la relance ouverte la plus proche (création dans le désordre)", async () => {
@@ -455,7 +544,7 @@ describe("intégrité des données clients", () => {
 
       // On repousse la plus proche après l'autre → l'autre devient la prochaine.
       expect(
-        await actions.updateFollowupDueAction({
+        await actions.updateFollowupAction({
           followupId: rows[0].id,
           date: "2026-10-10",
           time: "09:00",
@@ -467,7 +556,7 @@ describe("intégrité des données clients", () => {
 
       // On avance la seconde → elle redevient la prochaine.
       expect(
-        await actions.updateFollowupDueAction({
+        await actions.updateFollowupAction({
           followupId: rows[1].id,
           date: "2026-08-25",
           time: "07:30",
@@ -488,7 +577,7 @@ describe("intégrité des données clients", () => {
       expect((await getClient(client.id)).nextFollowupAt).toBeNull();
 
       // Report d'une relance close : elle reste close, nextFollowupAt reste NULL.
-      await actions.updateFollowupDueAction({
+      await actions.updateFollowupAction({
         followupId: row.id,
         date: "2026-09-05",
         time: "10:00",

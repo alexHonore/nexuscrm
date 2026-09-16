@@ -160,6 +160,44 @@ export async function guardClient(
   return { ref, grants };
 }
 
+/**
+ * À QUI peut-on confier un suivi sur CETTE fiche ?
+ *
+ * Deux conditions, et les deux comptent :
+ *
+ *   `visible`  — sans elle, la tâche mène à une fiche qui, pour cette
+ *                personne, n'existe pas : la cloche masque la ligne et la
+ *                poussée ne part pas (`fanoutPush` revérifie). On lui aurait
+ *                donné du travail invisible.
+ *   `followup` — sans elle, elle voit la tâche sur son tableau de bord et le
+ *                bouton « Terminer » se fait refuser par le serveur. Confier
+ *                un suivi à qui ne peut pas le clore, c'est le laisser échoir
+ *                pour toujours.
+ *
+ * Le compartiment se calcule du point de vue du DESTINATAIRE, pas de celui qui
+ * partage : une fiche « à moi » pour l'un est « à un téléphoniste » pour
+ * l'autre, et c'est justement ce que la matrice sait dire.
+ *
+ * Les comptes désactivés sont écartés ici — c'est la même règle que les
+ * rappels d'échéance (`/api/cron/followup-reminders`), qui les sautent déjà.
+ */
+export async function followupCandidates(
+  client: ClientRef,
+): Promise<{ id: string; name: string }[]> {
+  const { cfg, rows, roleOf } = await loadDirectory();
+  const holder = await assigneeRole(client.assignedToId);
+  const out: { id: string; name: string }[] = [];
+  for (const row of rows) {
+    if (!row.isActive) continue;
+    const role = roleOf.get(row.id);
+    if (!role) continue;
+    const grants = grantsFor(cfg, role, bucketFor(row.id, client, holder));
+    if (!grants.visible || !grants.followup) continue;
+    out.push({ id: row.id, name: row.name });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, "fr"));
+}
+
 // ── Une liste à la fois ──────────────────────────────────────────────────────
 
 export async function scopeFor(actor: Actor): Promise<Scope> {

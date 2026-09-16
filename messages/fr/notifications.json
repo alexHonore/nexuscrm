@@ -13,6 +13,7 @@
   "types": {
     "mention": "Mention",
     "followup_due": "Suivi",
+    "followup_assigned": "Suivi confié",
     "incoming_lead": "Nouveau prospect",
     "appointment": "Rendez-vous",
     "system": "Système",
@@ -23,6 +24,9 @@
   "content": {
     "mentionTitle": "{name} vous a mentionné",
     "followupDueTitle": "Suivi à faire : {client}",
+    "followupAssignedTitle": "Suivi confié : {client}",
+    "followupAssignedBody": "{actor} vous a confié un suivi pour le {when}.",
+    "followupAssignedBodyNote": "{actor} vous a confié un suivi pour le {when} — {note}",
     "incomingLeadTitle": "Nouveau lead : {name}",
     "incomingLeadNewBody": "{phone} — via {source}",
     "incomingLeadExistingBody": "Client existant recontacté — {phone} — via {source}",

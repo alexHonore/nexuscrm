@@ -169,9 +169,13 @@ export default async function DashboardPage() {
         clientPhone: clients.phone,
         clientDoNotCall: clients.doNotCall,
         holderId: clients.assignedToId,
+        // Qui me l'a confié. `leftJoin` : l'assistant SMS pose des suivis sans
+        // auteur, et un compte supprimé laisse la colonne à null.
+        createdByName: users.name,
       })
       .from(followups)
       .innerJoin(clients, eq(clients.id, followups.clientId))
+      .leftJoin(users, eq(users.id, followups.createdById))
       .where(followupWhere)
       .orderBy(asc(followups.dueAt))
       .limit(FOLLOWUP_FETCH_LIMIT),
@@ -351,6 +355,11 @@ export default async function DashboardPage() {
       // l'a créé. Les deux familles vivent dans la MÊME liste — la marque est ce
       // qui permet de les y distinguer.
       aiScheduled: f.createdById === null,
+      // Un suivi qu'on m'a CONFIÉ ne se lit pas comme un que je me suis noté :
+      // l'un se discute avec celui qui l'a posé, l'autre pas. Rien à afficher
+      // quand je suis l'auteur — ce serait me raconter ma propre journée.
+      assignedByName:
+        f.createdById && f.createdById !== user.id ? (f.createdByName ?? null) : null,
     };
   };
 

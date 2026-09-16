@@ -2,7 +2,8 @@
 
 import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { fromZonedTime } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+import { enUS, fr } from "date-fns/locale";
 import { z } from "zod";
 import { db } from "@/db";
 import {
@@ -21,9 +22,10 @@ import { isForeignKeyViolation } from "@/lib/db-errors";
 import { categoryEntryPatch } from "@/lib/dispositions";
 import { cancelEvent } from "@/lib/google";
 import { createNotifications } from "@/lib/notify";
-import type { AssignRefusal } from "@/lib/permissions/access";
+import type { AssignRefusal, ClientRef } from "@/lib/permissions/access";
 import {
   currentActor,
+  followupCandidates,
   grantsOnClient,
   guardClient,
   ownedCount,
@@ -51,7 +53,9 @@ export type ActionResult =
         | "forbidden"
         | "notFound"
         | "locked"
-        | "capReached";
+        | "capReached"
+        /** Un destinataire de suivi qui n'a rien à faire là (voir `resolveFollowupTargets`). */
+        | "invalidAssignee";
     };
 
 /** Résultat des actions en masse : nombre de fiches réellement modifiées. */
@@ -65,6 +69,7 @@ const FORBIDDEN = { ok: false, error: "forbidden" } as const;
 const NOT_FOUND = { ok: false, error: "notFound" } as const;
 const LOCKED = { ok: false, error: "locked" } as const;
 const CAP_REACHED = { ok: false, error: "capReached" } as const;
+const BAD_ASSIGNEE = { ok: false, error: "invalidAssignee" } as const;
 
 /**
  * Un refus d'assignation se NOMME.
@@ -975,11 +980,114 @@ export async function bulkDeleteClientsAction(clientIds: string[]): Promise<Bulk
 
 // ── Follow-ups ───────────────────────────────────────────────────────────────
 
+/**
+ * Combien de personnes peuvent recevoir le MÊME suivi d'un coup.
+ *
+ * Un suivi partagé s'écrit une ligne PAR destinataire : chacun le voit sur son
+ * tableau de bord, chacun le termine pour lui-même, et le rappel d'échéance
+ * (`/api/cron/followup-reminders`) part une fois par personne. Deux téléphones
+ * qui sonnent pour la même tâche valent mieux qu'une tâche que chacun croyait
+ * confiée à l'autre.
+ *
+ * Le plafond n'est pas une limite métier : c'est ce qui empêche une page
+ * ouverte depuis une heure de poser trois cents lignes d'un clic.
+ */
+const FOLLOWUP_MAX_ASSIGNEES = 25;
+
+/**
+ * À QUI ce suivi revient-il ?
+ *
+ * Rien de coché = à SON AUTEUR. C'est la règle la moins surprenante : on pose
+ * un rappel pour soi, puis on le partage si on veut. (Avant, un suivi écrit sur
+ * la fiche d'un collègue atterrissait chez LUI sans qu'on l'ait demandé — on
+ * croyait s'être noté quelque chose et la tâche était partie ailleurs.)
+ *
+ * Une cible non proposée par `followupCandidates` est REFUSÉE, jamais écartée
+ * en silence : partager un suivi avec trois personnes et n'en servir que deux,
+ * sans le dire, c'est la panne qu'on ne voit qu'au moment où le rappel n'arrive
+ * pas. Le cas ne se produit que sur un onglet resté ouvert pendant qu'un rôle
+ * changeait — l'écran ne propose que des destinataires valables.
+ */
+async function resolveFollowupTargets(
+  actor: Actor,
+  ref: ClientRef,
+  wanted: string[] | undefined,
+): Promise<{ ok: true; ids: string[] } | { ok: false; error: typeof BAD_ASSIGNEE }> {
+  const ids = [...new Set(wanted ?? [])];
+  if (ids.length === 0) return { ok: true, ids: [actor.user.id] };
+  const allowed = new Set((await followupCandidates(ref)).map((u) => u.id));
+  if (ids.some((id) => !allowed.has(id))) return { ok: false, error: BAD_ASSIGNEE };
+  return { ok: true, ids };
+}
+
+/**
+ * Prévient ceux à qui on vient de confier un suivi, chacun dans SA langue.
+ *
+ * Sans cette ligne, une tâche posée pour le 12 du mois prochain n'existerait
+ * pour son destinataire qu'une heure avant l'échéance (`followup_due`) : il ne
+ * pourrait ni la contester, ni s'organiser autour. L'auteur ne se prévient
+ * jamais lui-même — la cloche perdrait son sens à sonner pour chaque clic.
+ *
+ * Écrire une notification à quelqu'un qui ne verrait pas la fiche serait sans
+ * danger (la cloche et `fanoutPush` revérifient), mais la question ne se pose
+ * pas ici : `resolveFollowupTargets` n'a laissé passer que des personnes à qui
+ * la fiche est ouverte.
+ */
+async function notifyFollowupAssigned(opts: {
+  actor: Actor;
+  clientId: string;
+  userIds: string[];
+  dueAt: Date;
+  note: string | null;
+}): Promise<void> {
+  const userIds = [...new Set(opts.userIds)].filter((id) => id !== opts.actor.user.id);
+  if (userIds.length === 0) return;
+
+  const [recipients, client] = await Promise.all([
+    db.query.users.findMany({
+      where: and(inArray(users.id, userIds), eq(users.isActive, true)),
+      columns: { id: true, locale: true },
+    }),
+    db.query.clients.findFirst({
+      where: eq(clients.id, opts.clientId),
+      columns: { fullName: true },
+    }),
+  ]);
+  if (recipients.length === 0) return;
+
+  await createNotifications(
+    recipients.map((r) => ({
+      userId: r.id,
+      type: "followup_assigned",
+      title: notificationContent(r.locale, "followupAssignedTitle", {
+        client: client?.fullName ?? "",
+      }),
+      body: notificationContent(
+        r.locale,
+        opts.note ? "followupAssignedBodyNote" : "followupAssignedBody",
+        {
+          actor: opts.actor.user.name,
+          when: formatInTimeZone(
+            opts.dueAt,
+            APP_TZ,
+            r.locale === "en" ? "EEE MMM d, h:mm a" : "EEE d MMM, HH:mm",
+            { locale: r.locale === "en" ? enUS : fr },
+          ),
+          note: opts.note ?? "",
+        },
+      ),
+      link: `/clients/${opts.clientId}`,
+    })),
+  );
+}
+
 export async function createFollowupAction(input: {
   clientId: string;
   date: string;
   time: string;
   note?: string;
+  /** Les destinataires. Absent ou vide : l'auteur, et lui seul. */
+  assigneeIds?: string[];
 }): Promise<ActionResult> {
   const actor = await currentActor();
   if (!actor) return FORBIDDEN;
@@ -991,26 +1099,34 @@ export async function createFollowupAction(input: {
       date: dateStr,
       time: timeStr,
       note: optionalText(1000),
+      assigneeIds: z.array(z.string().uuid()).max(FOLLOWUP_MAX_ASSIGNEES).optional(),
     })
     .safeParse(input);
   if (!parsed.success) return INVALID;
-  const { clientId, date, time, note } = parsed.data;
+  const { clientId, date, time, note, assigneeIds } = parsed.data;
 
   // La garde charge déjà la fiche RÉDUITE à ce qui décide de l'accès — dont le
-  // responsable, seule chose dont la relance ait besoin ici.
+  // responsable, seule chose dont le partage ait besoin ici.
   const guard = await guardClient(actor, clientId, "followup");
   if (!guard) return NOT_FOUND;
 
   const dueAt = fromZonedTime(`${date}T${time}:00`, APP_TZ);
   if (Number.isNaN(dueAt.getTime())) return INVALID;
 
-  await db.insert(followups).values({
-    clientId,
-    assignedToId: guard.ref.assignedToId ?? actor.user.id,
-    dueAt,
-    note,
-    createdById: actor.user.id,
-  });
+  const targets = await resolveFollowupTargets(actor, guard.ref, assigneeIds);
+  if (!targets.ok) return targets.error;
+
+  await db.insert(followups).values(
+    targets.ids.map((assignedToId) => ({
+      clientId,
+      assignedToId,
+      dueAt,
+      note,
+      createdById: actor.user.id,
+    })),
+  );
+
+  await notifyFollowupAssigned({ actor, clientId, userIds: targets.ids, dueAt, note });
 
   await syncNextFollowup(clientId);
   revalidateClient(clientId);
@@ -1038,29 +1154,65 @@ export async function completeFollowupAction(followupId: string): Promise<Action
   return { ok: true };
 }
 
-export async function updateFollowupDueAction(input: {
+/**
+ * Déplacer l'échéance d'un suivi, et/ou le passer à quelqu'un d'autre.
+ *
+ * Une ligne = une personne : réassigner, c'est donc changer le destinataire de
+ * CETTE ligne, pas répartir la tâche. Pour la confier à plusieurs, on en crée
+ * une par personne (`createFollowupAction`).
+ */
+export async function updateFollowupAction(input: {
   followupId: string;
   date: string;
   time: string;
+  /** Le nouveau destinataire. Absent : on ne touche pas à qui le porte. */
+  assigneeId?: string;
 }): Promise<ActionResult> {
   const actor = await currentActor();
   if (!actor) return FORBIDDEN;
   if (!actor.can("clients.followup")) return FORBIDDEN;
 
   const parsed = z
-    .object({ followupId: z.string().uuid(), date: dateStr, time: timeStr })
+    .object({
+      followupId: z.string().uuid(),
+      date: dateStr,
+      time: timeStr,
+      assigneeId: z.string().uuid().optional(),
+    })
     .safeParse(input);
   if (!parsed.success) return INVALID;
-  const { followupId, date, time } = parsed.data;
+  const { followupId, date, time, assigneeId } = parsed.data;
 
   const followup = await db.query.followups.findFirst({ where: eq(followups.id, followupId) });
   if (!followup) return NOT_FOUND;
-  if (!(await guardClient(actor, followup.clientId, "followup"))) return NOT_FOUND;
+  const guard = await guardClient(actor, followup.clientId, "followup");
+  if (!guard) return NOT_FOUND;
 
   const dueAt = fromZonedTime(`${date}T${time}:00`, APP_TZ);
   if (Number.isNaN(dueAt.getTime())) return INVALID;
 
-  await db.update(followups).set({ dueAt }).where(eq(followups.id, followupId));
+  const handedTo = assigneeId && assigneeId !== followup.assignedToId ? assigneeId : null;
+  if (handedTo) {
+    const targets = await resolveFollowupTargets(actor, guard.ref, [handedTo]);
+    if (!targets.ok) return targets.error;
+  }
+
+  await db
+    .update(followups)
+    .set({ dueAt, ...(handedTo ? { assignedToId: handedTo } : {}) })
+    .where(eq(followups.id, followupId));
+
+  // Un suivi qu'on repasse à quelqu'un est une nouvelle pour lui, même si la
+  // date n'a pas bougé. Le rendre à soi-même n'en est pas une.
+  if (handedTo) {
+    await notifyFollowupAssigned({
+      actor,
+      clientId: followup.clientId,
+      userIds: [handedTo],
+      dueAt,
+      note: followup.note,
+    });
+  }
 
   await syncNextFollowup(followup.clientId);
   revalidateClient(followup.clientId);

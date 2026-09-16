@@ -13,6 +13,7 @@
   "types": {
     "mention": "Mention",
     "followup_due": "Follow-up",
+    "followup_assigned": "Follow-up handed over",
     "incoming_lead": "New lead",
     "appointment": "Appointment",
     "system": "System",
@@ -23,6 +24,9 @@
   "content": {
     "mentionTitle": "{name} mentioned you",
     "followupDueTitle": "Follow-up due: {client}",
+    "followupAssignedTitle": "Follow-up for you: {client}",
+    "followupAssignedBody": "{actor} handed you a follow-up due {when}.",
+    "followupAssignedBodyNote": "{actor} handed you a follow-up due {when} — {note}",
     "incomingLeadTitle": "New lead: {name}",
     "incomingLeadNewBody": "{phone} — via {source}",
     "incomingLeadExistingBody": "Existing client reaching out again — {phone} — via {source}",

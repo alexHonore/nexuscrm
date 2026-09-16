@@ -27,7 +27,8 @@
     "done": "Suivi terminé",
     "doNotCall": "Ne pas appeler",
     "truncated": "{count, plural, one {# suivi plus lointain n'est pas affiché} other {# suivis plus lointains ne sont pas affichés}}",
-    "aiScheduled": "IA"
+    "aiScheduled": "IA",
+    "assignedBy": "Confié par {name}"
   },
   "attention": {
     "title": "SMS IA — à reprendre",

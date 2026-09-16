@@ -27,7 +27,8 @@
     "done": "Follow-up completed",
     "doNotCall": "Do not call",
     "truncated": "{count, plural, one {# later follow-up is not shown} other {# later follow-ups are not shown}}",
-    "aiScheduled": "AI"
+    "aiScheduled": "AI",
+    "assignedBy": "Handed over by {name}"
   },
   "attention": {
     "title": "AI SMS — needs you",
