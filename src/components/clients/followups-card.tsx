@@ -27,13 +27,6 @@ import {
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { emitDataChange } from "@/lib/live";
 import { cn } from "@/lib/utils";
@@ -88,9 +81,9 @@ export function FollowupsCard({
   const [time, setTime] = useState("09:00");
   const [note, setNote] = useState("");
   // Un suivi se pose d'abord pour SOI : c'est le geste d'après-appel. Partager
-  // est un second geste, et il se voit.
+  // est un second geste, et il se voit. La même liste sert à la création et à
+  // la modification — un suivi se confie de la même façon des deux côtés.
   const [picked, setPicked] = useState<string[]>([currentUserId]);
-  const [handTo, setHandTo] = useState(currentUserId);
 
   // Seul à pouvoir porter ce suivi : la question « pour qui » ne se pose pas,
   // et une case unique cochée d'avance n'apprend rien à personne.
@@ -175,7 +168,10 @@ export function FollowupsCard({
     const zoned = toZonedTime(new Date(f.dueAt), APP_TZ);
     setDate(format(zoned, "yyyy-MM-dd"));
     setTime(format(zoned, "HH:mm"));
-    setHandTo(f.assignee?.id ?? currentUserId);
+    // Seul le porteur de CETTE ligne est coché : les lignes voisines d'un suivi
+    // partagé ne sont pas les siennes à décocher. Cocher quelqu'un de plus lui
+    // ouvre la sienne ; décocher ne referme jamais celle d'un autre.
+    setPicked([f.assignee?.id ?? currentUserId]);
     setEditId(f.id);
   };
 
@@ -217,35 +213,53 @@ export function FollowupsCard({
   };
 
   const submitEdit = () => {
-    if (!editId) return;
+    if (!editId || picked.length === 0) return;
     const id = editId;
     const current = rows.find((f) => f.id === id) ?? null;
+    const held = current?.assignee?.id ?? currentUserId;
     const dueAt = draftDueIso(date, time);
-    const handedOver = shared && handTo !== (current?.assignee?.id ?? currentUserId);
-    const nextAssignee = candidates.find((c) => c.id === handTo) ?? current?.assignee ?? null;
+    const overdue = Date.parse(dueAt) < Date.now();
+    // La même règle que le serveur, pour que l'affichage optimiste montre
+    // exactement ce qui va s'écrire : la ligne reste à son porteur s'il est
+    // encore coché, sinon elle part au premier, et le reste ouvre des lignes.
+    const keeper = picked.includes(held) ? held : picked[0];
+    const extras = picked.filter((pid) => pid !== keeper);
+    const keeperPerson = candidates.find((c) => c.id === keeper) ?? current?.assignee ?? null;
+    const drafts: FollowupData[] = extras.map((pid, i) => ({
+      id: `${DRAFT_PREFIX}${Date.now()}:${i}`,
+      dueAt,
+      note: current?.note ?? null,
+      doneAt: null,
+      overdue,
+      assignee: candidates.find((c) => c.id === pid) ?? null,
+    }));
     const payload = {
       followupId: id,
       date,
       time,
-      ...(shared ? { assigneeId: handTo } : {}),
+      ...(shared ? { assigneeIds: picked } : {}),
     };
     setEditId(null);
     mutate(
-      (list) =>
-        list.map((f) =>
+      (list) => [
+        ...list.map((f) =>
           f.id === id
-            ? {
-                ...f,
-                dueAt,
-                overdue: !f.doneAt && Date.parse(dueAt) < Date.now(),
-                assignee: nextAssignee,
-              }
+            ? { ...f, dueAt, overdue: !f.doneAt && overdue, assignee: keeperPerson }
             : f,
         ),
+        ...drafts,
+      ],
       () => updateFollowupAction(payload),
-      handedOver
-        ? t("followups.handedOver", { name: nameOf(nextAssignee) })
-        : t("followups.updated"),
+      // Trois issues, trois phrases : des lignes se sont ouvertes chez des
+      // collègues, ou la ligne a changé de main, ou seule l'heure a bougé.
+      // « Suivi confié à 1 personne » ne disait ni laquelle ni quoi.
+      extras.length > 0
+        ? t("followups.added", { count: extras.length })
+        : keeper === held
+          ? t("followups.updated")
+          : keeper === currentUserId
+            ? t("followups.takenBack")
+            : t("followups.handedOver", { name: nameOf(keeperPerson) }),
     );
   };
 
@@ -257,6 +271,42 @@ export function FollowupsCard({
       t("followups.completed"),
     );
   };
+
+  /**
+   * Qui porte ce suivi. La MÊME pièce dans les deux boîtes : créer et confier
+   * sont le même geste, et deux commandes différentes pour une seule question
+   * obligeraient à réapprendre la seconde.
+   *
+   * Le préfixe d'identifiant sépare les deux boîtes : deux `id` identiques dans
+   * la page feraient pointer chaque étiquette sur la mauvaise case.
+   */
+  const peopleField = (idPrefix: string) => (
+    <fieldset className="space-y-1.5">
+      {/* Le titre de section n'est plus peint : une colonne de noms cochables
+          sous une date, dans une boîte « suivi », ne se confond avec rien. Il
+          reste dans l'arbre d'accessibilité, où l'œil ne peut pas suppléer. */}
+      <legend className="sr-only">{t("followups.assignees")}</legend>
+      <ul className="max-h-48 space-y-0.5 overflow-y-auto border-t pt-2">
+        {candidates.map((person) => (
+          <li key={person.id} className="flex min-h-11 items-center gap-3">
+            <Checkbox
+              id={`fu-${idPrefix}-${person.id}`}
+              checked={picked.includes(person.id)}
+              onCheckedChange={(checked) => togglePicked(person.id, checked === true)}
+              className="after:-inset-3.5"
+            />
+            <Label
+              htmlFor={`fu-${idPrefix}-${person.id}`}
+              className="flex flex-1 items-center gap-2 font-normal"
+            >
+              <UserRoundIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              {nameOf(person)}
+            </Label>
+          </li>
+        ))}
+      </ul>
+    </fieldset>
+  );
 
   const dateTimeFields = (
     <div className="grid grid-cols-2 gap-3">
@@ -445,37 +495,10 @@ export function FollowupsCard({
             }}
           >
             {dateTimeFields}
-            {/* « Pour qui » : coché sur soi d'avance, parce que c'est le cas de
-                loin le plus courant — on se note un rappel après un appel. La
-                liste n'apparaît que s'il y a vraiment quelqu'un d'autre. */}
-            {shared ? (
-              <fieldset className="space-y-1.5">
-                {/* Le titre de section n'est plus peint : une colonne de noms
-                    cochables sous une date, dans une boîte « Ajouter un suivi »,
-                    ne se confond avec rien. Il reste dans l'arbre
-                    d'accessibilité, où l'œil ne peut pas suppléer. */}
-                <legend className="sr-only">{t("followups.assignees")}</legend>
-                <ul className="max-h-48 space-y-0.5 overflow-y-auto border-t pt-2">
-                  {candidates.map((person) => (
-                    <li key={person.id} className="flex min-h-11 items-center gap-3">
-                      <Checkbox
-                        id={`fu-who-${person.id}`}
-                        checked={picked.includes(person.id)}
-                        onCheckedChange={(checked) => togglePicked(person.id, checked === true)}
-                        className="after:-inset-3.5"
-                      />
-                      <Label
-                        htmlFor={`fu-who-${person.id}`}
-                        className="flex flex-1 items-center gap-2 font-normal"
-                      >
-                        <UserRoundIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                        {nameOf(person)}
-                      </Label>
-                    </li>
-                  ))}
-                </ul>
-              </fieldset>
-            ) : null}
+            {/* Coché sur soi d'avance : c'est le cas de loin le plus courant — on
+                se note un rappel après un appel. La liste n'apparaît que s'il y
+                a vraiment quelqu'un d'autre à qui le confier. */}
+            {shared ? peopleField("new") : null}
             <div className="space-y-1.5">
               <Label htmlFor="fu-note">{t("followups.note")}</Label>
               <Textarea
@@ -525,37 +548,10 @@ export function FollowupsCard({
             }}
           >
             {dateTimeFields}
-            {/* Une ligne = une personne : on la PASSE, on ne la partage pas
-                ici. Partager se fait en créant un suivi par personne. */}
-            {shared ? (
-              <div className="space-y-1.5">
-                <Select
-                  items={candidates.map((c) => ({ value: c.id, label: nameOf(c) }))}
-                  value={handTo}
-                  onValueChange={(value) => setHandTo(value ?? currentUserId)}
-                >
-                  {/* Le nom affiché EST le libellé ; « Confier à » au-dessus ne
-                      faisait que le répéter en plus long. Le pictogramme dit
-                      « quelqu'un », le nom dit qui, et l'étiquette d'accessi-
-                      bilité dit la phrase entière à qui ne voit pas l'icône. */}
-                  <SelectTrigger
-                    id="fu-hand"
-                    className="min-h-11 w-full md:min-h-8"
-                    aria-label={t("followups.assignees")}
-                  >
-                    <UserRoundIcon className="text-muted-foreground" aria-hidden />
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {candidates.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {nameOf(c)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : null}
+            {/* Cocher quelqu'un de plus lui ouvre SA ligne, à la même échéance
+                et avec la même note. Décocher n'efface rien : une tâche déjà
+                annoncée à un collègue se termine sur sa propre ligne. */}
+            {shared ? peopleField("edit") : null}
             <DialogFooter>
               <Button
                 type="button"
@@ -565,7 +561,11 @@ export function FollowupsCard({
               >
                 {t("followups.cancel")}
               </Button>
-              <Button type="submit" className="min-h-11 md:min-h-8" disabled={pending}>
+              <Button
+                type="submit"
+                className="min-h-11 md:min-h-8"
+                disabled={pending || (shared && picked.length === 0)}
+              >
                 {t("followups.edit")}
               </Button>
             </DialogFooter>

@@ -1155,18 +1155,25 @@ export async function completeFollowupAction(followupId: string): Promise<Action
 }
 
 /**
- * Déplacer l'échéance d'un suivi, et/ou le passer à quelqu'un d'autre.
+ * Déplacer l'échéance d'un suivi, et choisir QUI le porte — un ou plusieurs.
  *
- * Une ligne = une personne : réassigner, c'est donc changer le destinataire de
- * CETTE ligne, pas répartir la tâche. Pour la confier à plusieurs, on en crée
- * une par personne (`createFollowupAction`).
+ * Une ligne reste une personne. Cocher plusieurs noms ne fabrique donc pas une
+ * ligne à plusieurs porteurs : la ligne modifiée va au premier (le porteur
+ * actuel s'il est encore coché — on ne déplace pas un suivi sous les pieds de
+ * quelqu'un sans raison), et les autres reçoivent CHACUN la leur, à la même
+ * échéance et avec la même note. C'est ce que fait déjà la création ; c'est
+ * aussi ce que la carte montre ensuite, une ligne par personne.
+ *
+ * Décocher n'efface RIEN. Un suivi déjà posé chez quelqu'un est du travail qui
+ * lui a été annoncé : il se TERMINE sur sa propre ligne, il ne disparaît pas
+ * d'une case décochée dans la boîte d'un collègue.
  */
 export async function updateFollowupAction(input: {
   followupId: string;
   date: string;
   time: string;
-  /** Le nouveau destinataire. Absent : on ne touche pas à qui le porte. */
-  assigneeId?: string;
+  /** Les porteurs voulus. Absent ou vide : on ne touche pas à qui le porte. */
+  assigneeIds?: string[];
 }): Promise<ActionResult> {
   const actor = await currentActor();
   if (!actor) return FORBIDDEN;
@@ -1177,11 +1184,11 @@ export async function updateFollowupAction(input: {
       followupId: z.string().uuid(),
       date: dateStr,
       time: timeStr,
-      assigneeId: z.string().uuid().optional(),
+      assigneeIds: z.array(z.string().uuid()).max(FOLLOWUP_MAX_ASSIGNEES).optional(),
     })
     .safeParse(input);
   if (!parsed.success) return INVALID;
-  const { followupId, date, time, assigneeId } = parsed.data;
+  const { followupId, date, time, assigneeIds } = parsed.data;
 
   const followup = await db.query.followups.findFirst({ where: eq(followups.id, followupId) });
   if (!followup) return NOT_FOUND;
@@ -1191,24 +1198,61 @@ export async function updateFollowupAction(input: {
   const dueAt = fromZonedTime(`${date}T${time}:00`, APP_TZ);
   if (Number.isNaN(dueAt.getTime())) return INVALID;
 
-  const handedTo = assigneeId && assigneeId !== followup.assignedToId ? assigneeId : null;
-  if (handedTo) {
-    const targets = await resolveFollowupTargets(actor, guard.ref, [handedTo]);
+  const wanted = [...new Set(assigneeIds ?? [])];
+  let keeper = followup.assignedToId;
+  let extras: string[] = [];
+
+  if (wanted.length > 0) {
+    const targets = await resolveFollowupTargets(actor, guard.ref, wanted);
     if (!targets.ok) return targets.error;
+    keeper = targets.ids.includes(followup.assignedToId) ? followup.assignedToId : targets.ids[0];
+
+    // Qui a DÉJÀ ce travail, à cette heure-là, avec ce mot-là. Sans ce filtre,
+    // rouvrir une ligne d'un suivi partagé et recocher tout le monde donnait à
+    // chacun une seconde ligne identique — le collègue voyait sa tâche en
+    // double sans que personne l'ait demandée.
+    const twins = await db
+      .select({ assignedToId: followups.assignedToId })
+      .from(followups)
+      .where(
+        and(
+          eq(followups.clientId, followup.clientId),
+          eq(followups.dueAt, dueAt),
+          followup.note === null ? isNull(followups.note) : eq(followups.note, followup.note),
+          isNull(followups.doneAt),
+        ),
+      );
+    const alreadyHeld = new Set([keeper, ...twins.map((t) => t.assignedToId)]);
+    extras = targets.ids.filter((id) => !alreadyHeld.has(id));
   }
 
   await db
     .update(followups)
-    .set({ dueAt, ...(handedTo ? { assignedToId: handedTo } : {}) })
+    .set({ dueAt, assignedToId: keeper })
     .where(eq(followups.id, followupId));
+
+  if (extras.length > 0) {
+    await db.insert(followups).values(
+      extras.map((assignedToId) => ({
+        clientId: followup.clientId,
+        assignedToId,
+        dueAt,
+        note: followup.note,
+        // La ligne NEUVE est posée par celui qui coche, pas par l'auteur
+        // d'origine : « qui m'a confié ça » doit nommer quelqu'un d'atteignable.
+        createdById: actor.user.id,
+      })),
+    );
+  }
 
   // Un suivi qu'on repasse à quelqu'un est une nouvelle pour lui, même si la
   // date n'a pas bougé. Le rendre à soi-même n'en est pas une.
-  if (handedTo) {
+  const told = [...(keeper === followup.assignedToId ? [] : [keeper]), ...extras];
+  if (told.length > 0) {
     await notifyFollowupAssigned({
       actor,
       clientId: followup.clientId,
-      userIds: [handedTo],
+      userIds: told,
       dueAt,
       note: followup.note,
     });

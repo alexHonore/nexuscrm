@@ -452,7 +452,7 @@ describe("intégrité des données clients", () => {
           followupId: row.id,
           date: "2026-09-20",
           time: "10:00",
-          assigneeId: alice.id,
+          assigneeIds: [alice.id],
         }),
       ).toEqual({ ok: true });
 
@@ -460,11 +460,73 @@ describe("intégrité des données clients", () => {
       expect(after!.assignedToId).toBe(alice.id);
       // L'auteur reste l'auteur : « qui m'a confié ça » ne se réécrit pas.
       expect(after!.createdById).toBe(author.id);
+      // Et la ligne reste UNE ligne : personne d'autre n'a été coché.
+      expect(await testDb.select().from(followups)).toHaveLength(1);
       const notified = await testDb
         .select()
         .from(notifications)
         .where(eq(notifications.type, "followup_assigned"));
       expect(notified.map((n) => n.userId)).toEqual([alice.id]);
+    });
+
+    it("cocher d'autres noms à la modification ouvre UNE ligne chacun", async () => {
+      const author = await makeUser({ role: "admin", name: "Auteur" });
+      const alice = await makeUser({ role: "caller", name: "Alice" });
+      const bob = await makeUser({ role: "caller", name: "Bob" });
+      await login(author);
+      const client = await makeClient();
+      await actions.createFollowupAction({
+        clientId: client.id,
+        date: "2026-09-20",
+        time: "10:00",
+        note: "Rappeler",
+      });
+      const [row] = await testDb.select().from(followups);
+
+      expect(
+        await actions.updateFollowupAction({
+          followupId: row.id,
+          date: "2026-09-21",
+          time: "11:00",
+          assigneeIds: [author.id, alice.id, bob.id],
+        }),
+      ).toEqual({ ok: true });
+
+      const rows = await testDb.select().from(followups);
+      expect(rows).toHaveLength(3);
+      // La ligne d'origine RESTE à son porteur — il était encore coché.
+      expect(rows.find((r) => r.id === row.id)!.assignedToId).toBe(author.id);
+      expect(rows.map((r) => r.assignedToId).sort()).toEqual(
+        [author.id, alice.id, bob.id].sort(),
+      );
+      // Même échéance, même note, pour tout le monde.
+      expect(new Set(rows.map((r) => r.dueAt.toISOString()))).toEqual(
+        new Set(["2026-09-21T15:00:00.000Z"]),
+      );
+      expect(rows.every((r) => r.note === "Rappeler")).toBe(true);
+
+      // Rouvrir la même ligne et tout recocher ne doit RIEN ajouter : chacun a
+      // déjà ce travail, à cette heure-là, avec ce mot-là.
+      expect(
+        await actions.updateFollowupAction({
+          followupId: row.id,
+          date: "2026-09-21",
+          time: "11:00",
+          assigneeIds: [author.id, alice.id, bob.id],
+        }),
+      ).toEqual({ ok: true });
+      expect(await testDb.select().from(followups)).toHaveLength(3);
+
+      // Et décocher n'efface rien : la ligne d'Alice lui appartient.
+      expect(
+        await actions.updateFollowupAction({
+          followupId: row.id,
+          date: "2026-09-21",
+          time: "11:00",
+          assigneeIds: [author.id],
+        }),
+      ).toEqual({ ok: true });
+      expect(await testDb.select().from(followups)).toHaveLength(3);
     });
 
     it("garde toujours la relance ouverte la plus proche (création dans le désordre)", async () => {

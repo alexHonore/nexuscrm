@@ -162,6 +162,8 @@
     "you": "Moi",
     "forPerson": "Pour {name}",
     "handedOver": "Suivi confié à {name}",
+    "takenBack": "Suivi repris",
+    "added": "{count, plural, one {# suivi ajouté} other {# suivis ajoutés}}",
     "cancel": "Annuler",
     "empty": "Aucun suivi planifié.",
     "openSection": "À faire",
