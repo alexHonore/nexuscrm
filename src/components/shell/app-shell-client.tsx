@@ -6,6 +6,8 @@ import {
   BookOpenText,
   Bot,
   CalendarDays,
+  ChevronDown,
+  ChevronRight,
   ChevronsUpDown,
   Columns3,
   FileText,
@@ -55,6 +57,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { useDataChange, useVisiblePolling } from "@/lib/live";
 import type { PermissionKey } from "@/lib/permissions/catalog";
 import { cn } from "@/lib/utils";
+import { WorkspaceSearch } from "./workspace-search";
 
 export type ShellUser = {
   id: string;
@@ -285,6 +288,7 @@ export function AppShellClient({
   // démonte pas la coquille, donc rien ne la refermerait toute seule — on la
   // ferme sur le clic, avant même que la page suivante arrive.
   const [moreOpen, setMoreOpen] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
   // `unreadCount` est rendu côté serveur : sans ça, la pastille reste figée
   // jusqu'à un rechargement complet. On redemande les données serveur quand une
@@ -330,6 +334,17 @@ export function AppShellClient({
 
   const isActive = (href: string) =>
     pathname === href || (href !== "/dashboard" && pathname.startsWith(`${href}/`));
+
+  const currentItem = [...mainNav, ...adminGroups.flatMap((group) => group.items)]
+    .find((item) => isActive(item.href));
+  const currentGroup = adminGroups.find((group) => group.items.some((item) => isActive(item.href)));
+  const destinations = [
+    ...mainNav.map((item) => ({ ...item, label: t(`nav.${item.labelKey}`), group: t("workspace.daily") })),
+    ...adminGroups.flatMap((group) => group.items.map((item) => ({
+      ...item, label: t(`nav.${item.labelKey}`), group: t(`nav.${group.labelKey}`),
+    }))),
+    { href: "/profile", label: t("nav.profile"), group: t("workspace.account"), icon: UserRound },
+  ];
 
   const switchLocale = (locale: "fr" | "en") => {
     startTransition(async () => {
@@ -383,7 +398,7 @@ export function AppShellClient({
             : "border-border text-foreground hover:bg-accent hover:text-accent-foreground",
         )}
       >
-        <Icon className="size-4 shrink-0" />
+        <Icon aria-hidden className="size-4 shrink-0" />
         <span className="min-w-0 flex-1">{t(`nav.${item.labelKey}`)}</span>
         {item.labelKey === "notifications" && unreadCount > 0 ? (
           <Badge className="h-5 min-w-5 shrink-0 rounded-full px-1.5 text-[11px]">
@@ -410,13 +425,13 @@ export function AppShellClient({
         prefetch={false}
         aria-current={active ? "page" : undefined}
         className={cn(
-          "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring",
+          "relative flex min-h-11 items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring",
           active
-            ? "bg-sidebar-accent text-sidebar-accent-foreground ring-1 ring-white/5 before:absolute before:left-0 before:top-1/2 before:h-5 before:w-1 before:-translate-y-1/2 before:rounded-r-full before:bg-sidebar-primary"
+            ? "bg-sidebar-accent text-sidebar-accent-foreground ring-1 ring-sidebar-border before:absolute before:left-0 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-r-full before:bg-sidebar-primary"
             : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
         )}
       >
-        <Icon className={cn("size-4 shrink-0", active && "text-sidebar-primary")} />
+        <Icon aria-hidden className={cn("size-[18px] shrink-0", active && "text-sidebar-primary")} />
         <span className="truncate">{t(`nav.${item.labelKey}`)}</span>
         {item.labelKey === "notifications" && unreadCount > 0 ? (
           <Badge className="ml-auto h-5 min-w-5 rounded-full bg-sidebar-primary px-1.5 text-[11px] text-sidebar-primary-foreground">
@@ -428,34 +443,40 @@ export function AppShellClient({
   };
 
   return (
-    <div className="flex min-h-dvh">
+    <div className="flex min-h-dvh bg-muted/35">
+      <a href="#workspace-content" className="sr-only fixed left-4 top-4 z-[100] rounded-lg bg-primary px-4 py-3 text-primary-foreground focus:not-sr-only">{t("workspace.skipToContent")}</a>
       {/* ── Sidebar (desktop) ── */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col bg-sidebar text-sidebar-foreground md:flex">
-        <div className="flex items-center gap-2.5 border-b border-sidebar-border/60 px-5 py-4">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-sidebar-primary to-sidebar-ring text-sm font-bold text-sidebar-primary-foreground shadow-md ring-1 ring-white/10">
+        <Link href="/dashboard" prefetch={false} className="flex min-h-24 items-center gap-3 px-5 py-5 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring">
+          <div aria-hidden className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-sidebar-foreground/20 bg-sidebar-accent text-xl font-semibold text-sidebar-accent-foreground">
             N
           </div>
           <div className="min-w-0">
             <span className="block truncate text-base font-semibold tracking-tight">
-              Groupe Nexus
+              {t("appName")}
             </span>
             <span className="block truncate text-[11px] text-sidebar-foreground/50">
               {t("tagline")}
             </span>
           </div>
-        </div>
-        <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-4 pt-4">
+        </Link>
+        <nav aria-label={t("workspace.navigation")} className="flex-1 space-y-1 overflow-y-auto px-3 pb-4 pt-1">
+          <p className="px-3 pb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-sidebar-foreground/45">{t("workspace.daily")}</p>
           {mainNav.map(navLink)}
           {adminGroups.length > 0 ? (
-            <div className="mt-4 space-y-4 border-t border-sidebar-border/60 pt-4">
-              {adminGroups.map((group) => (
-                <div key={group.labelKey} className="space-y-1">
-                  <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
-                    {t(`nav.${group.labelKey}`)}
-                  </p>
-                  {group.items.map(navLink)}
-                </div>
-              ))}
+            <div className="mt-6 space-y-1 border-t border-sidebar-border/60 pt-4">
+              <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-sidebar-foreground/45">{t("nav.admin")}</p>
+              {adminGroups.map((group) => {
+                const expanded = expandedGroups[group.labelKey] ?? group.items.some((item) => isActive(item.href));
+                return (
+                  <div key={group.labelKey}>
+                    <button type="button" aria-expanded={expanded} aria-controls={`nav-${group.labelKey}`} onClick={() => setExpandedGroups((previous) => ({ ...previous, [group.labelKey]: !expanded }))} className="flex min-h-11 w-full items-center justify-between gap-2 rounded-lg px-3 text-left text-xs font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+                      {t(`nav.${group.labelKey}`)}<ChevronDown aria-hidden className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-180")} />
+                    </button>
+                    <div id={`nav-${group.labelKey}`} hidden={!expanded} className="space-y-0.5 pb-2">{group.items.map(navLink)}</div>
+                  </div>
+                );
+              })}
             </div>
           ) : null}
         </nav>
@@ -484,7 +505,7 @@ export function AppShellClient({
           face : deux règles pour un même bord se disputent l'ordre de la
           feuille de style, une seule est sûre.
         */}
-        <header className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b bg-background/95 px-4 pb-2.5 pt-[calc(env(safe-area-inset-top)+0.625rem)] shadow-[0_1px_8px_-4px_rgb(0_0_0/0.15)] backdrop-blur md:hidden">
+        <header className="sticky top-0 z-30 flex shrink-0 items-center justify-between gap-2 border-b bg-background/95 px-4 pb-2.5 pt-[calc(env(safe-area-inset-top)+0.625rem)] backdrop-blur md:h-16 md:gap-4 md:px-6 md:py-0 lg:px-8">
           {/*
             La marque est aussi le retour à l'accueil, et c'est le seul lien de
             cette barre : `min-h-11` lui donne la hauteur du pouce sans rien
@@ -494,16 +515,23 @@ export function AppShellClient({
             casse la commande vocale (WCAG 2.5.3). L'en-tête entier est
             `md:hidden`, donc rien de ceci n'atteint le bureau.
           */}
-          <Link href="/dashboard" className="flex min-h-11 items-center gap-2">
+          <Link href="/dashboard" prefetch={false} className="flex min-h-11 items-center gap-2 md:hidden">
             <div className="flex size-7 items-center justify-center rounded-md bg-gradient-to-br from-sidebar-primary to-sidebar-ring text-xs font-bold text-sidebar-primary-foreground shadow-sm ring-1 ring-white/10">
               N
             </div>
-            <span className="text-sm font-semibold">Groupe Nexus</span>
+            <span className="text-sm font-semibold">{t("appName")}</span>
           </Link>
-          <div className="flex items-center gap-1">
+          <div className="hidden min-w-0 items-center gap-2 text-xs lg:flex">
+            <span className="shrink-0 text-muted-foreground">{currentGroup ? t(`nav.${currentGroup.labelKey}`) : t("workspace.daily")}</span>
+            <ChevronRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground/60" />
+            <span className="truncate font-medium">{currentItem ? t(`nav.${currentItem.labelKey}`) : t("nav.profile")}</span>
+          </div>
+          <div className="flex shrink-0 items-center gap-1 md:gap-3">
+            <WorkspaceSearch destinations={destinations} />
             <Button
               variant="ghost"
               size="icon"
+              nativeButton={false}
               className="relative size-11"
               render={<Link href="/notifications" aria-label={t("nav.notifications")} />}
             >
@@ -517,7 +545,7 @@ export function AppShellClient({
             <UserMenu
               user={user}
               role={role}
-              adminGroups={adminGroups}
+              adminGroups={[]}
               onSwitchLocale={switchLocale}
               align="end"
               compact
@@ -526,7 +554,7 @@ export function AppShellClient({
         </header>
 
         {/* pb mobile : dégage la nav basse + le FAB webphone (size-14 au-dessus de la nav). */}
-        <main className="min-w-0 flex-1 pb-[calc(8.5rem+env(safe-area-inset-bottom))] md:pb-8">
+        <main id="workspace-content" tabIndex={-1} className="min-w-0 flex-1 scroll-mt-20 pb-[calc(8.5rem+env(safe-area-inset-bottom))] outline-none md:pb-8">
           {children}
         </main>
 

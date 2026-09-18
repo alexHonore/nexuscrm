@@ -3,7 +3,7 @@
 import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { useClientListNav } from "@/components/clients/client-list-nav";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -20,14 +20,14 @@ export function ClientSwitcher({ clientId }: { clientId: string }) {
   const nav = useClientListNav();
 
   const index = nav ? nav.indexOf(clientId) : -1;
-  const known = nav !== null && index >= 0;
+  const known = nav !== null && !nav.loading && !nav.failed && index >= 0;
 
   const goPrev = () => {
-    if (!nav || index <= 0) return;
+    if (!known || !nav || index <= 0) return;
     router.push(`/clients/${nav.ids[index - 1]}`);
   };
   const goNext = async () => {
-    if (!nav || index < 0) return;
+    if (!known || !nav || index < 0) return;
     if (index < nav.ids.length - 1) {
       router.push(`/clients/${nav.ids[index + 1]}`);
       return;
@@ -40,7 +40,9 @@ export function ClientSwitcher({ clientId }: { clientId: string }) {
 
   // Latest-ref so the global listener always sees the current neighbors.
   const handlersRef = useRef({ goPrev, goNext });
-  handlersRef.current = { goPrev, goNext };
+  useLayoutEffect(() => {
+    handlersRef.current = { goPrev, goNext };
+  });
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

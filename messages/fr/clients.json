@@ -51,6 +51,35 @@
     "noCategory": "Sans catégorie",
     "doNotCall": "Ne pas appeler"
   },
+  "workspace": {
+    "eyebrow": "Espace clients",
+    "title": "Chaque relation mérite une prochaine étape.",
+    "description": "Retrouvez le bon client, préparez votre échange et faites avancer son projet. Votre liste reste à portée de main, d'une fiche à l'autre.",
+    "panelHint": "Votre portefeuille, en mouvement.",
+    "openFirst": "Ouvrir la première fiche",
+    "inView": "{count, plural, =0 {Aucune fiche dans cette vue} one {# fiche dans cette vue} other {# fiches dans cette vue}}",
+    "queues": "Par où commencer ?",
+    "queueHint": "Ces raccourcis affichent tout le portefeuille auquel vous avez accès et remplacent les filtres actifs. Les suivis du jour peuvent aussi être en retard.",
+    "focus": {
+      "overdue": "À rattraper",
+      "today": "Au programme aujourd'hui",
+      "never": "Premiers échanges",
+      "none": "Une suite à prévoir"
+    },
+    "shortFocus": {
+      "all": "Tout",
+      "overdue": "En retard",
+      "today": "Aujourd'hui",
+      "never": "Premier contact",
+      "none": "Sans suivi"
+    },
+    "hints": {
+      "overdue": "Reprenez les suivis arrivés à échéance, du plus ancien au plus récent.",
+      "today": "Préparez les échanges prévus au fil de la journée.",
+      "never": "Ouvrez la conversation avec les clients jamais contactés.",
+      "none": "Donnez une prochaine étape aux fiches sans suivi planifié."
+    }
+  },
   "panel": {
     "filters": "Filtres",
     "loading": "Chargement…",
@@ -139,6 +168,8 @@
     "infoTitle": "Informations",
     "sectionContact": "Coordonnées",
     "sectionProject": "Projet",
+    "briefTitle": "Le projet en un regard",
+    "notSpecified": "À préciser",
     "save": "Enregistrer",
     "saved": "Modifications enregistrées",
     "invalidPhone": "Numéro de téléphone invalide",

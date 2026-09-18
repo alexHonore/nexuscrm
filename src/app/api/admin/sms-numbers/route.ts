@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { db } from "@/db";
 import { assistants, smsNumbers } from "@/db/schema-sms";
 import { eq } from "drizzle-orm";
@@ -7,6 +6,7 @@ import { logAudit } from "@/lib/audit";
 import { apiPerm } from "@/lib/permissions/server";
 import { normalizePhone } from "@/lib/phone";
 import { listSmsNumbersForAdmin } from "@/lib/sms-server/numbers";
+import { createNumberSchema } from "./schema";
 
 /** GET /api/admin/sms-numbers — les numéros et les assistants actifs (admin). */
 export async function GET() {
@@ -14,15 +14,6 @@ export async function GET() {
   if (actor instanceof NextResponse) return actor;
   return NextResponse.json(await listSmsNumbersForAdmin());
 }
-
-export const createNumberSchema = z.object({
-  e164: z.string().trim().min(3),
-  label: z.string().trim().max(80).nullable().default(null),
-  messagingServiceSid: z.string().trim().max(64).default(""),
-  dailyCap: z.number().int().min(1).max(10_000).default(200),
-  active: z.boolean().default(true),
-  defaultAssistantId: z.uuid().nullable().default(null),
-});
 
 /** POST /api/admin/sms-numbers — enregistre un numéro d'envoi (E.164 imposé). */
 export async function POST(req: Request) {

@@ -358,7 +358,7 @@ export function SmsThreadCard({
        * ligne, la zone de rédaction collante plus bas ne collerait à rien.
        * Au-delà de md, la carte retrouve exactement son rognage d'origine.
        */
-      className="border-l-4 shadow-xs max-md:overflow-visible"
+      className="min-w-0 max-w-full border-l-4 shadow-xs max-md:overflow-visible"
       style={{
         borderLeftColor: SMS.color,
         borderColor: `color-mix(in srgb, ${SMS.color} 35%, transparent)`,
@@ -366,7 +366,7 @@ export function SmsThreadCard({
       }}
     >
       <CardHeader
-        className="rounded-t-xl border-b"
+        className="flex flex-wrap items-center justify-between gap-2 rounded-t-xl border-b"
         style={{
           backgroundColor: `color-mix(in srgb, ${SMS.color} 7%, transparent)`,
           borderBottomColor: `color-mix(in srgb, ${SMS.color} 22%, transparent)`,
@@ -404,7 +404,7 @@ export function SmsThreadCard({
         </CardAction>
       </CardHeader>
 
-      <CardContent className="space-y-3">
+      <CardContent className="min-w-0 space-y-3 [overflow-wrap:anywhere]">
         {pausePrompt !== null ? (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
             <Label htmlFor={`pause-reason-${clientId}`} className="sr-only">
@@ -446,7 +446,7 @@ export function SmsThreadCard({
               onValueChange={(v) => assignAssistant(v === "__none__" ? null : String(v))}
               disabled={pending}
             >
-              <SelectTrigger className="min-h-11 w-auto min-w-44 md:min-h-8">
+              <SelectTrigger className="min-h-11 w-auto min-w-44 max-w-full *:data-[slot=select-value]:min-w-0 md:min-h-8">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

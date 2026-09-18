@@ -159,6 +159,27 @@ export const CHANNEL_LOOK = {
   sms: { color: "#7C3AED", Icon: SmartphoneIcon },
 } as const satisfies Record<string, Look>;
 
+/** Shared work queues: the same meaning on the dashboard and in the directory. */
+export const WORKSPACE_LOOK = {
+  clients: { color: "var(--primary)", Icon: UsersIcon },
+  overdue: { color: "var(--destructive)", Icon: CalendarClockIcon },
+  today: { color: TONE.speech, Icon: CalendarCheckIcon },
+  never: { color: TONE.scrutiny, Icon: UserPlusIcon },
+  none: { color: TONE.raw, Icon: CalendarPlusIcon },
+} as const satisfies Record<string, Look>;
+
+export const DASHBOARD_LOOK = {
+  calls: { color: TONE.speech, Icon: PhoneCallIcon },
+  minutes: { color: TONE.raw, Icon: ClockIcon },
+  booked: WORKSPACE_LOOK.today,
+  agenda: WORKSPACE_LOOK.today,
+  followups: { color: TONE.scrutiny, Icon: ListChecksIcon },
+  clear: { color: "#10B981", Icon: CircleCheckIcon },
+  overdue: WORKSPACE_LOOK.overdue,
+  directory: WORKSPACE_LOOK.clients,
+  focus: { color: "var(--primary)", Icon: TargetIcon },
+} as const satisfies Record<string, Look>;
+
 /**
  * Les cinq FAMILLES D'ACTIVITÉ du graphique de l'analytique — ce qu'on a fait,
  * et quand.

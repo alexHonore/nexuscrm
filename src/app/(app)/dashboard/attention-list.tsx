@@ -108,15 +108,15 @@ export function AttentionList({
           // lien en calque, actions au-dessus.
           <li
             key={row.id}
-            className="relative flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50 max-md:flex-col max-md:items-stretch max-md:gap-2"
+            className="relative flex flex-col items-stretch gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/30"
           >
             <Link
               href={row.clientId ? `/clients/${row.clientId}` : "/conversations"}
               className="absolute inset-0 rounded-lg"
               aria-label={`${tc("inbox.open")} — ${title}`}
             />
-            <LookIcon look={look} className="shrink-0" />
-            <div className="min-w-0 flex-1">
+            <LookIcon look={look} className="absolute top-3.5 left-3 shrink-0" />
+            <div className="min-w-0 flex-1 pl-7">
               <p className="truncate text-sm font-medium">{title}</p>
               {/* Motif et date sur la MÊME ligne, sous le nom : la droite est
                   rendue au geste, qui reste atteignable au pouce sur un
@@ -131,14 +131,14 @@ export function AttentionList({
                   // reste `shrink-0` comme toute pastille, donc intacte.
                   <Badge
                     variant="outline"
-                    className="gap-1 font-normal max-md:min-w-0 max-md:shrink"
+                    className="min-w-0 max-w-full shrink gap-1 font-normal"
                     style={lookTint(look)}
                   >
                     {/* Tronquer était la réponse à une colonne de 207 px ; au
                         bureau la pastille a la place de se lire en entier, et
                         l'y couper aurait été un changement de bureau déguisé
                         en correction mobile. */}
-                    <span className="max-md:truncate">
+                    <span className="truncate">
                       {tc.has(reasonKey as never) ? tc(reasonKey as never) : reason}
                     </span>
                   </Badge>
@@ -174,7 +174,7 @@ export function AttentionList({
             <Button
               variant="outline"
               size="sm"
-              className="relative z-10 min-h-11 shrink-0 max-md:w-full max-md:justify-center md:min-h-8"
+              className="relative z-10 min-h-11 w-full shrink-0 justify-center text-xs"
               disabled={pending}
               onClick={() => markHandled(row.id)}
             >

@@ -106,7 +106,7 @@ export function ClientInfoForm({
   const userOptions: FilterOption[] = [{ value: NONE, label: t("assign.unassigned") }, ...users];
 
   const fieldClass = "min-h-11 md:min-h-8";
-  const selectClass = "min-h-11 w-full md:min-h-8";
+  const selectClass = "min-h-11 min-w-0 w-full *:data-[slot=select-value]:min-w-0 md:min-h-8";
 
   const submit = () => {
     if (!editable) return;
@@ -176,14 +176,14 @@ export function ClientInfoForm({
   );
 
   return (
-    <Card className="shadow-xs">
+    <Card className="min-w-0 max-w-full shadow-xs">
       <CardHeader className="border-b">
         <CardTitle className="flex items-center gap-2">
           <UserRoundIcon className="size-4 text-muted-foreground" />
           {t("detail.infoTitle")}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="min-w-0 space-y-3">
         {/* Ce qu'on peut faire de cette fiche, dit AVANT les champs : découvrir
             au moment d'enregistrer qu'on ne pouvait pas est le pire ordre. */}
         {!canEdit ? (
@@ -195,7 +195,7 @@ export function ClientInfoForm({
         ) : null}
         <form
           id="client-info-form"
-          className="grid gap-3 sm:grid-cols-2"
+          className="grid min-w-0 grid-cols-1 gap-3 *:min-w-0 sm:grid-cols-2"
           onSubmit={(e) => {
             e.preventDefault();
             submit();

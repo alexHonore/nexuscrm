@@ -117,14 +117,14 @@ export function CampaignEnrollmentsCard({
   };
 
   return (
-    <Card>
+    <Card className="min-w-0 max-w-full">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <MegaphoneIcon aria-hidden className="size-4 text-muted-foreground" />
           {t("campaigns.title")}
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="min-w-0 [overflow-wrap:anywhere]">
         <ul className="space-y-3">
           {enrollments.map((e) => {
             const look = ENROLLMENT_STATUS_LOOK[e.displayStatus] ?? ENROLLMENT_STATUS_LOOK.pending;
@@ -132,7 +132,7 @@ export function CampaignEnrollmentsCard({
             const endReasonKey = `editor.enrollments.endReason.${e.endReason ?? ""}`;
             return (
               <li key={e.id} className="rounded-lg border p-3">
-                <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <LookIcon look={look} size="sm" />
@@ -171,7 +171,7 @@ export function CampaignEnrollmentsCard({
                     </p>
                   </div>
                   {canManage && e.inFlight ? (
-                    <div className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-center">
+                    <div className="flex max-w-full flex-wrap items-center gap-1.5">
                       {e.paused ? (
                         <Button
                           size="sm"

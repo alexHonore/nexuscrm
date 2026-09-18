@@ -569,7 +569,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
       : null;
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-4 px-4 py-3 md:px-6 md:py-4">
+    <div className="mx-auto min-w-0 w-full max-w-6xl space-y-5 px-4 py-4 md:px-6 md:py-5">
       {/* Quick switching in the panel's filtered order + back button on mobile */}
       <div className="flex items-center gap-2">
         <ClientSwitcher clientId={client.id} />
@@ -621,12 +621,37 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
         </p>
       ) : null}
 
+      <section aria-label={t("detail.briefTitle")} className="@container rounded-2xl border bg-card px-5 py-4">
+        <h2 className="mb-4 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          {t("detail.briefTitle")}
+        </h2>
+        <dl className="grid grid-cols-1 gap-4 @sm:grid-cols-3">
+          {[
+            {
+              label: "projectType",
+              value: client.projectType
+                ? t.has(`projectTypes.${client.projectType}`)
+                  ? t(`projectTypes.${client.projectType}`)
+                  : client.projectType
+                : null,
+            },
+            { label: "budget", value: client.budget },
+            { label: "timing", value: client.timing },
+          ].map((field) => (
+            <div key={field.label} className="min-w-0">
+              <dt className="text-xs text-muted-foreground">{t(`fields.${field.label}`)}</dt>
+              <dd className="mt-1.5 text-sm font-medium break-words">{field.value || t("detail.notSpecified")}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
       {/* Container queries: the working area is squeezed by the list panel, so
           columns depend on the available width, not the viewport. */}
-      <div className="@container">
-        <div className="grid items-start gap-4 @3xl:grid-cols-3 md:gap-5">
+      <div className="@container min-w-0">
+        <div className="grid min-w-0 grid-cols-1 items-start gap-4 @3xl:grid-cols-3 md:gap-5">
           {/* Follow-ups + comments first when stacked — the caller's workspace */}
-          <div className="order-1 space-y-4 @3xl:order-2 @3xl:col-span-1 md:space-y-5">
+          <div className="order-1 min-w-0 space-y-4 @3xl:order-2 @3xl:col-span-1 md:space-y-5">
             {history ? (
               <>
                 <FollowupsCard
@@ -666,7 +691,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
             ) : null}
           </div>
 
-          <div className="order-2 space-y-4 @3xl:order-1 @3xl:col-span-2 md:space-y-5">
+          <div className="order-2 min-w-0 space-y-4 @3xl:order-1 @3xl:col-span-2 md:space-y-5">
             <ClientInfoForm
               client={{
                 id: client.id,

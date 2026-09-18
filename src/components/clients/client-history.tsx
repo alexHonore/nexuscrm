@@ -89,14 +89,14 @@ export function ClientHistory({
   };
 
   return (
-    <Card className="shadow-xs">
+    <Card className="min-w-0 max-w-full shadow-xs">
       <CardHeader className="border-b">
         <CardTitle className="flex items-center gap-2">
           <HistoryIcon className="size-4 text-muted-foreground" />
           {t("history.title")}
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="min-w-0 [overflow-wrap:anywhere]">
         <Tabs defaultValue="calls">
           <TabsList className="w-full sm:w-auto">
             <TabsTrigger value="calls" className="min-h-11 md:min-h-9">

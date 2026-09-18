@@ -63,14 +63,14 @@ export function UpcomingFollowups({ groups }: { groups: FollowupDayGroup[] }) {
       {hidden > 0 ? (
         <Button
           variant="ghost"
-          className="min-h-11 w-full text-xs font-medium text-muted-foreground md:min-h-9"
+          className="min-h-11 w-full text-xs font-medium text-muted-foreground"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
         >
           {expanded ? (
-            <ChevronUpIcon data-icon="inline-start" />
+            <ChevronUpIcon aria-hidden data-icon="inline-start" />
           ) : (
-            <ChevronDownIcon data-icon="inline-start" />
+            <ChevronDownIcon aria-hidden data-icon="inline-start" />
           )}
           {expanded ? t("followups.showLess") : t("followups.showMore", { count: hidden })}
         </Button>

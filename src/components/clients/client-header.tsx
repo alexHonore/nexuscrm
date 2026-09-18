@@ -187,19 +187,19 @@ export function ClientHeader({
   const callDisabled = !ready || client.doNotCall;
   const callButton = (
     <Button
-      className="min-h-12 flex-1 bg-emerald-600 px-6 text-base text-white hover:bg-emerald-700 sm:flex-none"
+      className="min-h-12 flex-1 rounded-xl px-6 text-base shadow-sm sm:flex-none"
       disabled={callDisabled}
       onClick={() =>
         dial({ number: client.phone, clientId: client.id, clientName: client.fullName })
       }
     >
-      <PhoneIcon className="size-5" />
+      <PhoneIcon aria-hidden className="size-5" />
       {t("detail.call")}
     </Button>
   );
 
   const categoryChipClass =
-    "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 text-sm font-medium md:min-h-8";
+    "inline-flex min-h-11 max-w-full items-center gap-1.5 rounded-full border px-3 text-sm font-medium whitespace-normal md:min-h-8";
   const categoryChipStyle = current
     ? {
         color: current.color,
@@ -212,12 +212,12 @@ export function ClientHeader({
       {current ? (
         <span aria-hidden className="size-2 rounded-full" style={{ backgroundColor: current.color }} />
       ) : null}
-      {current ? categoryName(current) : t("detail.noCategory")}
+      <span className="min-w-0 [overflow-wrap:anywhere]">{current ? categoryName(current) : t("detail.noCategory")}</span>
     </>
   );
 
   return (
-    <div className="space-y-3">
+    <div className="@container min-w-0 space-y-5 rounded-2xl border bg-card p-4 shadow-sm [overflow-wrap:anywhere] sm:p-5">
       {/* Le retour à la liste vit dans <ClientSwitcher/> au-dessus de l'entête. */}
       {client.doNotCall ? (
         <div
@@ -229,13 +229,13 @@ export function ClientHeader({
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-5 @2xl:flex-row @2xl:items-start @2xl:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           {/* Avatar teinté par la catégorie courante (repli : couleur primaire). */}
           <div
             aria-hidden
             className={cn(
-              "flex size-12 shrink-0 items-center justify-center rounded-full text-base font-semibold select-none",
+              "flex size-14 shrink-0 items-center justify-center rounded-2xl text-lg font-semibold select-none",
               !current && "bg-primary/10 text-primary",
             )}
             style={
@@ -248,7 +248,7 @@ export function ClientHeader({
           </div>
           <div className="min-w-0 space-y-2">
             <div className="flex flex-wrap items-center gap-3">
-              <h1 className="font-heading text-2xl font-semibold tracking-tight break-words">
+              <h1 className="font-heading text-2xl font-semibold tracking-tight break-words lg:text-3xl">
                 {client.fullName}
               </h1>
               {/* Big category badge with quick-change dropdown — figée en
@@ -334,7 +334,7 @@ export function ClientHeader({
               {client.email ? (
                 <a
                   href={`mailto:${client.email}`}
-                  className="inline-flex items-center gap-1.5 hover:text-foreground hover:underline"
+                  className="inline-flex min-h-11 items-center gap-1.5 break-all hover:text-foreground hover:underline md:min-h-6"
                 >
                   <MailIcon className="size-3.5" />
                   {client.email}
@@ -384,7 +384,7 @@ export function ClientHeader({
           La question précède tout le reste de l'écran : ce qu'on peut y faire
           en découle. Une fiche au bassin se prend, une fiche à soi se rend, et
           celle d'un collègue ne bouge pas — le bouton absent le dit déjà. */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2 border-t pt-4 text-sm">
         {ownership.holderLook ? (
           <LookIcon look={roleLook(ownership.holderLook)} size="sm" />
         ) : (

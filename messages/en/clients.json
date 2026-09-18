@@ -51,6 +51,35 @@
     "noCategory": "No category",
     "doNotCall": "Do not call"
   },
+  "workspace": {
+    "eyebrow": "Client workspace",
+    "title": "Every relationship deserves a next step.",
+    "description": "Find the right client, prepare your conversation and move their project forward. Your list stays close, from one record to the next.",
+    "panelHint": "Keep your relationships moving.",
+    "openFirst": "Open the first record",
+    "inView": "{count, plural, =0 {No records in this view} one {# record in this view} other {# records in this view}}",
+    "queues": "Where to start?",
+    "queueHint": "These shortcuts show your entire accessible portfolio and replace active filters. Today's follow-ups may also be overdue.",
+    "focus": {
+      "overdue": "Catch up",
+      "today": "On today's agenda",
+      "never": "First conversations",
+      "none": "Plan what comes next"
+    },
+    "shortFocus": {
+      "all": "All",
+      "overdue": "Overdue",
+      "today": "Today",
+      "never": "First contact",
+      "none": "No follow-up"
+    },
+    "hints": {
+      "overdue": "Pick up overdue follow-ups, starting with the oldest.",
+      "today": "Prepare for the conversations scheduled throughout your day.",
+      "never": "Start a conversation with clients who haven't been contacted.",
+      "none": "Give records without a planned follow-up a clear next step."
+    }
+  },
   "panel": {
     "filters": "Filters",
     "loading": "Loading…",
@@ -139,6 +168,8 @@
     "infoTitle": "Information",
     "sectionContact": "Contact details",
     "sectionProject": "Project",
+    "briefTitle": "The project at a glance",
+    "notSpecified": "To clarify",
     "save": "Save",
     "saved": "Changes saved",
     "invalidPhone": "Invalid phone number",

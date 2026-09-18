@@ -297,7 +297,7 @@ export function FollowupsCard({
     });
     const shown = people.slice(0, FACES_SHOWN);
     return (
-      <span className="flex items-center gap-1.5" title={label}>
+      <span className="flex min-w-0 max-w-full items-center gap-1.5" title={label}>
         <span className="sr-only">{label}</span>
         {/* Le chevauchement de la pile par défaut (8 px) est taillé pour des
             pastilles de 32 px ; sur les nôtres, de 24, il les écrase en une
@@ -392,8 +392,8 @@ export function FollowupsCard({
   );
 
   return (
-    <Card className="shadow-xs">
-      <CardHeader className="border-b">
+    <Card className="min-w-0 max-w-full shadow-xs">
+      <CardHeader className="flex flex-wrap items-center justify-between gap-2 border-b">
         <CardTitle className="flex items-center gap-2">
           <CalendarClockIcon className="size-4 text-muted-foreground" />
           {t("followups.title")}
@@ -407,7 +407,7 @@ export function FollowupsCard({
           </CardAction>
         ) : null}
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="min-w-0 space-y-4">
         {open.length === 0 && done.length === 0 ? (
           <EmptyState icon={<CalendarClockIcon />} title={t("followups.empty")} className="py-6" />
         ) : null}
@@ -431,7 +431,7 @@ export function FollowupsCard({
                   <li
                     key={f.id}
                     className={cn(
-                      "flex items-center gap-2 rounded-lg border py-2 pr-1.5 pl-3 transition hover:bg-muted/40",
+                      "flex min-w-0 items-center gap-2 rounded-lg border py-2 pr-1.5 pl-3 transition hover:bg-muted/40",
                       overdue && "border-l-4 border-l-destructive bg-destructive/5",
                       isDraft && "opacity-60",
                     )}
@@ -439,13 +439,13 @@ export function FollowupsCard({
                     <div className="min-w-0 flex-1">
                       <p
                         className={cn(
-                          "text-sm font-medium tabular-nums",
+                          "flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium tabular-nums",
                           overdue && "text-destructive",
                         )}
                       >
                         {fmtDue(f.dueAt)}
                         {overdue ? (
-                          <span className="ml-2 inline-flex items-center rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive uppercase">
+                          <span className="inline-flex items-center rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive uppercase">
                             {t("followups.overdue")}
                           </span>
                         ) : null}
@@ -456,7 +456,7 @@ export function FollowupsCard({
                         </div>
                       ) : null}
                       {f.note ? (
-                        <p className="truncate text-xs text-muted-foreground">{f.note}</p>
+                        <p className="mt-1 text-xs text-muted-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">{f.note}</p>
                       ) : null}
                     </div>
                     {/* Déplacer et terminer : des gestes, donc rien à afficher
@@ -497,7 +497,7 @@ export function FollowupsCard({
             </p>
             <ul className="space-y-1.5">
               {done.map((f) => (
-                <li key={f.id} className="text-xs text-muted-foreground">
+                <li key={f.id} className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
                   <span className="line-through">{fmtDue(f.dueAt)}</span>
                   {f.assignees.length > 1 || shared || f.assignees[0]?.id !== currentUserId ? (
                     <span className="ml-2 inline-flex align-middle">{faces(f.assignees)}</span>

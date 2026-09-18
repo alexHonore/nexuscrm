@@ -1,6 +1,28 @@
 {
   "greeting": "Bonjour, {name}",
-  "subtitle": "Voici votre journée en un coup d'œil.",
+  "subtitle": "Vos priorités, vos clients, votre prochain geste.",
+  "workspace": "Votre espace de travail",
+  "briefing": {
+    "eyebrow": "Le cap du jour",
+    "updated": "À {time}",
+    "titleBusy": "Les bonnes conversations commencent ici.",
+    "titleToday": "Une journée pour faire avancer les choses.",
+    "titleClear": "Tout est à jour. Place aux prochaines occasions.",
+    "summary": "{count, plural, one {# suivi à faire d'ici ce soir. Votre prochaine action est juste ici.} other {# suivis à faire d'ici ce soir. Votre prochaine action est juste ici.}}",
+    "summaryClear": "Aucun suivi dû aujourd'hui. Gardez un œil sur les conversations et préparez la suite.",
+    "nextFollowup": "Reprendre avec {name}",
+    "nextConversation": "Répondre à {name}",
+    "nextMissed": "Reprendre les appels manqués",
+    "explore": "Découvrir les clients à contacter",
+    "priorities": "À votre attention",
+    "overdue": "Suivis en retard",
+    "overdueHint": "À reprendre en premier",
+    "attention": "Conversations à reprendre",
+    "attentionHint": "L'assistant vous passe la main",
+    "missed": "Appels à retourner",
+    "missedHint": "Sur votre ligne · 7 derniers jours",
+    "missedHintLimited": "Parmi les {count} derniers appels manqués · 7 jours"
+  },
   "search": {
     "label": "Recherche rapide",
     "placeholder": "Rechercher un client (nom ou téléphone)…",
@@ -12,7 +34,15 @@
     "booked": "Rendez-vous pris"
   },
   "followups": {
-    "title": "Suivis",
+    "title": "Votre file de travail",
+    "subtitle": "Une personne à la fois. Les suivis les plus urgents passent en premier.",
+    "focus": "Aujourd'hui",
+    "viewLabel": "Période des suivis",
+    "focusEmpty": "Votre journée est à jour",
+    "focusEmptyHint": "Aucun suivi en retard ni à faire aujourd'hui. Vos prochaines relances sont dans À venir.",
+    "upcomingEmpty": "Aucune relance planifiée dans cette période.",
+    "planningHorizon": "Vos relances prévues au cours des {months} prochains mois.",
+    "loadedLimit": "{count, plural, one {# autre suivi n'est pas chargé. Les échéances les plus proches sont affichées en premier.} other {# autres suivis ne sont pas chargés. Les échéances les plus proches sont affichées en premier.}}",
     "overdue": "En retard",
     "dueToday": "À faire aujourd'hui",
     "upcoming": "À venir",
@@ -23,6 +53,7 @@
     "empty": "Aucun suivi en attente — beau travail !",
     "call": "Appeler",
     "open": "Ouvrir la fiche",
+    "openShort": "Fiche",
     "markDone": "Terminer",
     "done": "Suivi terminé",
     "doNotCall": "Ne pas appeler",
@@ -32,12 +63,16 @@
   },
   "attention": {
     "title": "SMS IA — à reprendre",
+    "subtitle": "Les conversations qui ont besoin de votre jugement.",
     "empty": "Rien à reprendre : l'assistant tient tous ses fils.",
     "openInbox": "Conversations",
     "more": "{count, plural, one {et # autre} other {et # autres}}"
   },
   "appointments": {
     "title": "Prochains rendez-vous",
+    "horizon": "Votre agenda des 14 prochains jours",
+    "horizonTeam": "L'agenda de l'équipe · 14 prochains jours",
+    "more": "{count, plural, one {Voir le rendez-vous suivant} other {Voir les # autres rendez-vous}}",
     "empty": "Aucun rendez-vous à venir.",
     "viewAll": "Voir tout",
     "meet": "Vidéo (Meet)",
@@ -51,6 +86,7 @@
   "error": "Une erreur est survenue",
   "missedCalls": {
     "title": "Appels manqués à rappeler",
+    "window": "Parmi les 50 derniers appels manqués des 7 derniers jours.",
     "viewAll": "Tout voir",
     "attempts": "{count, plural, one {# appel manqué} other {# appels manqués}}",
     "doNotCall": "Ne pas appeler"

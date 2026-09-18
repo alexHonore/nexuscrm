@@ -22,11 +22,11 @@ export function PageHeader({
   className?: string;
 }) {
   return (
-    <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-2", className)}>
+    <div className={cn("flex flex-wrap items-center gap-x-3.5 gap-y-4", className)}>
       {icon ? (
         <div
           aria-hidden
-          className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary [&_svg]:size-5"
+          className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-primary/10 bg-primary/5 text-primary [&_svg]:size-5"
         >
           {icon}
         </div>
@@ -34,13 +34,13 @@ export function PageHeader({
       <div className="min-w-0 flex-1">
         {titleAccessory ? (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <h1 className="font-heading text-2xl font-semibold tracking-tight">{title}</h1>
+            <h1 className="font-heading text-2xl font-semibold tracking-tight md:text-[28px]">{title}</h1>
             {titleAccessory}
           </div>
         ) : (
-          <h1 className="font-heading text-2xl font-semibold tracking-tight">{title}</h1>
+          <h1 className="font-heading text-2xl font-semibold tracking-tight md:text-[28px]">{title}</h1>
         )}
-        {subtitle ? <p className="text-sm text-muted-foreground">{subtitle}</p> : null}
+        {subtitle ? <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{subtitle}</p> : null}
       </div>
       {/*
         Sur téléphone, les actions prennent TOUTE une ligne, donc elles passent

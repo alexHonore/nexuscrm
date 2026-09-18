@@ -5,7 +5,9 @@ import { formatInTimeZone } from "date-fns-tz";
 import { enUS, fr } from "date-fns/locale";
 import {
   ArrowDownIcon,
+  ArrowRightIcon,
   ArrowUpIcon,
+  BookmarkIcon,
   CheckIcon,
   ClockAlertIcon,
   EyeOffIcon,
@@ -22,7 +24,7 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AddClientDialog } from "@/components/clients/add-client-dialog";
 import {
   ClientsTable,
@@ -35,6 +37,14 @@ import {
   type ClientListNav,
 } from "@/components/clients/client-list-nav";
 import type { FilterOption } from "@/components/clients/clients-filters";
+import {
+  clientFocus,
+  clientRouteFilters,
+  localClientWorkspaceUrl,
+  type ClientFilterState,
+  type ClientFocus,
+} from "@/components/clients/focus";
+import { LookIcon, WORKSPACE_LOOK } from "@/components/look";
 import {
   type DateFilterMode,
   normalizeSavedView,
@@ -263,6 +273,22 @@ export function ClientsWorkspace({
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const routeQ = searchParams.get("q");
+  const routeCategory = searchParams.get("categoryId");
+  const routeFocus = searchParams.get("focus");
+  // Only explicit route criteria can reapply a deep link. Local edits and
+  // unrelated renders leave this memo unchanged, so they cannot be erased.
+  const routeFilters = useMemo(
+    () => clientRouteFilters({ q: routeQ, categoryId: routeCategory, focus: routeFocus }),
+    [routeQ, routeCategory, routeFocus],
+  );
+  const markLocalChange = useCallback(() => {
+    const url = localClientWorkspaceUrl(window.location.href);
+    // Next's native-history integration updates useSearchParams without a
+    // server navigation or another history entry. Repeating the same palette
+    // search can now apply again, and Back preserves the user's local edits.
+    if (url) window.history.replaceState(null, "", url);
+  }, []);
 
   const isDetail = pathname !== "/clients";
   const activeId = isDetail ? (pathname.split("/")[2] ?? null) : null;
@@ -274,8 +300,8 @@ export function ClientsWorkspace({
     (): ClientsView => "list",
   );
 
-  const [sortKey, setSortKey] = useState<ClientSortKey>("activity");
-  const [sortDir, setSortDir] = useState<ClientSortDir>("desc");
+  const [sortKey, setSortKey] = useState<ClientSortKey>(routeFilters?.sortKey ?? "activity");
+  const [sortDir, setSortDir] = useState<ClientSortDir>(routeFilters?.sortDir ?? "desc");
 
   const changeView = (next: ClientsView) => {
     writeStoredView(next);
@@ -284,6 +310,7 @@ export function ClientsWorkspace({
   };
 
   const onSort = (key: Exclude<ClientSortKey, "activity">) => {
+    markLocalChange();
     if (sortKey === key) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
@@ -295,36 +322,46 @@ export function ClientsWorkspace({
   // ── Filters ────────────────────────────────────────────────────────────────
   // Multi-sélection partout : liste vide = « tous ». Semée depuis ?q= (recherche
   // rapide du tableau de bord) et ?categoryId= (liens « +N autres » du pipeline).
-  const [q, setQ] = useState(() => searchParams.get("q") ?? "");
-  const [appliedQ, setAppliedQ] = useState(() => (searchParams.get("q") ?? "").trim());
-  const [categoryIds, setCategoryIds] = useState<Array<number | "none">>(() => {
-    const raw = searchParams.get("categoryId");
-    if (!raw) return [];
-    return raw.split(",").flatMap((token): Array<number | "none"> => {
-      const trimmed = token.trim();
-      if (trimmed === "none") return ["none"];
-      const parsed = Number.parseInt(trimmed, 10);
-      return Number.isFinite(parsed) ? [parsed] : [];
-    });
-  });
+  const [q, setQ] = useState(routeFilters?.q ?? "");
+  const [appliedQ, setAppliedQ] = useState((routeFilters?.q ?? "").trim());
+  const [categoryIds, setCategoryIds] = useState<Array<number | "none">>(routeFilters?.categoryIds ?? []);
   const [sourceIds, setSourceIds] = useState<string[]>([]);
   const [assignedToIds, setAssignedToIds] = useState<string[]>([]);
-  const [statuses, setStatuses] = useState<string[]>([]);
+  const [statuses, setStatuses] = useState<string[]>(routeFilters?.statuses ?? []);
   const [languages, setLanguages] = useState<string[]>([]);
   const [campaignIds, setCampaignIds] = useState<string[]>([]);
   // Filtres de dates (mode + bornes yyyy-mm-dd) : création / modification.
   const [createdFilter, setCreatedFilter] = useState<DateFilter>(NO_DATE_FILTER);
   const [updatedFilter, setUpdatedFilter] = useState<DateFilter>(NO_DATE_FILTER);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const applyFocus = useCallback((focus: ClientFocus) => {
+    markLocalChange();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setQ("");
+    setAppliedQ("");
+    setCategoryIds([]);
+    setSourceIds([]);
+    setAssignedToIds([]);
+    setLanguages([]);
+    setCampaignIds([]);
+    setCreatedFilter(NO_DATE_FILTER);
+    setUpdatedFilter(NO_DATE_FILTER);
+    setStatuses(focus === "all" ? [] : [focus]);
+    setSortKey(focus === "overdue" || focus === "today" ? "followupAt" : "activity");
+    setSortDir(focus === "overdue" || focus === "today" ? "asc" : "desc");
+  }, [markLocalChange]);
 
   /** Ajoute/retire une valeur d'un filtre multi-sélection. */
   function toggleValue<T>(setter: React.Dispatch<React.SetStateAction<T[]>>, value: T): void {
+    markLocalChange();
     setter((prev) =>
       prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
     );
   }
 
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onSearchChange = (value: string) => {
+    markLocalChange();
     setQ(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => setAppliedQ(value.trim()), 300);
@@ -337,7 +374,7 @@ export function ClientsWorkspace({
   );
 
   /** Applique un état de filtres/tri complet (vues enregistrées, restauration). */
-  const applyFilterState = (v: SavedViewState) => {
+  const applyFilterState = useCallback((v: ClientFilterState) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     setQ(v.q);
     setAppliedQ(v.q.trim());
@@ -351,7 +388,7 @@ export function ClientsWorkspace({
     setUpdatedFilter({ mode: v.updatedMode, from: v.updatedFrom, to: v.updatedTo });
     setSortKey(SORT_KEYS.includes(v.sortKey) ? v.sortKey : "activity");
     setSortDir(v.sortDir);
-  };
+  }, []);
 
   // Restauration au montage — une seule fois, après l'hydratation. Un lien
   // profond (?q= du tableau de bord, ?categoryId= du pipeline) gagne : ces
@@ -360,20 +397,31 @@ export function ClientsWorkspace({
   useEffect(() => {
     if (hydratedRef.current) return;
     hydratedRef.current = true;
-    if (searchParams.get("q") || searchParams.get("categoryId")) return;
+    if (routeFilters) return;
     const stored = readStoredPanelState();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate external localStorage only after the server render
     if (stored) applyFilterState(stored);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- montage seulement
   }, []);
+
+  // This layout survives global search, pipeline links and detail navigation.
+  // Reapply explicit URL searches on navigation/back/forward. A bare route
+  // retains the workspace; local edits do not change routeFilters.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- synchronize an external URL navigation into the persistent workspace
+    if (routeFilters) applyFilterState(routeFilters);
+  }, [routeFilters, applyFilterState]);
 
   // ── List state ─────────────────────────────────────────────────────────────
   const [items, setItems] = useState<ClientRow[]>([]);
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [settledRequestKey, setSettledRequestKey] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [failed, setFailed] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [loadedQuery, setLoadedQuery] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   const filterQuery = useMemo(() => {
     const p = new URLSearchParams();
@@ -427,6 +475,10 @@ export function ClientsWorkspace({
     sortKey,
     sortDir,
   ]);
+  const requestKey = JSON.stringify([filterQuery, refreshKey]);
+  // A new filter is loading in the very render where it changes. This keeps
+  // the previous queue from offering stale record links before effects run.
+  const loading = settledRequestKey !== requestKey;
 
   // Mémorisation continue : chaque changement de filtres ou de tri est rangé —
   // jamais avant la restauration, sinon le montage écraserait l'état d'hier
@@ -477,7 +529,9 @@ export function ClientsWorkspace({
   const rerunRef = useRef(false);
   /** Incrémenté à chaque mutation locale — invalide les réponses parties avant. */
   const versionRef = useRef(0);
-  queryRef.current = filterQuery;
+  useLayoutEffect(() => {
+    queryRef.current = filterQuery;
+  }, [filterQuery]);
 
   const listUrl = (query: string, page: number) =>
     `/api/clients/list?${query ? `${query}&` : ""}page=${page}`;
@@ -498,14 +552,13 @@ export function ClientsWorkspace({
     setItems(merged);
     setTotal(data.total);
     setHasMore(hasMoreRef.current);
+    setNow(Date.now());
   }, []);
 
   // Page 1 (re)load whenever the filters change.
   useEffect(() => {
     const controller = new AbortController();
     loadingRef.current = true;
-    setLoading(true);
-    setFailed(false);
     fetch(listUrl(filterQuery, 1), { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -513,20 +566,22 @@ export function ClientsWorkspace({
       })
       .then((data) => {
         applyPage(data, "replace");
+        setLoadedQuery(filterQuery);
+        setFailed(false);
         loadingRef.current = false;
-        setLoading(false);
+        setSettledRequestKey(requestKey);
       })
       .catch(() => {
         if (controller.signal.aborted) return;
         loadingRef.current = false;
         setFailed(true);
-        setLoading(false);
+        setSettledRequestKey(requestKey);
       });
     return () => {
       controller.abort();
       loadingRef.current = false;
     };
-  }, [filterQuery, refreshKey, applyPage]);
+  }, [filterQuery, requestKey, applyPage]);
 
   /**
    * Rafraîchissement « vivant » : recharge la page 1 avec les filtres courants
@@ -573,6 +628,7 @@ export function ClientsWorkspace({
       const merged = [...data.items, ...tail].slice(0, Math.max(data.items.length, data.total));
 
       setFailed(false);
+      setNow(Date.now());
       setTotal(data.total);
       hasMoreRef.current = merged.length < data.total;
       setHasMore(hasMoreRef.current);
@@ -642,8 +698,8 @@ export function ClientsWorkspace({
   const ids = useMemo(() => items.map((item) => item.id), [items]);
   const indexOf = useCallback((id: string) => ids.indexOf(id), [ids]);
   const nav = useMemo<ClientListNav>(
-    () => ({ ids, total, hasMore, loadingMore, indexOf, loadMore }),
-    [ids, total, hasMore, loadingMore, indexOf, loadMore],
+    () => ({ ids, total, hasMore, loadingMore, loading, failed, focus: applyFocus, indexOf, loadMore }),
+    [ids, total, hasMore, loadingMore, loading, failed, applyFocus, indexOf, loadMore],
   );
 
   // ── Options ────────────────────────────────────────────────────────────────
@@ -691,8 +747,16 @@ export function ClientsWorkspace({
     (hasDateFilter(createdFilter) ? 1 : 0) +
     (hasDateFilter(updatedFilter) ? 1 : 0);
   const hasAnyCriteria = activeFilterCount > 0 || categoryIds.length > 0 || appliedQ !== "";
+  const selectedFocus = !hasAnyCriteria
+    ? "all"
+    : sourceIds.length === 0 && assignedToIds.length === 0 && languages.length === 0 &&
+        campaignIds.length === 0 && categoryIds.length === 0 && !appliedQ &&
+        !hasDateFilter(createdFilter) && !hasDateFilter(updatedFilter) && statuses.length === 1
+      ? clientFocus(statuses[0])
+      : null;
 
   const clearFilters = () => {
+    markLocalChange();
     setSourceIds([]);
     setAssignedToIds([]);
     setStatuses([]);
@@ -731,6 +795,7 @@ export function ClientsWorkspace({
     view,
   };
   const applySavedView = (saved: SavedView) => {
+    markLocalChange();
     // Données venues du localStorage (ancien ou nouveau format) : normalisées.
     const v = normalizeSavedView(saved);
     applyFilterState(v);
@@ -779,8 +844,6 @@ export function ClientsWorkspace({
       </div>
     </div>
   );
-
-  const now = Date.now();
 
   /** « 1 août » (année courante) ou « 1 août 2025 » — la valeur yyyy-mm-dd
    *  est affichée telle quelle, sans conversion de fuseau. */
@@ -934,12 +997,17 @@ export function ClientsWorkspace({
       label: languageOptions.find((o) => o.value === v)?.label ?? v,
       remove: () => toggleValue(setLanguages, v),
     })),
+    ...campaignIds.map((v) => ({
+      key: `campaign-${v}`,
+      label: campaignFilterOptions.find((o) => o.value === v)?.label ?? v,
+      remove: () => toggleValue(setCampaignIds, v),
+    })),
     ...(hasDateFilter(createdFilter)
       ? [
           {
             key: "created-range",
             label: dateChipLabel("createdShort", createdFilter),
-            remove: () => setCreatedFilter(NO_DATE_FILTER),
+            remove: () => { markLocalChange(); setCreatedFilter(NO_DATE_FILTER); },
           },
         ]
       : []),
@@ -948,7 +1016,7 @@ export function ClientsWorkspace({
           {
             key: "updated-range",
             label: dateChipLabel("updatedShort", updatedFilter),
-            remove: () => setUpdatedFilter(NO_DATE_FILTER),
+            remove: () => { markLocalChange(); setUpdatedFilter(NO_DATE_FILTER); },
           },
         ]
       : []),
@@ -1026,8 +1094,8 @@ export function ClientsWorkspace({
         <aside
           aria-label={t("list.title")}
           className={cn(
-            "flex w-full flex-col",
-            !showTable && "md:sticky md:top-0 md:h-dvh md:w-[340px] md:shrink-0 md:border-r",
+            "flex w-full flex-col bg-card",
+            !showTable && "md:sticky md:top-16 md:h-[calc(100dvh-4rem)] md:w-[360px] md:shrink-0 md:border-r xl:w-[380px]",
             isDetail && "hidden md:flex",
           )}
         >
@@ -1038,7 +1106,16 @@ export function ClientsWorkspace({
               verre dépoli. L'encoche s'ajoute par-dessus, comme dans la barre
               elle-même. Sur écran large la colonne redevient `static` : ce
               `top` n'y sert plus à rien. */}
-          <div className="sticky top-[calc(env(safe-area-inset-top)+65px)] z-20 border-b bg-background/95 px-3 pb-2 pt-3 backdrop-blur md:static md:bg-background">
+          <div className="sticky top-[calc(env(safe-area-inset-top)+65px)] z-20 border-b bg-card/95 px-4 pt-5 pb-3 backdrop-blur md:static md:bg-card">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="font-heading text-xl font-semibold tracking-tight">{t("list.title")}</h2>
+                <p className="mt-1 text-xs text-muted-foreground">{t("workspace.panelHint")}</p>
+              </div>
+              {can.create ? (
+                <AddClientDialog compact categories={categoryOptions} sources={sources} users={users} />
+              ) : null}
+            </div>
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
                 <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -1047,7 +1124,7 @@ export function ClientsWorkspace({
                   onChange={(e) => onSearchChange(e.target.value)}
                   placeholder={t("list.searchPlaceholder")}
                   aria-label={t("list.searchPlaceholder")}
-                  className="min-h-11 pl-9 md:min-h-9"
+                  className="min-h-11 rounded-xl bg-background pl-9"
                   inputMode="search"
                   enterKeyHint="search"
                 />
@@ -1058,7 +1135,7 @@ export function ClientsWorkspace({
                   render={
                     <Button
                       variant="outline"
-                      className="relative size-11 md:size-9"
+                      className="relative size-11 rounded-xl"
                       aria-label={t("panel.filters")}
                     />
                   }
@@ -1090,6 +1167,7 @@ export function ClientsWorkspace({
                         items={sortOptions}
                         value={sortKey}
                         onValueChange={(v) => {
+                          markLocalChange();
                           const key = (v ?? "activity") as ClientSortKey;
                           setSortKey(key);
                           setSortDir(key === "activity" ? "desc" : SORT_DEFAULT_DIR[key]);
@@ -1114,7 +1192,7 @@ export function ClientsWorkspace({
                           variant="outline"
                           className="size-11 shrink-0 md:size-9"
                           aria-label={t(sortDir === "asc" ? "sort.asc" : "sort.desc")}
-                          onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+                          onClick={() => { markLocalChange(); setSortDir((d) => (d === "asc" ? "desc" : "asc")); }}
                         >
                           {sortDir === "asc" ? <ArrowUpIcon /> : <ArrowDownIcon />}
                         </Button>
@@ -1154,8 +1232,14 @@ export function ClientsWorkspace({
                         (v) => toggleValue(setCampaignIds, v),
                       )
                     : null}
-                  {dateFilterGroup(t("list.filters.createdAt"), createdFilter, setCreatedFilter)}
-                  {dateFilterGroup(t("list.filters.updatedAt"), updatedFilter, setUpdatedFilter)}
+                  {dateFilterGroup(t("list.filters.createdAt"), createdFilter, (next) => {
+                    markLocalChange();
+                    setCreatedFilter(next);
+                  })}
+                  {dateFilterGroup(t("list.filters.updatedAt"), updatedFilter, (next) => {
+                    markLocalChange();
+                    setUpdatedFilter(next);
+                  })}
                   {activeFilterCount > 0 ? (
                     <Button
                       variant="ghost"
@@ -1167,41 +1251,47 @@ export function ClientsWorkspace({
                     </Button>
                   ) : null}
 
-                  <div className="border-t pt-3">
-                    <SavedViews current={currentViewState} onApply={applySavedView} />
-                  </div>
                 </PopoverContent>
               </Popover>
 
               <Button
                 variant="outline"
-                className="size-11 md:size-9"
+                className="size-11 rounded-xl"
                 aria-label={view === "list" ? t("views.table") : t("views.cards")}
                 onClick={() => changeView(view === "list" ? "table" : "list")}
               >
                 {view === "list" ? <Table2Icon /> : <Rows3Icon />}
               </Button>
 
-              {can.create ? (
-                <AddClientDialog
-                  compact
-                  categories={categoryOptions}
-                  sources={sources}
-                  users={users}
-                />
-              ) : null}
+            </div>
+
+            <div role="group" aria-label={t("workspace.queues")} className="mt-3 -mx-1 flex gap-1 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {(["all", "overdue", "today", "never", "none"] as const).map((focus) => (
+                <button
+                  key={focus}
+                  type="button"
+                  aria-pressed={selectedFocus === focus}
+                  onClick={() => applyFocus(focus)}
+                  className={cn(
+                    "inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors md:min-h-9",
+                    selectedFocus === focus ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                >
+                  {t(`workspace.shortFocus.${focus}`)}
+                </button>
+              ))}
             </div>
 
             {/* Category chips — multi-select, colored per categories.color */}
             <div
               role="group"
               aria-label={t("list.filters.category")}
-              className="mt-2 flex flex-wrap gap-1.5"
+              className="mt-3 flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               <button
                 type="button"
                 aria-pressed={categoryIds.length === 0}
-                onClick={() => setCategoryIds([])}
+                onClick={() => { markLocalChange(); setCategoryIds([]); }}
                 className={cn(
                   chipBase,
                   categoryIds.length === 0
@@ -1295,9 +1385,20 @@ export function ClientsWorkspace({
               </div>
             ) : null}
 
-            <p className="mt-1.5 text-[11px] tabular-nums text-muted-foreground" aria-live="polite">
-              {loading ? t("panel.loading") : t("list.count", { count: total })}
-            </p>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <p className="text-xs tabular-nums text-muted-foreground" aria-live="polite">
+                {loading ? t("panel.loading") : t("list.count", { count: total })}
+              </p>
+              <Popover>
+                <PopoverTrigger render={<Button variant="ghost" className="min-h-11 gap-1.5 px-2 text-xs md:min-h-8" />}>
+                  <BookmarkIcon aria-hidden className="size-3.5" />
+                  {t("savedViews.title")}
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-80">
+                  <SavedViews current={currentViewState} onApply={applySavedView} />
+                </PopoverContent>
+              </Popover>
+            </div>
           </div>
 
           {showTable ? (
@@ -1342,7 +1443,7 @@ export function ClientsWorkspace({
             ) : items.length === 0 ? (
               emptyBlock
             ) : (
-              <ul className="divide-y divide-border/60">
+              <ul className="space-y-1 p-2">
                 {items.map((item) => {
                   const active = item.id === activeId;
                   const overdue =
@@ -1353,16 +1454,16 @@ export function ClientsWorkspace({
                         href={`/clients/${item.id}`}
                         aria-current={active ? "page" : undefined}
                         className={cn(
-                          "flex min-h-[56px] items-center gap-2.5 border-l-2 px-3 py-2 transition-colors",
+                          "group flex min-h-[82px] items-center gap-3 rounded-xl border px-3 py-3 transition-colors",
                           active
-                            ? "border-l-primary bg-accent text-accent-foreground"
-                            : "border-l-transparent hover:bg-muted/60 active:bg-muted",
+                            ? "border-primary/20 bg-accent text-accent-foreground shadow-sm"
+                            : "border-transparent hover:border-border hover:bg-muted/50 active:bg-muted",
                         )}
                       >
                         <span
                           aria-hidden
                           className={cn(
-                            "flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
+                            "flex size-10 shrink-0 items-center justify-center rounded-xl text-xs font-semibold",
                             !item.categoryColor &&
                               "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
                           )}
@@ -1402,7 +1503,10 @@ export function ClientsWorkspace({
                             ) : (
                               <span className="tabular-nums">{formatPhone(item.phone)}</span>
                             )}
-                            {item.city ? <span className="truncate">{item.city}</span> : null}
+                          </span>
+                          <span className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                            <span className="truncate">{categories.find((category) => category.id === item.categoryId)?.label ?? t("list.noCategory")}</span>
+                            {item.city ? <><span aria-hidden>·</span><span className="truncate">{item.city}</span></> : null}
                           </span>
                           {/* Le POURQUOI du masque, écrit. Il vivait dans un
                               `title=` — c'est-à-dire nulle part sur un écran
@@ -1418,7 +1522,7 @@ export function ClientsWorkspace({
                         {item.nextFollowupAt ? (
                           <span
                             className={cn(
-                              "flex shrink-0 items-center gap-1 text-[11px] tabular-nums",
+                              "flex shrink-0 flex-col items-end gap-1 text-[11px] tabular-nums",
                               overdue ? "font-medium text-destructive" : "text-muted-foreground",
                             )}
                           >
@@ -1427,7 +1531,7 @@ export function ClientsWorkspace({
                                 className="size-3.5"
                                 aria-label={t("list.filters.late")}
                               />
-                            ) : null}
+                            ) : <span className="text-[10px]">{t("table.followup")}</span>}
                             {shortDay(item.nextFollowupAt)}
                           </span>
                         ) : null}
@@ -1441,6 +1545,14 @@ export function ClientsWorkspace({
             {loadMoreBlock}
           </div>
           )}
+          {!showTable && !loading && !failed && loadedQuery === filterQuery && items.length > 0 ? (
+            <div className="border-t bg-card p-3">
+              <Button render={<Link href={`/clients/${items[0].id}`} />} nativeButton={false} variant="outline" className="min-h-11 w-full justify-between px-3">
+                <span className="flex items-center gap-2"><LookIcon look={WORKSPACE_LOOK.clients} size="sm" />{t("workspace.openFirst")}</span>
+                <ArrowRightIcon aria-hidden className="size-4" />
+              </Button>
+            </div>
+          ) : null}
         </aside>
 
         {/* ── Right side: detail (or desktop empty state) — masqué en vue tableau ── */}

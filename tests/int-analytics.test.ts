@@ -424,6 +424,8 @@ type IntlMessages = ComponentProps<typeof NextIntlClientProvider>["messages"];
 
 function renderStatsTable(rows: Awaited<ReturnType<typeof getUserStats>>): string[] {
   const html = renderToStaticMarkup(
+    // The provider's required children prop is checked by React's createElement overload.
+    // eslint-disable-next-line react/no-children-prop
     createElement(NextIntlClientProvider, {
       locale: "fr",
       messages: { analytics: analyticsFr } as unknown as IntlMessages,

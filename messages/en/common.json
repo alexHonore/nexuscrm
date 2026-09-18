@@ -1,6 +1,25 @@
 {
   "appName": "Groupe Nexus",
   "tagline": "Real estate CRM",
+  "workspace": {
+    "daily": "Workspace",
+    "account": "My account",
+    "navigation": "Main navigation",
+    "skipToContent": "Skip to content",
+    "search": "Search or jump to…",
+    "searchHelp": "Find a client by name, phone or city, or open a workspace page.",
+    "searchPlaceholder": "A client, a phone number, a page…",
+    "searchHint": "Type at least 2 characters to find a client, or choose a page below.",
+    "records": "Clients",
+    "searching": "Finding clients…",
+    "searchError": "Search is unavailable. Try again or open the client directory.",
+    "noRecords": "No matching clients.",
+    "allResults": "View all results ({count})",
+    "openDirectory": "Search the client directory",
+    "closeSearch": "Close",
+    "keyboardHint": "↑ ↓ to navigate · Esc to close",
+    "openResult": "Open"
+  },
   "nav": {
     "dashboard": "Dashboard",
     "clients": "Clients",

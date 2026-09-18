@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { asc } from "drizzle-orm";
-import { z } from "zod";
 import { db } from "@/db";
 import { objectionPacks } from "@/db/schema-sms";
 import { logAudit } from "@/lib/audit";
-import { objectionItemSchema } from "@/lib/guardrails/types";
 import { apiPerm } from "@/lib/permissions/server";
+import { packInputSchema } from "./schema";
 
 /**
  * Les paquets d'objections — jusqu'ici semés une fois et jamais modifiables.
@@ -19,27 +18,6 @@ import { apiPerm } from "@/lib/permissions/server";
  * Rien n'est codé en dur, comme pour les garde-fous : tout paquet, y compris
  * ceux de la semence, se lit, se modifie et se supprime.
  */
-
-/**
- * Un identifiant STABLE, écrit une fois.
- *
- * C'est lui que `assistants.objection_packs` référence et que le fichier
- * d'export transporte : le renommer romprait chaque assistant qui l'utilise,
- * d'où l'absence de `id` dans le schéma de modification.
- */
-const idSchema = z
-  .string()
-  .trim()
-  .min(2)
-  .max(60)
-  .regex(/^[a-z0-9_]+$/, "minuscules, chiffres et tirets bas seulement");
-
-export const packInputSchema = z.object({
-  id: idSchema,
-  label: z.string().trim().min(1).max(120),
-  language: z.string().trim().min(2).max(10).default("fr-CA"),
-  items: z.array(objectionItemSchema).max(40).default([]),
-});
 
 /**
  * GET /api/objection-packs — tous les paquets, contenu compris.

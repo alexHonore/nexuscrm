@@ -1,6 +1,6 @@
 "use client";
 
-import { BotIcon, CheckIcon, PhoneIcon, PhoneOffIcon, UserRoundIcon } from "lucide-react";
+import { BotIcon, CheckIcon, PhoneOffIcon, UserRoundIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -8,6 +8,7 @@ import { useTransition } from "react";
 import { toast } from "sonner";
 import { completeFollowupAction } from "@/app/(app)/clients/actions";
 import { Button } from "@/components/ui/button";
+import { CALL_DIRECTION_LOOK, DASHBOARD_LOOK, LookIcon } from "@/components/look";
 import { useTelephony } from "@/components/telephony/telephony-context";
 import { cn } from "@/lib/utils";
 
@@ -71,20 +72,21 @@ export function FollowupItem({ item }: { item: FollowupItemData }) {
   return (
     <li
       className={cn(
-        "flex items-center gap-3 rounded-lg border py-2 pr-2 pl-3 transition-colors hover:bg-muted/50",
-        item.overdue && "border-l-4 border-l-destructive bg-destructive/5 hover:bg-destructive/10",
+        "rounded-xl border p-3 transition-colors hover:bg-muted/30 sm:p-4",
+        item.overdue && "border-l-[3px]",
       )}
+      style={item.overdue ? { borderLeftColor: DASHBOARD_LOOK.overdue.color } : undefined}
     >
       <div className="min-w-0 flex-1">
         <Link
           href={`/clients/${item.clientId}`}
-          className="flex items-center gap-1.5 text-sm font-medium hover:underline"
+          className="flex min-h-6 flex-wrap items-center gap-1.5 text-sm font-semibold hover:underline"
         >
           {item.doNotCall ? (
-            <PhoneOffIcon
-              aria-label={t("followups.doNotCall")}
-              className="size-3.5 shrink-0 text-destructive"
-            />
+            <span aria-label={t("followups.doNotCall")} className="inline-flex items-center gap-1 text-xs font-normal" style={{ color: DASHBOARD_LOOK.overdue.color }}>
+              <PhoneOffIcon aria-hidden className="size-3.5 shrink-0" />
+              {t("followups.doNotCall")}
+            </span>
           ) : null}
           <span className="truncate">{item.clientName}</span>
           {/* D'où vient ce rappel. Les deux familles partagent la liste ; sans
@@ -92,35 +94,35 @@ export function FollowupItem({ item }: { item: FollowupItemData }) {
               lit comme une note qu'on aurait prise soi-même — et on ne sait
               plus lequel des deux a déjà parlé au client. */}
           {item.aiScheduled ? (
-            <BotIcon
-              aria-label={t("followups.aiScheduled")}
-              className="size-3.5 shrink-0 text-muted-foreground"
-            />
+            <span aria-label={t("followups.aiScheduled")} className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <BotIcon aria-hidden className="size-3 shrink-0" />
+              {t("followups.aiScheduled")}
+            </span>
           ) : null}
         </Link>
-        <p className="truncate text-xs text-muted-foreground">
-          <span className={cn("font-medium tabular-nums", item.overdue && "text-destructive")}>
+        <p className="mt-1 truncate text-xs text-muted-foreground">
+          <span className="font-medium tabular-nums" style={item.overdue ? { color: DASHBOARD_LOOK.overdue.color } : undefined}>
             {item.dueLabel}
           </span>
           {" · "}
           {item.phoneDisplay}
-          {item.note ? ` · ${item.note}` : null}
         </p>
+        {item.note ? <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{item.note}</p> : null}
         {/* Sur sa propre ligne : le nom de celui qui a posé la tâche est ce
             qu'on lit quand on se demande « pourquoi je dois rappeler ça ? »,
             et il se ferait couper au bout d'une ligne déjà pleine. */}
         {item.assignedByName ? (
-          <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+          <p className="mt-1.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
             <UserRoundIcon className="size-3 shrink-0" aria-hidden />
             {t("followups.assignedBy", { name: item.assignedByName })}
           </p>
         ) : null}
       </div>
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t pt-2">
         {dialNumber ? (
           <Button
-            variant="ghost"
-            className="size-11 rounded-full bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 hover:text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-400 dark:hover:bg-emerald-500/25 dark:hover:text-emerald-300"
+            variant="outline"
+            className="min-h-11 gap-1.5 px-3 text-xs"
             aria-label={item.doNotCall ? t("followups.doNotCall") : t("followups.call")}
             // Même règle que l'en-tête de la fiche et la carte du pipeline :
             // une fiche « Ne pas appeler » ne se compose pas d'un geste.
@@ -129,25 +131,29 @@ export function FollowupItem({ item }: { item: FollowupItemData }) {
               dial({ number: dialNumber, clientId: item.clientId, clientName: item.clientName })
             }
           >
-            <PhoneIcon className="size-5" />
+            <LookIcon look={CALL_DIRECTION_LOOK.outbound} className="size-3.5" />
+            {t("followups.call")}
           </Button>
         ) : null}
         <Button
+          nativeButton={false}
           variant="ghost"
-          className="size-11"
+          className="min-h-11 gap-1.5 px-2.5 text-xs text-muted-foreground"
           aria-label={t("followups.open")}
           render={<Link href={`/clients/${item.clientId}`} />}
         >
-          <UserRoundIcon className="size-5" />
+          <UserRoundIcon aria-hidden className="size-3.5" />
+          {t("followups.openShort")}
         </Button>
         <Button
           variant="ghost"
-          className="size-11"
+          className="ml-auto min-h-11 gap-1.5 px-2.5 text-xs text-muted-foreground"
           aria-label={t("followups.markDone")}
           disabled={pending}
           onClick={markDone}
         >
-          <CheckIcon className="size-5" />
+          <CheckIcon aria-hidden className="size-3.5" />
+          {t("followups.markDone")}
         </Button>
       </div>
     </li>

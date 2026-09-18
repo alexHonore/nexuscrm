@@ -76,7 +76,7 @@ function mentionTint(percent: number): string {
 function MentionChip({ name, self }: { name: string; self: boolean }) {
   return (
     <span
-      className="mx-px rounded-full px-1.5 py-px font-medium whitespace-nowrap text-foreground"
+      className="mx-px rounded-full px-1.5 py-px font-medium whitespace-normal text-foreground [overflow-wrap:anywhere]"
       style={{
         backgroundColor: mentionTint(self ? 26 : 14),
         boxShadow: self ? `inset 0 0 0 1px ${mentionTint(60)}` : undefined,
@@ -303,14 +303,14 @@ export function CommentsTimeline({
   };
 
   return (
-    <Card className="shadow-xs">
+    <Card className="min-w-0 max-w-full shadow-xs">
       <CardHeader className="border-b">
         <CardTitle className="flex items-center gap-2">
           <MessageSquareIcon className="size-4 text-muted-foreground" />
           {t("comments.title")}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="min-w-0 space-y-4 [overflow-wrap:anywhere]">
         {rows.length === 0 ? (
           <EmptyState icon={<MessageSquareIcon />} title={t("comments.empty")} className="py-6" />
         ) : (

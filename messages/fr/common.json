@@ -1,6 +1,25 @@
 {
   "appName": "Groupe Nexus",
   "tagline": "CRM immobilier",
+  "workspace": {
+    "daily": "Espace de travail",
+    "account": "Mon compte",
+    "navigation": "Navigation principale",
+    "skipToContent": "Aller au contenu",
+    "search": "Rechercher ou accéder à…",
+    "searchHelp": "Trouvez un client par nom, téléphone ou ville, ou ouvrez une page de votre espace.",
+    "searchPlaceholder": "Un client, un numéro, une page…",
+    "searchHint": "Saisissez au moins 2 caractères pour trouver un client, ou choisissez une page ci-dessous.",
+    "records": "Clients",
+    "searching": "Recherche des clients…",
+    "searchError": "La recherche est indisponible. Réessayez ou ouvrez le répertoire clients.",
+    "noRecords": "Aucun client correspondant.",
+    "allResults": "Voir tous les résultats ({count})",
+    "openDirectory": "Rechercher dans le répertoire",
+    "closeSearch": "Fermer",
+    "keyboardHint": "↑ ↓ pour naviguer · Échap pour fermer",
+    "openResult": "Ouvrir"
+  },
   "nav": {
     "dashboard": "Tableau de bord",
     "clients": "Clients",

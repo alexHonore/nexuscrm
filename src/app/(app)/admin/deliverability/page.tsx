@@ -191,12 +191,12 @@ export default async function DeliverabilityPage({
             </ul>
           </nav>
 
-          {/* `scroll-mt` : l'en-tête mobile est collant, sans marge de défilement
-              une ancre place le titre de section SOUS lui. */}
+          {/* `scroll-mt` : les en-têtes de la coquille sont collants ; sur
+              ordinateur, garder les 4rem de l'en-tête et 1rem de respiration. */}
           <section
             id="apercu"
             aria-label={t("deliverability.tabs.overview")}
-            className="scroll-mt-16 md:scroll-mt-4"
+            className="scroll-mt-16 md:scroll-mt-20"
           >
             <DeliverabilityMetrics report={report} />
           </section>
@@ -207,7 +207,7 @@ export default async function DeliverabilityPage({
           <section
             id="contenu"
             aria-label={t("deliverability.tabs.content")}
-            className="scroll-mt-16 md:scroll-mt-4"
+            className="scroll-mt-16 md:scroll-mt-20"
           >
             <DeliverabilityFindings
               findings={report.findings}
@@ -221,7 +221,7 @@ export default async function DeliverabilityPage({
           <section
             id="numeros"
             aria-label={t("deliverability.tabs.numbers")}
-            className="scroll-mt-16 space-y-4 md:scroll-mt-4"
+            className="scroll-mt-16 space-y-4 md:scroll-mt-20"
           >
             <DeliverabilityNumbers report={report} />
             <DeliverabilitySkipped skipped={report.skipped} />
@@ -230,7 +230,7 @@ export default async function DeliverabilityPage({
           <section
             id="gabarits"
             aria-label={t("deliverability.tabs.templates")}
-            className="scroll-mt-16 md:scroll-mt-4"
+            className="scroll-mt-16 md:scroll-mt-20"
           >
             <DeliverabilityTemplates templates={report.templates} />
           </section>
@@ -242,7 +242,7 @@ export default async function DeliverabilityPage({
           <section
             id="twilio"
             aria-label={t("deliverability.tabs.twilio")}
-            className="scroll-mt-16 md:scroll-mt-4"
+            className="scroll-mt-16 md:scroll-mt-20"
           >
             <DeliverabilityTwilioCard />
           </section>

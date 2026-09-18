@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
+import type { ClientFocus } from "./focus";
 
 /** One row of the /clients lists (shape of GET /api/clients/list items). */
 export type ClientListItem = {
@@ -34,6 +35,10 @@ export type ClientListNav = {
   total: number;
   hasMore: boolean;
   loadingMore: boolean;
+  loading: boolean;
+  failed: boolean;
+  /** Select a complete work queue, clearing any previously saved criteria. */
+  focus: (focus: ClientFocus) => void;
   indexOf: (id: string) => number;
   /** Loads the next page; resolves with the newly appended ids. */
   loadMore: () => Promise<string[]>;

@@ -3,14 +3,10 @@ import { enUS, fr } from "date-fns/locale";
 import { formatInTimeZone } from "date-fns-tz";
 import {
   BarChart3Icon,
-  CalendarCheckIcon,
   CalendarDaysIcon,
-  CheckCircle2Icon,
   ChevronRightIcon,
-  ClockIcon,
+  ArrowUpRightIcon,
   MapPinIcon,
-  PhoneCallIcon,
-  PhoneMissedIcon,
   PhoneOffIcon,
   VideoIcon,
 } from "lucide-react";
@@ -26,13 +22,15 @@ import { loadDirectory, requireActor, scopeFor, withVisibility } from "@/lib/per
 import { formatPhone, phoneMatchKey } from "@/lib/phone";
 import { RedialButton } from "@/components/calls/redial-button";
 import { APP_TZ, torontoDayRange, torontoMonthStart } from "@/components/clients/timezone";
-import { CALL_DIRECTION_LOOK, CONVERSATION_STATE_LOOK, LookIcon } from "@/components/look";
+import { CALL_DIRECTION_LOOK, CONVERSATION_STATE_LOOK, DASHBOARD_LOOK, LookIcon, lookTint } from "@/components/look";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { FollowupItem, type FollowupItemData } from "./followup-item";
-import { UpcomingFollowups, type FollowupDayGroup } from "./upcoming-followups";
+import { type FollowupItemData } from "./followup-item";
+import { type FollowupDayGroup } from "./upcoming-followups";
+import { FollowupWorkspace } from "./followup-workspace";
+import { followupCountFields } from "./followup-counts";
 import { AttentionList } from "./attention-list";
 import { QuickSearch } from "./quick-search";
 
@@ -50,10 +48,11 @@ const UPCOMING_MONTHS = 3;
 /**
  * Plafond de lignes chargées. Trois mois de relances peuvent en faire des
  * centaines ; on en charge un lot et on COMPTE le reste à part, plutôt que de
- * tronquer en silence. Le tri par échéance garantit que ce qui saute est le
- * plus lointain — jamais un retard.
+ * tronquer en silence. Le tri par échéance garde les suivis les plus proches
+ * en premier, même si le lot entier est constitué de retards.
  */
 const FOLLOWUP_FETCH_LIMIT = 500;
+const MISSED_CALL_FETCH_LIMIT = 50;
 
 export default async function DashboardPage() {
   const actor = await requireActor();
@@ -124,6 +123,7 @@ export default async function DashboardPage() {
   const attentionWhere = await withVisibility(
     actor,
     and(
+      ...(actor.can("conversations.view") ? [] : [sql`false`]),
       needsHumanCondition(),
       ...(seesEveryone ? [] : [eq(conversations.assignedToId, user.id)]),
     ),
@@ -140,19 +140,27 @@ export default async function DashboardPage() {
       lt(followups.dueAt, upcomingEnd),
     ),
   );
+  const bookedTodayWhere = await withVisibility(
+    actor,
+    and(
+      eq(appointments.userId, user.id),
+      gte(appointments.createdAt, start),
+      lt(appointments.createdAt, end),
+    ),
+  );
 
   const [
     pendingFollowups,
     upcomingAppointments,
     [upcomingCountRow],
     [callStats],
-    bookedToday,
+    [bookedTodayRow],
     missedRows,
     attentionRows,
     [attentionCountRow],
     [followupTotalRow],
   ] = await Promise.all([
-    // En retard + aujourd'hui + les 7 jours qui viennent, en UNE requête —
+    // En retard + aujourd'hui + les trois mois qui viennent, en UNE requête —
     // l'index (assigned_to_id, due_at) couvre la borne haute.
     //
     // Jointure explicite et colonnes NOMMÉES là où un `with: { client: true }`
@@ -208,14 +216,11 @@ export default async function DashboardPage() {
       })
       .from(calls)
       .where(and(eq(calls.userId, user.id), gte(calls.startedAt, start), lt(calls.startedAt, end))),
-    db.$count(
-      appointments,
-      and(
-        eq(appointments.userId, user.id),
-        gte(appointments.createdAt, start),
-        lt(appointments.createdAt, end),
-      ),
-    ),
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(appointments)
+      .innerJoin(clients, eq(clients.id, appointments.clientId))
+      .where(bookedTodayWhere),
     // Appels manqués (7 jours) sur MA ligne — le filtre « jamais retourné »
     // est calculé plus bas, en mémoire, pour épargner à la page d'accueil un
     // anti-join à base d'expressions régulières sur toute la table.
@@ -241,7 +246,7 @@ export default async function DashboardPage() {
         ),
       )
       .orderBy(desc(calls.startedAt))
-      .limit(50),
+      .limit(MISSED_CALL_FETCH_LIMIT),
     // Les fils rendus à un humain — les plus récents d'abord. Le fil est
     // toujours rattaché à une fiche : c'est elle qu'on ouvre pour répondre.
     db
@@ -267,7 +272,7 @@ export default async function DashboardPage() {
       .where(attentionWhere),
     // Le VRAI nombre, pour que le plafond de chargement ne mente jamais.
     db
-      .select({ n: sql<number>`count(*)::int` })
+      .select(followupCountFields(now, end))
       .from(followups)
       .innerJoin(clients, eq(clients.id, followups.clientId))
       .where(followupWhere),
@@ -276,6 +281,8 @@ export default async function DashboardPage() {
   const upcomingCount = upcomingCountRow?.n ?? 0;
   const attentionCount = attentionCountRow?.n ?? 0;
   const pendingFollowupTotal = followupTotalRow?.n ?? 0;
+  const overdueCount = followupTotalRow?.overdue ?? 0;
+  const dueTodayCount = followupTotalRow?.today ?? 0;
 
   // « Jamais retourné » : aucun appel POSTÉRIEUR, de qui que ce soit dans
   // l'équipe, vers ou depuis ce numéro (sortant = on a tenté un rappel ;
@@ -394,11 +401,10 @@ export default async function DashboardPage() {
       items: [toItem(f, false)],
     });
   }
-  const upcomingFollowupCount = upcomingGroups.reduce((n, g) => n + g.items.length, 0);
   // Ce que le plafond de chargement a laissé de côté. Le tri par échéance le
   // rend inoffensif — c'est le plus lointain qui saute — mais le taire ferait
   // croire à une liste complète.
-  const upcomingTruncated = Math.max(0, pendingFollowupTotal - pendingFollowups.length);
+  const followupsTruncated = Math.max(0, pendingFollowupTotal - pendingFollowups.length);
 
   // Un numéro = une ligne (le plus récent d'abord, avec le nombre de tentatives).
   type MissedGroup = {
@@ -420,7 +426,7 @@ export default async function DashboardPage() {
     const group: MissedGroup = {
       key,
       latest: row,
-      timeLabel: formatInTimeZone(row.startedAt, APP_TZ, sameDay ? "HH:mm" : "d MMM HH:mm", {
+      timeLabel: formatInTimeZone(row.startedAt, APP_TZ, sameDay ? timeFormat : `d MMM ${timeFormat}`, {
         locale: dfnsLocale,
       }),
       count: 1,
@@ -450,383 +456,303 @@ export default async function DashboardPage() {
   }
 
   const firstName = user.name.split(/\s+/)[0] ?? user.name;
+  const focusCount = overdueCount + dueTodayCount;
+  const hasUrgentWork = overdueCount > 0 || attentionCount > 0 || missedGroups.length > 0;
+  const nextFollowup = overdueItems[0] ?? dueTodayItems[0];
+  const nextAttention = attentionRows[0];
+  const nextHref = overdueItems[0]
+    ? `/clients/${overdueItems[0].clientId}`
+    : nextAttention
+      ? `/clients/${nextAttention.clientId}`
+      : missedGroups.length > 0
+        ? "#missed-calls"
+        : nextFollowup
+          ? `/clients/${nextFollowup.clientId}`
+          : "/clients?focus=never";
+  const nextLabel = overdueItems[0]
+    ? t("briefing.nextFollowup", { name: overdueItems[0].clientName })
+    : nextAttention
+      ? t("briefing.nextConversation", { name: nextAttention.clientName })
+      : missedGroups.length > 0
+        ? t("briefing.nextMissed")
+        : nextFollowup
+          ? t("briefing.nextFollowup", { name: nextFollowup.clientName })
+          : t("briefing.explore");
   const stats = [
+    { look: DASHBOARD_LOOK.calls, label: t("stats.calls"), value: callStats?.count ?? 0 },
+    { look: DASHBOARD_LOOK.minutes, label: t("stats.minutes"), value: Math.round((callStats?.seconds ?? 0) / 60) },
+    { look: DASHBOARD_LOOK.booked, label: t("stats.booked"), value: bookedTodayRow?.n ?? 0 },
+  ];
+  const priorities = [
     {
-      icon: PhoneCallIcon,
-      label: t("stats.calls"),
-      value: callStats?.count ?? 0,
-      chip: "bg-primary/10 text-primary",
+      look: DASHBOARD_LOOK.overdue,
+      label: t("briefing.overdue"),
+      description: t("briefing.overdueHint"),
+      value: overdueCount,
+      href: "#followups",
     },
+    ...(actor.can("conversations.view") ? [{
+      look: CONVERSATION_STATE_LOOK.attention,
+      label: t("briefing.attention"),
+      description: t("briefing.attentionHint"),
+      value: attentionCount,
+      href: "#attention",
+    }] : []),
     {
-      icon: ClockIcon,
-      label: t("stats.minutes"),
-      value: Math.round((callStats?.seconds ?? 0) / 60),
-      // chart-3 est un gris neutre en mode sombre — repli sur primary à un autre poids.
-      chip: "bg-chart-3/15 text-chart-3 dark:bg-primary/15 dark:text-primary",
-    },
-    {
-      icon: CalendarCheckIcon,
-      label: t("stats.booked"),
-      value: bookedToday,
-      chip: "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400",
+      look: CALL_DIRECTION_LOOK.missed,
+      label: t("briefing.missed"),
+      description: missedRows.length === MISSED_CALL_FETCH_LIMIT
+        ? t("briefing.missedHintLimited", { count: MISSED_CALL_FETCH_LIMIT })
+        : t("briefing.missedHint"),
+      value: missedGroups.length,
+      href: missedGroups.length > 0 ? "#missed-calls" : "/calls?missed=1&period=7",
     },
   ];
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-6 md:px-8">
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {formatInTimeZone(now, APP_TZ, locale === "en" ? "EEEE, MMMM d" : "EEEE d MMMM", { locale: dfnsLocale })}
+    <div className="mx-auto w-full max-w-[1440px] space-y-7 px-4 py-6 md:px-8 md:py-8 lg:space-y-8 lg:px-10">
+      <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        <div className="space-y-2">
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-muted-foreground">
+            <span className="uppercase tracking-[0.16em]">{t("workspace")}</span>
+            <span aria-hidden className="h-3 w-px bg-border" />
+            <span className="first-letter:uppercase">
+              {formatInTimeZone(now, APP_TZ, dayLabelFormat, { locale: dfnsLocale })}
+            </span>
           </p>
-          <h1 className="font-heading text-2xl font-semibold tracking-tight md:text-3xl">
+          <h1 className="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
             {t("greeting", { name: firstName })}
           </h1>
-          <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
+          <p className="text-sm leading-relaxed text-muted-foreground">{t("subtitle")}</p>
         </div>
-        {actor.can("admin.analytics") ? (
-          // Pleine largeur sur téléphone, ce bouton n'en restait pas moins haut
-          // de 32 px : large mais trop mince pour un pouce. La hauteur MINIMALE
-          // monte à 44 px sous md et retrouve exactement `h-8` au-delà.
-          <Button
-            variant="outline"
-            className="min-h-11 md:min-h-8"
-            render={<Link href="/admin/analytics" />}
-          >
-            <BarChart3Icon />
-            {t("analyticsLink")}
-          </Button>
-        ) : null}
-      </div>
+        <div className="w-full lg:max-w-sm"><QuickSearch /></div>
+      </header>
 
-      <QuickSearch />
-
-      {/* Quick stats — current user, today */}
-      <div className="grid grid-cols-3 gap-2 md:gap-3">
-        {stats.map((s) => (
-          <Card key={s.label} size="sm" className="shadow-xs">
-            <CardContent className="flex flex-col gap-2">
-              {/* Sous 640 px le libellé passe SOUS la pastille : à côté d'elle
-                  il ne reste qu'une quarantaine de pixels, et « aujourd'hui »
-                  — un mot qu'on ne coupe pas — débordait de la carte, que son
-                  `overflow-hidden` tranchait en plein milieu. */}
-              <div className="flex items-center gap-2 max-sm:flex-wrap">
-                <span
-                  aria-hidden
-                  className={`flex size-8 shrink-0 items-center justify-center rounded-md ${s.chip}`}
-                >
-                  <s.icon className="size-4" />
-                </span>
-                <span className="min-w-0 text-xs font-medium leading-tight text-muted-foreground">
-                  {s.label}
-                </span>
+      <section className="overflow-hidden rounded-2xl border bg-card shadow-xs" aria-labelledby="briefing-title">
+        <div className="grid lg:grid-cols-[1.4fr_1fr]">
+          <div className="space-y-5 p-5 md:p-7 lg:p-8">
+            <div className="flex items-center gap-2.5">
+              <span className="flex size-8 items-center justify-center rounded-lg" style={lookTint(DASHBOARD_LOOK.focus)}>
+                <LookIcon look={DASHBOARD_LOOK.focus} className="size-4" />
+              </span>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em]">{t("briefing.eyebrow")}</p>
+              <span className="ml-auto rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                {t("briefing.updated", { time: formatInTimeZone(now, APP_TZ, timeFormat, { locale: dfnsLocale }) })}
+              </span>
+            </div>
+            <div className="space-y-2">
+              <h2 id="briefing-title" className="max-w-lg font-heading text-2xl font-semibold leading-tight tracking-tight md:text-3xl">
+                {hasUrgentWork ? t("briefing.titleBusy") : focusCount > 0 ? t("briefing.titleToday") : t("briefing.titleClear")}
+              </h2>
+              <p className="max-w-lg text-sm leading-relaxed text-muted-foreground">
+                {focusCount > 0 ? t("briefing.summary", { count: focusCount }) : t("briefing.summaryClear")}
+              </p>
+            </div>
+            <Button nativeButton={false} className="min-h-11 max-w-full rounded-lg px-4" render={<Link href={nextHref} />}>
+              <span className="truncate">{nextLabel}</span>
+              <ArrowUpRightIcon aria-hidden className="shrink-0" />
+            </Button>
+          </div>
+          <div className="grid grid-cols-3 border-t bg-muted/25 p-5 lg:border-t-0 lg:border-l lg:p-7">
+            {stats.map((stat) => (
+              <div key={stat.label} className="flex min-w-0 flex-col justify-center gap-3 px-2 first:pl-0 last:pr-0 sm:px-4 lg:gap-4">
+                <LookIcon look={stat.look} className="size-5" />
+                <div className="space-y-1.5">
+                  <p className="text-3xl font-semibold tracking-tight tabular-nums md:text-4xl">{stat.value}</p>
+                  <p className="max-w-28 text-xs leading-relaxed text-muted-foreground">{stat.label}</p>
+                </div>
               </div>
-              <span className="text-3xl font-bold tracking-tight tabular-nums">{s.value}</span>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Appels manqués à rappeler — visible seulement quand il y en a */}
-        {missedGroups.length > 0 ? (
-          <Card className="shadow-xs lg:col-span-2">
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2">
-                <PhoneMissedIcon aria-hidden className="size-4" style={{ color: CALL_DIRECTION_LOOK.missed.color }} />
-                {t("missedCalls.title")}
-                <Badge variant="destructive" className="tabular-nums">
-                  {missedGroups.length}
-                </Badge>
-              </CardTitle>
-              <CardAction>
-                <Button
-                  variant="ghost"
-                  className="min-h-11 text-muted-foreground md:min-h-8"
-                  render={<Link href="/calls?missed=1&period=7" />}
-                >
+      <section className="space-y-3" aria-labelledby="priorities-title">
+        <div className="flex items-center justify-between gap-3">
+          <h2 id="priorities-title" className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            {t("briefing.priorities")}
+          </h2>
+          {actor.can("admin.analytics") ? (
+            <Link href="/admin/analytics" className="inline-flex min-h-11 items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+              <BarChart3Icon aria-hidden className="size-3.5" />
+              {t("analyticsLink")}
+              <ChevronRightIcon aria-hidden className="size-3.5" />
+            </Link>
+          ) : null}
+        </div>
+        <div className="grid gap-3 lg:grid-cols-3">
+          {priorities.map((priority) => (
+            <Link key={priority.label} href={priority.href} className="group flex min-h-24 items-center gap-3 rounded-xl border bg-card p-4 transition-all hover:border-foreground/20 hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring xl:p-5">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-xl" style={lookTint(priority.look)}>
+                <LookIcon look={priority.look} className="size-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">{priority.label}</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{priority.description}</p>
+              </div>
+              <span className="text-2xl font-semibold tracking-tight tabular-nums">{priority.value}</span>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      <div className="grid items-start gap-6 min-[1180px]:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <div className="min-w-0 space-y-6">
+          <section id="followups" className="scroll-mt-24">
+            <FollowupWorkspace
+              overdue={overdueItems}
+              today={dueTodayItems}
+              upcoming={upcomingGroups}
+              overdueCount={overdueCount}
+              todayCount={dueTodayCount}
+              upcomingCount={pendingFollowupTotal - focusCount}
+              truncated={followupsTruncated}
+              months={UPCOMING_MONTHS}
+            />
+          </section>
+
+          {missedGroups.length > 0 ? (
+            <Card id="missed-calls" className="scroll-mt-24 rounded-2xl shadow-xs [--card-spacing:--spacing(5)]">
+              <CardHeader className="border-b">
+                <CardTitle className="flex flex-wrap items-center gap-2">
+                  <LookIcon look={CALL_DIRECTION_LOOK.missed} />
+                  {t("missedCalls.title")}
+                  <Badge variant="secondary" className="tabular-nums">{missedGroups.length}</Badge>
+                </CardTitle>
+                <p className="mt-1 text-xs text-muted-foreground">{t("missedCalls.window")}</p>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-2">
+                  {missedDisplay.map((group) => (
+                    <li key={group.key} className="flex flex-wrap items-center gap-3 rounded-xl border p-3 transition-colors hover:bg-muted/40">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground" aria-hidden>
+                        {group.latest.clientName ? group.latest.clientName.split(/\s+/).map((part) => part[0]).slice(0, 2).join("") : <LookIcon look={CALL_DIRECTION_LOOK.missed} />}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        {group.latest.clientId && group.latest.clientName ? (
+                          <Link href={`/clients/${group.latest.clientId}`} className="block truncate text-sm font-medium hover:underline">
+                            {group.latest.clientName}
+                          </Link>
+                        ) : (
+                          <span className="block truncate text-sm font-medium tabular-nums">{formatPhone(group.latest.fromNumber)}</span>
+                        )}
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                          <span className="tabular-nums">{group.timeLabel}</span>
+                          {group.count > 1 ? <> · {t("missedCalls.attempts", { count: group.count })}</> : null}
+                        </p>
+                      </div>
+                      {group.latest.clientDoNotCall ? (
+                        <Button type="button" variant="outline" className="min-h-11 shrink-0" disabled>
+                          <PhoneOffIcon aria-hidden className="size-4" />
+                          {t("missedCalls.doNotCall")}
+                        </Button>
+                      ) : (
+                        <RedialButton number={group.latest.fromNumber ?? ""} clientId={group.latest.clientId ?? undefined} clientName={group.latest.clientName ?? undefined} className="shrink-0" />
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                <Button nativeButton={false} variant="ghost" className="mt-3 min-h-11 w-full text-xs text-muted-foreground" render={<Link href="/calls?missed=1&period=7" />}>
                   {t("missedCalls.viewAll")}
-                  <ChevronRightIcon />
+                  <ChevronRightIcon aria-hidden />
+                </Button>
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
+
+        <div className="min-w-0 space-y-6">
+          <Card className="rounded-2xl shadow-xs [--card-spacing:--spacing(5)]">
+            <CardHeader className="border-b">
+              <CardTitle className="flex flex-wrap items-center gap-2">
+                <LookIcon look={DASHBOARD_LOOK.agenda} />
+                {t("appointments.title")}
+                <Badge variant="secondary" className="tabular-nums">{upcomingCount}</Badge>
+              </CardTitle>
+              <p className="mt-1 text-xs text-muted-foreground">{t(seesEveryone ? "appointments.horizonTeam" : "appointments.horizon")}</p>
+              <CardAction>
+                <Button nativeButton={false} variant="ghost" className="min-h-11 px-2 text-xs text-muted-foreground" render={<Link href="/appointments?view=calendar" />}>
+                  {t("appointments.calendar")}
+                  <ChevronRightIcon aria-hidden />
                 </Button>
               </CardAction>
             </CardHeader>
-            <CardContent>
-              <ul className="grid gap-2 md:grid-cols-2">
-                {missedDisplay.map((g) => (
-                  <li
-                    key={g.key}
-                    className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50"
-                  >
-                    <div className="min-w-0 flex-1">
-                      {g.latest.clientId && g.latest.clientName ? (
-                        <Link
-                          href={`/clients/${g.latest.clientId}`}
-                          className="block truncate text-sm font-medium hover:underline"
-                        >
-                          {g.latest.clientName}
-                        </Link>
-                      ) : (
-                        <span className="block truncate text-sm font-medium tabular-nums">
-                          {formatPhone(g.latest.fromNumber)}
-                        </span>
-                      )}
-                      <p className="truncate text-xs text-muted-foreground">
-                        <span className="tabular-nums">{g.timeLabel}</span>
-                        {g.count > 1 ? <> · {t("missedCalls.attempts", { count: g.count })}</> : null}
-                      </p>
-                    </div>
-                    {g.latest.clientDoNotCall ? (
-                      // Fiche « Ne pas appeler » : pas de rappel en un geste —
-                      // même règle que l'en-tête de la fiche et le pipeline.
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="size-11 shrink-0 rounded-full"
-                        aria-label={t("missedCalls.doNotCall")}
-                        disabled
-                      >
-                        <PhoneOffIcon className="size-4.5 text-destructive" />
-                      </Button>
-                    ) : (
-                      <RedialButton
-                        number={g.latest.fromNumber ?? ""}
-                        clientId={g.latest.clientId ?? undefined}
-                        clientName={g.latest.clientName ?? undefined}
-                        iconOnly
-                        className="shrink-0"
-                      />
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {/* Follow-ups */}
-        <Card className="shadow-xs">
-          <CardHeader className="border-b">
-            <CardTitle className="flex items-center gap-2">
-              {t("followups.title")}
-              <Badge variant="secondary" className="tabular-nums">
-                {pendingFollowups.length}
-              </Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {pendingFollowups.length === 0 ? (
-              <EmptyState
-                className="py-8"
-                icon={<CheckCircle2Icon className="text-emerald-700! dark:text-emerald-400!" />}
-                title={t("followups.empty")}
-              />
-            ) : (
-              <>
-                {overdueItems.length > 0 ? (
-                  <div className="space-y-2">
-                    <p className="flex items-center gap-2 text-xs font-semibold text-destructive uppercase tracking-wide">
-                      {t("followups.overdue")}
-                      <Badge variant="destructive" className="tabular-nums">
-                        {overdueItems.length}
-                      </Badge>
-                    </p>
+            <CardContent className="space-y-5">
+              {upcomingAppointments.length === 0 ? (
+                <EmptyState className="py-7" icon={<CalendarDaysIcon aria-hidden />} title={t("appointments.empty")} />
+              ) : (
+                apptGroups.map((group) => (
+                  <div key={group.key} className="space-y-2.5">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{group.label}</p>
                     <ul className="space-y-2">
-                      {overdueItems.map((item) => (
-                        <FollowupItem key={item.id} item={item} />
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                {dueTodayItems.length > 0 ? (
-                  <div className="space-y-2">
-                    <p className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                      {t("followups.dueToday")}
-                      <Badge variant="secondary" className="tabular-nums">
-                        {dueTodayItems.length}
-                      </Badge>
-                    </p>
-                    <ul className="space-y-2">
-                      {dueTodayItems.map((item) => (
-                        <FollowupItem key={item.id} item={item} />
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                {upcomingGroups.length > 0 ? (
-                  <div className="space-y-2 border-t pt-4">
-                    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {t("followups.upcoming")}
-                      <Badge variant="secondary" className="tabular-nums">
-                        {upcomingFollowupCount}
-                      </Badge>
-                      <span className="font-normal normal-case">
-                        {t("followups.upcomingRange", { months: UPCOMING_MONTHS })}
-                      </span>
-                    </p>
-                    <UpcomingFollowups groups={upcomingGroups} />
-                    {upcomingTruncated > 0 ? (
-                      <p className="text-xs text-muted-foreground">
-                        {t("followups.truncated", { count: upcomingTruncated })}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Ce que l'assistant SMS a rendu à un humain. Placé À CÔTÉ des suivis :
-            c'est du travail humain dû MAINTENANT, au même titre qu'une relance
-            en retard — pas une statistique du moteur. La bande de santé du
-            moteur, elle, reste dans les conversations et reste au courtier. */}
-        <Card className="shadow-xs">
-          <CardHeader className="border-b">
-            <CardTitle className="flex items-center gap-2">
-              <LookIcon look={CONVERSATION_STATE_LOOK.attention} />
-              {t("attention.title")}
-              <Badge variant="secondary" className="tabular-nums">
-                {attentionCount}
-              </Badge>
-            </CardTitle>
-            <CardAction>
-              <Button
-                variant="ghost"
-                className="min-h-11 text-muted-foreground md:min-h-8"
-                render={<Link href="/conversations" />}
-              >
-                {t("attention.openInbox")}
-                <ChevronRightIcon />
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent>
-            {attentionRows.length === 0 ? (
-              <EmptyState
-                className="py-8"
-                icon={<CheckCircle2Icon className="text-emerald-700! dark:text-emerald-400!" />}
-                title={t("attention.empty")}
-              />
-            ) : (
-              <AttentionList
-                rows={attentionRows.map((row) => ({
-                  id: row.id,
-                  clientId: row.clientId,
-                  clientName: row.clientName,
-                  // Le fil PORTE le numéro du client : il se masque comme celui
-                  // de la fiche, sinon la boîte de réception rend en clair ce
-                  // que la fiche cache. Et la ligne DIT qu'elle masque, au lieu
-                  // de laisser croire à un fil sans numéro.
-                  clientPhone: grantsOfHolder(row.holderId).contact ? row.clientPhone : null,
-                  contactHidden: !grantsOfHolder(row.holderId).contact,
-                  attentionReason: row.attentionReason,
-                  // Mise en forme ICI : une locale `date-fns` est un objet de
-                  // fonctions, et rien de tel ne traverse la frontière
-                  // serveur → client. Même règle que `dueLabel` des suivis.
-                  lastAtLabel: (() => {
-                    const at = row.lastInboundAt ?? row.lastOutboundAt;
-                    return at
-                      ? formatInTimeZone(at, APP_TZ, "d MMM HH:mm", { locale: dfnsLocale })
-                      : null;
-                  })(),
-                }))}
-                hidden={attentionCount - attentionRows.length}
-              />
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Prochains rendez-vous — 14 jours (admin : toute l'équipe) */}
-        <Card className="shadow-xs">
-          <CardHeader className="border-b">
-            <CardTitle className="flex items-center gap-2">
-              {t("appointments.title")}
-              <Badge variant="secondary" className="tabular-nums">
-                {upcomingCount}
-              </Badge>
-            </CardTitle>
-            <CardAction>
-              <Button
-                variant="ghost"
-                className="min-h-11 text-muted-foreground md:min-h-8"
-                render={<Link href="/appointments?view=calendar" />}
-              >
-                {t("appointments.calendar")}
-                <ChevronRightIcon />
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {upcomingAppointments.length === 0 ? (
-              <EmptyState
-                className="py-8"
-                icon={<CalendarDaysIcon />}
-                title={t("appointments.empty")}
-              />
-            ) : (
-              <>
-                {apptGroups.map((g) => (
-                  <div key={g.key} className="space-y-2">
-                    <p className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                      {g.key === todayKey ? (
-                        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-primary" />
-                      ) : null}
-                      {g.label}
-                    </p>
-                    <ul className="space-y-2">
-                      {g.items.map((a) => (
-                        <li
-                          key={a.id}
-                          className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50"
-                        >
-                          <div className="flex shrink-0 flex-col items-center rounded-md bg-muted px-2 py-1 tabular-nums">
-                            <span className="text-sm font-semibold leading-tight">
-                              {formatInTimeZone(a.startsAt, APP_TZ, timeFormat, { locale: dfnsLocale })}
-                            </span>
-                            <span className="text-[11px] leading-tight text-muted-foreground">
-                              {formatInTimeZone(a.endsAt, APP_TZ, timeFormat, { locale: dfnsLocale })}
-                            </span>
+                      {group.items.map((appointment) => (
+                        <li key={appointment.id} className="relative flex items-start gap-3 rounded-xl border p-3 transition-colors hover:bg-muted/40">
+                          <div className="flex w-16 shrink-0 flex-col gap-1 border-r pr-3 tabular-nums">
+                            <span className="text-sm font-semibold">{formatInTimeZone(appointment.startsAt, APP_TZ, timeFormat, { locale: dfnsLocale })}</span>
+                            <span className="text-[11px] text-muted-foreground">{formatInTimeZone(appointment.endsAt, APP_TZ, timeFormat, { locale: dfnsLocale })}</span>
                           </div>
                           <div className="min-w-0 flex-1">
-                            <Link
-                              href={`/clients/${a.clientId}`}
-                              className="block truncate text-sm font-medium hover:underline"
-                            >
-                              {a.clientName}
+                            <Link href={`/clients/${appointment.clientId}`} className="block truncate text-sm font-medium after:absolute after:inset-0 after:rounded-xl hover:underline">
+                              {appointment.clientName}
                             </Link>
-                            <p className="truncate text-xs text-muted-foreground">
-                              {seesEveryone
-                                ? t("appointments.bookedBy", { name: a.bookedByName })
-                                : a.title}
+                            <p className="mt-0.5 truncate text-xs text-muted-foreground">{seesEveryone ? t("appointments.bookedBy", { name: appointment.bookedByName }) : appointment.title}</p>
+                            <p className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                              {appointment.type === "meet" ? <VideoIcon aria-hidden className="size-3.5" /> : <MapPinIcon aria-hidden className="size-3.5" />}
+                              {appointment.type === "meet" ? t("appointments.meet") : t("appointments.inperson")}
                             </p>
                           </div>
-                          <Badge variant="secondary" className="shrink-0 gap-1">
-                            {a.type === "meet" ? (
-                              <VideoIcon className="size-3" />
-                            ) : (
-                              <MapPinIcon className="size-3" />
-                            )}
-                            <span className="max-sm:sr-only">
-                              {a.type === "meet" ? t("appointments.meet") : t("appointments.inperson")}
-                            </span>
-                          </Badge>
                         </li>
                       ))}
                     </ul>
                   </div>
-                ))}
-                {upcomingCount > upcomingAppointments.length ? (
-                  <Link
-                    href="/appointments"
-                    className="flex min-h-11 items-center justify-center text-xs font-medium text-primary underline-offset-4 hover:underline md:min-h-8"
-                  >
-                    {t("appointments.viewAll")}
-                  </Link>
-                ) : null}
-              </>
-            )}
-          </CardContent>
-        </Card>
+                ))
+              )}
+              {upcomingCount > upcomingAppointments.length ? (
+                <Link href="/appointments" className="flex min-h-11 items-center justify-center text-xs font-medium text-primary hover:underline">
+                  {t("appointments.more", { count: upcomingCount - upcomingAppointments.length })}
+                </Link>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          {actor.can("conversations.view") ? (
+            <Card id="attention" className="scroll-mt-24 rounded-2xl shadow-xs [--card-spacing:--spacing(5)]">
+              <CardHeader className="border-b">
+                <CardTitle className="flex flex-wrap items-center gap-2">
+                  <LookIcon look={CONVERSATION_STATE_LOOK.attention} />
+                  {t("attention.title")}
+                  <Badge variant="secondary" className="tabular-nums">{attentionCount}</Badge>
+                </CardTitle>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t("attention.subtitle")}</p>
+              </CardHeader>
+              <CardContent>
+                {attentionRows.length === 0 ? (
+                  <EmptyState className="py-7" icon={<LookIcon look={DASHBOARD_LOOK.clear} />} title={t("attention.empty")} />
+                ) : (
+                  <AttentionList
+                    rows={attentionRows.map((row) => ({
+                      id: row.id,
+                      clientId: row.clientId,
+                      clientName: row.clientName,
+                      clientPhone: grantsOfHolder(row.holderId).contact ? row.clientPhone : null,
+                      contactHidden: !grantsOfHolder(row.holderId).contact,
+                      attentionReason: row.attentionReason,
+                      lastAtLabel: (() => {
+                        const at = row.lastInboundAt ?? row.lastOutboundAt;
+                        return at ? formatInTimeZone(at, APP_TZ, `d MMM ${timeFormat}`, { locale: dfnsLocale }) : null;
+                      })(),
+                    }))}
+                    hidden={attentionCount - attentionRows.length}
+                  />
+                )}
+                <Button nativeButton={false} variant="ghost" className="mt-3 min-h-11 w-full text-xs text-muted-foreground" render={<Link href="/conversations" />}>
+                  {t("attention.openInbox")}
+                  <ChevronRightIcon aria-hidden />
+                </Button>
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
       </div>
     </div>
   );

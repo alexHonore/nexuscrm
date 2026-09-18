@@ -59,7 +59,7 @@ export function DocsToc({ entries, title }: { entries: TocEntry[]; title: string
         <summary className="min-h-11 cursor-pointer text-sm font-medium leading-[2.75rem]">{title}</summary>
         {list}
       </details>
-      <nav aria-label={title} className="sticky top-4 hidden max-h-[calc(100dvh-2rem)] overflow-y-auto lg:block">
+      <nav aria-label={title} className="sticky top-20 hidden max-h-[calc(100dvh-6rem)] overflow-y-auto lg:block">
         <p className="mb-2 px-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
         {list}
       </nav>

@@ -278,7 +278,7 @@ export function AssistantEditor({
               n'existait que dans le champ « Nom » du premier onglet, et l'état
               (actif? à jour? vert?) nulle part. Il est ici, avec les gestes, et
               il reste à l'écran quand on descend dans un onglet long. */}
-          <header className="z-20 -mx-4 border-b bg-background/90 px-4 pb-3 backdrop-blur md:sticky md:top-0 md:-mx-6 md:px-6 md:pt-4">
+          <header className="z-20 -mx-4 border-b bg-background/90 px-4 pb-3 backdrop-blur md:sticky md:top-16 md:-mx-6 md:px-6 md:pt-4">
             <Button
               variant="ghost"
               size="sm"

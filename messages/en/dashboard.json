@@ -1,6 +1,28 @@
 {
   "greeting": "Hello, {name}",
-  "subtitle": "Here is your day at a glance.",
+  "subtitle": "Your priorities, your clients, your next move.",
+  "workspace": "Your workspace",
+  "briefing": {
+    "eyebrow": "Today's direction",
+    "updated": "As of {time}",
+    "titleBusy": "Good conversations start here.",
+    "titleToday": "A day to move things forward.",
+    "titleClear": "All caught up. Make room for what's next.",
+    "summary": "{count, plural, one {# follow-up due by tonight. Your next step is right here.} other {# follow-ups due by tonight. Your next step is right here.}}",
+    "summaryClear": "No follow-ups due today. Keep an eye on conversations and get ready for what's next.",
+    "nextFollowup": "Reconnect with {name}",
+    "nextConversation": "Reply to {name}",
+    "nextMissed": "Return missed calls",
+    "explore": "Discover clients to reach",
+    "priorities": "Needs your attention",
+    "overdue": "Overdue follow-ups",
+    "overdueHint": "Start with these",
+    "attention": "Conversations to take over",
+    "attentionHint": "Your assistant is handing over",
+    "missed": "Calls to return",
+    "missedHint": "Your line · Last 7 days",
+    "missedHintLimited": "Among the last {count} missed calls · 7 days"
+  },
   "search": {
     "label": "Quick search",
     "placeholder": "Search a client (name or phone)…",
@@ -12,7 +34,15 @@
     "booked": "Meetings booked"
   },
   "followups": {
-    "title": "Follow-ups",
+    "title": "Your work queue",
+    "subtitle": "One person at a time. The most urgent follow-ups come first.",
+    "focus": "Today",
+    "viewLabel": "Follow-up period",
+    "focusEmpty": "You're all caught up today",
+    "focusEmptyHint": "Nothing overdue or due today. Your next follow-ups are under Upcoming.",
+    "upcomingEmpty": "No follow-ups scheduled in this period.",
+    "planningHorizon": "Your planned follow-ups for the next {months} months.",
+    "loadedLimit": "{count, plural, one {# other follow-up is not loaded. The closest deadlines are shown first.} other {# other follow-ups are not loaded. The closest deadlines are shown first.}}",
     "overdue": "Overdue",
     "dueToday": "Due today",
     "upcoming": "Upcoming",
@@ -23,6 +53,7 @@
     "empty": "No pending follow-ups — great job!",
     "call": "Call",
     "open": "Open client",
+    "openShort": "Client",
     "markDone": "Mark done",
     "done": "Follow-up completed",
     "doNotCall": "Do not call",
@@ -32,12 +63,16 @@
   },
   "attention": {
     "title": "AI SMS — needs you",
+    "subtitle": "Conversations that need your judgment.",
     "empty": "Nothing to take over: the assistant is holding every thread.",
     "openInbox": "Conversations",
     "more": "{count, plural, one {and # more} other {and # more}}"
   },
   "appointments": {
     "title": "Upcoming appointments",
+    "horizon": "Your agenda for the next 14 days",
+    "horizonTeam": "Team agenda · Next 14 days",
+    "more": "{count, plural, one {View the next appointment} other {View # more appointments}}",
     "empty": "No upcoming appointments.",
     "viewAll": "View all",
     "meet": "Video (Meet)",
@@ -51,6 +86,7 @@
   "error": "Something went wrong",
   "missedCalls": {
     "title": "Missed calls to return",
+    "window": "Among your last 50 missed calls in the past 7 days.",
     "viewAll": "View all",
     "attempts": "{count, plural, one {# missed call} other {# missed calls}}",
     "doNotCall": "Do not call"
