@@ -25,8 +25,7 @@
   },
   "search": {
     "label": "Quick search",
-    "placeholder": "Search a client (name or phone)…",
-    "submit": "Search"
+    "placeholder": "Search a client, a number, a note…"
   },
   "stats": {
     "calls": "Calls today",

@@ -248,7 +248,7 @@ export const GRANT_TEXT_EN: Record<string, DocOverlay> = {
   history: {
     label: "Record history",
     what: "Opens the calls, appointments, SMS thread, comments and change log of this record.",
-    pitfalls: "Capped by the \"See the history\" right. Closed on other people's records, it also hides what would prevent a duplicate call: the record looks brand new although it has already been worked.",
+    pitfalls: "Capped by the \"See the history\" right. Closed on other people's records, it also hides what would prevent a duplicate call: the record looks brand new although it has already been worked. Closed, search does not read this record's comments, call notes, follow-ups and SMS either: a word that only appears there won't bring it up.",
   },
   comment: {
     label: "Comment",

@@ -18,6 +18,11 @@ import { toast } from "sonner";
 import { addCommentAction } from "@/app/(app)/clients/actions";
 import { LookGlyph, NOTIFICATION_LOOK } from "@/components/look";
 import { RelativeTime } from "@/components/relative-time";
+import {
+  COMMENT_ANCHOR_EVENT,
+  COMMENT_ANCHOR_PREFIX,
+  type CommentAnchorDetail,
+} from "@/components/search/open-search";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,6 +57,22 @@ const MENTION = NOTIFICATION_LOOK.mention;
 
 /** Préfixe du commentaire optimiste (pas encore confirmé par le serveur). */
 const DRAFT_PREFIX = "draft:";
+
+/** Ancre d'un commentaire — la cible des liens de la recherche (`/clients/<id>#comment-<id>`). */
+const ANCHOR_PREFIX = COMMENT_ANCHOR_PREFIX;
+/** Durée du halo posé sur le commentaire visé par un lien de recherche. */
+const FLASH_MS = 2500;
+
+/** L'identifiant du commentaire visé par l'ancre de l'adresse, s'il y en a un. */
+function anchoredCommentId(): string | null {
+  let hash = window.location.hash.slice(1);
+  try {
+    hash = decodeURIComponent(hash);
+  } catch {
+    // Ancre mal encodée : lue telle quelle.
+  }
+  return hash.startsWith(ANCHOR_PREFIX) ? hash.slice(ANCHOR_PREFIX.length) || null : null;
+}
 
 function initials(name: string): string {
   return name
@@ -178,6 +199,38 @@ export function CommentsTimeline({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mirrorRef = useRef<HTMLDivElement>(null);
   const listId = useId();
+
+  // Arrivé depuis un résultat de recherche (`#comment-<id>`) : on défile
+  // jusqu'au commentaire et on l'entoure un instant pour que l'œil le trouve.
+  // Le défilement est fait ICI et pas laissé au navigateur : sur un chargement
+  // complet (nouvel onglet, rechargement), il cherche l'ancre avant que la
+  // liste n'existe et reste en haut de la fiche. Pas de `target:` en CSS :
+  // `:target` ne suit pas un `pushState`, et une navigation côté client
+  // laissait le halo sur l'ANCIEN commentaire.
+  const [flashId, setFlashId] = useState<string | null>(null);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const show = (id: string | null) => {
+      if (!id) return;
+      document.getElementById(`${ANCHOR_PREFIX}${id}`)?.scrollIntoView({ block: "start" });
+      setFlashId(id);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => setFlashId(null), FLASH_MS);
+    };
+    const fromLocation = () => show(anchoredCommentId());
+    // Lien de recherche vers CETTE fiche, déjà ouverte : voir `signalCommentAnchor`.
+    const fromSearch = (event: Event) => show((event as CustomEvent<CommentAnchorDetail>).detail?.id ?? null);
+    // Au montage : lire l'adresse est une synchronisation avec l'extérieur,
+    // impossible pendant le rendu serveur (pas de `location`).
+    fromLocation();
+    window.addEventListener("hashchange", fromLocation);
+    window.addEventListener(COMMENT_ANCHOR_EVENT, fromSearch);
+    return () => {
+      window.removeEventListener("hashchange", fromLocation);
+      window.removeEventListener(COMMENT_ANCHOR_EVENT, fromSearch);
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -318,9 +371,11 @@ export function CommentsTimeline({
             {rows.map((c) => (
               <li
                 key={c.id}
+                id={`${ANCHOR_PREFIX}${c.id}`}
                 className={cn(
-                  "flex gap-3",
+                  "flex scroll-mt-28 gap-3 transition-shadow",
                   c.id.startsWith(DRAFT_PREFIX) && "opacity-60",
+                  flashId === c.id && "rounded-lg ring-2 ring-primary/30 ring-offset-4 ring-offset-card",
                 )}
               >
                 <Avatar className="mt-0.5 size-8 shrink-0">

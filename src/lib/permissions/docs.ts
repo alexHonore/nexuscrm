@@ -418,7 +418,7 @@ export const GRANT_DOCS: Record<GrantKey, DocEntry> = {
     whatFr:
       "Ouvre les appels, les rendez-vous, le fil SMS, les commentaires et le journal de modifications de cette fiche.",
     pitfallsFr:
-      "Plafonnée par le droit « Voir l'historique ». Fermée sur les fiches des autres, elle cache aussi ce qui éviterait un doublon d'appel : la fiche paraît neuve alors qu'elle a déjà été travaillée.",
+      "Plafonnée par le droit « Voir l'historique ». Fermée sur les fiches des autres, elle cache aussi ce qui éviterait un doublon d'appel : la fiche paraît neuve alors qu'elle a déjà été travaillée. Fermée, la recherche ne lit pas non plus les commentaires, notes d'appel, suivis et SMS de cette fiche : un mot qui ne figure que là ne la fait pas remonter.",
   },
   comment: {
     labelFr: "Commenter",

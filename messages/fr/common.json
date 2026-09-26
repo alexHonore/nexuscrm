@@ -7,18 +7,72 @@
     "navigation": "Navigation principale",
     "skipToContent": "Aller au contenu",
     "search": "Rechercher ou accéder à…",
-    "searchHelp": "Trouvez un client par nom, téléphone ou ville, ou ouvrez une page de votre espace.",
-    "searchPlaceholder": "Un client, un numéro, une page…",
-    "searchHint": "Saisissez au moins 2 caractères pour trouver un client, ou choisissez une page ci-dessous.",
+    "searchHelp": "Trouvez un client par son nom, son numéro, son courriel, sa ville, son adresse, ses notes ou ses commentaires — ou ouvrez une page de votre espace.",
+    "searchPlaceholder": "Un nom, un numéro, un mot d'une note, une page…",
+    "searchHint": "Au moins 2 caractères. Accents et majuscules ne comptent pas ; les commentaires, notes d'appel et suivis sont cherchés à partir de 3 lettres.",
     "records": "Clients",
     "searching": "Recherche des clients…",
     "searchError": "La recherche est indisponible. Réessayez ou ouvrez le répertoire clients.",
-    "noRecords": "Aucun client correspondant.",
     "allResults": "Voir tous les résultats ({count})",
     "openDirectory": "Rechercher dans le répertoire",
     "closeSearch": "Fermer",
-    "keyboardHint": "↑ ↓ pour naviguer · Échap pour fermer",
-    "openResult": "Ouvrir"
+    "keyboardHint": "↑ ↓ naviguer · ↵ ouvrir · Maj+↵ tous les résultats · Échap fermer"
+  },
+  "search": {
+    "shortcutMac": "⌘ K",
+    "shortcutOther": "Ctrl K",
+    "clear": "Effacer la recherche",
+    "masked": "Masqué",
+    "doNotCall": "Ne pas appeler",
+    "retry": "Réessayer",
+    "scope": {
+      "label": "Chercher dans",
+      "all": "Tout",
+      "contact": "Nom et coordonnées",
+      "profile": "Lieu et projet",
+      "notes": "Notes et commentaires",
+      "count": "{label} · {count}"
+    },
+    "field": {
+      "name": "Nom",
+      "phone": "Téléphone",
+      "email": "Courriel",
+      "city": "Ville",
+      "address": "Adresse",
+      "project": "Projet",
+      "notes": "Notes de la fiche",
+      "comment": "Commentaire",
+      "followup": "Suivi",
+      "call": "Note d'appel",
+      "sms": "SMS"
+    },
+    "matchedIn": "Trouvé dans : {fields}",
+    "more": "+{count}",
+    "origin": {
+      "ai": "Note IA",
+      "booking": "Rendez-vous"
+    },
+    "recent": {
+      "title": "Recherches récentes",
+      "clear": "Effacer l'historique de recherche"
+    },
+    "empty": {
+      "title": "Aucun client pour « {query} »",
+      "everywhere": "Chercher partout",
+      "only": "Chercher seulement « {term} »",
+      "withoutExclusions": "Retirer les exclusions",
+      "contactHint": "Un numéro ou un courriel n'est cherché que sur les fiches dont vous voyez les coordonnées.",
+      "shortHint": "Les mots de 1 ou 2 lettres ne cherchent que dans le nom, la ville, l'adresse et le projet — pas dans les notes ni l'historique."
+    },
+    "onlyExclusions": "Ajoutez au moins un mot à chercher : « -mot » ne fait qu'exclure.",
+    "ignored": "Ignorés : {terms}",
+    "approximate": "Aucun résultat exact — voici les noms et villes les plus proches.",
+    "degraded": {
+      "timeout": "Recherche rapide seulement : l'historique n'a pas pu être parcouru à temps. Réessayez.",
+      "busy": "Recherche rapide seulement : trop de recherches en cours. Réessayez dans un instant."
+    },
+    "tips": "« expression exacte » · -mot pour exclure · ville:laval · tel:514 · note:piscine · dans:notes",
+    "announce": "{count, plural, =0 {Aucun client} one {# client trouvé} other {# clients trouvés}}"
   },
   "nav": {
     "dashboard": "Tableau de bord",

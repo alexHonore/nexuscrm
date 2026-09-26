@@ -934,6 +934,75 @@ describe("intégrité des données clients", () => {
       expect((await list({ q: "zzzz" })).items).toHaveLength(0);
     });
 
+    // Sans `q`, la liste masque les coordonnées fiche par fiche, selon le
+    // DÉTENTEUR (`holderGrants`). Rien d'autre ne couvre ce chemin : une
+    // régression y ferait partir les numéros et courriels des collègues vers
+    // le panneau /clients et le dialogue de campagne, suites toutes vertes.
+    it("sans q : la fiche d'une collègue part SANS coordonnées ; les siennes et le bassin les gardent ; le total ne compte que le visible", async () => {
+      const patron = await makeUser({ role: "admin", name: "Patron" });
+      const luc = await makeUser({ role: "caller", name: "Luc" });
+      const marie = await makeUser({ role: "caller", name: "Marie" });
+      const own = await makeClient({
+        fullName: "Olivier Brun",
+        phone: "+14185550001",
+        email: "olivier@exemple.com",
+        assignedToId: luc.id,
+      });
+      const pool = await makeClient({
+        fullName: "Nadia Blanc",
+        phone: "+14185550002",
+        email: "nadia@exemple.com",
+        assignedToId: null,
+      });
+      const colleague = await makeClient({
+        fullName: "Colette Marchand",
+        phone: "+14185550003",
+        email: "colette@exemple.com",
+        assignedToId: marie.id,
+      });
+      // La fiche du patron : invisible au téléphoniste — absente, et hors du total.
+      await makeClient({ fullName: "Prospect Zeta", phone: "+14185550004", assignedToId: patron.id });
+      await login(luc);
+
+      type Row = { id: string; phone: string | null; email: string | null; contactHidden: boolean };
+      const rowsOf = (b: ListBody) => b.items as unknown as Row[];
+      const expectMasked = (rows: Row[], label: string) => {
+        const byId = new Map(rows.map((r) => [r.id, r]));
+        expect(byId.get(colleague.id), label).toMatchObject({ phone: null, email: null, contactHidden: true });
+        expect(byId.get(own.id), label).toMatchObject({
+          phone: "+14185550001",
+          email: "olivier@exemple.com",
+          contactHidden: false,
+        });
+        expect(byId.get(pool.id), label).toMatchObject({
+          phone: "+14185550002",
+          email: "nadia@exemple.com",
+          contactHidden: false,
+        });
+      };
+
+      // Les deux branches de tri de la route (activité / colonne).
+      for (const params of [{}, { sort: "name", dir: "asc" }] as Record<string, string>[]) {
+        const b = await list(params);
+        const label = JSON.stringify(params);
+        expect(new Set(b.items.map((i) => i.id)), label).toEqual(new Set([own.id, pool.id, colleague.id]));
+        expect(b.total, label).toBe(3);
+        expectMasked(rowsOf(b), label);
+      }
+      // Une page de 1 : le total reste celui du visible.
+      const paged = await list({ pageSize: "1", page: "3" });
+      expect(paged.total).toBe(3);
+      expect(paged.items).toHaveLength(1);
+      // Un filtre ne peut que rétrécir : « au patron » = rien, et un total de 0.
+      const boss = await list({ assignedToId: patron.id });
+      expect(boss.items).toEqual([]);
+      expect(boss.total).toBe(0);
+      // Filtré sur la collègue : toujours masquée.
+      const onlyMarie = await list({ assignedToId: marie.id });
+      expect(onlyMarie.total).toBe(1);
+      expect(rowsOf(onlyMarie)[0]).toMatchObject({ id: colleague.id, phone: null, email: null, contactHidden: true });
+    });
+
     it("filtre par catégorie, source et responsable", async () => {
       const cats = await seedSystemCategories();
       const other = await makeCategory({ key: null, nameFr: "Chaud", nameEn: "Hot", color: "#ff0000" });

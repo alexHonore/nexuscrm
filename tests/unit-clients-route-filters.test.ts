@@ -35,7 +35,8 @@ describe("client directory URL searches", () => {
       updatedMode: "none",
       updatedFrom: "",
       updatedTo: "",
-      sortKey: "activity",
+      // Une recherche ouverte depuis la palette arrive classée par pertinence.
+      sortKey: "relevance",
       sortDir: "desc",
     });
     expect(next).not.toHaveProperty("view");

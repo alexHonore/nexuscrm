@@ -50,7 +50,10 @@ export function clientRouteFilters(route: {
     updatedMode: "none",
     updatedFrom: "",
     updatedTo: "",
-    sortKey: chronological ? "followupAt" : "activity",
+    // Une recherche arrive classée par pertinence : le meilleur résultat en
+    // tête, comme dans la palette qui a ouvert ce lien. Sans terme (`q` vide,
+    // file de travail), l'activité récente reste l'ordre naturel.
+    sortKey: chronological ? "followupAt" : route.q ? "relevance" : "activity",
     sortDir: chronological ? "asc" : "desc",
   };
 }

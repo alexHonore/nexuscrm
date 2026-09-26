@@ -527,7 +527,7 @@ export function AppShellClient({
             <span className="truncate font-medium">{currentItem ? t(`nav.${currentItem.labelKey}`) : t("nav.profile")}</span>
           </div>
           <div className="flex shrink-0 items-center gap-1 md:gap-3">
-            <WorkspaceSearch destinations={destinations} />
+            <WorkspaceSearch destinations={destinations} userId={user.id} />
             <Button
               variant="ghost"
               size="icon"

@@ -236,6 +236,88 @@ export async function withVisibility(
   return where ? and(where, vis) : vis;
 }
 
+// ── Une case, détenteur par détenteur ────────────────────────────────────────
+
+/**
+ * Les cases ouvertes sur une fiche, selon son DÉTENTEUR seulement.
+ *
+ * Le compartiment d'une fiche ne dépend que de `assigned_to_id` : on le résout
+ * une fois par détenteur et non une fois par ligne — une page de 50 fiches ne
+ * coûte pas 50 questions de plus à la matrice. `holders` liste les comptes de
+ * l'annuaire, c'est-à-dire tous les détenteurs possibles d'une fiche.
+ */
+export type HolderGrants = {
+  (assignedToId: string | null): Grants;
+  readonly holders: readonly string[];
+};
+
+export async function holderGrants(actor: Actor): Promise<HolderGrants> {
+  const { cfg, roleOf, rows } = await loadDirectory();
+  const memo = new Map<string, Grants>();
+  const of = (assignedToId: string | null): Grants => {
+    const key = assignedToId ?? "";
+    let g = memo.get(key);
+    if (!g) {
+      const holder = assignedToId ? (roleOf.get(assignedToId) ?? null) : null;
+      g = grantsFor(cfg, actor.role, bucketFor(actor.user.id, { assignedToId }, holder));
+      memo.set(key, g);
+    }
+    return g;
+  };
+  return Object.assign(of, { holders: rows.map((r) => r.id) });
+}
+
+/**
+ * Sur quelles fiches une case est-elle ouverte, en SQL : le bassin, et la liste
+ * des détenteurs dont le compartiment l'ouvre.
+ */
+export type HolderScope =
+  | { kind: "all" }
+  | { kind: "none" }
+  | { kind: "some"; pool: boolean; ids: string[] };
+
+/**
+ * La portée d'une case, pour qu'une LISTE puisse la poser dans son `where`
+ * (la recherche : « le numéro ne se cherche que là où il se lit »).
+ *
+ * Toujours passer `g => g.visible && g.<case>` : les cases de relation sont
+ * indépendantes, un rôle inventé peut ouvrir `history` sans `visible`. Sous un
+ * ET avec la visibilité, c'est sans effet ; sous un OU, ça fuirait.
+ *
+ * Seul l'administrateur a « tout ». Il n'y a PAS d'autre raccourci « toutes
+ * les cases ouvertes » : une fiche tenue par un compte absent de l'annuaire
+ * (créé pendant la requête, ou disparu) reste fermée — c'est la même règle que
+ * `role:__unknown__` dans `grantsFor`.
+ *
+ * `of` évite de relire l'annuaire quand l'appelant a déjà son résolveur.
+ */
+export async function holderGrantScope(
+  actor: Actor,
+  open: (g: Grants) => boolean,
+  of?: HolderGrants,
+): Promise<HolderScope> {
+  if (actor.role.superAdmin) return { kind: "all" };
+  const resolve = of ?? (await holderGrants(actor));
+  const pool = open(resolve(null));
+  const ids = resolve.holders.filter((id) => open(resolve(id)));
+  return !pool && ids.length === 0 ? { kind: "none" } : { kind: "some", pool, ids };
+}
+
+/**
+ * Une `HolderScope` en condition SQL sur `clients.assigned_to_id` (colonnes
+ * TYPÉES : à poser seulement là où `clients` est la table du FROM).
+ * `undefined` = aucune restriction ; `false` = aucune fiche.
+ */
+export function holderScopeCondition(scope: HolderScope): SQL | undefined {
+  if (scope.kind === "all") return undefined;
+  if (scope.kind === "none") return sql`false`;
+  const parts: SQL[] = [];
+  if (scope.pool) parts.push(isNull(clients.assignedToId));
+  if (scope.ids.length > 0) parts.push(inArray(clients.assignedToId, scope.ids));
+  if (parts.length === 0) return sql`false`;
+  return parts.length === 1 ? parts[0] : or(...parts)!;
+}
+
 // ── Assignation ──────────────────────────────────────────────────────────────
 
 /** Combien de fiches cette personne détient — pour le plafond du rôle. */

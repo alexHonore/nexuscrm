@@ -16,11 +16,9 @@ import {
   desc,
   eq,
   gte,
-  ilike,
   inArray,
   isNotNull,
   isNull,
-  like,
   lt,
   lte,
   or,
@@ -30,9 +28,9 @@ import {
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
-import { bucketFor, grantsFor } from "@/lib/permissions/access";
-import type { Grants } from "@/lib/permissions/catalog";
-import { apiActor, loadDirectory, withVisibility } from "@/lib/permissions/server";
+import { apiActor, holderGrants, withVisibility } from "@/lib/permissions/server";
+import { SORT_COLUMNS, parseListSort } from "@/lib/clients-search-server/order";
+import { listSearchResponse } from "@/lib/clients-search-server/search";
 import { APP_TZ, torontoDayRange } from "@/components/clients/timezone";
 
 const MAX_PAGE_SIZE = 50;
@@ -144,23 +142,16 @@ function torontoAfter(raw: string | null): Date | undefined {
   return validDate(fromZonedTime(`${next}T00:00:00`, APP_TZ));
 }
 
-/** Tris acceptés — `activity` reproduit l'ordre historique du panneau. */
-const SORT_COLUMNS = {
-  name: clients.fullName,
-  city: clients.city,
-  createdAt: clients.createdAt,
-  updatedAt: clients.updatedAt,
-  followupAt: clients.nextFollowupAt,
-  lastContact: clients.lastContactedAt,
-} as const;
-
-type SortKey = keyof typeof SORT_COLUMNS;
-
 /**
  * GET /api/clients/list — paginated rows for the /clients left panel and the
  * table view. Every filter param accepts a comma-separated list (OR within
  * the param, AND across params); a single value still works. Params:
- * - q (name, email, phone, city)
+ * - q — la RECHERCHE (`src/lib/clients-search-server/search.ts`) : plis
+ *   d'accents, ET entre les mots, `"expression"`, `-exclusion`, `ville:`,
+ *   `tel:`, `note:`… Tout `q` passe par ce moteur, un seul statement.
+ * - match — identity (défaut : nom, ville, téléphone, courriel — le dialogue
+ *   « ajouter des clients » d'une campagne) | all (en plus : adresse, notes,
+ *   projet, commentaires, suivis, notes d'appel, SMS — panneau et palette ⌘K)
  * - categoryId / sourceId / assignedToId — ids and/or "none" for unset
  * - filter — overdue | today | upcoming | none (no follow-up) | never
  *   (never contacted) | dnc (do-not-call list), combinable
@@ -172,12 +163,19 @@ type SortKey = keyof typeof SORT_COLUMNS;
  * - createdBefore / createdAfter, updatedBefore / updatedAfter — yyyy-mm-dd,
  *   strictement avant / après ce jour (Toronto)
  * - sort (activity | name | city | createdAt | updatedAt | followupAt |
- *   lastContact), dir (asc|desc), page, pageSize (capped at 50).
- * Ordered by recent activity by default.
+ *   lastContact | relevance), dir (asc|desc), page, pageSize (capped at 50).
+ *   `relevance` n'a de sens qu'avec un terme à chercher ; sinon `activity`.
+ * Ordered by recent activity by default — avec ou sans `q`.
+ *
+ * Avec `q`, chaque ligne porte `match` (score, raisons, plages à surligner,
+ * extrait) et la réponse porte `search` (termes compris, ignorés, facettes,
+ * repli éventuel). Sans `q`, la réponse est celle d'avant, octet pour octet.
  *
  * La PORTÉE du regard s'ajoute à tout : filtres et compte total lisent le même
  * `where`, et une ligne dont le compartiment ferme les coordonnées repart avec
- * `phone: null, email: null, contactHidden: true`.
+ * `phone: null, email: null, contactHidden: true`. La recherche va plus loin :
+ * un numéro ou un courriel ne fait jamais remonter une fiche aux coordonnées
+ * fermées, et l'historique ne se lit que là où la case `history` l'ouvre.
  */
 export async function GET(req: NextRequest) {
   const actor = await apiActor();
@@ -190,47 +188,14 @@ export async function GET(req: NextRequest) {
   const assignedParam = sp.get("assignedToId") ?? "";
   const filterParam = sp.get("filter") ?? "";
   const languageParam = sp.get("language") ?? "";
-  const sortParam = sp.get("sort") ?? "activity";
-  const sort: SortKey | "activity" =
-    sortParam in SORT_COLUMNS ? (sortParam as SortKey) : "activity";
+  const mode = sp.get("match") === "all" ? "all" : "identity";
+  const sort = parseListSort(sp.get("sort"), q !== "");
   const dir = sp.get("dir") === "asc" ? "asc" : "desc";
   const page = Math.min(MAX_PAGE, Math.max(1, Number.parseInt(sp.get("page") ?? "", 10) || 1));
   const pageSize = Math.min(
     MAX_PAGE_SIZE,
     Math.max(1, Number.parseInt(sp.get("pageSize") ?? "", 10) || MAX_PAGE_SIZE),
   );
-
-  // ── Ce que ce regard a le droit de lire ───────────────────────────────────
-  // Le compartiment d'une fiche ne dépend que de son DÉTENTEUR : on le résout
-  // une fois par détenteur et non une fois par ligne — une page de 50 fiches
-  // ne coûte donc pas 50 questions de plus à la matrice.
-  const { cfg, roleOf, rows: accounts } = await loadDirectory();
-  const grantsCache = new Map<string, Grants>();
-  const grantsOfHolder = (assignedToId: string | null): Grants => {
-    const key = assignedToId ?? "";
-    const hit = grantsCache.get(key);
-    if (hit) return hit;
-    const holder = assignedToId ? (roleOf.get(assignedToId) ?? null) : null;
-    const g = grantsFor(cfg, actor.role, bucketFor(actor.user.id, { assignedToId }, holder));
-    grantsCache.set(key, g);
-    return g;
-  };
-
-  // Chercher « 5145551234 » et voir une fiche remonter DIT le numéro : la
-  // recherche ne compare téléphone et courriel que sur les fiches dont le
-  // compartiment ouvre les coordonnées. Le nom et la ville restent cherchables
-  // partout — c'est ce qui permet de ne pas rappeler un lead déjà pris.
-  const contactHolders = accounts.filter((a) => grantsOfHolder(a.id).contact).map((a) => a.id);
-  const contactOpen: SQL | undefined =
-    grantsOfHolder(null).contact && contactHolders.length === accounts.length
-      ? undefined
-      : (() => {
-          const parts: SQL[] = [];
-          if (grantsOfHolder(null).contact) parts.push(isNull(clients.assignedToId));
-          if (contactHolders.length > 0) parts.push(inArray(clients.assignedToId, contactHolders));
-          if (parts.length === 0) return sql`false`;
-          return parts.length === 1 ? parts[0] : or(...parts)!;
-        })();
 
   const now = new Date();
   const conditions: SQL[] = [];
@@ -241,23 +206,6 @@ export async function GET(req: NextRequest) {
     if (kept.length === 1) conditions.push(kept[0]);
     else if (kept.length > 1) conditions.push(or(...kept)!);
   };
-
-  if (q) {
-    const digits = q.replace(/\D/g, "");
-    const openMatchers = [ilike(clients.fullName, `%${q}%`), ilike(clients.city, `%${q}%`)];
-    const contactMatchers = [
-      ilike(clients.email, `%${q}%`),
-      ...(digits.length >= 3
-        ? [like(clients.phone, `%${digits}%`), like(clients.phoneAlt, `%${digits}%`)]
-        : []),
-    ];
-    const guardedContact = or(...contactMatchers)!;
-    const merged = or(
-      ...openMatchers,
-      contactOpen ? and(contactOpen, guardedContact)! : guardedContact,
-    );
-    if (merged) conditions.push(merged);
-  }
 
   const catTokens = tokens(categoryParam);
   const catIds = int4Ids(catTokens);
@@ -357,11 +305,36 @@ export async function GET(req: NextRequest) {
   };
   pushOr(...tokens(filterParam).filter((f) => FILTERS.has(f)).map(followupState));
 
+  const filters = conditions.length > 0 ? and(...conditions) : undefined;
+
+  // ── Recherche : un moteur à part, qui pose lui-même la visibilité ─────────
+  // Téléphone, courriel et historique ne s'y cherchent que là où la fiche les
+  // MONTRE à ce regard (cases `contact` / `history`, détenteur par
+  // détenteur) : sinon, voir une fiche remonter dirait ce qu'on a masqué.
+  if (q) {
+    return NextResponse.json(
+      await listSearchResponse(actor, {
+        q,
+        filters,
+        mode,
+        sort,
+        dir,
+        page,
+        pageSize,
+        signal: req.signal,
+      }),
+    );
+  }
+
+  // Le compartiment d'une fiche ne dépend que de son DÉTENTEUR : résolu une
+  // fois par détenteur, pas une fois par ligne.
+  const grantsOfHolder = await holderGrants(actor);
+
   // La visibilité s'ajoute EN DERNIER et ne se négocie pas : un filtre reçu du
   // client (assignedToId = le patron, par exemple) ne peut que rétrécir ce que
   // la portée autorise déjà. Le compte total lit le MÊME `where` — un total non
   // filtré serait à lui seul une fuite : il dirait combien de fiches on cache.
-  const where = await withVisibility(actor, conditions.length > 0 ? and(...conditions) : undefined);
+  const where = await withVisibility(actor, filters);
 
   // Activité récente par défaut (même tri que l'ancienne liste) ; la vue
   // tableau peut trier par nom / ville / dates / suivi / dernier contact.
@@ -369,7 +342,7 @@ export async function GET(req: NextRequest) {
   // en premier sur un DESC par défaut — on veut les fiches sans valeur à la
   // fin, pas en tête). Toujours `id` en dernier pour une pagination stable.
   const orderBy =
-    sort === "activity"
+    sort === "activity" || sort === "relevance"
       ? [
           desc(
             sql`GREATEST(COALESCE(${clients.lastContactedAt}, to_timestamp(0)), ${clients.updatedAt})`,

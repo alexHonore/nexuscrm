@@ -2,7 +2,9 @@
   "list": {
     "title": "Clients",
     "count": "{count, plural, =0 {No clients} one {# client} other {# clients}}",
-    "searchPlaceholder": "Search (name, phone, email, city)…",
+    "searchPlaceholder": "Search: name, number, city, notes, comments…",
+    "clearSearch": "Clear search",
+    "foundIn": "Found in:",
     "addClient": "Add a client",
     "filters": {
       "category": "Category",
@@ -47,6 +49,7 @@
     },
     "empty": "No clients match your search.",
     "emptyTitle": "No clients found",
+    "emptySearch": "Nothing found for “{query}” in the names, contact details, notes and comments you can access.",
     "unassigned": "Unassigned",
     "noCategory": "No category",
     "doNotCall": "Do not call"
@@ -57,6 +60,7 @@
     "description": "Find the right client, prepare your conversation and move their project forward. Your list stays close, from one record to the next.",
     "panelHint": "Keep your relationships moving.",
     "openFirst": "Open the first record",
+    "openBest": "Open the best match",
     "inView": "{count, plural, =0 {No records in this view} one {# record in this view} other {# records in this view}}",
     "queues": "Where to start?",
     "queueHint": "These shortcuts show your entire accessible portfolio and replace active filters. Today's follow-ups may also be overdue.",
@@ -257,6 +261,7 @@
   "sort": {
     "label": "Sort by",
     "activity": "Recent activity",
+    "relevance": "Relevance",
     "name": "Name",
     "city": "City",
     "followupAt": "Next follow-up",

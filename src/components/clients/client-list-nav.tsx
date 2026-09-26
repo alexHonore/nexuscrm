@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
+import type { ClientMatch } from "@/lib/clients-search/types";
 import type { ClientFocus } from "./focus";
 
 /** One row of the /clients lists (shape of GET /api/clients/list items). */
@@ -22,6 +23,13 @@ export type ClientListItem = {
   /** ISO strings (UTC). */
   createdAt: string;
   updatedAt: string;
+  /**
+   * Présent quand la liste répond à une recherche (`q` avec au moins un
+   * terme) : score, champs trouvés, tranches à surligner, extrait, lien. Tout
+   * vient du serveur, déjà filtré par les cases de la fiche — le navigateur ne
+   * fait que l'afficher.
+   */
+  match?: ClientMatch;
 };
 
 /**

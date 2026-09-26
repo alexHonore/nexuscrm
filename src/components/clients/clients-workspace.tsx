@@ -24,7 +24,7 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AddClientDialog } from "@/components/clients/add-client-dialog";
 import {
   ClientsTable,
@@ -53,6 +53,12 @@ import {
   type SavedViewState,
 } from "@/components/clients/saved-views";
 import { APP_TZ } from "@/components/clients/timezone";
+import { Highlighted } from "@/components/search/highlighted";
+import { SearchReason } from "@/components/search/match-line";
+import { signalCommentAnchor } from "@/components/search/open-search";
+import { refreshDegradesShown } from "@/components/search/refresh";
+import { ScopeChips } from "@/components/search/scope-chips";
+import { resultHref } from "@/components/search/use-client-search";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
@@ -65,6 +71,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { applyScopeToken, noResultSuggestions } from "@/lib/clients-search/palette";
+import { parseSearchQuery } from "@/lib/clients-search/query";
+import type { MatchGroup, SearchMeta } from "@/lib/clients-search/types";
 import { useDataChange, useVisiblePolling } from "@/lib/live";
 import { formatPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
@@ -109,7 +118,14 @@ type ListResponse = {
   total: number;
   page: number;
   pageSize: number;
+  /** Présent quand `q` porte un terme : termes compris, ignorés, facettes, repli. */
+  search?: SearchMeta;
 };
+
+/** Même méta, même rendu : le sondage de 20 s ne redessine pas le panneau pour rien. */
+function sameMeta(a: SearchMeta | null, b: SearchMeta | null): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
 
 /** Cadence du rafraîchissement de fond (autres utilisateurs, leads webhook). */
 const PANEL_POLL_MS = 20_000;
@@ -187,13 +203,16 @@ function rowsSignature(rows: ClientRow[]): string {
       // `contactHidden` en fait partie : une fiche qui change de main ouvre ou
       // ferme son numéro sans que rien d'autre ne bouge sur la ligne.
       (r) =>
-        `${r.id}:${r.fullName}:${r.phone}:${r.contactHidden ? 1 : 0}:${r.city ?? ""}:${r.categoryId ?? ""}:${r.categoryColor ?? ""}:${r.nextFollowupAt ?? ""}:${r.lastContactedAt ?? ""}:${r.doNotCall ? 1 : 0}:${r.updatedAt}:${r.assignedToId ?? ""}:${r.sourceId ?? ""}`,
+        `${r.id}:${r.fullName}:${r.phone}:${r.contactHidden ? 1 : 0}:${r.city ?? ""}:${r.categoryId ?? ""}:${r.categoryColor ?? ""}:${r.nextFollowupAt ?? ""}:${r.lastContactedAt ?? ""}:${r.doNotCall ? 1 : 0}:${r.updatedAt}:${r.assignedToId ?? ""}:${r.sourceId ?? ""}` +
+        // Le « pourquoi » d'une recherche : un nouveau commentaire peut changer
+        // le rang, les puces ou l'extrait sans que rien d'autre ne bouge.
+        `:${r.match?.score ?? ""}:${r.match?.reasons.map((reason) => reason.field).join() ?? ""}:${r.match?.snippet?.text ?? ""}`,
     )
     .join("|");
 }
 
 /** Sens de tri initial par colonne — celui qu'on attend naturellement. */
-const SORT_DEFAULT_DIR: Record<Exclude<ClientSortKey, "activity">, ClientSortDir> = {
+const SORT_DEFAULT_DIR: Record<Exclude<ClientSortKey, "activity" | "relevance">, ClientSortDir> = {
   name: "asc",
   city: "asc",
   followupAt: "asc",
@@ -204,6 +223,8 @@ const SORT_DEFAULT_DIR: Record<Exclude<ClientSortKey, "activity">, ClientSortDir
 
 const SORT_KEYS: ClientSortKey[] = [
   "activity",
+  // Proposée seulement quand une recherche est posée (voir `effectiveSortKey`).
+  "relevance",
   "name",
   "city",
   "followupAt",
@@ -268,8 +289,10 @@ export function ClientsWorkspace({
   children: React.ReactNode;
 }) {
   const t = useTranslations("clients");
+  const ts = useTranslations("common.search");
   const locale = useLocale();
   const dfnsLocale = locale === "en" ? enUS : fr;
+  const foundInId = useId();
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -309,7 +332,7 @@ export function ClientsWorkspace({
     if (next === "table" && isDetail) router.push("/clients");
   };
 
-  const onSort = (key: Exclude<ClientSortKey, "activity">) => {
+  const onSort = (key: Exclude<ClientSortKey, "activity" | "relevance">) => {
     markLocalChange();
     if (sortKey === key) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -324,6 +347,15 @@ export function ClientsWorkspace({
   // rapide du tableau de bord) et ?categoryId= (liens « +N autres » du pipeline).
   const [q, setQ] = useState(routeFilters?.q ?? "");
   const [appliedQ, setAppliedQ] = useState((routeFilters?.q ?? "").trim());
+  // La pertinence n'a de sens qu'avec un terme : sans recherche, un tri
+  // « pertinence » mémorisé (vue enregistrée, retour sur le panneau) se lit
+  // comme l'activité récente — sans rien réécrire de l'état choisi.
+  const effectiveSortKey: ClientSortKey = sortKey === "relevance" && !appliedQ ? "activity" : sortKey;
+  /** Le terme appliqué, lisible depuis le délai de frappe (voir `commitSearch`). */
+  const appliedQRef = useRef(appliedQ);
+  useLayoutEffect(() => {
+    appliedQRef.current = appliedQ;
+  }, [appliedQ]);
   const [categoryIds, setCategoryIds] = useState<Array<number | "none">>(routeFilters?.categoryIds ?? []);
   const [sourceIds, setSourceIds] = useState<string[]>([]);
   const [assignedToIds, setAssignedToIds] = useState<string[]>([]);
@@ -334,6 +366,8 @@ export function ClientsWorkspace({
   const [createdFilter, setCreatedFilter] = useState<DateFilter>(NO_DATE_FILTER);
   const [updatedFilter, setUpdatedFilter] = useState<DateFilter>(NO_DATE_FILTER);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Le champ de recherche — l'effacer y rend la main (voir le bouton ×). */
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const applyFocus = useCallback((focus: ClientFocus) => {
     markLocalChange();
@@ -360,11 +394,32 @@ export function ClientsWorkspace({
     );
   }
 
+  /**
+   * Applique une recherche. Quand elle NAÎT (rien → un terme) et que le tri est
+   * l'activité récente — le défaut —, le panneau passe à la pertinence : le
+   * meilleur résultat en tête. Un tri choisi exprès (nom, ville, suivi…) est
+   * gardé tel quel.
+   */
+  const commitSearch = useCallback((value: string) => {
+    const next = value.trim();
+    if (next && !appliedQRef.current) setSortKey((k) => (k === "activity" ? "relevance" : k));
+    appliedQRef.current = next;
+    setAppliedQ(next);
+  }, []);
+
   const onSearchChange = (value: string) => {
     markLocalChange();
     setQ(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setAppliedQ(value.trim()), 300);
+    debounceRef.current = setTimeout(() => commitSearch(value), 300);
+  };
+
+  /** Réécrit la recherche d'un geste (puce de portée, « Chercher seulement »), sans délai de frappe. */
+  const replaceSearch = (value: string) => {
+    markLocalChange();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setQ(value);
+    commitSearch(value);
   };
   useEffect(
     () => () => {
@@ -421,6 +476,7 @@ export function ClientsWorkspace({
   const [failed, setFailed] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [loadedQuery, setLoadedQuery] = useState<string | null>(null);
+  const [searchMeta, setSearchMeta] = useState<SearchMeta | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   const filterQuery = useMemo(() => {
@@ -457,8 +513,13 @@ export function ClientsWorkspace({
           break;
       }
     }
-    if (sortKey !== "activity") {
-      p.set("sort", sortKey);
+    // Une recherche lit tout ce que la fiche montre (notes, commentaires,
+    // suivis…) — le dialogue de campagne, lui, reste sur l'identité par défaut.
+    if (appliedQ) p.set("match", "all");
+    if (effectiveSortKey === "relevance") {
+      p.set("sort", "relevance");
+    } else if (effectiveSortKey !== "activity") {
+      p.set("sort", effectiveSortKey);
       p.set("dir", sortDir);
     }
     return p.toString();
@@ -472,7 +533,7 @@ export function ClientsWorkspace({
     campaignIds,
     createdFilter,
     updatedFilter,
-    sortKey,
+    effectiveSortKey,
     sortDir,
   ]);
   const requestKey = JSON.stringify([filterQuery, refreshKey]);
@@ -529,6 +590,8 @@ export function ClientsWorkspace({
   const rerunRef = useRef(false);
   /** Incrémenté à chaque mutation locale — invalide les réponses parties avant. */
   const versionRef = useRef(0);
+  /** La méta de recherche des lignes À L'ÉCRAN — voir `refreshDegradesShown`. */
+  const shownMetaRef = useRef<SearchMeta | null>(null);
   useLayoutEffect(() => {
     queryRef.current = filterQuery;
   }, [filterQuery]);
@@ -549,6 +612,11 @@ export function ClientsWorkspace({
     itemsRef.current = merged;
     pageRef.current = data.page;
     hasMoreRef.current = data.page * data.pageSize < data.total;
+    if (mode === "replace") {
+      const meta = data.search ?? null;
+      shownMetaRef.current = meta;
+      setSearchMeta((prev) => (sameMeta(prev, meta) ? prev : meta));
+    }
     setItems(merged);
     setTotal(data.total);
     setHasMore(hasMoreRef.current);
@@ -574,6 +642,9 @@ export function ClientsWorkspace({
       .catch(() => {
         if (controller.signal.aborted) return;
         loadingRef.current = false;
+        // L'écran montre l'erreur, plus aucune ligne : une recherche rapide
+        // de repli vaut mieux qu'elle, le prochain sondage doit pouvoir passer.
+        shownMetaRef.current = null;
         setFailed(true);
         setSettledRequestKey(requestKey);
       });
@@ -615,6 +686,11 @@ export function ClientsWorkspace({
       ) {
         return;
       }
+      // Recherche rapide de repli (limiteur plein, budget épuisé) par-dessus
+      // des résultats complets : on la jette, l'écran garde les siens — une
+      // recherche trouvée dans les notes ne se vide plus pour 20 s. Le
+      // prochain sondage réessaie.
+      if (refreshDegradesShown(shownMetaRef.current, data.search)) return;
 
       const fresh = new Set(data.items.map((item) => item.id));
       // Les pages ≥ 2 déjà chargées restent en place, sans doublon avec la page 1.
@@ -630,6 +706,9 @@ export function ClientsWorkspace({
       setFailed(false);
       setNow(Date.now());
       setTotal(data.total);
+      const meta = data.search ?? null;
+      shownMetaRef.current = meta;
+      setSearchMeta((prev) => (sameMeta(prev, meta) ? prev : meta));
       hasMoreRef.current = merged.length < data.total;
       setHasMore(hasMoreRef.current);
       if (rowsSignature(merged) === rowsSignature(itemsRef.current)) return;
@@ -734,7 +813,8 @@ export function ClientsWorkspace({
     { value: "none", label: t("list.filters.noCampaign") },
     ...campaigns,
   ];
-  const sortOptions: FilterOption[] = SORT_KEYS.map((key) => ({
+  // « Pertinence » n'est offerte qu'avec une recherche posée.
+  const sortOptions: FilterOption[] = SORT_KEYS.filter((key) => key !== "relevance" || appliedQ !== "").map((key) => ({
     value: key,
     label: t(`sort.${key}`),
   }));
@@ -1022,6 +1102,17 @@ export function ClientsWorkspace({
       : []),
   ];
 
+  // ── Recherche : ce que le serveur a compris, et quoi proposer s'il n'a rien ──
+  const appliedParsed = useMemo(() => parseSearchQuery(appliedQ), [appliedQ]);
+  const searchSuggestions = appliedQ ? noResultSuggestions(appliedParsed) : [];
+  const searchNotices = [
+    searchMeta?.approximate ? ts("approximate") : null,
+    searchMeta?.degraded ? ts(`degraded.${searchMeta.degraded}`) : null,
+    searchMeta && searchMeta.ignored.length > 0
+      ? ts("ignored", { terms: searchMeta.ignored.join(" · ") })
+      : null,
+  ].filter((notice): notice is string => notice !== null);
+
   const chipBase =
     "inline-flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-xs font-medium transition-colors md:h-7";
 
@@ -1056,7 +1147,48 @@ export function ClientsWorkspace({
     />
   );
 
-  const emptyBlock = (
+  const emptyBlock = appliedQ ? (
+    // Une recherche vide dit CE qu'elle a cherché, et où — puis propose de
+    // desserrer : un seul terme à la fois, sans portée, sans exclusions.
+    <EmptyState
+      icon={<SearchXIcon />}
+      title={t("list.emptyTitle")}
+      hint={
+        appliedParsed.onlyExclusions
+          ? ts("onlyExclusions")
+          : t("list.emptySearch", { query: appliedQ })
+      }
+      action={
+        <div className="flex w-full max-w-xs flex-col items-stretch gap-2">
+          {searchSuggestions.map((suggestion, i) =>
+            suggestion.kind === "contactHint" || suggestion.kind === "shortHint" ? (
+              <p key={suggestion.kind} className="text-xs text-muted-foreground">
+                {ts(`empty.${suggestion.kind}`)}
+              </p>
+            ) : (
+              <Button
+                key={`${suggestion.kind}-${i}`}
+                variant="outline"
+                className="min-h-11 justify-start md:min-h-9"
+                onClick={() => replaceSearch(suggestion.query)}
+              >
+                <SearchIcon aria-hidden />
+                <span className="truncate">
+                  {suggestion.kind === "only"
+                    ? ts("empty.only", { term: suggestion.term })
+                    : ts(`empty.${suggestion.kind}`)}
+                </span>
+              </Button>
+            ),
+          )}
+          <Button variant="ghost" className="min-h-11 md:min-h-9" onClick={clearEverything}>
+            <XIcon aria-hidden />
+            {t("list.filters.clear")}
+          </Button>
+        </div>
+      }
+    />
+  ) : (
     <EmptyState
       icon={<SearchXIcon />}
       title={t("list.emptyTitle")}
@@ -1117,17 +1249,38 @@ export function ClientsWorkspace({
               ) : null}
             </div>
             <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+              <div className="relative min-w-0 flex-1">
+                <SearchIcon aria-hidden className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
+                  ref={searchInputRef}
                   value={q}
                   onChange={(e) => onSearchChange(e.target.value)}
                   placeholder={t("list.searchPlaceholder")}
                   aria-label={t("list.searchPlaceholder")}
-                  className="min-h-11 rounded-xl bg-background pl-9"
+                  className={cn("min-h-11 rounded-xl bg-background pl-9", q && "pr-11")}
                   inputMode="search"
                   enterKeyHint="search"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                 />
+                {q ? (
+                  <button
+                    type="button"
+                    aria-label={t("list.clearSearch")}
+                    onClick={() => {
+                      replaceSearch("");
+                      // Le bouton disparaît avec le texte : sans cela le focus
+                      // tombait sur <body> (clavier, lecteur d'écran) et, au
+                      // téléphone, le clavier se refermait avant la recherche
+                      // suivante. On efface pour retaper : retour au champ.
+                      searchInputRef.current?.focus();
+                    }}
+                    className="absolute top-1/2 right-0 flex size-11 -translate-y-1/2 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <XIcon aria-hidden className="size-4" />
+                  </button>
+                ) : null}
               </div>
 
               <Popover>
@@ -1165,12 +1318,12 @@ export function ClientsWorkspace({
                     <div className="flex items-center gap-1.5">
                       <Select
                         items={sortOptions}
-                        value={sortKey}
+                        value={effectiveSortKey}
                         onValueChange={(v) => {
                           markLocalChange();
                           const key = (v ?? "activity") as ClientSortKey;
                           setSortKey(key);
-                          setSortDir(key === "activity" ? "desc" : SORT_DEFAULT_DIR[key]);
+                          setSortDir(key === "activity" || key === "relevance" ? "desc" : SORT_DEFAULT_DIR[key]);
                         }}
                       >
                         <SelectTrigger
@@ -1187,7 +1340,7 @@ export function ClientsWorkspace({
                           ))}
                         </SelectContent>
                       </Select>
-                      {sortKey !== "activity" ? (
+                      {effectiveSortKey !== "activity" && effectiveSortKey !== "relevance" ? (
                         <Button
                           variant="outline"
                           className="size-11 shrink-0 md:size-9"
@@ -1401,6 +1554,43 @@ export function ClientsWorkspace({
             </div>
           </div>
 
+          {/* Ce que la recherche a trouvé, et ce qu'elle n'a pas pu faire —
+              HORS de l'en-tête collant. Dedans, la rangée « Trouvé dans »
+              (puces de 44 px) et jusqu'à trois avis faisaient passer l'en-tête
+              de 313 à 434 px sur un téléphone de 844 : une carte de résultat,
+              à peine, entre lui et la barre du bas. Ici la rangée défile avec
+              la liste au téléphone ; sur écran large la colonne ne défile que
+              sous elle, elle reste donc en vue au-dessus des fiches. */}
+          {appliedQ && (searchMeta?.facets || searchNotices.length > 0) ? (
+            <div className="shrink-0 space-y-1 border-b px-4 py-2">
+              {/* Où la recherche a trouvé : une puce par famille, avec son
+                  nombre. La choisir RÉÉCRIT la requête (`dans:notes`) — la vue
+                  enregistrée, le lien partagé, l'historique disent donc
+                  exactement ce qu'on cherche. */}
+              {searchMeta?.facets ? (
+                <div className={cn("flex min-w-0 items-center gap-2", loading && "opacity-60")} aria-busy={loading || undefined}>
+                  <span id={foundInId} className="shrink-0 text-[11px] font-medium text-muted-foreground">
+                    {t("list.foundIn")}
+                  </span>
+                  <ScopeChips
+                    className="min-w-0 flex-1"
+                    labelledBy={foundInId}
+                    facets={searchMeta.facets}
+                    scope={appliedParsed.scope}
+                    onPick={(scope: MatchGroup | null) => replaceSearch(applyScopeToken(q, scope, locale))}
+                  />
+                </div>
+              ) : null}
+              {searchNotices.length > 0 ? (
+                <div className="space-y-0.5 text-[11px] leading-snug text-muted-foreground">
+                  {searchNotices.map((notice) => (
+                    <p key={notice}>{notice}</p>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           {showTable ? (
             <div className="min-w-0">
               {failed && !loading ? (
@@ -1416,7 +1606,7 @@ export function ClientsWorkspace({
                   sources={sources}
                   users={users}
                   campaigns={campaigns}
-                  sortKey={sortKey}
+                  sortKey={effectiveSortKey}
                   sortDir={sortDir}
                   onSort={onSort}
                   now={now}
@@ -1451,7 +1641,8 @@ export function ClientsWorkspace({
                   return (
                     <li key={item.id}>
                       <Link
-                        href={`/clients/${item.id}`}
+                        href={resultHref(item)}
+                        onClick={() => signalCommentAnchor(resultHref(item))}
                         aria-current={active ? "page" : undefined}
                         className={cn(
                           "group flex min-h-[82px] items-center gap-3 rounded-xl border px-3 py-3 transition-colors",
@@ -1481,7 +1672,11 @@ export function ClientsWorkspace({
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-1.5">
-                            <span className="truncate text-sm font-semibold">{item.fullName}</span>
+                            <Highlighted
+                              text={item.fullName}
+                              ranges={item.match?.nameRanges}
+                              className="truncate text-sm font-semibold"
+                            />
                             {item.doNotCall ? (
                               <PhoneOffIcon
                                 className="size-3.5 shrink-0 text-destructive"
@@ -1506,8 +1701,12 @@ export function ClientsWorkspace({
                           </span>
                           <span className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                             <span className="truncate">{categories.find((category) => category.id === item.categoryId)?.label ?? t("list.noCategory")}</span>
-                            {item.city ? <><span aria-hidden>·</span><span className="truncate">{item.city}</span></> : null}
+                            {item.city ? <><span aria-hidden>·</span><Highlighted text={item.city} ranges={item.match?.cityRanges} className="truncate" /></> : null}
                           </span>
+                          {/* Trouvée par une recherche : dans quels champs, et
+                              l'extrait qui le montre — puces non interactives,
+                              la carte entière reste UN lien. */}
+                          <SearchReason match={item.match} maxChips={3} snippetClassName="line-clamp-2" />
                           {/* Le POURQUOI du masque, écrit. Il vivait dans un
                               `title=` — c'est-à-dire nulle part sur un écran
                               tactile, où il n'y a pas de curseur à poser. Sur
@@ -1547,8 +1746,8 @@ export function ClientsWorkspace({
           )}
           {!showTable && !loading && !failed && loadedQuery === filterQuery && items.length > 0 ? (
             <div className="border-t bg-card p-3">
-              <Button render={<Link href={`/clients/${items[0].id}`} />} nativeButton={false} variant="outline" className="min-h-11 w-full justify-between px-3">
-                <span className="flex items-center gap-2"><LookIcon look={WORKSPACE_LOOK.clients} size="sm" />{t("workspace.openFirst")}</span>
+              <Button render={<Link href={resultHref(items[0])} />} nativeButton={false} variant="outline" className="min-h-11 w-full justify-between px-3">
+                <span className="flex items-center gap-2"><LookIcon look={WORKSPACE_LOOK.clients} size="sm" />{effectiveSortKey === "relevance" ? t("workspace.openBest") : t("workspace.openFirst")}</span>
                 <ArrowRightIcon aria-hidden className="size-4" />
               </Button>
             </div>

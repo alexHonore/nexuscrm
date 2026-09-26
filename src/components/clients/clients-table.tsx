@@ -70,6 +70,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { APP_TZ } from "@/components/clients/timezone";
+import { Highlighted } from "@/components/search/highlighted";
+import { SearchReason } from "@/components/search/match-line";
+import { resultHref } from "@/components/search/use-client-search";
 import { BULK_MAX } from "@/lib/bulk";
 import { ENROLL_REFUSALS } from "@/lib/campaigns/eligibility";
 import { emitDataChange } from "@/lib/live";
@@ -78,6 +81,8 @@ import { cn } from "@/lib/utils";
 
 export type ClientSortKey =
   | "activity"
+  /** Pertinence d'une recherche — seulement quand `q` porte un terme, sans sens de tri. */
+  | "relevance"
   | "name"
   | "city"
   | "createdAt"
@@ -184,7 +189,7 @@ export function ClientsTable({
   campaigns: FilterOption[];
   sortKey: ClientSortKey;
   sortDir: ClientSortDir;
-  onSort: (key: Exclude<ClientSortKey, "activity">) => void;
+  onSort: (key: Exclude<ClientSortKey, "activity" | "relevance">) => void;
   /** Horodatage « maintenant » du parent — évite un Date.now() par cellule. */
   now: number;
 }) {
@@ -384,7 +389,7 @@ export function ClientsTable({
     });
   };
 
-  const sortHead = (key: Exclude<ClientSortKey, "activity">, label: string) => (
+  const sortHead = (key: Exclude<ClientSortKey, "activity" | "relevance">, label: string) => (
     <button
       type="button"
       onClick={() => onSort(key)}
@@ -697,7 +702,7 @@ export function ClientsTable({
                 key={item.id}
                 data-state={selected.has(item.id) ? "selected" : undefined}
                 className="cursor-pointer"
-                onClick={() => router.push(`/clients/${item.id}`)}
+                onClick={() => router.push(resultHref(item))}
               >
                 {can.bulk ? (
                   <TableCell
@@ -714,11 +719,11 @@ export function ClientsTable({
                 <TableCell className="max-w-56">
                   <span className="flex items-center gap-1.5">
                     <Link
-                      href={`/clients/${item.id}`}
+                      href={resultHref(item)}
                       className="truncate font-medium hover:underline"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {item.fullName}
+                      <Highlighted text={item.fullName} ranges={item.match?.nameRanges} />
                     </Link>
                     {item.doNotCall ? (
                       <PhoneOffIcon
@@ -727,6 +732,8 @@ export function ClientsTable({
                       />
                     ) : null}
                   </span>
+                  {/* Trouvée par une recherche : où, en une ligne tronquée. */}
+                  <SearchReason match={item.match} compact />
                 </TableCell>
                 {show("phone") ? (
                   <TableCell className="tabular-nums">{phoneCell(item)}</TableCell>
@@ -744,7 +751,11 @@ export function ClientsTable({
                 ) : null}
                 {show("city") ? (
                   <TableCell className="max-w-36 truncate text-muted-foreground">
-                    {item.city ?? "—"}
+                    {item.city ? (
+                      <Highlighted text={item.city} ranges={item.match?.cityRanges} />
+                    ) : (
+                      "—"
+                    )}
                   </TableCell>
                 ) : null}
                 {show("source") ? (
@@ -816,7 +827,7 @@ export function ClientsTable({
                 />
               </span>
             ) : null}
-            <Link href={`/clients/${item.id}`} className="min-w-0 flex-1 py-2">
+            <Link href={resultHref(item)} className="min-w-0 flex-1 py-2">
               <span className="flex items-center gap-1.5">
                 <span
                   aria-hidden
@@ -826,7 +837,11 @@ export function ClientsTable({
                   )}
                   style={item.categoryColor ? { backgroundColor: item.categoryColor } : undefined}
                 />
-                <span className="truncate text-sm font-semibold">{item.fullName}</span>
+                <Highlighted
+                  text={item.fullName}
+                  ranges={item.match?.nameRanges}
+                  className="truncate text-sm font-semibold"
+                />
                 {item.nextFollowupAt && Date.parse(item.nextFollowupAt) < now ? (
                   <ClockAlertIcon
                     className="size-3.5 shrink-0 text-destructive"
@@ -842,7 +857,9 @@ export function ClientsTable({
               </span>
               <span className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
                 <span className="tabular-nums">{phoneCell(item)}</span>
-                {item.city ? <span className="truncate">{item.city}</span> : null}
+                {item.city ? (
+                  <Highlighted text={item.city} ranges={item.match?.cityRanges} className="truncate" />
+                ) : null}
                 <span className="shrink-0">
                   {t("table.createdShort", { date: day(item.createdAt) })}
                 </span>
@@ -855,6 +872,7 @@ export function ClientsTable({
                   {t("access.maskedHint")}
                 </span>
               ) : null}
+              <SearchReason match={item.match} compact />
             </Link>
           </li>
         ))}

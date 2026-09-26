@@ -35,6 +35,8 @@ import {
   QUEUE_KIND_LOOK,
   ROLE_LOOK,
   RESULT_LOOK,
+  SEARCH_FIELD_LOOK,
+  SEARCH_GROUP_LOOK,
   SEVERITY_LOOK,
   TONE,
   TOOL_LOOK,
@@ -49,6 +51,7 @@ import { NOTIFICATION_TYPES } from "@/lib/push/policy";
 import { defaultRoles } from "@/lib/permissions/defaults";
 import { GUARDRAIL_KINDS, GUARDRAIL_SEVERITIES } from "@/lib/guardrails/types";
 import { FINDING_FAMILIES, VERDICTS } from "@/lib/deliverability/types";
+import { FIELD_GROUP, MATCH_FIELDS, MATCH_GROUPS } from "@/lib/clients-search/types";
 
 /**
  * Les trois lectures indépendantes d'une ligne de la liste des assistants :
@@ -480,5 +483,58 @@ describe("vocabulaire de la délivrabilité", () => {
     for (const [key, look] of Object.entries({ ...VERDICT_LOOK, ...DELIVERABILITY_LOOK })) {
       expect(look.color, `${key} emprunte la couleur du canal SMS`).not.toBe(CHANNEL_LOOK.sms.color);
     }
+  });
+});
+
+/**
+ * La recherche de clients — OÙ une fiche a été trouvée.
+ *
+ * Ce qui casserait sans ces cas : un douzième champ cherchable ajouté au moteur
+ * reviendrait en puce grise sans dessin au milieu de puces illustrées, deux
+ * champs partageraient un pictogramme (et, sous la même teinte de groupe, ne se
+ * distingueraient plus du tout), ou le violet réservé du SMS s'afficherait sur
+ * une ligne de résultat — alors que trouver un mot dans un texto n'est pas en
+ * envoyer un.
+ */
+describe("vocabulaire de la recherche", () => {
+  it("chaque champ et chaque groupe du moteur a un pictogramme qui se dessine", () => {
+    // Listes lues dans le MOTEUR, pas dans les familles : sinon le test se
+    // vérifierait lui-même.
+    for (const field of MATCH_FIELDS) {
+      const look = SEARCH_FIELD_LOOK[field];
+      expect(look, field).toBeTruthy();
+      expect(renderToStaticMarkup(createElement(look.Icon)), field).toContain("<svg");
+    }
+    for (const group of MATCH_GROUPS) {
+      const look = SEARCH_GROUP_LOOK[group];
+      expect(look, group).toBeTruthy();
+      expect(renderToStaticMarkup(createElement(look.Icon)), group).toContain("<svg");
+    }
+  });
+
+  it("deux champs ne partagent jamais un pictogramme", () => {
+    // La couleur GROUPE (trois familles pour onze champs) : c'est donc le
+    // pictogramme qui identifie, et il doit être unique.
+    const icons = MATCH_FIELDS.map((f) => SEARCH_FIELD_LOOK[f].Icon);
+    expect(new Set(icons).size, "deux champs partagent un pictogramme").toBe(icons.length);
+    const groupIcons = MATCH_GROUPS.map((g) => SEARCH_GROUP_LOOK[g].Icon);
+    expect(new Set(groupIcons).size, "deux groupes partagent un pictogramme").toBe(groupIcons.length);
+  });
+
+  it("un champ porte la teinte de SON groupe", () => {
+    for (const field of MATCH_FIELDS) {
+      expect(SEARCH_FIELD_LOOK[field].color, field).toBe(SEARCH_GROUP_LOOK[FIELD_GROUP[field]].color);
+    }
+  });
+
+  it("aucune teinte inventée, et jamais celle du canal SMS", () => {
+    const allowed = new Set<string>(["var(--primary)", ...Object.values(TONE)]);
+    for (const [key, look] of Object.entries({ ...SEARCH_GROUP_LOOK, ...SEARCH_FIELD_LOOK })) {
+      expect(allowed, `${key} invente une teinte : ${look.color}`).toContain(look.color);
+      expect(look.color, `${key} emprunte la couleur du canal SMS`).not.toBe(CHANNEL_LOOK.sms.color);
+    }
+    // Le SMS garde son PICTOGRAMME (celui du canal) — c'est sa teinte qu'il
+    // laisse sur la fiche.
+    expect(SEARCH_FIELD_LOOK.sms.Icon).toBe(CHANNEL_LOOK.sms.Icon);
   });
 });

@@ -2,7 +2,9 @@
   "list": {
     "title": "Clients",
     "count": "{count, plural, =0 {Aucun client} one {# client} other {# clients}}",
-    "searchPlaceholder": "Rechercher (nom, téléphone, courriel, ville)…",
+    "searchPlaceholder": "Rechercher : nom, numéro, ville, notes, commentaires…",
+    "clearSearch": "Effacer la recherche",
+    "foundIn": "Trouvé dans :",
     "addClient": "Ajouter un client",
     "filters": {
       "category": "Catégorie",
@@ -47,6 +49,7 @@
     },
     "empty": "Aucun client ne correspond à votre recherche.",
     "emptyTitle": "Aucun client trouvé",
+    "emptySearch": "Rien trouvé pour « {query} » dans les noms, coordonnées, notes et commentaires que vous pouvez consulter.",
     "unassigned": "Non assigné",
     "noCategory": "Sans catégorie",
     "doNotCall": "Ne pas appeler"
@@ -57,6 +60,7 @@
     "description": "Retrouvez le bon client, préparez votre échange et faites avancer son projet. Votre liste reste à portée de main, d'une fiche à l'autre.",
     "panelHint": "Votre portefeuille, en mouvement.",
     "openFirst": "Ouvrir la première fiche",
+    "openBest": "Ouvrir le meilleur résultat",
     "inView": "{count, plural, =0 {Aucune fiche dans cette vue} one {# fiche dans cette vue} other {# fiches dans cette vue}}",
     "queues": "Par où commencer ?",
     "queueHint": "Ces raccourcis affichent tout le portefeuille auquel vous avez accès et remplacent les filtres actifs. Les suivis du jour peuvent aussi être en retard.",
@@ -257,6 +261,7 @@
   "sort": {
     "label": "Trier par",
     "activity": "Activité récente",
+    "relevance": "Pertinence",
     "name": "Nom",
     "city": "Ville",
     "followupAt": "Prochain suivi",

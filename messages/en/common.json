@@ -7,18 +7,72 @@
     "navigation": "Main navigation",
     "skipToContent": "Skip to content",
     "search": "Search or jump to…",
-    "searchHelp": "Find a client by name, phone or city, or open a workspace page.",
-    "searchPlaceholder": "A client, a phone number, a page…",
-    "searchHint": "Type at least 2 characters to find a client, or choose a page below.",
+    "searchHelp": "Find a client by name, number, email, city, address, notes or comments — or open a workspace page.",
+    "searchPlaceholder": "A name, a number, a word from a note, a page…",
+    "searchHint": "At least 2 characters. Accents and capitals don't matter; comments, call notes and follow-ups are searched from 3 letters.",
     "records": "Clients",
     "searching": "Finding clients…",
     "searchError": "Search is unavailable. Try again or open the client directory.",
-    "noRecords": "No matching clients.",
     "allResults": "View all results ({count})",
     "openDirectory": "Search the client directory",
     "closeSearch": "Close",
-    "keyboardHint": "↑ ↓ to navigate · Esc to close",
-    "openResult": "Open"
+    "keyboardHint": "↑ ↓ navigate · ↵ open · Shift+↵ all results · Esc close"
+  },
+  "search": {
+    "shortcutMac": "⌘ K",
+    "shortcutOther": "Ctrl K",
+    "clear": "Clear search",
+    "masked": "Hidden",
+    "doNotCall": "Do not call",
+    "retry": "Try again",
+    "scope": {
+      "label": "Search in",
+      "all": "Everything",
+      "contact": "Name & contact",
+      "profile": "Place & project",
+      "notes": "Notes & comments",
+      "count": "{label} · {count}"
+    },
+    "field": {
+      "name": "Name",
+      "phone": "Phone",
+      "email": "Email",
+      "city": "City",
+      "address": "Address",
+      "project": "Project",
+      "notes": "Record notes",
+      "comment": "Comment",
+      "followup": "Follow-up",
+      "call": "Call note",
+      "sms": "Text message"
+    },
+    "matchedIn": "Found in: {fields}",
+    "more": "+{count}",
+    "origin": {
+      "ai": "AI note",
+      "booking": "Appointment"
+    },
+    "recent": {
+      "title": "Recent searches",
+      "clear": "Clear search history"
+    },
+    "empty": {
+      "title": "No client matches “{query}”",
+      "everywhere": "Search everywhere",
+      "only": "Search only “{term}”",
+      "withoutExclusions": "Remove exclusions",
+      "contactHint": "A number or an email is only matched on records whose contact details you can see.",
+      "shortHint": "1–2 letter words only search the name, city, address and project — not notes or history."
+    },
+    "onlyExclusions": "Add at least one word to find: “-word” only excludes.",
+    "ignored": "Ignored: {terms}",
+    "approximate": "No exact match — closest names and cities shown.",
+    "degraded": {
+      "timeout": "Quick search only: history couldn't be searched in time. Try again.",
+      "busy": "Quick search only: too many searches running. Try again in a moment."
+    },
+    "tips": "“exact phrase” · -word to exclude · city:laval · phone:514 · note:pool · in:notes",
+    "announce": "{count, plural, =0 {No clients} one {# client found} other {# clients found}}"
   },
   "nav": {
     "dashboard": "Dashboard",

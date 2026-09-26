@@ -28,6 +28,7 @@ import {
   ClipboardCheckIcon,
   ClipboardXIcon,
   ClockIcon,
+  ContactRoundIcon,
   CpuIcon,
   EyeIcon,
   FileCheckIcon,
@@ -42,15 +43,20 @@ import {
   HardDriveDownloadIcon,
   HashIcon,
   HourglassIcon,
+  HouseIcon,
   IdCardIcon,
+  KeyRoundIcon,
   LayersIcon,
   LinkIcon,
   ListChecksIcon,
   ListOrderedIcon,
   MailIcon,
+  MapPinHouseIcon,
+  MapPinIcon,
   MegaphoneIcon,
   MessageCircleQuestionMarkIcon,
   MessageSquareDotIcon,
+  MessageSquareIcon,
   MessageSquareOffIcon,
   MessageSquareReplyIcon,
   MessageSquareTextIcon,
@@ -58,6 +64,7 @@ import {
   MessageSquareWarningIcon,
   MessageSquareXIcon,
   MessagesSquareIcon,
+  NotebookTextIcon,
   PackageOpenIcon,
   UserRoundIcon,
   UserCheckIcon,
@@ -67,6 +74,7 @@ import {
   PercentIcon,
   PencilLineIcon,
   PhoneCallIcon,
+  PhoneIcon,
   PhoneIncomingIcon,
   PhoneMissedIcon,
   PhoneOutgoingIcon,
@@ -98,6 +106,7 @@ import {
   SplitIcon,
   SquareArrowOutUpRightIcon,
   SquarePenIcon,
+  StickyNoteIcon,
   TargetIcon,
   TriangleAlertIcon,
   UsersIcon,
@@ -110,6 +119,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { ActivityForm, ActivityKind } from "@/components/analytics/activity";
+import type { MatchField, MatchGroup } from "@/lib/clients-search/types";
 import type { ErrorFamily } from "@/lib/deliverability/error-classes";
 import type { GuardrailKind } from "@/lib/guardrails/types";
 import { cn } from "@/lib/utils";
@@ -1000,3 +1010,44 @@ export const PERMISSION_GROUP_LOOK = {
   conversations: { color: TONE.speech, Icon: MessagesSquareIcon },
   admin: { color: ROLE_LOOK.admin.color, Icon: SlidersHorizontalIcon },
 } as const satisfies Record<string, Look>;
+
+/**
+ * Recherche de clients — OÙ la fiche a été trouvée.
+ *
+ * Trois familles, une teinte chacune : le bleu primaire de l'identité (nom,
+ * numéro, courriel), l'ardoise de la matière brute pour le lieu et le projet,
+ * le bleu de la parole pour ce qui a été ÉCRIT (notes, commentaires, suivis,
+ * appels, SMS). Le pictogramme, lui, dit le CHAMP : c'est lui qui identifie,
+ * la teinte ne fait que ranger.
+ *
+ * Les trois pictogrammes de groupe évitent `IdCardIcon`, `UserSearchIcon` et
+ * `MessageSquareTextIcon`, qui disent déjà autre chose ailleurs dans ce fichier.
+ */
+export const SEARCH_GROUP_LOOK = {
+  contact: { color: "var(--primary)", Icon: ContactRoundIcon },
+  profile: { color: TONE.raw, Icon: MapPinHouseIcon },
+  notes: { color: TONE.speech, Icon: NotebookTextIcon },
+} as const satisfies Record<MatchGroup, Look>;
+
+/**
+ * Le champ d'une correspondance : pictogramme du champ, teinte de son groupe.
+ *
+ * Suivi, note d'appel et SMS reprennent le dessin qu'ils portent déjà sur le
+ * tableau de bord et sur la fiche — une chose qui change de dessin en changeant
+ * d'écran est une chose qu'on relit. Le SMS emprunte le PICTOGRAMME du canal,
+ * JAMAIS sa couleur réservée : trouver un mot dans un texto n'est pas en envoyer
+ * un.
+ */
+export const SEARCH_FIELD_LOOK = {
+  name: { color: SEARCH_GROUP_LOOK.contact.color, Icon: UserRoundIcon },
+  phone: { color: SEARCH_GROUP_LOOK.contact.color, Icon: PhoneIcon },
+  email: { color: SEARCH_GROUP_LOOK.contact.color, Icon: MailIcon },
+  city: { color: SEARCH_GROUP_LOOK.profile.color, Icon: MapPinIcon },
+  address: { color: SEARCH_GROUP_LOOK.profile.color, Icon: HouseIcon },
+  project: { color: SEARCH_GROUP_LOOK.profile.color, Icon: KeyRoundIcon },
+  notes: { color: SEARCH_GROUP_LOOK.notes.color, Icon: StickyNoteIcon },
+  comment: { color: SEARCH_GROUP_LOOK.notes.color, Icon: MessageSquareIcon },
+  followup: { color: SEARCH_GROUP_LOOK.notes.color, Icon: DASHBOARD_LOOK.followups.Icon },
+  call: { color: SEARCH_GROUP_LOOK.notes.color, Icon: DASHBOARD_LOOK.calls.Icon },
+  sms: { color: SEARCH_GROUP_LOOK.notes.color, Icon: CHANNEL_LOOK.sms.Icon },
+} as const satisfies Record<MatchField, Look>;
