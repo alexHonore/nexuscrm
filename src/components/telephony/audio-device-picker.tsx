@@ -51,6 +51,7 @@ export function AudioDevicePicker({ className }: { className?: string }) {
   const outputs = snap.devices.filter((d) => d.kind === "audiooutput");
   const inputs = snap.devices.filter((d) => d.kind === "audioinput");
   const canPickOutput = supportsOutputSelection();
+  const inCall = tel.callState !== "idle" && tel.callState !== "ended";
 
   /**
    * L'autorisation du micro est ce qui débloque les LIBELLÉS. On ouvre et on
@@ -125,7 +126,7 @@ export function AudioDevicePicker({ className }: { className?: string }) {
           <Button
             variant="outline"
             className="h-11 w-full"
-            disabled={asking}
+            disabled={asking || inCall}
             onClick={() => void askForLabels()}
           >
             {t("audio.reveal")}

@@ -4,6 +4,8 @@
  * L'admin bascule le fournisseur dans Réglages → Téléphonie.
  */
 
+import type { CallQuality } from "./call-quality";
+
 export type CallState =
   | "idle"
   | "connecting" // sortant : invitation envoyée
@@ -22,7 +24,7 @@ export interface ActiveCall {
   answeredAt?: Date;
 }
 
-export type RegistrationState = "unregistered" | "registering" | "registered" | "failed";
+export type RegistrationState = "unregistered" | "registering" | "registered" | "failed" | "elsewhere";
 
 export interface TelephonyEvents {
   onRegistrationChange: (state: RegistrationState, error?: string) => void;
@@ -35,6 +37,7 @@ export interface TelephonyEvents {
    */
   onMissedWhileBusy?: (remoteNumber: string) => void;
   onError: (message: string) => void;
+  onQuality?: (sample: CallQuality) => void;
 }
 
 export interface EngineConfig {

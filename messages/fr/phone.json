@@ -4,6 +4,7 @@
     "openWithStatus": "{action} — {status}"
   },
   "status": {
+    "elsewhere": "Téléphone actif dans un autre onglet — fermez cet onglet pour l'utiliser ici",
     "registered": "Ligne prête",
     "registering": "Connexion à la ligne…",
     "unregistered": "Ligne déconnectée",
@@ -35,7 +36,7 @@
     "input": "Microphone",
     "systemDefault": "Appareil par défaut",
     "anonymous": "Appareil",
-    "missing": "L'appareil choisi n'est pas branché — le son passe par le défaut.",
+    "missing": "L'appareil choisi n'est pas branché. Vérifiez l'appareil actif dans Connexion de l'appel.",
     "reveal": "Afficher le nom des appareils",
     "outputUnsupported": "Ce navigateur ne permet pas de choisir le haut-parleur. Utilisez Chrome ou Edge, ou changez la sortie dans les réglages du système."
   },
@@ -82,6 +83,10 @@
     "deleted": "Statut supprimé"
   },
   "errors": {
+    "mic_fallback": "Le microphone choisi est indisponible. Cet appel utilise le microphone par défaut du système.",
+    "mic_disconnected": "Votre microphone s'est déconnecté. Passage au microphone par défaut du système — vérifiez que votre interlocuteur vous entend.",
+    "playback_blocked": "Le navigateur a bloqué le son de l'appel. Touchez ou cliquez dans l'application pour l'activer.",
+    "hold_unavailable": "La mise en attente ne peut pas encore être modifiée. Patientez un instant, puis réessayez.",
     "mic_denied": "Accès au microphone refusé. Autorisez le micro dans les réglages du navigateur puis réessayez.",
     "mic_prompt": "Autorisez l'accès au microphone dans la fenêtre du navigateur pour lancer l'appel.",
     "mic_timeout": "Impossible d'accéder au microphone (aucune réponse). Vérifiez l'autorisation du micro puis réessayez.",
@@ -143,6 +148,31 @@
       "title": "Aucun appel pour cette période",
       "hint": "Composez avec le bouton téléphone en bas de l'écran — vos appels apparaîtront ici."
     }
+  },
+  "quality": {
+    "title": "Connexion de l'appel",
+    "lastCall": "Connexion du dernier appel",
+    "unknown": "Mesures incomplètes",
+    "good": "Réseau stable",
+    "fair": "Réseau dégradé",
+    "poor": "Son à risque",
+    "held": "En attente",
+    "scope": "Mesure la connexion entre ce navigateur et le service téléphonique. Le réseau et l'appareil du destinataire ne sont pas mesurés. Les mesures manquantes sont indiquées comme indisponibles.",
+    "unavailable": "Indisponible",
+    "sentLoss": "Son envoyé : perte de paquets",
+    "sentJitter": "Son envoyé : gigue",
+    "receivedLoss": "Son reçu : perte de paquets",
+    "receivedJitter": "Son reçu : gigue",
+    "delay": "Délai aller-retour",
+    "codec": "Codec audio",
+    "percent": "{value} %",
+    "ms": "{value} ms",
+    "micLevel": "Niveau du microphone",
+    "mic": { "live": "Microphone actif", "muted": "Microphone en sourdine", "interrupted": "Microphone interrompu", "unknown": "État du microphone indisponible" },
+    "micInterrupted": "Le microphone ne transmet plus de son. Vérifiez votre casque et les autorisations du microphone.",
+    "networkAdvice": "Le son risque de couper. Vérifiez votre connexion et suspendez les gros téléversements. Évitez de changer de réseau pendant l'appel.",
+    "captureAdvice": "Pour une voix claire, utilisez un casque filaire, choisissez son microphone et placez-le près de la bouche. Le haut-parleur et le Bluetooth peuvent ajouter de l'écho ou réduire la clarté.",
+    "export": "Télécharger le rapport de qualité"
   },
   "panel": {
     "title": "Téléphone",

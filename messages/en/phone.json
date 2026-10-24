@@ -4,6 +4,7 @@
     "openWithStatus": "{action} — {status}"
   },
   "status": {
+    "elsewhere": "Phone active in another tab — close that tab to use it here",
     "registered": "Line ready",
     "registering": "Connecting to the line…",
     "unregistered": "Line disconnected",
@@ -35,7 +36,7 @@
     "input": "Microphone",
     "systemDefault": "System default device",
     "anonymous": "Device",
-    "missing": "The selected device is not plugged in — sound goes to the default.",
+    "missing": "The selected device is not plugged in. Check the active device under Call connection.",
     "reveal": "Show device names",
     "outputUnsupported": "This browser cannot choose the speaker. Use Chrome or Edge, or change the output in your system settings."
   },
@@ -82,6 +83,10 @@
     "deleted": "Deleted status"
   },
   "errors": {
+    "mic_fallback": "The selected microphone is unavailable. This call is using your system's default microphone.",
+    "mic_disconnected": "Your microphone disconnected. Switching to the system's default microphone — check that the other person can hear you.",
+    "playback_blocked": "Your browser blocked call audio. Tap or click in the app to enable sound.",
+    "hold_unavailable": "The call cannot change hold state yet. Wait a moment and try again.",
     "mic_denied": "Microphone access denied. Allow the microphone in your browser settings and try again.",
     "mic_prompt": "Allow microphone access in the browser prompt to start the call.",
     "mic_timeout": "Could not access the microphone (no response). Check the mic permission and try again.",
@@ -143,6 +148,31 @@
       "title": "No calls for this period",
       "hint": "Dial with the phone button at the bottom of the screen — your calls will show up here."
     }
+  },
+  "quality": {
+    "title": "Call connection",
+    "lastCall": "Last call connection",
+    "unknown": "Incomplete measurements",
+    "good": "Network stable",
+    "fair": "Network degraded",
+    "poor": "Audio at risk",
+    "held": "On hold",
+    "scope": "Measures the connection between this browser and the phone service. The recipient's carrier and device are not measured. Missing measurements are shown as unavailable.",
+    "unavailable": "Unavailable",
+    "sentLoss": "Sent audio: packet loss",
+    "sentJitter": "Sent audio: jitter",
+    "receivedLoss": "Received audio: packet loss",
+    "receivedJitter": "Received audio: jitter",
+    "delay": "Round-trip delay",
+    "codec": "Audio codec",
+    "percent": "{value}%",
+    "ms": "{value} ms",
+    "micLevel": "Microphone level",
+    "mic": { "live": "Microphone active", "muted": "Microphone muted", "interrupted": "Microphone interrupted", "unknown": "Microphone status unavailable" },
+    "micInterrupted": "The microphone has stopped delivering audio. Check your headset and microphone permissions.",
+    "networkAdvice": "Audio may break up. Check your connection and pause large uploads. Avoid switching networks during the call.",
+    "captureAdvice": "For clear speech, use a wired headset, select its microphone, and keep it near your mouth. Speakerphone and Bluetooth can add echo or reduce clarity.",
+    "export": "Download quality report"
   },
   "panel": {
     "title": "Phone",

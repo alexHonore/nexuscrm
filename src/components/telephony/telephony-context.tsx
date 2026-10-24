@@ -32,6 +32,8 @@ import {
   setOutputChoice,
 } from "@/lib/telephony/audio-devices";
 import { primeTones } from "@/lib/telephony/tones";
+import type { CallQuality } from "@/lib/telephony/call-quality";
+import { acquirePhoneLine } from "@/lib/telephony/phone-line-lock";
 import type {
   ActiveCall,
   CallDirection,
@@ -84,6 +86,8 @@ export type TelephonyContextValue = {
   activeCall: (ActiveCall & { clientId?: string; clientName?: string }) | null;
   muted: boolean;
   held: boolean;
+  quality: CallQuality | null;
+  exportQuality: () => void;
   dial: (target: DialTarget) => void;
   answer: () => void;
   hangup: () => void;
@@ -126,6 +130,9 @@ const KNOWN_ERRORS = new Set([
   "call_failed",
   "connect_failed",
   "not_configured",
+  "mic_disconnected",
+  "playback_blocked",
+  "hold_unavailable",
 ]);
 
 const TelephonyContext = createContext<TelephonyContextValue | null>(null);
@@ -193,6 +200,10 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
   const [activeCall, setActiveCall] = useState<TelephonyContextValue["activeCall"]>(null);
   const [muted, setMuted] = useState(false);
   const [held, setHeld] = useState(false);
+  const [quality, setQuality] = useState<CallQuality | null>(null);
+  const qualityHistory = useRef<CallQuality[]>([]);
+  const callStateRef = useRef<CallState>("idle");
+  const mutedRef = useRef(false);
   const [incomingCall, setIncomingCall] = useState<IncomingCallInfo | null>(null);
   const [pendingDisposition, setPendingDisposition] = useState<PendingDisposition | null>(null);
 
@@ -226,12 +237,15 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    let booting = false;
+    const lifetime = new AbortController();
+    let releaseLine: (() => void) | null = null;
 
     const showError = (code: string) => {
       const { t: tt } = i18nRef.current;
-      if (code === "mic_prompt") {
+      if (code === "mic_prompt" || code === "mic_fallback") {
         // Pas une erreur : l'invite micro du navigateur attend une réponse.
-        toast.info(tt("errors.mic_prompt"));
+        toast.info(tt(`errors.${code}`));
         return;
       }
       toast.error(KNOWN_ERRORS.has(code) ? tt(`errors.${code}`) : tt("errors.call_failed"));
@@ -275,6 +289,7 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
       ringRef.current = null;
       setIncomingCall(null);
       setMuted(false);
+      mutedRef.current = false;
       setHeld(false);
 
       if (!endedCall) return;
@@ -361,7 +376,7 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
       });
     };
 
-    const boot = async () => {
+    const performBoot = async () => {
       engineRef.current?.destroy();
       engineRef.current = null;
 
@@ -392,7 +407,19 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
 
       setProvider(config.provider);
       setReady(config.ready);
-      if (!config.ready) return;
+      if (!config.ready) {
+        releaseLine?.();
+        releaseLine = null;
+        setRegistration("unregistered");
+        return;
+      }
+
+      if (!releaseLine) {
+        releaseLine = await acquirePhoneLine(lifetime.signal, () => {
+          if (!cancelled) setRegistration("elsewhere");
+        });
+      }
+      if (cancelled) { releaseLine(); return; }
 
       // Import dynamique : le moteur inutilisé n'est jamais téléchargé.
       const engine: TelephonyEngine =
@@ -415,10 +442,15 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
 
       await engine.init(engineConfig, {
         onRegistrationChange: (state) => {
-          if (!cancelled) setRegistration(state);
+          if (!cancelled && engineRef.current === engine) setRegistration(state);
         },
         onCallStateChange: (state, call) => {
-          if (cancelled) return;
+          if (cancelled || engineRef.current !== engine) return;
+          if (callStateRef.current === "idle" && state !== "idle") {
+            setQuality(null);
+            qualityHistory.current = [];
+          }
+          callStateRef.current = state;
           if (state === "ended") {
             setCallState("ended");
             handleCallEnded(call);
@@ -428,6 +460,7 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
           if (state === "idle") {
             setActiveCall(null);
             setMuted(false);
+            mutedRef.current = false;
             setHeld(false);
           } else if (call) {
             setActiveCall({ ...call, ...callMetaRef.current });
@@ -436,7 +469,7 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
           if (state === "active") setHeld(false);
         },
         onIncoming: (remoteNumber) => {
-          if (cancelled) return;
+          if (cancelled || engineRef.current !== engine) return;
           const number = normalizePhone(remoteNumber) ?? remoteNumber;
           const ringToken = ++ringTokenRef.current;
           const info: IncomingCallInfo = { number, client: null };
@@ -485,7 +518,12 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
           });
         },
         onError: (code) => {
-          if (!cancelled) showError(code);
+          if (!cancelled && engineRef.current === engine) showError(code);
+        },
+        onQuality: (sample) => {
+          if (cancelled || engineRef.current !== engine) return;
+          setQuality(sample);
+          qualityHistory.current = [...qualityHistory.current.slice(-89), sample];
         },
       });
 
@@ -496,6 +534,17 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
       void engine.setInputDevice(getInputChoice());
     };
 
+    const boot = async () => {
+      // Repeated retries must not create several SIP registrations, or destroy
+      // the media engine underneath an active call.
+      if (cancelled || booting || !["idle", "ended"].includes(callStateRef.current)) return;
+      booting = true;
+      setRegistration("registering");
+      try { await performBoot(); }
+      catch { if (!cancelled) setRegistration("failed"); }
+      finally { booting = false; }
+    };
+
     bootRef.current = boot;
     void boot();
 
@@ -503,6 +552,8 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
       engineRef.current?.destroy();
       engineRef.current = null;
+      lifetime.abort();
+      releaseLine?.();
     };
   }, []);
 
@@ -510,6 +561,10 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
 
   const dial = useCallback(
     (target: DialTarget) => {
+      if (registration === "elsewhere") {
+        toast.info(t("status.elsewhere"));
+        return;
+      }
       const engine = engineRef.current;
       const config = configRef.current;
       if (!engine || !config?.ready) {
@@ -563,7 +618,7 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
         });
       callLogIdRef.current = chain;
     },
-    [t, tClients],
+    [t, tClients, registration],
   );
 
   const answer = useCallback(() => {
@@ -606,17 +661,14 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const toggleMute = useCallback(() => {
-    setMuted((prev) => {
-      engineRef.current?.mute(!prev);
-      return !prev;
-    });
+    mutedRef.current = !mutedRef.current;
+    engineRef.current?.mute(mutedRef.current);
+    setMuted(mutedRef.current);
   }, []);
 
   const toggleHold = useCallback(() => {
-    setHeld((prev) => {
-      engineRef.current?.hold(!prev);
-      return !prev;
-    });
+    // Only the engine's hold/unhold events confirm that the action succeeded.
+    engineRef.current?.hold(callStateRef.current !== "held");
   }, []);
 
   const sendDTMF = useCallback((digit: string) => {
@@ -628,8 +680,21 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const retryRegistration = useCallback(() => {
-    setRegistration("registering");
     void bootRef.current();
+  }, []);
+
+  const exportQuality = useCallback(() => {
+    // No audio, phone numbers, credentials, SDP or network addresses in this file.
+    const url = URL.createObjectURL(new Blob([JSON.stringify({
+      provider: configRef.current?.provider,
+      scope: "browser-to-media-service",
+      samples: qualityHistory.current,
+    }, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `nexus-call-quality-${Date.now()}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1_000);
   }, []);
 
   const setOutputDevice = useCallback((deviceId: string) => {
@@ -654,6 +719,8 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
       activeCall,
       muted,
       held,
+      quality,
+      exportQuality,
       dial,
       answer,
       hangup,
@@ -676,6 +743,8 @@ export function TelephonyProvider({ children }: { children: React.ReactNode }) {
       activeCall,
       muted,
       held,
+      quality,
+      exportQuality,
       dial,
       answer,
       hangup,

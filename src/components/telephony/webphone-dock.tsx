@@ -35,6 +35,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { AudioDevicePicker } from "@/components/telephony/audio-device-picker";
+import { CallQualityPanel } from "@/components/telephony/call-quality-panel";
 import {
   startRingtone,
   stopRingtone,
@@ -193,7 +194,7 @@ function PhonePanel({
         {inCall && tel.activeCall ? (
           <ActiveCallPanelCard tel={tel} call={tel.activeCall} />
         ) : (
-          <DialpadContent />
+          <><DialpadContent /><CallQualityPanel /></>
         )}
       </div>
     </SidePanel>
@@ -307,6 +308,7 @@ const REG_DOT: Record<string, string> = {
   registering: "bg-amber-500",
   unregistered: "bg-amber-500",
   failed: "bg-red-500",
+  elsewhere: "bg-muted-foreground",
 };
 
 function DialFab({ onOpenPanel }: { onOpenPanel: () => void }) {
@@ -651,6 +653,7 @@ function CallControlsSection({ tel }: { tel: TelephonyContextValue }) {
         </Button>
       </div>
 
+      <CallQualityPanel />
       {dtmfOpen ? (
         <div className="mt-3 border-t pt-3">
           {dtmfHistory ? (

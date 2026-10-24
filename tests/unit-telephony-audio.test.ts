@@ -65,6 +65,27 @@ afterEach(() => {
 // ── Registre des sorties ─────────────────────────────────────────────────────
 
 describe("choix du haut-parleur", () => {
+  it("actively falls back to the system output when a selected speaker disappears", async () => {
+    const store = await import("@/lib/telephony/audio-devices");
+    const setSinkId = vi.fn().mockRejectedValueOnce(new Error("NotFoundError")).mockResolvedValue(undefined);
+    store.sinkForElement({ setSinkId } as unknown as HTMLMediaElement).apply("unplugged");
+    await vi.waitFor(() => expect(setSinkId).toHaveBeenCalledTimes(2));
+    expect(setSinkId.mock.calls.map(([id]) => id)).toEqual(["unplugged", "default"]);
+  });
+
+  it("a slow failed old selection cannot override the new headset", async () => {
+    const store = await import("@/lib/telephony/audio-devices");
+    let reject!: (error: Error) => void;
+    const setSinkId = vi.fn().mockImplementationOnce(() => new Promise((_, r) => { reject = r; })).mockResolvedValue(undefined);
+    const sink = store.sinkForElement({ setSinkId } as unknown as HTMLMediaElement);
+    sink.apply("old");
+    await vi.waitFor(() => expect(setSinkId).toHaveBeenCalledOnce());
+    sink.apply("new");
+    reject(new Error("unplugged"));
+    await vi.waitFor(() => expect(setSinkId).toHaveBeenCalledTimes(2));
+    expect(setSinkId.mock.calls.map(([id]) => id)).toEqual(["old", "new"]);
+  });
+
   it("applique le choix mémorisé à une sortie inscrite APRÈS coup", async () => {
     const store = await import("@/lib/telephony/audio-devices");
     store.setOutputChoice("casque-123");
@@ -74,7 +95,7 @@ describe("choix du haut-parleur", () => {
     const { el, calls } = fakeMediaElement();
     store.registerSink(store.sinkForElement(el));
 
-    expect(calls).toEqual(["casque-123"]);
+    await vi.waitFor(() => expect(calls).toEqual(["casque-123"]));
   });
 
   it("re-route TOUTES les sorties vivantes d'un seul choix", async () => {
@@ -83,23 +104,25 @@ describe("choix du haut-parleur", () => {
     const b = fakeMediaElement();
     store.registerSink(store.sinkForElement(a.el));
     store.registerSink(store.sinkForElement(b.el));
+    await vi.waitFor(() => expect(a.calls).toEqual(["default"]));
 
     store.setOutputChoice("casque-123");
 
     // "" à l'inscription (aucun choix), puis le casque : les deux ont suivi.
-    expect(a.calls).toEqual(["default", "casque-123"]);
-    expect(b.calls).toEqual(["default", "casque-123"]);
+    await vi.waitFor(() => expect(a.calls).toEqual(["default", "casque-123"]));
+    await vi.waitFor(() => expect(b.calls).toEqual(["default", "casque-123"]));
   });
 
   it("traduit « aucun choix » en \"default\" — setSinkId refuse la chaîne vide", async () => {
     const store = await import("@/lib/telephony/audio-devices");
     const { el, calls } = fakeMediaElement();
     store.registerSink(store.sinkForElement(el));
-
+    await vi.waitFor(() => expect(calls).toEqual(["default"]));
     store.setOutputChoice("casque-123");
+    await vi.waitFor(() => expect(calls).toEqual(["default", "casque-123"]));
     store.setOutputChoice("");
 
-    expect(calls).toEqual(["default", "casque-123", "default"]);
+    await vi.waitFor(() => expect(calls).toEqual(["default", "casque-123", "default"]));
   });
 
   it("ne touche pas à une sortie désinscrite (moteur détruit)", async () => {
@@ -109,7 +132,7 @@ describe("choix du haut-parleur", () => {
     release();
 
     store.setOutputChoice("casque-123");
-    expect(calls).toEqual(["default"]);
+    await vi.waitFor(() => expect(calls).toEqual(["default"]));
   });
 
   it("ne lève pas sur un navigateur sans setSinkId (Safari, Firefox)", async () => {
@@ -136,7 +159,7 @@ describe("choix du haut-parleur", () => {
     expect(() => store.setOutputChoice("casque-123")).not.toThrow();
     // Perdu au rechargement, mais vivant pour cette session.
     expect(store.getOutputChoice()).toBe("casque-123");
-    expect(calls).toContain("casque-123");
+    await vi.waitFor(() => expect(calls).toContain("casque-123"));
   });
 
   it("persiste le choix — un rechargement retrouve le casque", async () => {
@@ -282,7 +305,7 @@ describe("tonalités", () => {
 
     tones.primeTones();
 
-    expect(sinkIds).toContain("casque-123");
+    await vi.waitFor(() => expect(sinkIds).toContain("casque-123"));
   });
 
   it("programme la cadence d'avance sur l'horloge audio, pas au fil des minuteries", async () => {

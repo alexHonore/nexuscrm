@@ -166,7 +166,7 @@ Rien ne change par rapport à une installation classique. Dans le portail
    - Device type : ATA / IP Phone / Softphone
    - **NAT : yes** (important — c'est ce qui fait que voip.ms renvoie les
      appels entrants vers la passerelle)
-   - Allowed codecs : **ulaw** en premier, plus **opus** s'il est proposé
+   - Allowed codecs : **ulaw (PCMU)** et **G.722**. Opus n'est pas pris en charge par voip.ms ; cette passerelle relaie les codecs et ne configure pas de transcodage Opus. G.722 peut fournir de la voix large bande quand le trajet distant le permet.
      (g729 facultatif)
    - DTMF : auto ; Lock international : au goût du courtier
    - *(Le CRM peut aussi créer les sous-comptes automatiquement via l'API —
@@ -254,7 +254,7 @@ Dans l'ordre — chaque étape valide une couche de plus :
 | Audio dans un seul sens (ou aucun) | rtpengine annonce la mauvaise IP ou ports RTP bloqués | `RTP_INTERFACE` dans `.env` = IPv4 publique du KVM ; pare-feu 23000-33000/udp ouvert (ufw **et** hPanel le cas échéant) ; `docker compose logs rtpengine` (chercher les adresses annoncées dans le SDP) |
 | Appels sortants OK, mais les appels entrants ne sonnent pas | Routage DID, ou perte du lien enregistrement→fureteur | DID routé vers le bon sous-compte ? `sngrep` sur le KVM : l'INVITE de voip.ms arrive-t-il sur 5060 ? S'il arrive mais répond 404 → voir « Limites connues / Plan B » |
 | Le CRM n'arrive pas à parler à l'API voip.ms | IP non autorisée ou jeton différent | L'IPv4 du KVM est bien dans « Enable IP Address » chez voip.ms ; `VOIPMS_API_PROXY_TOKEN` (Vercel) = `PROXY_TOKEN` (`.env` du KVM) ; test direct : `curl -H "x-proxy-token: <jeton>" "https://voice.../voipms-api?method=getBalance&api_username=...&api_password=...&content_type=json"` |
-| Écho ou coupures d'audio | Réseau du téléphoniste | Tester en filaire/LTE ; le POP Montréal ; codecs ulaw/opus |
+| Écho ou coupures d'audio | Microphone, réseau du téléphoniste, passerelle ou transporteur | Consulter « Connexion de l'appel » dans le CRM et télécharger le rapport ; tester un casque filaire et une connexion stable ; vérifier les deux trajets RTP (voir `docs/telephony-quality-audit.md` à la racine du dépôt) |
 | n8n ne répond plus après l'installation | (Ne devrait pas arriver : rien n'est modifié chez n8n) | `docker ps` : `root-traefik-1` et `root-n8n-1` tournent ? `docker compose -f /root/docker-compose.yml up -d` dans le dossier de n8n ; la passerelle n'occupe ni 80 ni 443 |
 
 Commandes utiles sur le KVM :

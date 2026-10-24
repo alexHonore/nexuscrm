@@ -45,6 +45,8 @@ import {
   sinkForElement,
 } from "@/lib/telephony/audio-devices";
 import { startRingback, stopRingback } from "@/lib/telephony/tones";
+import { acquireMicrophone, speechConstraints, stopStream } from "@/lib/telephony/microphone";
+import { monitorCallQuality } from "@/lib/telephony/call-quality";
 import type {
   ActiveCall,
   EngineConfig,
@@ -64,17 +66,7 @@ const PC_CONFIG: RTCConfiguration = {
  * peu près ». Le repli sur le défaut si l'appareil a disparu est dans
  * acquireMic — sans lui, débrancher un casque USB empêcherait d'appeler.
  */
-function mediaConstraints(deviceId: string): MediaStreamConstraints {
-  return {
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-    },
-    video: false,
-  };
-}
+const mediaConstraints = speechConstraints;
 
 /** Cadence de lecture des statistiques RTP pendant la sonnerie. */
 const RTP_POLL_MS = 250;
@@ -119,8 +111,9 @@ const PSTN_CODECS = new Set(["pcmu", "pcma", "g722", "g729", "telephone-event"])
  * n'aboutit jamais. Mesuré le 2026-08-07 — 774 o : voip.ms répond ;
  * 1 755 o : silence total ; le même message en TCP : réponse immédiate.
  *
- * Aucun de ces codecs supplémentaires ne sert : la ligne est en 8 kHz de bout
- * en bout. On les retire donc, ce qui évite aussi un transcodage inutile.
+ * Opus n'est pas accepté par voip.ms et la passerelle ne le transcode pas.
+ * G.722 reste proposé : son horloge RTP de 8 kHz transporte de la voix à
+ * 16 kHz. La bande passante finale dépend toutefois du transporteur distant.
  * En cas de doute (aucun codec reconnu), on renvoie le SDP intact.
  */
 export function trimSdpForPstn(sdp: string): string {
@@ -179,9 +172,6 @@ export function trimSdpForPstn(sdp: string): string {
 /** Collecte ICE : envoi de l'INVITE 500 ms après le dernier candidat, 3 s max. */
 const ICE_SETTLE_MS = 500;
 const ICE_MAX_MS = 3_000;
-/** Micro : rappel à l'usager après 2,5 s, abandon après 30 s. */
-const MIC_HINT_MS = 2_500;
-const MIC_MAX_MS = 30_000;
 /** Sortant : échec si AUCUNE réponse SIP (180/183/2xx/4xx…) après 20 s. */
 const DIAL_WATCHDOG_MS = 20_000;
 
@@ -225,6 +215,15 @@ export class JsSipEngine implements TelephonyEngine {
   /** Sondage des paquets RTP entrants — coupe la tonalité au vrai son. */
   private rtpPoll: ReturnType<typeof setInterval> | null = null;
   private releaseAudioSink: (() => void) | null = null;
+  private micRequest: AbortController | null = null;
+  private inputRequest: AbortController | null = null;
+  private inputChange = Promise.resolve();
+  private answering = false;
+  private userMuted = false;
+  private earlyMedia = false;
+  private audioPc: RTCPeerConnection | null = null;
+  private stopQuality: (() => void) | null = null;
+  private clearPlaybackRetry: (() => void) | null = null;
 
   get registrationState(): RegistrationState {
     return this.registration;
@@ -300,7 +299,7 @@ export class JsSipEngine implements TelephonyEngine {
       this.events?.onError("not_registered");
       throw new Error("not_registered");
     }
-    if (this.session) {
+    if (this.session || this.call) {
       this.events?.onError("already_in_call");
       throw new Error("already_in_call");
     }
@@ -317,12 +316,16 @@ export class JsSipEngine implements TelephonyEngine {
     const target = `sip:${toDialString(number)}@${domain}`;
 
     const gen = ++this.dialGen;
+    this.userMuted = false;
+    this.micRequest?.abort();
+    const request = new AbortController();
+    this.micRequest = request;
     this.call = { direction: "outbound", remoteNumber: number, startedAt: new Date() };
     this.events?.onCallStateChange("connecting", this.call);
 
     let stream: MediaStream;
     try {
-      stream = await this.acquireMic();
+      stream = await this.acquireMic(request.signal);
     } catch (err) {
       // Si l'usager a raccroché pendant l'attente (génération périmée),
       // hangup() a déjà remis l'UI au repos — ne pas ré-émettre ended/idle.
@@ -333,14 +336,16 @@ export class JsSipEngine implements TelephonyEngine {
         this.events?.onCallStateChange("idle", null);
       }
       throw err;
+    } finally {
+      if (this.micRequest === request) this.micRequest = null;
     }
     // L'état a pu changer pendant l'attente du micro : raccroché ou nouveau
     // dial() (génération périmée), ou une session apparue entre-temps.
-    if (gen !== this.dialGen || this.session || this.call?.direction !== "outbound") {
+    if (this.destroyed || gen !== this.dialGen || this.session || this.call?.direction !== "outbound") {
       for (const track of stream.getTracks()) track.stop();
       throw new Error("canceled");
     }
-    this.localStream = stream;
+    this.useLocalStream(stream);
 
     let session: RTCSession;
     try {
@@ -368,14 +373,34 @@ export class JsSipEngine implements TelephonyEngine {
   }
 
   answer(): void {
-    if (!this.session || this.call?.direction !== "inbound") return;
-    this.session.answer({
-      mediaConstraints: mediaConstraints(getInputChoice()),
-      pcConfig: PC_CONFIG,
+    const session = this.session;
+    if (!session || this.call?.direction !== "inbound" || this.call.answeredAt || this.answering) return;
+    this.answering = true;
+    const request = new AbortController();
+    this.micRequest = request;
+    this.events?.onCallStateChange("connecting", this.call);
+    void this.acquireMic(request.signal).then((stream) => {
+      if (this.destroyed || this.session !== session || request.signal.aborted) {
+        stopStream(stream);
+        return;
+      }
+      this.useLocalStream(stream);
+      session.answer({ mediaStream: stream, mediaConstraints: mediaConstraints(getInputChoice()), pcConfig: PC_CONFIG });
+    }).catch((error) => {
+      if (this.session !== session || request.signal.aborted) return;
+      if (!(error instanceof Error) || !error.message.startsWith("mic_")) this.events?.onError("call_failed");
+      this.releaseLocalStream();
+      try { session.terminate(); } catch { /* already ended */ }
+    }).finally(() => {
+      if (this.micRequest === request) {
+        this.micRequest = null;
+      }
     });
   }
 
   hangup(): void {
+    this.micRequest?.abort();
+    this.inputRequest?.abort();
     if (!this.session && this.call?.direction === "outbound") {
       // Appel encore en préflight micro (aucune session SIP) : périmer la
       // génération — dial() s'arrêtera au retour de getUserMedia sans émettre
@@ -395,6 +420,7 @@ export class JsSipEngine implements TelephonyEngine {
   }
 
   reject(): void {
+    this.micRequest?.abort();
     try {
       this.session?.terminate({ status_code: 486, reason_phrase: "Busy Here" });
     } catch {
@@ -403,15 +429,19 @@ export class JsSipEngine implements TelephonyEngine {
   }
 
   mute(muted: boolean): void {
+    this.userMuted = muted;
+    for (const track of this.localStream?.getAudioTracks() ?? []) {
+      track.enabled = !muted && !(this.session?.isOnHold?.().local ?? false);
+    }
     if (!this.session) return;
     if (muted) this.session.mute({ audio: true });
     else this.session.unmute({ audio: true });
   }
 
   hold(held: boolean): void {
-    if (!this.session) return;
-    if (held) this.session.hold();
-    else this.session.unhold();
+    if (!this.session || !this.call?.answeredAt) return;
+    const changed = held ? this.session.hold() : this.session.unhold();
+    if (!changed) this.events?.onError("hold_unavailable");
   }
 
   sendDTMF(digit: string): void {
@@ -439,39 +469,58 @@ export class JsSipEngine implements TelephonyEngine {
    * offre repasserait par trimSdpForPstn, avec le risque de MTU que l'on sait.
    */
   async setInputDevice(deviceId: string): Promise<void> {
-    const pc = this.session?.connection;
-    if (!pc) return; // hors appel : le choix est déjà mémorisé par le magasin
-    const sender = pc.getSenders().find((s) => s.track?.kind === "audio");
-    if (!sender) return;
-
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia(mediaConstraints(deviceId));
-    } catch {
-      this.events?.onError("mic_unavailable");
-      return;
-    }
-    const track = stream.getAudioTracks()[0];
-    if (!track) {
-      for (const t of stream.getTracks()) t.stop();
-      return;
-    }
-    // La sourdine en cours doit survivre au changement d'appareil : sinon
-    // l'agent se croit muet et parle dans le vide (ou l'inverse, bien pire).
-    track.enabled = sender.track?.enabled ?? true;
-    try {
-      await sender.replaceTrack(track);
-    } catch {
-      for (const t of stream.getTracks()) t.stop();
-      this.events?.onError("mic_unavailable");
-      return;
-    }
-    this.releaseLocalStream();
-    this.localStream = stream;
+    const session = this.session;
+    const sender = session?.connection?.getSenders().find((s) => s.track?.kind === "audio");
+    if (!session || !sender) return;
+    this.inputRequest?.abort();
+    const request = new AbortController();
+    this.inputRequest = request;
+    // Serialize replaceTrack too: a slow old choice cannot replace the latest mic.
+    const change = this.inputChange.catch(() => {}).then(async () => {
+      let stream: MediaStream | null = null;
+      try {
+        stream = await this.acquireMic(request.signal, deviceId);
+        if (request.signal.aborted || this.destroyed || this.session !== session) return;
+        const track = stream.getAudioTracks()[0];
+        if (!track) return;
+        track.enabled = !this.userMuted && !(session.isOnHold?.().local ?? false);
+        const oldTrack = sender.track;
+        try { await sender.replaceTrack(track); } catch {
+          if (!request.signal.aborted) this.events?.onError("mic_unavailable");
+          return;
+        }
+        if (request.signal.aborted || this.destroyed || this.session !== session) {
+          if (!this.destroyed && this.session === session && oldTrack?.readyState === "live") {
+            oldTrack.enabled = !this.userMuted && !(session.isOnHold?.().local ?? false);
+            await sender.replaceTrack(oldTrack).catch(() => {});
+          }
+          return;
+        }
+        // Mute/hold may have changed while replaceTrack was pending.
+        track.enabled = !this.userMuted && !(session.isOnHold?.().local ?? false);
+        const ownedOldTrack = oldTrack && this.localStream?.getTracks().includes(oldTrack);
+        this.releaseLocalStream();
+        if (!ownedOldTrack) oldTrack?.stop();
+        this.useLocalStream(stream, track.enabled);
+        stream = null;
+      } catch { /* acquireMic already reported the error */ }
+      finally {
+        if (stream) stopStream(stream);
+        if (this.inputRequest === request) this.inputRequest = null;
+      }
+    });
+    this.inputChange = change;
+    return change;
   }
 
   destroy(): void {
     this.destroyed = true;
+    this.dialGen++;
+    this.micRequest?.abort();
+    this.inputRequest?.abort();
+    this.stopQuality?.();
+    this.stopQuality = null;
+    this.clearPlaybackRetry?.();
     this.clearReconnectTimer();
     this.clearDialWatchdog();
     this.clearIceTimers();
@@ -506,64 +555,36 @@ export class JsSipEngine implements TelephonyEngine {
    * introuvable / expiré) et rappel si l'invite du navigateur reste sans
    * réponse — au lieu d'un « Connexion… » silencieux.
    */
-  private async acquireMic(deviceId: string = getInputChoice()): Promise<MediaStream> {
-    const media = typeof navigator === "undefined" ? undefined : navigator.mediaDevices;
-    if (!media?.getUserMedia) {
-      this.events?.onError("mic_unavailable");
-      throw new Error("mic_unavailable");
-    }
-    const hintTimer = setTimeout(() => this.events?.onError("mic_prompt"), MIC_HINT_MS);
-    let timedOut = false;
+  private async acquireMic(signal: AbortSignal, deviceId: string = getInputChoice()): Promise<MediaStream> {
     try {
-      const stream = await Promise.race([
-        media.getUserMedia(mediaConstraints(deviceId)).then((s) => {
-          if (!timedOut) return s;
-          // Permission accordée après l'abandon : libérer ce flux orphelin.
-          for (const track of s.getTracks()) track.stop();
-          throw new Error("mic_timeout");
-        }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => {
-            timedOut = true;
-            reject(new Error("mic_timeout"));
-          }, MIC_MAX_MS),
-        ),
-      ]);
-      // Le micro accordé, enumerateDevices() livre enfin les LIBELLÉS : c'est
-      // le seul moment où le sélecteur peut afficher « Casque Jabra » plutôt
-      // que « Périphérique 2 ».
+      const stream = await acquireMicrophone({
+        deviceId,
+        signal,
+        onHint: () => this.events?.onError("mic_prompt"),
+        onFallback: () => this.events?.onError("mic_fallback"),
+      });
       void refreshDevices();
       return stream;
-    } catch (err) {
-      // `instanceof DOMException` est faux d'un realm à l'autre (iframe) et
-      // avec certains polyfills : on lit `name`/`message` sans contrainte de
-      // type, sinon un refus de micro serait annoncé « aucun micro » et
-      // l'agent chercherait un problème de matériel au lieu d'autoriser.
-      const { name = "", message = "" } = (err ?? {}) as { name?: string; message?: string };
-      // Micro choisi mais débranché depuis le dernier appel : reprendre sur le
-      // défaut plutôt que de refuser l'appel. Le choix reste mémorisé — il
-      // reprendra effet au rebranchement.
-      if (deviceId && (name === "OverconstrainedError" || name === "NotFoundError")) {
-        clearTimeout(hintTimer);
-        return this.acquireMic("");
-      }
-      const denied =
-        name === "NotAllowedError" ||
-        name === "SecurityError" ||
-        name === "PermissionDeniedError";
-      const code = denied
-        ? "mic_denied"
-        : name === "mic_timeout" || message === "mic_timeout"
-          ? "mic_timeout"
-          : "mic_unavailable";
-      this.events?.onError(code);
-      throw new Error(code);
-    } finally {
-      clearTimeout(hintTimer);
+    } catch (error) {
+      if (!signal.aborted) this.events?.onError(error instanceof Error ? error.message : "mic_unavailable");
+      throw error;
+    }
+  }
+
+  private useLocalStream(stream: MediaStream, enabled = !this.userMuted): void {
+    this.localStream = stream;
+    for (const track of stream.getAudioTracks()) {
+      track.enabled = enabled;
+      track.addEventListener("ended", () => {
+        if (this.destroyed || this.localStream !== stream || !this.session) return;
+        this.events?.onError("mic_disconnected");
+        void this.setInputDevice("");
+      }, { once: true });
     }
   }
 
   private handleIncoming(e: IncomingRTCSessionEvent): void {
+    if (this.destroyed) return;
     const user = e.request.from.uri.user || "";
     const display = e.request.from.display_name || "";
     // Brut (10 chiffres, 11 chiffres ou déjà E.164) — normalisé côté contexte.
@@ -581,6 +602,7 @@ export class JsSipEngine implements TelephonyEngine {
       return;
     }
 
+    this.userMuted = false;
     this.call = { direction: "inbound", remoteNumber, startedAt: new Date() };
     this.attachSession(e.session);
     this.events?.onIncoming(remoteNumber);
@@ -589,11 +611,16 @@ export class JsSipEngine implements TelephonyEngine {
 
   private attachSession(session: RTCSession): void {
     this.session = session;
+    this.earlyMedia = false;
+    const current = () => !this.destroyed && this.session === session;
     this.wireAudio(session);
+    if (this.userMuted) session.mute({ audio: true });
 
     // Allège l'offre SDP avant l'envoi (voir trimSdpForPstn). JsSIP réutilise
     // la valeur de `e.sdp` après l'événement : la muter suffit.
     session.on("sdp", (e: { originator: string; type: string; sdp: string }) => {
+      if (!current()) return;
+      if (e.originator === "local") this.clearIceTimers();
       if (e.originator === "local" && e.type === "offer") {
         e.sdp = trimSdpForPstn(e.sdp);
       }
@@ -601,19 +628,24 @@ export class JsSipEngine implements TelephonyEngine {
 
     // Ne pas attendre la collecte ICE complète (voir l'en-tête du fichier).
     session.on("icecandidate", (e: IceCandidateEvent) => {
+      if (!current()) return;
       this.sawIceCandidate = true;
+      const ready = () => {
+        this.clearIceTimers();
+        if (current()) e.ready();
+      };
       const line = e.candidate?.candidate ?? "";
       if (e.candidate?.type === "srflx" || line.includes(" typ srflx")) {
-        e.ready();
+        ready();
         return;
       }
       if (this.iceSettleTimer) clearTimeout(this.iceSettleTimer);
-      this.iceSettleTimer = setTimeout(e.ready, ICE_SETTLE_MS);
-      if (!this.iceMaxTimer) this.iceMaxTimer = setTimeout(e.ready, ICE_MAX_MS);
+      this.iceSettleTimer = setTimeout(ready, ICE_SETTLE_MS);
+      if (!this.iceMaxTimer) this.iceMaxTimer = setTimeout(ready, ICE_MAX_MS);
     });
 
     session.on("progress", () => {
-      if (this.call?.direction !== "outbound") return;
+      if (!current() || this.call?.direction !== "outbound" || this.call.answeredAt) return;
       this.clearDialWatchdog();
       // TOUJOURS sonner. L'ancienne version se taisait dès qu'un 183 portait du
       // SDP, en supposant que l'opérateur enverrait sa propre tonalité — mais
@@ -623,10 +655,13 @@ export class JsSipEngine implements TelephonyEngine {
       // sonne et le suivant reste muet. Notre tonalité se tait maintenant sur
       // du VRAI son (paquets RTP reçus), pas sur une promesse de signalisation.
       this.startRingback();
+      // track often fires BEFORE progress (183 SDP), so monitor from both events.
+      if (this.audioPc) this.watchInboundRtp(this.audioPc);
       this.events?.onCallStateChange("ringing", this.call);
     });
 
     const onAnswered = () => {
+      if (!current()) return;
       this.clearDialWatchdog();
       this.stopRingback();
       if (!this.call) return;
@@ -636,18 +671,27 @@ export class JsSipEngine implements TelephonyEngine {
     session.on("accepted", onAnswered);
     session.on("confirmed", onAnswered);
 
-    session.on("hold", () => this.events?.onCallStateChange("held", this.call));
-    session.on("unhold", () => this.events?.onCallStateChange("active", this.call));
+    session.on("hold", () => { if (current()) this.events?.onCallStateChange("held", this.call); });
+    session.on("unhold", () => { if (current()) this.events?.onCallStateChange("active", this.call); });
 
     session.on("getusermediafailed", () => {
+      if (!current()) return;
       // Micro refusé — message clair côté UI, l'appel ne peut pas continuer.
       this.events?.onError("mic_denied");
     });
 
     const onEnd = (e: EndEvent) => {
+      if (this.session !== session) return;
       const ended = this.call;
       this.session = null;
       this.call = null;
+      this.micRequest?.abort();
+      this.inputRequest?.abort();
+      this.answering = false;
+      this.stopQuality?.();
+      this.stopQuality = null;
+      this.audioPc = null;
+      this.clearPlaybackRetry?.();
       this.clearDialWatchdog();
       this.clearIceTimers();
       this.stopRingback();
@@ -676,8 +720,14 @@ export class JsSipEngine implements TelephonyEngine {
   /** Route le flux audio distant vers l'unique élément <audio>. */
   private wireAudio(session: RTCSession): void {
     const attach = (pc: RTCPeerConnection) => {
+      if (this.destroyed || this.session !== session || this.audioPc === pc) return;
+      this.audioPc = pc;
+      this.stopQuality?.();
+      this.stopQuality = monitorCallQuality(pc, (sample) => {
+        if (this.session === session && this.call?.answeredAt) this.events?.onQuality?.(sample);
+      });
       pc.addEventListener("track", (e: RTCTrackEvent) => {
-        if (e.track.kind !== "audio") return;
+        if (this.destroyed || this.session !== session || e.track.kind !== "audio") return;
         // NE PAS couper la tonalité ici. Cet événement se déclenche quand la
         // description distante est POSÉE, pas quand du son arrive : couper là
         // laissait l'agent dans le silence pendant toute la sonnerie. C'est le
@@ -703,16 +753,24 @@ export class JsSipEngine implements TelephonyEngine {
   private playRemoteAudio(): void {
     const audio = this.audio;
     if (!audio) return;
+    const stream = audio.srcObject;
+    this.clearPlaybackRetry?.();
     void audio.play().catch(() => {
+      if (this.destroyed || this.audio !== audio || !stream || audio.srcObject !== stream) return;
+      this.events?.onError("playback_blocked");
       if (typeof document === "undefined" || typeof document.addEventListener !== "function") return;
       const retry = () => {
-        document.removeEventListener("pointerdown", retry, true);
-        document.removeEventListener("keydown", retry, true);
+        this.clearPlaybackRetry?.();
         // L'appel a pu se terminer entre-temps : ne pas ressusciter un flux mort.
-        if (this.audio === audio && audio.srcObject) void audio.play().catch(() => {});
+        if (this.audio === audio && audio.srcObject === stream) void audio.play().catch(() => {});
       };
       document.addEventListener("pointerdown", retry, true);
       document.addEventListener("keydown", retry, true);
+      this.clearPlaybackRetry = () => {
+        document.removeEventListener("pointerdown", retry, true);
+        document.removeEventListener("keydown", retry, true);
+        this.clearPlaybackRetry = null;
+      };
     });
   }
 
@@ -732,12 +790,21 @@ export class JsSipEngine implements TelephonyEngine {
       void pc
         .getStats()
         .then((stats) => {
-          let received = 0;
+          if (this.audioPc !== pc || !this.ringbackOn) return;
+          let audible = false;
           stats.forEach((report) => {
-            const r = report as { type?: string; kind?: string; packetsReceived?: number };
-            if (r.type === "inbound-rtp" && r.kind === "audio") received += r.packetsReceived ?? 0;
+            const r = report as { type?: string; kind?: string; mediaType?: string; packetsReceived?: number; totalAudioEnergy?: number; audioLevel?: number };
+            if (r.type !== "inbound-rtp" || (r.kind ?? r.mediaType) !== "audio" || !(r.packetsReceived! > 0)) return;
+            // Some carriers send silent RTP before ringback. When the browser
+            // supplies energy, packet arrival alone must not silence our tone.
+            if (typeof r.totalAudioEnergy === "number") audible ||= r.totalAudioEnergy > 0;
+            else if (typeof r.audioLevel === "number") audible ||= r.audioLevel > 0;
+            else audible = true;
           });
-          if (received > 0) this.stopRingback();
+          if (audible) {
+            this.earlyMedia = true;
+            this.stopRingback();
+          }
         })
         .catch(() => {
           // getStats indisponible : la tonalité s'arrêtera au décroché.
@@ -754,7 +821,7 @@ export class JsSipEngine implements TelephonyEngine {
 
   /** Tonalité de retour d'appel nord-américaine — voir `tones.ts`. */
   private startRingback(): void {
-    if (this.ringbackOn) return;
+    if (this.ringbackOn || this.earlyMedia) return;
     this.ringbackOn = true;
     startRingback();
   }

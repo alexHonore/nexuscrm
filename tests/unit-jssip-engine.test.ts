@@ -105,15 +105,14 @@ let gumReject: ((err: unknown) => void) | null = null;
 let stoppedTracks = 0;
 
 function fakeStream() {
+  const track = {
+    kind: "audio", enabled: true, readyState: "live", muted: false,
+    addEventListener: vi.fn(),
+    stop: () => { stoppedTracks += 1; },
+  };
   return {
-    getTracks: () => [
-      {
-        kind: "audio",
-        stop: () => {
-          stoppedTracks += 1;
-        },
-      },
-    ],
+    getTracks: () => [track],
+    getAudioTracks: () => [track],
   };
 }
 
@@ -605,14 +604,14 @@ describe("chien de garde de composition", () => {
  */
 describe("tonalité de retour d'appel", () => {
   /** Piste audio distante + statistiques RTP pilotables depuis le test. */
-  function stubPeerConnection(packetsReceived: () => number) {
+  function stubPeerConnection(packetsReceived: () => number, energy: () => number | undefined = () => undefined) {
     const listeners = new Map<string, (e: unknown) => void>();
     const pc = {
       addEventListener: (type: string, fn: (e: unknown) => void) => listeners.set(type, fn),
       getStats: () =>
         Promise.resolve({
           forEach: (fn: (r: unknown) => void) =>
-            fn({ type: "inbound-rtp", kind: "audio", packetsReceived: packetsReceived() }),
+            fn({ type: "inbound-rtp", kind: "audio", packetsReceived: packetsReceived(), totalAudioEnergy: energy() }),
         }),
     };
     const emitTrack = () =>
@@ -690,6 +689,24 @@ describe("tonalité de retour d'appel", () => {
 
     expect(stop).toHaveBeenCalled();
   });
+
+  it("keeps ringing over silent RTP until the carrier actually supplies audio energy", async () => {
+    const { engine } = await bootEngine();
+    const tones = await import("@/lib/telephony/tones");
+    const stop = vi.spyOn(tones, "stopRingback");
+    await dialWithMic(engine);
+    let energy = 0;
+    const { pc, emitTrack } = stubPeerConnection(() => 50, () => energy);
+    h.state.session!.emit("peerconnection", { peerconnection: pc });
+    h.state.session!.emit("progress", {});
+    emitTrack();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(stop).not.toHaveBeenCalled();
+    energy = .01;
+    await vi.advanceTimersByTimeAsync(500);
+    expect(stop).toHaveBeenCalledOnce();
+    engine.destroy();
+  });
 });
 
 describe("nettoyage de fin d'appel", () => {
@@ -730,5 +747,130 @@ describe("garde-fous de composition", () => {
     await expect(engine.dial("+15145550142")).rejects.toThrow("not_registered");
     expect(events.onError).toHaveBeenCalledWith("not_registered");
     expect(h.state.ua?.stop).toHaveBeenCalled();
+  });
+});
+
+describe("call and microphone races", () => {
+  it("rejects a second dial while the first microphone prompt is pending", async () => {
+    const { engine } = await bootEngine();
+    const first = engine.dial("+15145550142");
+    await expect(engine.dial("+15145550143")).rejects.toThrow("already_in_call");
+    gumResolve?.(fakeStream());
+    await first;
+    expect(h.state.ua?.call).toHaveBeenCalledOnce();
+  });
+
+  it("uses the same microphone preflight for incoming calls and disposes of a late stream", async () => {
+    const { engine } = await bootEngine();
+    const session = new h.FakeSession();
+    h.state.ua?.emit("newRTCSession", {
+      originator: "remote", session,
+      request: { from: { uri: { user: "5145550142" } } },
+    });
+    engine.answer();
+    engine.answer();
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledOnce();
+    expect(session.answer).not.toHaveBeenCalled();
+    engine.hangup();
+    session.emit("ended", { cause: h.causes.CANCELED });
+    gumResolve?.(fakeStream());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(session.answer).not.toHaveBeenCalled();
+    expect(stoppedTracks).toBe(1);
+  });
+
+  it("supplies the captured stream when answering and suppresses duplicate answers", async () => {
+    const { engine } = await bootEngine();
+    const session = new h.FakeSession();
+    h.state.ua?.emit("newRTCSession", {
+      originator: "remote", session,
+      request: { from: { uri: { user: "5145550142" } } },
+    });
+    engine.answer();
+    const mic = fakeStream();
+    gumResolve?.(mic);
+    await vi.advanceTimersByTimeAsync(0);
+    engine.answer();
+    expect(session.answer).toHaveBeenCalledOnce();
+    expect(session.answer.mock.calls[0][0].mediaStream).toBe(mic);
+    session.emit("ended", { cause: h.causes.BYE });
+    expect(stoppedTracks).toBe(1);
+  });
+
+  it("ignores a duplicate termination from an older call", async () => {
+    const { engine, events } = await bootEngine();
+    await dialWithMic(engine);
+    const old = h.state.session!;
+    old.emit("ended", { cause: h.causes.BYE });
+    await dialWithMic(engine);
+    events.onCallStateChange.mockClear();
+    old.emit("failed", { cause: "WebRTC Error" });
+    expect(events.onCallStateChange).not.toHaveBeenCalled();
+    await expect(engine.dial("+15145550143")).rejects.toThrow("already_in_call");
+  });
+
+  it("does not let a microphone switch survive hangup", async () => {
+    const { engine } = await bootEngine();
+    await dialWithMic(engine);
+    const sender = { track: fakeStream().getAudioTracks()[0], replaceTrack: vi.fn() };
+    h.state.session!.connection = { getSenders: () => [sender] };
+    const switching = engine.setInputDevice("new-headset");
+    await vi.advanceTimersByTimeAsync(0);
+    const resolveSwitch = gumResolve;
+    h.state.session!.emit("ended", { cause: h.causes.BYE });
+    await switching;
+    const late = fakeStream();
+    resolveSwitch?.(late);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sender.replaceTrack).not.toHaveBeenCalled();
+    expect(stoppedTracks).toBe(2);
+  });
+
+  it("preserves mute changed while the replacement microphone was being acquired", async () => {
+    const { engine } = await bootEngine();
+    await dialWithMic(engine);
+    const sender = { track: (h.state.callOptions!.mediaStream as ReturnType<typeof fakeStream>).getAudioTracks()[0], replaceTrack: vi.fn().mockResolvedValue(undefined) };
+    h.state.session!.connection = { getSenders: () => [sender] };
+    const switching = engine.setInputDevice("new-headset");
+    await vi.advanceTimersByTimeAsync(0);
+    engine.mute(true);
+    const replacement = fakeStream();
+    gumResolve?.(replacement);
+    await switching;
+    expect(sender.replaceTrack).toHaveBeenCalledWith(replacement.getAudioTracks()[0]);
+    expect(replacement.getAudioTracks()[0].enabled).toBe(false);
+    expect(stoppedTracks).toBe(1);
+  });
+
+  it("clears obsolete ICE timers after an early usable candidate", async () => {
+    const { engine } = await bootEngine();
+    await dialWithMic(engine);
+    const ready = vi.fn();
+    h.state.session!.emit("icecandidate", { candidate: { type: "host" }, ready });
+    h.state.session!.emit("icecandidate", { candidate: { type: "srflx" }, ready });
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(ready).toHaveBeenCalledOnce();
+  });
+
+  it("stops local ringback when track arrives before progress, and keeps it stopped", async () => {
+    const { engine } = await bootEngine();
+    const tones = await import("@/lib/telephony/tones");
+    const stop = vi.spyOn(tones, "stopRingback");
+    const start = vi.spyOn(tones, "startRingback");
+    await dialWithMic(engine);
+    const listeners = new Map<string, (e: unknown) => void>();
+    const pc = {
+      addEventListener: (name: string, handler: (e: unknown) => void) => listeners.set(name, handler),
+      getStats: () => Promise.resolve(new Map([["in", { id: "in", type: "inbound-rtp", kind: "audio", packetsReceived: 3 }]])),
+      getSenders: () => [],
+    };
+    h.state.session!.emit("peerconnection", { peerconnection: pc });
+    listeners.get("track")?.({ track: { kind: "audio" }, streams: [{}] });
+    h.state.session!.emit("progress", {});
+    await vi.advanceTimersByTimeAsync(500);
+    expect(stop).toHaveBeenCalledOnce();
+    h.state.session!.emit("progress", {});
+    expect(start).toHaveBeenCalledOnce();
+    engine.destroy();
   });
 });

@@ -119,13 +119,22 @@ function applyToAllSinks(deviceId: string): void {
 
 /** `setSinkId` sur un élément média — Chrome/Edge seulement, sans jamais lever. */
 export function sinkForElement(el: HTMLMediaElement): AudioSink {
+  let generation = 0;
+  let pending = Promise.resolve();
   return {
     apply: (deviceId) => {
+      const current = ++generation;
       const withSink = el as HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
       if (typeof withSink.setSinkId !== "function") return;
-      // "" n'est pas accepté par setSinkId : le défaut du système, c'est "default".
-      void withSink.setSinkId(deviceId || "default").catch(() => {
-        // Appareil débranché entre le choix et l'appel : Chrome garde le défaut.
+      // A failed selection leaves the OLD sink in place, possibly unplugged.
+      // Serialize calls so an old fallback cannot override a newer selection.
+      pending = pending.catch(() => {}).then(async () => {
+        if (current !== generation) return;
+        try {
+          await withSink.setSinkId!(deviceId || "default");
+        } catch {
+          if (deviceId && current === generation) await withSink.setSinkId!("default").catch(() => {});
+        }
       });
     },
   };
@@ -133,11 +142,20 @@ export function sinkForElement(el: HTMLMediaElement): AudioSink {
 
 /** `setSinkId` sur un AudioContext — Chrome 110+. Ailleurs : sans effet. */
 export function sinkForContext(ctx: AudioContext): AudioSink {
+  let generation = 0;
+  let pending = Promise.resolve();
   return {
     apply: (deviceId) => {
+      const current = ++generation;
       const withSink = ctx as AudioContext & { setSinkId?: (id: string) => Promise<void> };
       if (typeof withSink.setSinkId !== "function") return;
-      void Promise.resolve(withSink.setSinkId(deviceId || "")).catch(() => {});
+      pending = pending.catch(() => {}).then(async () => {
+        if (current !== generation) return;
+        try { await withSink.setSinkId!(deviceId || ""); }
+        catch {
+          if (deviceId && current === generation) await withSink.setSinkId!("").catch(() => {});
+        }
+      });
     },
   };
 }

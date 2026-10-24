@@ -277,7 +277,7 @@ cat <<EOF
 
 1. Côté voip.ms (https://voip.ms) :
    - Créer un sous-compte SIP par téléphoniste (protocole SIP, mot de passe,
-     NAT = yes, codecs ulaw + opus si offert, POP Montréal).
+     NAT = yes, codecs ulaw + G.722, POP Montréal).
    - Menu principal -> API : activer l'API et AUTORISER L'IP ${PUBLIC_IP}.
    - Router chaque DID vers le sous-compte du ou de la téléphoniste.
 

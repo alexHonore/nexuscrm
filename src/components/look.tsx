@@ -322,6 +322,13 @@ export const SEVERITY_LOOK: Record<string, Look> = {
   off: { color: "#64748B", Icon: CircleSlashIcon },
 };
 
+export const CALL_QUALITY_LOOK = {
+  unknown: { color: TONE.raw, Icon: ActivityIcon },
+  good: { color: DASHBOARD_LOOK.clear.color, Icon: CircleCheckIcon },
+  fair: { color: TONE.scrutiny, Icon: CircleAlertIcon },
+  poor: { color: SEVERITY_LOOK.block.color, Icon: CircleXIcon },
+} as const satisfies Record<string, Look>;
+
 /**
  * La pastille : le pictogramme sur son fond teinté.
  *
