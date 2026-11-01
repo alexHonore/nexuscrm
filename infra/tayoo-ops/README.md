@@ -48,6 +48,7 @@ Code : `src/db/connection.ts`, `src/db/index.ts`, `src/lib/audit.ts`
 | `reverse-sync.env.example` | Modèle de sa conf (URL de l'ancienne base) | modèle de `reverse-sync.env` (600) |
 | `systemd/nexuscrm-reverse-sync.{service,timer}` | Toutes les 15 min | `/etc/systemd/system/` |
 | `../../n8n/cron-crm.tayoo-ops.json` | Les crons vers le nouveau domaine, **plus** les notes d'appel (`/api/cron/transcripts`) qui n'existaient que comme cron Vercel | import dans n8n, **inactif** jusqu'à la bascule |
+| `RETOUR-ARRIERE.md` | Retour arrière pas à pas pour un agent IA : constater l'état, commandes exactes, réponses aux refus | — (à lire avant d'agir) |
 
 ---
 
@@ -197,9 +198,15 @@ confirme au moment de la faire.
 
 ## 7. Retour arrière (≈10 min)
 
-1. ✋ Arrêter les écritures sur le VPS : arrêter l'app hébergée (portail →
-   Stop) et désactiver le workflow `cron-crm.tayoo-ops.json`. App arrêtée
-   d'abord : aucun job en cours ne reste « réclamé » dans la copie.
+> Pour un agent IA (ou en cas de doute) : `RETOUR-ARRIERE.md` — état à
+> constater d'abord, commandes exactes, que faire quand une étape refuse.
+
+1. ✋ Arrêter les écritures sur le VPS : arrêter **le conteneur de l'app
+   seulement** — `cd /srv/supabase/projects/nexuscrm && docker compose -p web-nexuscrm -f website.compose.json stop --timeout 45`
+   (pas « Stop » du portail : il arrête aussi la base, et la dernière copie
+   de l'étape 2 échouerait) — et désactiver le workflow
+   `cron-crm.tayoo-ops.json`. App arrêtée d'abord : aucun job en cours ne
+   reste « réclamé » dans la copie.
 2. Dernière copie, à la main :
    `systemctl start nexuscrm-reverse-sync.service && cat /srv/supabase/apps/nexuscrm/reverse-sync/last-success`
    (doit dater de maintenant). S'il refuse, **ne pas forcer** : lire le motif.

@@ -1,6 +1,6 @@
 # Groupe Nexus — CRM immobilier (conventions du dépôt)
 
-CRM de centre d'appels pour un courtier immobilier québécois. Interface **français par défaut**, anglais disponible. Déployé sur Vercel + Supabase cloud (version d'origine) et sur **Tayoo Ops** (VPS, Supabase auto-hébergé) — même code, trois variables d'environnement d'écart ; déploiement, bascule et retour arrière : `infra/tayoo-ops/README.md`. Les RÔLES sont configurables par l'administrateur (règle 13) ; `users.role` en base ne dit plus que le plancher, `admin` (le courtier) ou `caller` (tout le reste).
+CRM de centre d'appels pour un courtier immobilier québécois. Interface **français par défaut**, anglais disponible. Déployé sur Vercel + Supabase cloud (version d'origine) et sur **Tayoo Ops** (VPS, Supabase auto-hébergé) — même code, trois variables d'environnement d'écart ; déploiement, bascule et retour arrière : `infra/tayoo-ops/README.md` ; **retour arrière vers l'ancienne infrastructure : lire d'abord `infra/tayoo-ops/RETOUR-ARRIERE.md`**. Les RÔLES sont configurables par l'administrateur (règle 13) ; `users.role` en base ne dit plus que le plancher, `admin` (le courtier) ou `caller` (tout le reste).
 
 ## Stack
 
