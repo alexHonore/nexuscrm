@@ -137,11 +137,23 @@ Suivi :
 systemctl list-timers nexuscrm-reverse-sync.timer; cat /srv/supabase/apps/nexuscrm/reverse-sync/last-success; journalctl -u nexuscrm-reverse-sync -n 30 --no-pager
 ```
 
-Répétition **sans rien écrire** (tout le chemin, puis `ROLLBACK`) :
+Prévol, **lecture seule des deux côtés** — sans risque même pendant que
+l'ancienne version est en service (connexion, cible, schémas ; la garde 4 y est
+rapportée sans être fatale) :
+
+```bash
+/srv/supabase/apps/nexuscrm/reverse-sync.sh --preflight
+```
+
+Répétition complète (tout le chemin, puis `ROLLBACK` — rien n'est gardé) :
 
 ```bash
 /srv/supabase/apps/nexuscrm/reverse-sync.sh --check
 ```
+
+> ⚠️ `--check` prend des verrous exclusifs sur toutes les tables de l'ancienne
+> base le temps de la transaction (quelques secondes) : ne le lancer qu'une
+> fois l'ancienne version **arrêtée** (bascule, étape 3). Avant, `--preflight`.
 
 > Testé ici sur deux Postgres 17 avec le schéma complet (41 tables) : copie
 > octet pour octet identique (données + séquences), trigger d'activation des
@@ -157,9 +169,10 @@ Répétition **sans rien écrire** (tout le chemin, puis `ROLLBACK`) :
 Chaque ligne marquée ✋ est une action vers l'extérieur : l'exploitant la
 confirme au moment de la faire.
 
-1. **Préalables** : section 4 vérifiée ; `reverse-sync.sh --check` OK **contre
-   la vraie base cloud** (il refusera en garde 4 tant que l'ancienne version
-   vit — normal ; le faire juste après l'étape 4) ; une répétition de retour
+1. **Préalables** : section 4 vérifiée ; `reverse-sync.sh --preflight` OK
+   **contre la vraie base cloud** (la garde 4 y signale les écritures de
+   l'ancienne version — normal tant qu'elle tourne ; le `--check` complet se
+   fait juste après l'étape 4) ; une répétition de retour
    arrière faite ; workflow `n8n/cron-crm.tayoo-ops.json` importé **inactif**
    avec le nouveau `CRON_SECRET` ; nouvelle URI de redirection
    `https://web-nexuscrm.tayoo.app/api/google/callback` **ajoutée** (pas

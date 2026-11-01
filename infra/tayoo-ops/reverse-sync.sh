@@ -7,8 +7,13 @@
 # retour arrière reparte d'un état à jour (au pire 15 min de retard, zéro
 # après la synchronisation finale du runbook).
 #
-#   reverse-sync.sh           synchronise (une transaction, tout ou rien)
-#   reverse-sync.sh --check   fait TOUT, vérifications comprises, puis ROLLBACK
+#   reverse-sync.sh              synchronise (une transaction, tout ou rien)
+#   reverse-sync.sh --check      fait TOUT, vérifications comprises, puis ROLLBACK
+#                                (verrouille les tables cibles le temps de la
+#                                transaction : ancienne version ARRÊTÉE seulement)
+#   reverse-sync.sh --preflight  LECTURE SEULE des deux côtés : connexion,
+#                                gardes 2 à 4 (la 4 est rapportée, pas fatale).
+#                                Sans risque contre une base encore en service.
 #
 # Lancé par nexuscrm-reverse-sync.timer (toutes les 15 min), en root, SUR LE VPS.
 #
@@ -42,8 +47,9 @@ MODE=commit
 case "${1:-}" in
   "") ;;
   --check) MODE=check ;;
-  -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
-  *) echo "usage: $0 [--check]" >&2; exit 2 ;;
+  --preflight) MODE=preflight ;;
+  -h|--help) sed -n '2,37p' "$0"; exit 0 ;;
+  *) echo "usage: $0 [--check|--preflight]" >&2; exit 2 ;;
 esac
 
 # ── Réglages : défauts, puis le fichier de conf (600, jamais `source`) ───────
@@ -166,8 +172,19 @@ if [ -n "$last_dst" ]; then
   [[ "$last_id" =~ ^[0-9]+$ ]] || die 5 "identifiant d'audit inattendu"
   same_src="$(q_src "$AUDIT_SQL_TAIL WHERE id = ${last_id}")" || die 5 "lecture d'audit_logs (source) impossible"
   if [ "$same_src" != "$last_dst" ]; then
-    die 6 "l'ancienne base a reçu des écritures que le VPS n'a pas (audit_logs #${last_id}) — l'ancienne version tourne-t-elle encore ? Refus d'écraser."
+    if [ "$MODE" = preflight ]; then
+      log "garde 4 : l'ancienne base a des écritures que le VPS n'a pas (audit_logs #${last_id}) — attendu tant que l'ancienne version tourne ; une copie serait REFUSÉE."
+    else
+      die 6 "l'ancienne base a reçu des écritures que le VPS n'a pas (audit_logs #${last_id}) — l'ancienne version tourne-t-elle encore ? Refus d'écraser."
+    fi
+  elif [ "$MODE" = preflight ]; then
+    log "garde 4 : OK — dernière ligne d'audit de l'ancienne base (#${last_id}) présente à l'identique sur le VPS."
   fi
+fi
+
+if [ "$MODE" = preflight ]; then
+  log "PRÉVOL OK — connexions, cible et schémas vérifiés ; rien n'a été écrit."
+  exit 0
 fi
 
 # ── Instantané de la source ──────────────────────────────────────────────────
