@@ -178,6 +178,16 @@ confirme au moment de la faire.
    avec le nouveau `CRON_SECRET` ; nouvelle URI de redirection
    `https://web-nexuscrm.tayoo.app/api/google/callback` **ajoutée** (pas
    remplacée) dans la console Google.
+   **`app.env` complet** : Vercel ne rend PAS les variables « Sensitive »,
+   et `receive-env.py` n'a que ce que contient le `.env` du Mac. Au
+   déploiement d'essai du 2026-11-01 manquaient : `NEXT_PUBLIC_SIP_WSS_URL`
+   (inlinée au build : reconstruire l'image après l'avoir ajoutée),
+   `VOIPMS_API_PROXY_URL` / `_TOKEN` (ceux de la passerelle vocale),
+   `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_API_KEY_SID` /
+   `_SECRET`, `TWILIO_TWIML_APP_SID`, `TWILIO_MESSAGING_SERVICE_SID` (console
+   Twilio), `VAPID_*` (une NOUVELLE paire convient : sur une nouvelle origine
+   chacun se réabonne de toute façon). Sans eux : ni appel, ni texto, ni
+   notification.
 2. ✋ Désactiver le workflow n8n `cron-crm.json` (plus de crons vers Vercel).
 3. ✋ Mettre Vercel `groupe-nexus` en pause (plus d'écriture dans l'ancienne base).
 4. Recopie finale ancienne → nouvelle :
@@ -191,6 +201,9 @@ confirme au moment de la faire.
 8. Démarrer la copie inverse :
    `systemctl enable --now nexuscrm-reverse-sync.timer`, puis
    `systemctl start nexuscrm-reverse-sync.service` et lire `last-success`.
+   Marquer l'instance `nexuscrm` **live** (drapeau du portail) : sauvegarde
+   avant chaque migration, et `migrate-from-url.sh --resync` refuse alors de
+   vider une base qui porte désormais les vraies écritures.
 9. Essai : connexion, un appel, un texto reçu et un envoyé, une notification.
 10. Prévenir les téléphonistes : **nouvelle adresse**, réinstaller l'app (PWA)
     et réactiver les notifications — une PWA et ses abonnements push sont liés
