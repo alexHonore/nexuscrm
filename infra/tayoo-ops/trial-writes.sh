@@ -22,6 +22,12 @@
 # audit_logs est exporté pour mémoire mais pas ré-appliqué (ses identifiants
 # entiers entreraient en collision avec ceux de l'ancienne base).
 #
+# Tables à identifiant ENTIER (séquence : categories, sources, webhook_keys…) :
+# reapply.sql remonte la séquence au-dessus des lignes reportées — sinon le
+# prochain INSERT de l'app tomberait sur une clé déjà prise. Une ligne de
+# l'essai dont l'identifiant a été repris entre-temps par l'ancienne version
+# est ignorée (DO NOTHING) : le script le signale, à vérifier à la main.
+#
 # Non détecté : les SUPPRESSIONS, et les tables sans created_at / updated_at
 # (listées à la fin). Lecture seule sur la base ; n'écrit que dans trial-writes/.
 set -Eeuo pipefail
@@ -91,7 +97,7 @@ fi
 total=0; reapplied=0
 while read -r t cols has_upd; do
   [ -n "$t" ] || continue
-  cond="$(tr ',' '\n' <<< "$cols" | sed "s/.*/\"&\" > :'since'::timestamptz/" | paste -sd'|' | sed 's/|/ or /g')"
+  cond="$(tr ',' '\n' <<< "$cols" | sed "s/.*/\"&\" > (:'since'::timestamp AT TIME ZONE 'UTC')/" | paste -sd'|' | sed 's/|/ or /g')"
   n="$(q -v since="$SINCE" <<< "select count(*) from public.\"$t\" where $cond;")"
   [ "$n" -gt 0 ] || continue
   total=$((total + n))
@@ -116,6 +122,14 @@ while read -r t cols has_upd; do
       printf 'ON CONFLICT (id) DO NOTHING;\n'
     fi
   } >> "$OUT/reapply.sql"
+  idtype="$(q <<< "select format_type(atttypid, atttypmod) from pg_attribute where attrelid = 'public.\"$t\"'::regclass and attname = 'id';")"
+  case "$idtype" in
+    integer|bigint|smallint)
+      echo "    ⚠ identifiant entier : séquence remontée dans reapply.sql ; une ligne dont l'id a été repris entre-temps par l'ancienne version sera ignorée — vérifier à la main"
+      printf 'DO $%s$ DECLARE s text := pg_get_serial_sequence(%s, %s); m bigint; BEGIN\n  IF s IS NOT NULL THEN\n    EXECUTE format(%s, s) INTO m;\n    PERFORM setval(s, m);\n  END IF;\nEND $%s$;\n' \
+        "$TAG" "'public.\"$t\"'" "'id'" "'SELECT GREATEST((SELECT coalesce(max(id), 1) FROM public.\"$t\"), (SELECT last_value FROM %s))'" "$TAG" >> "$OUT/reapply.sql"
+      ;;
+  esac
   reapplied=$((reapplied + 1))
 done <<< "$TABLES"
 
