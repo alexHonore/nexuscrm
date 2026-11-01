@@ -106,11 +106,13 @@ La production n'a jamais quitté Vercel ; le VPS ne fait tourner qu'un essai.
 - **Ne PAS lancer la copie inverse** (`reverse-sync.sh` sans option,
   `--check`, ni le service) : elle remplacerait la vraie production par les
   données de l'essai. La garde 4 devrait refuser ; on ne vérifie pas.
-- Ce qui a été saisi sur l'essai n'existe **pas** en production, et la
-  recopie finale de la bascule (`migrate-from-url.sh … --resync`) l'effacera
-  du VPS : c'est voulu. Si c'était du vrai travail, le refaire sur
-  `groupe-nexus.vercel.app`. Les écritures de l'essai sont dans `audit_logs`
-  de l'instance (`docker exec sb-nexuscrm-db-1 psql -U postgres -c "select …"`).
+- Ce qui a été saisi sur l'essai n'existe **pas** dans l'ancienne base, et la
+  recopie finale de la bascule (`migrate-from-url.sh … --resync`) vide la base
+  du VPS. Ces saisies peuvent être du vrai travail (cas réel le 2026-11-01 :
+  une fiche et une note de qualification) : elles se reportent avec
+  `/srv/supabase/apps/nexuscrm/trial-writes.sh --export` AVANT la recopie,
+  puis son `reapply.sql` APRÈS (`README.md` §6, étape 4). Ne jamais lancer
+  `migrate-from-url.sh … --resync` sans avoir fait l'export.
 
 ## 4. Après la bascule : retour arrière complet (≈ 15 min)
 

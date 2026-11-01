@@ -48,6 +48,7 @@ Code : `src/db/connection.ts`, `src/db/index.ts`, `src/lib/audit.ts`
 | `reverse-sync.env.example` | Modèle de sa conf (URL de l'ancienne base) | modèle de `reverse-sync.env` (600) |
 | `systemd/nexuscrm-reverse-sync.{service,timer}` | Toutes les 15 min | `/etc/systemd/system/` |
 | `../../n8n/cron-crm.tayoo-ops.json` | Les crons vers le nouveau domaine, **plus** les notes d'appel (`/api/cron/transcripts`) qui n'existaient que comme cron Vercel | import dans n8n, **inactif** jusqu'à la bascule |
+| `trial-writes.sh` | Ce qui a été saisi sur le VPS depuis la dernière recopie : le liste, l'exporte, prépare `reapply.sql` pour le reporter après la recopie finale (§6, étape 4) | `/srv/supabase/apps/nexuscrm/` |
 | `RETOUR-ARRIERE.md` | Retour arrière pas à pas pour un agent IA : constater l'état, commandes exactes, réponses aux refus | — (à lire avant d'agir) |
 
 ---
@@ -70,7 +71,7 @@ COMMIT=$(git rev-parse origin/main) && git archive "$COMMIT" | ssh root@31.97.14
 Puis sur le VPS :
 
 ```bash
-install -m 755 /srv/supabase/apps/nexuscrm/src/infra/tayoo-ops/build-image.sh /srv/supabase/apps/nexuscrm/build-image.sh
+install -m 755 /srv/supabase/apps/nexuscrm/src/infra/tayoo-ops/build-image.sh /srv/supabase/apps/nexuscrm/build-image.sh && install -m 700 /srv/supabase/apps/nexuscrm/src/infra/tayoo-ops/trial-writes.sh /srv/supabase/apps/nexuscrm/trial-writes.sh
 ```
 
 ```bash
@@ -190,9 +191,23 @@ confirme au moment de la faire.
    notification.
 2. ✋ Désactiver le workflow n8n `cron-crm.json` (plus de crons vers Vercel).
 3. ✋ Mettre Vercel `groupe-nexus` en pause (plus d'écriture dans l'ancienne base).
-4. Recopie finale ancienne → nouvelle :
-   `… | ssh root@31.97.147.222 /srv/supabase/bin/migrate-from-url.sh nexuscrm NexusCRM --resync`
-   (commande complète dans la passation). Vérifier les comptes de lignes.
+4. Recopie finale ancienne → nouvelle — **sans perdre ce qui a été saisi
+   sur le site d'essai** (la recopie VIDE la base du VPS) :
+   1. **Avant** : `/srv/supabase/apps/nexuscrm/trial-writes.sh --export` —
+      liste et exporte tout ce qui a été créé ou modifié sur le VPS depuis la
+      dernière recopie, et prépare `trial-writes/<horodatage>/reapply.sql`.
+   2. La recopie :
+      `… | ssh root@31.97.147.222 /srv/supabase/bin/migrate-from-url.sh nexuscrm NexusCRM --resync`
+      (commande complète dans la passation). Vérifier les comptes de lignes.
+   3. **Après**, si l'étape 1 a listé des lignes :
+      `docker exec -i sb-nexuscrm-db-1 psql -U postgres -v ON_ERROR_STOP=1 < /srv/supabase/apps/nexuscrm/trial-writes/<horodatage>/reapply.sql`
+      — une transaction ; une ligne de l'essai ne remplace jamais une
+      modification PLUS RÉCENTE faite dans l'ancienne version. psql affiche
+      `INSERT 0 n` par table : `n` = lignes reportées (0 pour une ligne que
+      l'ancienne version a modifiée depuis — la sienne est gardée). Comparer
+      avec les comptes de l'étape 1.
+   Limites : les suppressions faites sur l'essai et les tables sans
+   `created_at` / `updated_at` (listées par le script) ne sont pas reportées.
 5. `app.env` : `SMS_MODE=live` et `SMS_LIVE_CONFIRMED=true` ; ré-héberger.
 6. ✋ Twilio : webhooks SMS entrants / statut (Messaging Service) et, si
    utilisé, TwiML App → `https://web-nexuscrm.tayoo.app/api/...` (mêmes
