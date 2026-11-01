@@ -103,12 +103,44 @@ function firstPublicOf(headerValue: string | null): string | null {
 }
 
 /**
+ * Le mandataire de confiance devant l'application, d'après `TRUSTED_PROXY`.
+ *
+ * - absent ou `vercel` : la chaîne d'origine (Vercel pose et écrase
+ *   `x-vercel-forwarded-for`) ;
+ * - `cloudflare` : Tayoo Ops — le trafic n'arrive QUE par le tunnel
+ *   Cloudflare, qui écrase `cf-connecting-ip` avec l'adresse réelle. Là,
+ *   `x-vercel-forwarded-for` et `x-real-ip` traversent tels que le visiteur
+ *   les a écrits : leur faire confiance laisserait n'importe qui changer d'IP
+ *   à chaque essai et contourner le limiteur de connexions ;
+ * - toute autre valeur : `invalid` — aucune IP plutôt qu'une IP falsifiable.
+ */
+export type TrustedProxy = "vercel" | "cloudflare" | "invalid";
+
+export function resolveTrustedProxy(raw: string | undefined): TrustedProxy {
+  const value = (raw ?? "").trim().toLowerCase();
+  if (value === "" || value === "vercel") return "vercel";
+  if (value === "cloudflare") return "cloudflare";
+  return "invalid";
+}
+
+/**
  * IP réelle du client d'après des en-têtes déjà lus, ou `null`.
  *
- * Ordre : `x-vercel-forwarded-for` (posé par Vercel, non falsifiable) →
- * `x-real-ip` → première entrée **publique** de `x-forwarded-for`.
+ * Derrière Cloudflare (`TRUSTED_PROXY=cloudflare`) : `cf-connecting-ip`
+ * SEULEMENT. Sinon (Vercel, le défaut) : `x-vercel-forwarded-for` (posé par
+ * Vercel, non falsifiable) → `x-real-ip` → première entrée **publique** de
+ * `x-forwarded-for`.
  */
-export function clientIpFromHeaders(h: Headers): string | null {
+export function clientIpFromHeaders(
+  h: Headers,
+  proxy: TrustedProxy = resolveTrustedProxy(process.env.TRUSTED_PROXY),
+): string | null {
+  if (proxy === "invalid") return null;
+  if (proxy === "cloudflare") {
+    const cf = cleanIpCandidate(h.get("cf-connecting-ip") ?? "");
+    return cf && isPublicIp(cf) ? cf : null;
+  }
+
   const vercel = cleanIpCandidate(h.get("x-vercel-forwarded-for") ?? "");
   if (vercel && isPublicIp(vercel)) return vercel;
 

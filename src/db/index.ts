@@ -4,13 +4,16 @@ import * as schemaCrm from "./schema";
 import * as schemaSms from "./schema-sms";
 import * as schemaPush from "./schema-push";
 import * as schemaLibrary from "./schema-library";
+import { resolveDbSsl, resolvePoolMax } from "./connection";
 
 const schema = { ...schemaCrm, ...schemaSms, ...schemaPush, ...schemaLibrary };
 
 const globalForDb = globalThis as unknown as { pgConn?: ReturnType<typeof postgres> };
 
 const url = process.env.DATABASE_URL!;
-const isLocal = url.includes("localhost") || url.includes("127.0.0.1");
+// Vercel + Supabase cloud : rien à régler (TLS, 30). Tayoo Ops : DATABASE_SSL=disable
+// (réseau Docker privé de l'instance). Voir src/db/connection.ts.
+const sslMode = resolveDbSsl(url, process.env.DATABASE_SSL);
 
 const poolOptions = {
   // Compatible pgbouncer/Supavisor (Supabase "Transaction pooler") et Postgres local.
@@ -34,14 +37,14 @@ const poolOptions = {
   // Une instance Fluid multiplexe plusieurs requêtes HTTP dans le MÊME
   // processus, donc dans ce seul pool : une ouverture de fiche en demande
   // plus de dix à elle seule. Sous-dimensionner ne ralentit pas, ça déborde.
-  max: 30,
+  max: resolvePoolMax(process.env.DATABASE_POOL_MAX),
   // Supavisor coupe les connexions inactives : on les recycle nous-mêmes,
   // sinon une socket à moitié morte bloque la file d'attente du pool.
   idle_timeout: 20,
   max_lifetime: 60 * 5,
   connect_timeout: 10,
   // Supabase/Neon exigent TLS ; les URI n'incluent pas toujours sslmode=require.
-  ...(isLocal ? {} : { ssl: "require" as const }),
+  ...(sslMode === "require" ? { ssl: "require" as const } : {}),
 };
 
 const conn = globalForDb.pgConn ?? postgres(url, poolOptions);
