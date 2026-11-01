@@ -1,0 +1,14 @@
+# Contexte de build de infra/tayoo-ops/Dockerfile (BuildKit lit ce fichier
+# à la place d'un .dockerignore racine). Jamais de secret dans l'image.
+.git
+.env*
+!.env.example
+node_modules
+.next
+coverage
+.vercel
+.claude
+*.tsbuildinfo
+next-env.d.ts
+gateway
+infra/dev-db

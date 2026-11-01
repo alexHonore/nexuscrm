@@ -7,6 +7,12 @@ touché jusqu'à la production.
 d'étape « déployer » séparée — Vercel suit la branche, et le `git push` sur
 `main` met en ligne. Tout le reste de ce document découle de là.
 
+> **Après la bascule vers Tayoo Ops** (`infra/tayoo-ops/README.md`), Vercel est
+> en pause : le `git push` sur `main` ne met plus rien en ligne. La production
+> se met à jour par l'export d'un commit vers le VPS (section 4 du runbook), et
+> pendant la période de repli le schéma est gelé — tout changement de
+> `src/db/schema*.ts` s'applique aux DEUX bases (section 8).
+
 Conventions de code : voir `AGENTS.md`. Installation : voir `README.md`.
 
 ---

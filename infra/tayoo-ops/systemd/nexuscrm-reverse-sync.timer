@@ -1,0 +1,11 @@
+[Unit]
+Description=NexusCRM — synchronisation inverse toutes les 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+RandomizedDelaySec=60
+Persistent=false
+Unit=nexuscrm-reverse-sync.service
+
+[Install]
+WantedBy=timers.target

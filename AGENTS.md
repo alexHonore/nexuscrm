@@ -1,6 +1,6 @@
 # Groupe Nexus — CRM immobilier (conventions du dépôt)
 
-CRM de centre d'appels pour un courtier immobilier québécois. Interface **français par défaut**, anglais disponible. Déployé sur Vercel. Les RÔLES sont configurables par l'administrateur (règle 13) ; `users.role` en base ne dit plus que le plancher, `admin` (le courtier) ou `caller` (tout le reste).
+CRM de centre d'appels pour un courtier immobilier québécois. Interface **français par défaut**, anglais disponible. Déployé sur Vercel + Supabase cloud (version d'origine) et sur **Tayoo Ops** (VPS, Supabase auto-hébergé) — même code, trois variables d'environnement d'écart ; déploiement, bascule et retour arrière : `infra/tayoo-ops/README.md`. Les RÔLES sont configurables par l'administrateur (règle 13) ; `users.role` en base ne dit plus que le plancher, `admin` (le courtier) ou `caller` (tout le reste).
 
 ## Stack
 
@@ -55,6 +55,8 @@ CRM de centre d'appels pour un courtier immobilier québécois. Interface **fran
 | `src/lib/permissions/defaults.ts` | Les quatre rôles livrés et les règles d'assignation par défaut |
 | `src/lib/classification-server/` | Règles de classement : la MÊME liste pour le prompt et pour l'outil |
 | `src/app/api/objection-packs/` | CRUD des paquets d'objections — ressource PARTAGÉE entre assistants |
+| `src/db/connection.ts` | TLS et taille du pool Postgres tirés de l'environnement (`DATABASE_SSL`, `DATABASE_POOL_MAX`) — défauts = Vercel |
+| `infra/tayoo-ops/` | Hébergement sur le VPS : image, copie inverse vers l'ancienne base, runbook de bascule / retour arrière |
 
 ## Routes de l'app
 

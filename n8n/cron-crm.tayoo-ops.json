@@ -1,0 +1,231 @@
+{
+  "name": "Groupe Nexus CRM — crons (Tayoo Ops)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "a2000000-0000-0000-0000-000000000001",
+      "name": "Toutes les 30 min"
+    },
+    {
+      "parameters": {
+        "url": "https://web-nexuscrm.tayoo.app/api/cron/followup-reminders",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer REMPLACER_PAR_CRON_SECRET"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "id": "a2000000-0000-0000-0000-000000000002",
+      "name": "Rappels de suivis"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ],
+      "id": "a2000000-0000-0000-0000-000000000003",
+      "name": "Toutes les heures"
+    },
+    {
+      "parameters": {
+        "url": "https://web-nexuscrm.tayoo.app/api/cron/sync-cdr",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer REMPLACER_PAR_CRON_SECRET"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        200
+      ],
+      "id": "a2000000-0000-0000-0000-000000000004",
+      "name": "Sync CDR voip.ms"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        400
+      ],
+      "id": "a2000000-0000-0000-0000-000000000005",
+      "name": "Chaque minute"
+    },
+    {
+      "parameters": {
+        "url": "https://web-nexuscrm.tayoo.app/api/cron/dispatch",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer REMPLACER_PAR_CRON_SECRET"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        400
+      ],
+      "id": "a2000000-0000-0000-0000-000000000006",
+      "name": "Dispatcher SMS"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "45 11 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        600
+      ],
+      "id": "a2000000-0000-0000-0000-000000000007",
+      "name": "Chaque jour 11 h 45"
+    },
+    {
+      "parameters": {
+        "url": "https://web-nexuscrm.tayoo.app/api/cron/transcripts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer REMPLACER_PAR_CRON_SECRET"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        600
+      ],
+      "id": "a2000000-0000-0000-0000-000000000008",
+      "name": "Notes d'appel (transcriptions)"
+    }
+  ],
+  "connections": {
+    "Toutes les 30 min": {
+      "main": [
+        [
+          {
+            "node": "Rappels de suivis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Toutes les heures": {
+      "main": [
+        [
+          {
+            "node": "Sync CDR voip.ms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chaque minute": {
+      "main": [
+        [
+          {
+            "node": "Dispatcher SMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chaque jour 11 h 45": {
+      "main": [
+        [
+          {
+            "node": "Notes d'appel (transcriptions)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

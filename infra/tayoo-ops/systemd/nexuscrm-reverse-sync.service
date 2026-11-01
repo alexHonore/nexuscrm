@@ -1,0 +1,17 @@
+# Synchronisation inverse NexusCRM : Tayoo Ops → ancienne base Supabase cloud.
+# Installé par infra/tayoo-ops/README.md (§ « Synchronisation inverse »).
+[Unit]
+Description=NexusCRM — copie des données du VPS vers l'ancienne base (repli)
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/srv/supabase/apps/nexuscrm/reverse-sync.sh
+TimeoutStartSec=10min
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=yes
+PrivateTmp=yes
+UMask=0077
