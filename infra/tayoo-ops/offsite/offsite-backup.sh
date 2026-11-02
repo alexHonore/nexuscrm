@@ -8,6 +8,11 @@
 #   offsite-backup.sh list SLUG             copies présentes dans R2
 #   offsite-backup.sh restore-test [SLUG…]  télécharge la dernière copie, déchiffre,
 #                                           vérifie MANIFEST.sha256 et lit db.dump
+#   offsite-backup.sh send-keys [SLUG…]     renvoie les clés aux administrateurs du portail
+#
+# Toute clé créée (instance activée = nouveau dossier R2) part d'elle-même par
+# courriel aux administrateurs du portail (/etc/tayoo-portal/config.json,
+# « members ») ; en cas d'échec, nouvel essai à chaque passage nocturne.
 #
 # Chiffrement AVANT l'envoi (age, une clé par instance : keys/<slug>.key, 600) :
 # Cloudflare ne voit jamais rien en clair. SANS CES CLÉS, LES COPIES SONT
@@ -38,8 +43,8 @@ B=$(grep -m1 '^R2_BUCKET=' "$CONF" | cut -d= -f2-)
 
 log() { printf '%s offsite: %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$STATE/offsite.log" >&2; }
 
-notify() {  # notify "sujet" "texte"
-  python3 -I - "$1" "$2" "$ALERT_TO" <<'PY' || log "courriel impossible"
+notify() {  # notify "sujet" "texte" — 1 si le serveur SMTP refuse
+  python3 -I - "$1" "$2" "$ALERT_TO" <<'PY' || { log "courriel impossible ($ALERT_TO)"; return 1; }
 import smtplib, ssl, sys
 from email.message import EmailMessage
 cfg = dict(l.split('=', 1) for l in open('/srv/supabase/smtp.env').read().splitlines() if '=' in l and not l.startswith('#'))
@@ -73,6 +78,23 @@ pubkey() {  # crée la clé de l'instance au besoin, imprime sa clé publique
   age-keygen -y "$k"
 }
 
+admins() { python3 -I -c 'import json; print("\n".join(json.load(open("/etc/tayoo-portal/config.json")).get("members", [])))' 2>/dev/null || true; }
+
+send_key() {  # send_key SLUG [force] — envoie la clé aux administrateurs du portail (une fois par version de clé)
+  local slug="$1" k="$KEYS/$1.key" h to ok=0 body
+  [ -f "$k" ] || return 0
+  h=$(sha256sum "$k" | cut -c1-64)
+  if [ "${2:-}" != force ] && [ "$(cat "$STATE/$slug.key-sent" 2>/dev/null)" = "$h" ]; then return 0; fi
+  body=$(printf 'Clé de chiffrement des copies hors serveur de l instance « %s » (Tayoo Ops).\n\nLes sauvegardes de cette instance sont chiffrées sur le VPS avec cette clé avant d être envoyées dans Cloudflare R2 (seau %s, dossier %s/). SANS ELLE, CES COPIES SONT ILLISIBLES : c est la seule chose qui permet de les relire si le serveur est perdu.\n\nÀ faire : garder ce courriel (ou copier la clé dans un gestionnaire de mots de passe). Ne pas le transférer : quiconque a cette clé ET l accès au seau peut lire les données de l instance.\n\n----- début de la clé (fichier %s.key) -----\n%s\n----- fin de la clé -----\n\nRestaurer : télécharger %s/<dossier>.tar.age depuis R2, puis\n  age -d -i %s.key <dossier>.tar.age | tar -x\nProcédure complète : /srv/supabase/offsite/README.md sur le VPS (copie : infra/tayoo-ops/offsite/README.md, dépôt nexuscrm).\n' \
+    "$slug" "$B" "$slug" "$slug" "$(cat "$k")" "$slug" "$slug")
+  while read -r to; do
+    [ -n "$to" ] || continue
+    if ALERT_TO="$to" notify "clé de chiffrement des sauvegardes hors serveur — $slug" "$body"; then ok=1; log "clé de $slug envoyée à $to"; fi
+  done < <(admins)
+  [ "$ok" = 1 ] || return 1
+  echo "$h" > "$STATE/$slug.key-sent"
+}
+
 remote_size() { rc lsjson "r2:$B/$1" | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["Size"] if d else -1)'; }
 
 cmd_run() {
@@ -82,6 +104,7 @@ cmd_run() {
     [ -n "$slug" ] || continue
     [ -d "$BACKUPS/$slug" ] || { fails+=("$slug : aucun dossier de sauvegarde locale"); continue; }
     pub=$(pubkey "$slug"); touch "$STATE/$slug.uploaded"; newest=""
+    send_key "$slug" || fails+=("$slug : la clé de chiffrement n'a pas pu être envoyée aux administrateurs (nouvel essai au prochain passage)")
     while read -r dir; do
       [ -n "$dir" ] || continue
       newest=$dir
@@ -135,7 +158,7 @@ cmd_restore_test() {
   done
   printf '%s\n' "${report[@]}" | tee "$STATE/last-restore-test" >&2
   date -u +%FT%TZ >> "$STATE/last-restore-test"
-  notify "test de restauration hors serveur : $([ $bad = 0 ] && echo OK || echo ÉCHEC)" "$(printf 'Test mensuel des copies R2 (seau %s) :\n\n' "$B"; printf -- '- %s\n' "${report[@]}")"
+  notify "test de restauration hors serveur : $([ $bad = 0 ] && echo OK || echo ÉCHEC)" "$(printf 'Test mensuel des copies R2 (seau %s) :\n\n' "$B"; printf -- '- %s\n' "${report[@]}")" || true
   return $bad
 }
 
@@ -159,8 +182,11 @@ case "${1:-}" in
     grep -vx "$s" "$ENABLED" > "$ENABLED.new" || true
     [ "$1" = enable ] && echo "$s" >> "$ENABLED.new"
     sort -u "$ENABLED.new" -o "$ENABLED"; rm -f "$ENABLED.new"
-    [ "$1" = enable ] && pubkey "$s" >/dev/null
+    if [ "$1" = enable ]; then pubkey "$s" >/dev/null; send_key "$s" || log "clé de $s non envoyée — nouvel essai au prochain passage"; fi
     log "copie hors serveur $( [ "$1" = enable ] && echo activée || echo désactivée ) pour $s"; cmd_status ;;
+  send-keys)  # send-keys [SLUG…] — renvoie les clés aux administrateurs du portail
+    shift; [ $# -gt 0 ] || set -- $(grep -v '^[[:space:]]*$' "$ENABLED")
+    rc_all=0; for s in "$@"; do send_key "$s" force || rc_all=1; done; exit $rc_all ;;
   list) rc lsl "r2:$B/${2:?slug}/" ;;
   restore-test) shift; cmd_restore_test "$@" ;;
   *) sed -n '2,20p' "$0"; exit 2 ;;
