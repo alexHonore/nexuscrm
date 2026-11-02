@@ -3,9 +3,25 @@ import createNextIntlPlugin from "next-intl/plugin";
 
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
+// En-têtes de sécurité sur TOUTES les réponses. Vercel posait HSTS de lui-même ;
+// derrière Cloudflare (Tayoo Ops) personne ne le fait — l'app les déclare donc,
+// identiques sur les deux hébergements. Pas de CSP de scripts (Twilio, JsSIP,
+// Google et les scripts en ligne de Next la rendraient fragile) : seulement
+// `frame-ancestors`, qui interdit d'encadrer l'app (détournement de clic).
+// Le micro reste permis à l'app elle-même : c'est le téléphone web.
+const SECURITY_HEADERS = [
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(), geolocation=(), payment=(), usb=(), microphone=(self)" },
+];
+
 const nextConfig: NextConfig = {
   async headers() {
     return [
+      { source: "/:path*", headers: SECURITY_HEADERS },
       {
         // Le service worker est servi depuis `public/sw.js` — donc à la racine,
         // donc avec la portée « / » nativement. Le paquet officiel de Next le

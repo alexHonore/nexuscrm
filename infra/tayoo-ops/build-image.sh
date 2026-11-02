@@ -21,6 +21,18 @@ NAME="${IMAGE_NAME:-nexuscrm}"
 # Options docker build en plus, ex. BUILD_FLAGS="--no-cache --pull".
 read -r -a EXTRA <<< "${BUILD_FLAGS:-}"
 
+# Le build tourne sur LE serveur de production (4 vCPU partagés avec la base, n8n
+# et la passerelle vocale, dont l'audio des appels supporte mal la contention) :
+# pas pendant les heures d'appel (lun.–sam. 8 h–21 h, heure de Toronto), sauf
+# FORCE=1 pour un correctif urgent.
+if [ "${FORCE:-0}" != 1 ]; then
+  dow="$(TZ=America/Toronto date +%u)"; hour="$(TZ=America/Toronto date +%H)"
+  if [ "$dow" -le 6 ] && [ "$((10#$hour))" -ge 8 ] && [ "$((10#$hour))" -lt 21 ]; then
+    echo "heures d'appel à Toronto ($(TZ=America/Toronto date '+%a %H:%M')) : build refusé — relancer après 21 h, ou FORCE=1 pour un correctif urgent" >&2
+    exit 3
+  fi
+fi
+
 [ -f "$SRC/infra/tayoo-ops/Dockerfile" ] || { echo "pas de infra/tayoo-ops/Dockerfile dans $SRC" >&2; exit 2; }
 [ -f "$APP_ENV" ] || { echo "app.env introuvable : $APP_ENV" >&2; exit 2; }
 

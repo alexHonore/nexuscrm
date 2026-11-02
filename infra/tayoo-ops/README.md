@@ -49,6 +49,7 @@ Code : `src/db/connection.ts`, `src/db/index.ts`, `src/lib/audit.ts`
 | `systemd/nexuscrm-reverse-sync.{service,timer}` | Toutes les 15 min | `/etc/systemd/system/` |
 | `../../n8n/cron-crm.tayoo-ops.json` | Les crons vers le nouveau domaine, **plus** les notes d'appel (`/api/cron/transcripts`) qui n'existaient que comme cron Vercel | import dans n8n, **inactif** jusqu'à la bascule |
 | `trial-writes.sh` | Ce qui a été saisi sur le VPS depuis la dernière recopie : le liste, l'exporte, prépare `reapply.sql` pour le reporter après la recopie finale (§6, étape 4) | `/srv/supabase/apps/nexuscrm/` |
+| `AUDIT-2026-11-02.md` | Audit post-bascule : ce qui a été durci le 2026-11-02 (SSH, port 5066, rôle `nexuscrm_app`, en-têtes, surveillance) et ce qui reste à revoir | — |
 | `RETOUR-ARRIERE.md` | Retour arrière pas à pas pour un agent IA : constater l'état, commandes exactes, réponses aux refus | — (à lire avant d'agir) |
 
 ---
